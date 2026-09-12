@@ -1,0 +1,26 @@
+// Versions are pinned rather than left as '+' for the reason every other
+// dependency in this repository is: a build that resolves to whatever is
+// newest is a build that stops working on a day nobody changed anything.
+//
+// The Android Gradle plugin's version decides which Gradle it needs, which
+// decides which JDK. 8.7.3 wants Gradle 8.9 or newer and a JDK 17.
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.3'
+    }
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

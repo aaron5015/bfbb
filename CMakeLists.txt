@@ -73,7 +73,25 @@ cmake_minimum_required(VERSION 3.16)
 #
 # CMAKE_HOST_SYSTEM_NAME rather than WIN32: this has to be decided before
 # project(), and WIN32 is not set until after it.
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+#
+# An Android build is the one case where the HOST is the wrong thing to ask.
+# It is a cross build: the word size is ANDROID_ABI's to decide -- armeabi-v7a
+# is 32-bit and arm64-v8a is 64 -- and -m32 is not a flag the NDK's clang will
+# take for either of them. A Windows machine cross-building for a phone would
+# otherwise default this ON and fail in the compiler probe, before anything in
+# this file has run.
+#
+# ANDROID_ABI rather than ANDROID or CMAKE_SYSTEM_NAME, because neither of
+# those exists yet: the NDK's toolchain file is what sets them and it is not
+# read until project(). Gradle always passes -DANDROID_ABI, and so does anyone
+# invoking the toolchain file by hand.
+if(DEFINED ANDROID_ABI OR CMAKE_SYSTEM_NAME STREQUAL "Android")
+  set(BFBB_ANDROID_EARLY ON)
+else()
+  set(BFBB_ANDROID_EARLY OFF)
+endif()
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT BFBB_ANDROID_EARLY)
   set(BFBB_32BIT_DEFAULT ON)
 else()
   set(BFBB_32BIT_DEFAULT OFF)
@@ -86,6 +104,14 @@ if(BFBB_BUILD_32BIT AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
   message(FATAL_ERROR
     "BFBB_BUILD_32BIT is on and this is macOS, which has no 32-bit runtime.\n"
     "  Configure with -DBFBB_BUILD_32BIT=OFF.")
+endif()
+
+if(BFBB_BUILD_32BIT AND BFBB_ANDROID_EARLY)
+  message(FATAL_ERROR
+    "BFBB_BUILD_32BIT is on and this is an Android build, where the word "
+    "size is ANDROID_ABI's to pick.\n"
+    "  32-bit is abiFilters 'armeabi-v7a'; 64-bit is 'arm64-v8a'."
+    " See docs/ANDROID.md.")
 endif()
 
 if(BFBB_BUILD_32BIT)
@@ -170,6 +196,43 @@ endif()
 # reason; this is the same problem with a simpler answer.
 if(MINGW)
   add_link_options(-static)
+endif()
+
+# --- Android -----------------------------------------------------------------
+# What an Android build is, in this file: a Linux build with no console, no
+# executable and no second process.
+#
+# It takes every arm a POSIX host takes -- iHostPosix.cpp, the SDL input and
+# audio backends, GL3 -- and differs in four places, each marked `if(ANDROID)`
+# below and each for a reason the platform imposes rather than a preference:
+#
+#   * the game is a SHARED LIBRARY, libmain.so, because the framework starts
+#     the application and calls into it rather than exec'ing anything;
+#   * SDL is the vendored one, because nothing is installed in an NDK sysroot;
+#   * the configurator is off, because wxWidgets is a desktop toolkit;
+#   * the host-side executables -- the self-tests, fontfit -- are not built,
+#     because a cross build produces binaries the build machine cannot run and
+#     the gates that use them stay on a desktop runner.
+#
+# ANDROID is set by the NDK's toolchain file, which project() has now read.
+# BFBB_ANDROID_EARLY above is the same question asked before that point; they
+# must agree, and a configure that reached here disagreeing was invoked in a
+# way this file does not understand.
+if(ANDROID AND NOT BFBB_ANDROID_EARLY)
+  message(FATAL_ERROR
+    "This is an Android build, but ANDROID_ABI was not set before project().\n"
+    "  Configure through android/ with Gradle, or pass -DANDROID_ABI"
+    " alongside the NDK toolchain file. See docs/ANDROID.md.")
+endif()
+
+# The host-side executables. Off when cross-compiling: they exist to be RUN by
+# ctest and by tools/, and an arm64 binary on an x86-64 build machine cannot
+# be. Nothing the APK contains depends on any of them.
+if(ANDROID)
+  set(BFBB_HOST_TOOLS OFF)
+  message(STATUS "bfbb: Android (${ANDROID_ABI}, API ${ANDROID_PLATFORM_LEVEL}) -- libmain.so, no host tools")
+else()
+  set(BFBB_HOST_TOOLS ON)
 endif()
 
 # Selects the port's own struct layouts in include/rwsdk -- the ones that mirror
@@ -457,7 +520,20 @@ endif()
 # and there is a build directory per render backend and per configuration --
 # each of which was compiling its own copy. An installed SDL is compiled once
 # and every configure after that just links it.
-set(BFBB_SDL "auto" CACHE STRING "Where SDL3 comes from: auto, system, vendored")
+#
+# Vendored on Android with no choice worth offering: an NDK sysroot contains
+# the platform and nothing else, so there is no installed SDL3 to find and
+# `auto` would spend a find_package to learn that. SDL also has to be the
+# static one there, which the vendored arm already forces -- with a shared
+# SDL3.so the Java side has a second library to load and the Activity's
+# getLibraries() has to name it.
+if(ANDROID)
+  set(BFBB_SDL_DEFAULT "vendored")
+else()
+  set(BFBB_SDL_DEFAULT "auto")
+endif()
+
+set(BFBB_SDL "${BFBB_SDL_DEFAULT}" CACHE STRING "Where SDL3 comes from: auto, system, vendored")
 set_property(CACHE BFBB_SDL PROPERTY STRINGS auto system vendored)
 
 if(BFBB_NEEDS_SDL)
@@ -974,6 +1050,14 @@ target_link_libraries(bfbb_platform PRIVATE ${FMV_LIBRARIES})
 # The input and audio backends' libraries, if they have any. PUBLIC because
 # both the game and the self-test link the backends through this target.
 target_link_libraries(bfbb_platform PUBLIC ${INPUT_LIBS} ${AUDIO_LIBS})
+
+# liblog, which is where iHostPosix.cpp's Android arms print: iHostErrorBox
+# has nowhere else to put a message on a device with no console. PUBLIC and
+# attached HERE rather than to the game target, because the caller is in this
+# library and anything else linking it needs the same symbol.
+if(ANDROID)
+  target_link_libraries(bfbb_platform PUBLIC log)
+endif()
 if(FMV_INCLUDES)
   target_include_directories(bfbb_platform PRIVATE ${FMV_INCLUDES})
 endif()
@@ -1016,6 +1100,32 @@ file(GLOB_RECURSE BFBB_GAME_SOURCES
 add_library(bfbb_game STATIC ${BFBB_GAME_SOURCES})
 target_link_libraries(bfbb_game PUBLIC bfbb_platform bfbb_rw)
 target_compile_options(bfbb_game PRIVATE ${BFBB_NO_WARNINGS})
+
+# The game's entry point, renamed on Android and nowhere else.
+#
+# A shared library's main() is never called by anything; the framework loads
+# libmain.so and calls an exported SDL_main. zMain.cpp's main() is retail's,
+# shared with the GameCube build, and is the last file that should learn about
+# a host -- so the rename is done to the compiler rather than to the source,
+# with a one-line header forced in ahead of it. iAndroidMain.cpp supplies the
+# SDL_main that calls it. See src/SB/Core/pc/android/iAndroidGameMain.h.
+#
+# Per source file rather than per target: `main` is a common enough identifier
+# that renaming it across a whole library is a trap waiting for whoever adds
+# the next file, and zMain.cpp is the only one in here that defines it.
+if(ANDROID)
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SB/Game/zMain.cpp
+    PROPERTIES COMPILE_OPTIONS
+      "-include;${PC_DIR}/android/iAndroidGameMain.h")
+endif()
+
+# --- the host-side executables -----------------------------------------------
+# Four targets that exist to be RUN on the machine doing the building: three
+# self-tests and the font fitter. A cross build produces binaries it cannot
+# run, so they are not built there; see the Android section near the top, and
+# docs/ANDROID.md on why an Android CI job builds the APK and stops.
+if(BFBB_HOST_TOOLS)
 
 # --- the frame-rate independence test ----------------------------------------
 # The rate helpers in xMath.cpp, checked as PROPERTIES rather than values: that
@@ -1089,6 +1199,8 @@ target_link_libraries(rw_selftest PRIVATE bfbb_rw)
 target_compile_options(rw_selftest PRIVATE ${BFBB_NO_WARNINGS})
 add_test(NAME rw_selftest COMMAND rw_selftest)
 
+endif() # BFBB_HOST_TOOLS
+
 # --- what an executable that runs the game needs from the linker -------------
 # Applied to `bfbb` and to `pc_selftest`, which are the two targets that call
 # iMemInit and the two that print a backtrace. Nothing here is optional on the
@@ -1143,7 +1255,14 @@ function(bfbb_host_link_options target)
     # frame in the game prints as the module plus an offset and the backtraces
     # in iHostPosix.cpp are worth nothing. Mach-O keeps the symbols either way
     # and this costs it nothing.
-    set_target_properties(${target} PROPERTIES ENABLE_EXPORTS ON)
+    #
+    # Android already is what this asks for. A shared library exports its
+    # symbols by definition, and dladdr -- which is what walks the stack there,
+    # bionic having no backtrace() -- reads that same dynamic table. The
+    # property means something else on a library and is left alone.
+    if(NOT ANDROID)
+      set_target_properties(${target} PROPERTIES ENABLE_EXPORTS ON)
+    endif()
 
     # The watchdog thread in bfbb_main.cpp. SDL links pthreads as well, but
     # through a target this one does not necessarily see.
@@ -1166,6 +1285,21 @@ endfunction()
 # and the binary has no icon, which is not worth failing a build over.
 set(BFBB_EXE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/SB/Core/pc/bfbb_main.cpp)
 
+# The Android shim, compiled INTO the library rather than into bfbb_platform.
+#
+# iAndroidMain.cpp has to be: it defines SDL_main, which nothing in this build
+# refers to -- the Java side finds it with dlsym at run time -- so from a
+# static archive the linker would have no reason to pull the object in and the
+# application would start, fail to find its entry point, and show a black
+# screen. iAndroid.cpp keeps it company because they are two halves of one
+# file's worth of work.
+if(ANDROID)
+  list(APPEND BFBB_EXE_SOURCES
+    ${PC_DIR}/android/iAndroid.cpp
+    ${PC_DIR}/android/iAndroidMain.cpp
+  )
+endif()
+
 if(WIN32)
   # CMake only knows how to build .rc files if RC is an enabled language, and
   # enabling it is what finds llvm-rc (or rc.exe) and sets CMAKE_RC_COMPILER.
@@ -1184,8 +1318,29 @@ if(WIN32)
   endif()
 endif()
 
-add_executable(bfbb ${BFBB_EXE_SOURCES})
-target_link_libraries(bfbb PRIVATE bfbb_game bfbb_platform bfbb_rw)
+# On Android the game is a shared library called `main`, which is to say
+# libmain.so -- the name SDLActivity.getMainSharedObject() looks for, and the
+# reason the target is not called bfbb there. There is no executable to build:
+# the process is the framework's, and it dlopens this and calls SDL_main.
+#
+# BFBB_GAME_TARGET is what the rest of this section says instead of `bfbb`.
+if(ANDROID)
+  add_library(main SHARED ${BFBB_EXE_SOURCES})
+  set(BFBB_GAME_TARGET main)
+else()
+  add_executable(bfbb ${BFBB_EXE_SOURCES})
+  set(BFBB_GAME_TARGET bfbb)
+endif()
+
+target_link_libraries(${BFBB_GAME_TARGET} PRIVATE bfbb_game bfbb_platform bfbb_rw)
+
+if(ANDROID)
+  # iAndroid.cpp asks SDL where the application's directories are. SDL comes
+  # in through bfbb_platform already; naming it here is what puts the headers
+  # on this target's own two files.
+  target_link_libraries(${BFBB_GAME_TARGET} PRIVATE bfbb_sdl log)
+endif()
+
 if(BFBB_EXE_RES_DIR)
   target_include_directories(bfbb PRIVATE ${BFBB_EXE_RES_DIR})
 endif()
@@ -1237,14 +1392,22 @@ endif()
 # src/SB/Core/pc/res/buttons/ needs no edit here, and copied to `buttons/`
 # because that is the folder name input.button_icons documents. These are the
 # port's own files, not the game's, so they do not live under the assets path.
-add_custom_command(TARGET bfbb POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-          ${PC_DIR}/res/buttons $<TARGET_FILE_DIR:bfbb>/buttons
-  COMMENT "Staging the button glyphs"
-)
+#
+# Not on Android, where $<TARGET_FILE_DIR> is the jniLibs staging directory
+# that Gradle packs into the APK as native libraries -- anything else put
+# there is dropped, and a .so directory is not a place the game can read
+# files from anyway. Getting these onto a device is the same problem as
+# getting the assets there and has the same answer; see docs/ANDROID.md.
+if(NOT ANDROID)
+  add_custom_command(TARGET bfbb POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${PC_DIR}/res/buttons $<TARGET_FILE_DIR:bfbb>/buttons
+    COMMENT "Staging the button glyphs"
+  )
+endif()
 
-target_compile_options(bfbb PRIVATE ${BFBB_NO_WARNINGS})
-bfbb_host_link_options(bfbb)
+target_compile_options(${BFBB_GAME_TARGET} PRIVATE ${BFBB_NO_WARNINGS})
+bfbb_host_link_options(${BFBB_GAME_TARGET})
 
 if(WIN32)
   # dbghelp is the crash handler in bfbb_main.cpp; see the comment there.
@@ -1294,7 +1457,21 @@ endif()
 # there into xPad.h and the pad backend -- most of the game, to read a file
 # this program reads itself.
 
-option(BFBB_BUILD_CONFIGURATOR "Build bfbb_config, the settings front end" ON)
+# Off on Android. It is a wxWidgets window -- a desktop toolkit with no
+# Android port at all -- and it exists to be run BEFORE the game, which is not
+# a thing an Android application can do to itself. The settings it edits are
+# still read: config.ini is written with the defaults on the first run, in the
+# internal storage directory (iHostExeDir), and can be pulled, edited and
+# pushed back with adb. A settings screen inside the game is the honest answer
+# and is phase 6 in docs/ANDROID.md.
+if(ANDROID)
+  set(BFBB_CONFIGURATOR_DEFAULT OFF)
+else()
+  set(BFBB_CONFIGURATOR_DEFAULT ON)
+endif()
+
+option(BFBB_BUILD_CONFIGURATOR "Build bfbb_config, the settings front end"
+       ${BFBB_CONFIGURATOR_DEFAULT})
 
 # Where wxWidgets comes from, on the same three words SDL uses.
 #
@@ -1453,6 +1630,11 @@ endif()
 # Exercises the parts of the layer that do not need the renderer, so that
 # "implemented" means something ran and produced the right answer rather than
 # something compiled. ctest, or run it directly.
+#
+# Host-side like the three above, and skipped on a cross build for the same
+# reason: ctest would have an arm64 binary and an x86-64 machine to run it on.
+if(BFBB_HOST_TOOLS)
+
 enable_testing()
 
 add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
@@ -1573,3 +1755,5 @@ if(BFBB_SDL_RUNTIME_DLL)
 endif()
 
 add_test(NAME pc_selftest COMMAND pc_selftest)
+
+endif() # BFBB_HOST_TOOLS

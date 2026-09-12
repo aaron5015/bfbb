@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fullscreen and no title bar, which is what SDL's own template uses:
+         the game draws every pixel it is given and has its own pause. -->
+    <style name="AppTheme" parent="android:Theme.NoTitleBar.Fullscreen" />
+</resources>

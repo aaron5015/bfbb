@@ -24,10 +24,41 @@
 // backtrace(). A glibc extension that macOS also carries; musl and the BSDs
 // have neither, and iHostPrintCallers is a diagnostic, so it prints nothing
 // there rather than the build failing.
-#if defined(__GLIBC__) || defined(__APPLE__)
+//
+// Android is the third case: bionic has no execinfo.h, but it does have the
+// C++ ABI's unwinder, which is enough to walk the stack by hand. See
+// iHostPrintCallers.
+#if defined(__ANDROID__)
+#define BFBB_HAVE_UNWIND 1
+#include <cxxabi.h>
+#include <dlfcn.h>
+#include <unwind.h>
+#elif defined(__GLIBC__) || defined(__APPLE__)
 #define BFBB_HAVE_EXECINFO 1
 #include <cxxabi.h>
 #include <execinfo.h>
+#endif
+
+#ifdef __ANDROID__
+// __android_log_print. Part of the NDK's platform libraries, not of anything
+// the port links on top of them -- which is what lets the host seam use it
+// without learning about SDL.
+#include <android/log.h>
+
+// Where the app's own directories are. Android has no fixed answer to any of
+// the four questions below -- the paths carry the package name and the user
+// id -- and the calls that do answer them are JNI, which this layer has no
+// business holding. So the Android shim asks SDL once, at the top of
+// SDL_main, and puts the answers here; see src/SB/Core/pc/android/iAndroid.h.
+//
+// Unset until then. Every reader below returns false rather than guessing,
+// and the callers all have a fallback -- so an early failure degrades to the
+// working directory instead of writing into somewhere that does not exist.
+static const char* iAndroidDir(const char* name)
+{
+    const char* v = getenv(name);
+    return (v != NULL && v[0] != '\0') ? v : NULL;
+}
 #endif
 
 // The POSIX half of the iHost seam. See iHost.h for what each of these is for;
@@ -142,9 +173,25 @@ void* iHostReserveLow(U32 size)
     // game allocator can address, and every hint below would land inside it;
     // CMakeLists.txt passes -pagezero_size, and the comment there says why the
     // value it passes still leaves a null dereference faulting.
+    //
+    // MAP_FIXED_NOREPLACE where the kernel has it (Linux 4.17 and up, which
+    // is every Android that can run this). It turns the hint into a request
+    // that either lands exactly where it was asked for or fails with EEXIST,
+    // rather than one the kernel may answer with any address at all. Without
+    // it a kernel that declines the first hint tends to decline all of them
+    // the same way -- it hands back the same high address sixteen times and
+    // the loop munmaps and re-mmaps it each time to find that out.
+    //
+    // Older kernels ignore the flag, which leaves the plain hint this had
+    // before, so the result is still checked rather than assumed.
+    int lowflags = flags;
+#ifdef MAP_FIXED_NOREPLACE
+    lowflags |= MAP_FIXED_NOREPLACE;
+#endif
+
     for (U64 base = 0x04000000ULL; base < 0x80000000ULL; base += 0x04000000ULL)
     {
-        void* p = mmap((void*)(uintptr_t)base, size, prot, flags, -1, 0);
+        void* p = mmap((void*)(uintptr_t)base, size, prot, lowflags, -1, 0);
         if (p == MAP_FAILED)
         {
             continue;
@@ -238,9 +285,25 @@ bool iHostRemoveDir(const char* path)
 
 bool iHostTempDir(char* out, size_t outsize)
 {
+#ifdef __ANDROID__
+    // /tmp does not exist on Android and no application may write outside its
+    // own sandbox, so the cache directory the framework hands each app is the
+    // only honest answer. Nothing in the game depends on this -- it is the
+    // selftest's -- so an app whose directories are not up yet gets false
+    // rather than a path that will fail at fopen.
+    const char* cache = iAndroidDir("BFBB_ANDROID_CACHE");
+    if (cache == NULL)
+    {
+        return false;
+    }
+
+    snprintf(out, outsize, "%s", cache);
+    return true;
+#else
     const char* t = getenv("TMPDIR");
     snprintf(out, outsize, "%s", (t != NULL && t[0] != 0) ? t : "/tmp");
     return true;
+#endif
 }
 
 bool iHostExeDir(char* out, size_t outsize)
@@ -251,7 +314,25 @@ bool iHostExeDir(char* out, size_t outsize)
     // rather than guessing. The caller has a fallback; see iConfig.cpp.
     char buf[1024];
 
-#ifdef __APPLE__
+#ifdef __ANDROID__
+    // There is no executable here to be beside. The process image is
+    // /system/bin/app_process64 -- the zygote, shared by every app on the
+    // device -- so /proc/self/exe answers a question nobody asked, and a
+    // config.ini written next to it would be written into /system.
+    //
+    // What the caller actually wants is "somewhere that ships with the
+    // application and is still there next time", and on Android that is the
+    // internal storage directory. It is private to the package, survives
+    // updates, and is wiped with the app.
+    const char* internal = iAndroidDir("BFBB_ANDROID_INTERNAL");
+    if (internal == NULL)
+    {
+        return false;
+    }
+
+    snprintf(out, outsize, "%s", internal);
+    return true;
+#elif defined(__APPLE__)
     uint32_t n = (uint32_t)sizeof(buf);
     if (_NSGetExecutablePath(buf, &n) != 0)
     {
@@ -314,6 +395,18 @@ bool iHostSetChildEnv(const char* name, const char* value)
 
 bool iHostRunDetached(const char* exe, const char* workingDir)
 {
+#ifdef __ANDROID__
+    // Android has no second executable to start. The port's one caller is the
+    // settings front end, which is not built here (there is no wxWidgets on a
+    // phone), and an application may not exec anything out of its own sandbox
+    // in any case -- the data partition is mounted noexec.
+    //
+    // False is the documented answer for "the child could not be started at
+    // all", which is exactly true, and the caller already handles it.
+    (void)exe;
+    (void)workingDir;
+    return false;
+#else
     // Forked twice. The first child exits immediately and is reaped below, so
     // the game is an orphan by the time this returns -- it is reparented to
     // init and nothing here has to wait for it or leave a zombie behind.
@@ -348,6 +441,7 @@ bool iHostRunDetached(const char* exe, const char* workingDir)
     }
 
     return true;
+#endif
 }
 
 bool iHostAbsolutePath(const char* path, char* out, size_t outsize)
@@ -442,6 +536,26 @@ void iHostDirClose(iHostDir* h)
 
 bool iHostUserDataDir(char* out, size_t outsize)
 {
+#ifdef __ANDROID__
+    // The same directory iHostExeDir gives, and deliberately: on a desktop the
+    // two are different places for good reasons -- one ships with the binary,
+    // one belongs to the user -- and on Android the application has exactly
+    // one private directory and both questions resolve to it.
+    //
+    // NOT the external one. Saves written to external storage are visible to
+    // a file manager, which sounds helpful until an update to the app or a
+    // "clear storage" tap takes them; and the framework may not have mounted
+    // it at all. isavegame's own subdirectory keeps them apart from config.
+    const char* internal = iAndroidDir("BFBB_ANDROID_INTERNAL");
+    if (internal == NULL)
+    {
+        return false;
+    }
+
+    snprintf(out, outsize, "%s", internal);
+    return true;
+#else
+
 #ifndef __APPLE__
     // XDG only on Linux. macOS has its own convention and no XDG_DATA_HOME to
     // read, so honouring the variable there would put the saves somewhere no
@@ -466,6 +580,7 @@ bool iHostUserDataDir(char* out, size_t outsize)
     }
 
     return false;
+#endif
 }
 
 S32 iHostStrCaseCmp(const char* a, const char* b)
@@ -475,13 +590,33 @@ S32 iHostStrCaseCmp(const char* a, const char* b)
 
 const char* iHostName()
 {
-#ifdef __APPLE__
+#if defined(__ANDROID__)
+    return "android";
+#elif defined(__APPLE__)
     return "macos";
 #else
     return "posix";
 #endif
 }
 
+#ifdef __ANDROID__
+// Android is the one POSIX host where the caller's own print is NOT enough.
+// The header says a startup failure printed to a console nobody is looking at
+// is a game that appears to do nothing; on a phone there is no console at all,
+// and the process simply disappears. logcat is not the player, but it is the
+// only place the message can still be read after the fact, and an ERROR-level
+// line is what `adb logcat *:E` shows without being asked.
+//
+// It does not block, because there is nothing to dismiss. The header allows
+// that -- "returns having done nothing on a host with no way to show one" --
+// and a message box drawn by the game is a later phase's work.
+void iHostErrorBox(const char* title, const char* message)
+{
+    __android_log_print(ANDROID_LOG_ERROR, "bfbb", "%s: %s",
+                        title != NULL ? title : "error",
+                        message != NULL ? message : "");
+}
+#else
 // Nothing portable to show one with. X11, Wayland, macOS and a headless
 // server disagree completely, and none of it belongs in the host seam for
 // the sake of one message the caller has already printed. Deliberately
@@ -489,6 +624,7 @@ const char* iHostName()
 void iHostErrorBox(const char*, const char*)
 {
 }
+#endif
 
 #ifdef BFBB_HAVE_EXECINFO
 // backtrace_symbols gives one string per frame, in a format that differs
@@ -557,6 +693,75 @@ static void iPrintFrame(S32 depth, char* text)
 }
 #endif
 
+#ifdef BFBB_HAVE_UNWIND
+// The same job as backtrace() plus backtrace_symbols(), written out, because
+// bionic ships neither.
+//
+// It matters more here than on a desktop, not less. A phone has no debugger
+// attached, no console, and a fault ends as a line in a tombstone that names
+// an address in libmain.so and nothing else -- so "which game code leads here"
+// is a question the process has to answer for itself or not at all.
+//
+// _Unwind_Backtrace is the C++ ABI's own unwinder, which is present because
+// the game is C++ and is exact where a frame-pointer walk would guess. dladdr
+// then maps an address onto the nearest preceding DYNAMIC symbol, which is the
+// same thing backtrace_symbols reads and comes with the same caveat: a static
+// function is invisible and its caller's name is printed instead. The offset
+// is what says so -- a five-digit one means the name is not really the frame.
+struct iUnwindState
+{
+    void** frames;
+    int count;
+    int max;
+};
+
+static _Unwind_Reason_Code iUnwindFrame(_Unwind_Context* ctx, void* arg)
+{
+    iUnwindState* state = (iUnwindState*)arg;
+
+    uintptr_t pc = (uintptr_t)_Unwind_GetIP(ctx);
+    if (pc == 0)
+    {
+        return _URC_NO_REASON;
+    }
+
+    if (state->count >= state->max)
+    {
+        return _URC_END_OF_STACK;
+    }
+
+    state->frames[state->count++] = (void*)pc;
+    return _URC_NO_REASON;
+}
+
+static void iPrintUnwoundFrame(S32 depth, void* pc)
+{
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+
+    if (dladdr(pc, &info) == 0 || info.dli_sname == NULL)
+    {
+        // No symbol at all -- a stripped library, or a JIT frame. The module
+        // and the offset into it still locate the code, and are what a later
+        // addr2line against the unstripped .so is given.
+        const char* module = (info.dli_fname != NULL) ? info.dli_fname : "?";
+        const char* slash = strrchr(module, '/');
+
+        printf("bfbb:   #%-2d %p  [%s]\n", depth, pc, slash != NULL ? slash + 1 : module);
+        return;
+    }
+
+    int status = 0;
+    char* pretty = abi::__cxa_demangle(info.dli_sname, NULL, NULL, &status);
+    const char* name = (status == 0 && pretty != NULL) ? pretty : info.dli_sname;
+
+    printf("bfbb:   #%-2d %s + 0x%lx\n", depth, name,
+           (unsigned long)((uintptr_t)pc - (uintptr_t)info.dli_saddr));
+
+    free(pretty);
+}
+#endif
+
 // Symbols, but no line numbers: backtrace_symbols reads the dynamic symbol
 // table rather than debug info, so a static function does not appear by name at
 // all. This is a diagnostic and nothing depends on its output, so that is worth
@@ -596,6 +801,40 @@ void iHostPrintCallers(const char* why, S32 maxFrames)
     }
 
     free(text);
+    fflush(stdout);
+#elif defined(BFBB_HAVE_UNWIND)
+    if (maxFrames < 1)
+    {
+        maxFrames = 1;
+    }
+    else if (maxFrames > 48)
+    {
+        maxFrames = 48;
+    }
+
+    // One more than asked for, because frame 0 is this function -- the same
+    // arithmetic the execinfo arm above does.
+    //
+    // Only one is dropped. Whether the unwinder reports its own frame as well
+    // is an implementation detail that differs between libgcc and LLVM's
+    // libunwind, and the cost of the two answers is not symmetric: an extra
+    // frame at the top is a line of noise, while skipping one that is really
+    // a caller loses the part being read for.
+    void* frames[49];
+    iUnwindState state;
+    state.frames = frames;
+    state.count = 0;
+    state.max = maxFrames + 1;
+
+    _Unwind_Backtrace(iUnwindFrame, &state);
+
+    printf("bfbb: callers -- %s\n", why != NULL ? why : "");
+
+    for (int i = 1; i < state.count; i++)
+    {
+        iPrintUnwoundFrame(i - 1, frames[i]);
+    }
+
     fflush(stdout);
 #else
     (void)why;

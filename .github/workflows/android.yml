@@ -1,0 +1,93 @@
+# The Android port: does it compile.
+#
+# That is the whole claim, and it is deliberately a small one. A green run here
+# means an APK came out of the NDK. It does NOT mean the game starts, finds its
+# assets, gets its arena below 4 GB or draws anything -- the first of those is
+# not knowable without a device and the rest follow from it. See
+# docs/ANDROID.md.
+#
+# Nothing in this job RUNS. The self-tests are host executables and a cross
+# build produces binaries this runner cannot execute, so CMakeLists.txt does
+# not build them for Android (BFBB_HOST_TOOLS) and ctest has nothing to do
+# here. gcgate.py, pclink.py and --drift all stay on the desktop runners in
+# pc-port.yml and build.yml, which is where the port is actually gated.
+#
+# A paths filter, unlike pc-port.yml, which deliberately has none. The reason
+# that one has no filter is that bfbb.exe links the game code, so a change
+# anywhere under src/ can break it. That is just as true here -- but this job
+# adds nothing the desktop builds do not already catch for a change in shared
+# code, and what it uniquely covers is the Android arms and the Gradle shell.
+# Running it on every commit to the decomp would be paying for the NDK to
+# confirm what four other jobs already said.
+name: Android
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'CMakeLists.txt'
+      - 'src/SB/Core/pc/android/**'
+      - 'src/SB/Core/pc/iHostPosix.cpp'
+      - 'src/SB/Core/pc/bfbb_main.cpp'
+      - 'src/SB/Core/pc/compat/intrin.h'
+      - 'tools/android/**'
+      - '.github/workflows/android.yml'
+      - '.gitmodules'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'CMakeLists.txt'
+      - 'src/SB/Core/pc/android/**'
+      - 'src/SB/Core/pc/iHostPosix.cpp'
+      - 'src/SB/Core/pc/bfbb_main.cpp'
+      - 'src/SB/Core/pc/compat/intrin.h'
+      - 'tools/android/**'
+      - '.github/workflows/android.yml'
+      - '.gitmodules'
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    name: assembleDebug (arm64-v8a)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Two of the three, as in pc-port.yml: wxWidgets is 300 MB of working
+      # tree for a configurator this build switches off anyway.
+      - name: Submodules
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
+
+      - name: Check the submodules came down
+        run: |
+          test -f third_party/librw/CMakeLists.txt || { echo "third_party/librw is empty"; exit 1; }
+          test -f third_party/SDL/CMakeLists.txt || { echo "third_party/SDL is empty"; exit 1; }
+          test -f third_party/SDL/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java \
+            || { echo "third_party/SDL has no android-project; the Java half is compiled from there"; exit 1; }
+
+      # The Android Gradle plugin pinned in android/build.gradle needs a 17.
+      - name: JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The runner image ships an SDK and at least one NDK; android/app/build.
+      # gradle pins the NDK version it wants and Gradle installs it if the
+      # image's is not that one.
+      - name: Build the APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      # So a failure that only shows up in the packaging is visible, and so
+      # that someone can install the thing and find out what it does on a
+      # device -- which is the only way the questions in docs/ANDROID.md get
+      # answered.
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: bfbb-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

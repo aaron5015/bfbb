@@ -46,6 +46,14 @@
 #include "iFMVAudio.h"
 #include "iFMVDecoder.h"
 
+#ifdef __ANDROID__
+// The log has to be opened from here rather than from the Android shim's own
+// startup, because the banner below is printed from a static constructor and
+// anything printed before the redirect is discarded by the platform. See
+// android/iAndroid.h for the two halves.
+#include "android/iAndroid.h"
+#endif
+
 #ifdef _WIN32
 namespace
 {
@@ -520,6 +528,11 @@ namespace
     {
         StartupBanner()
         {
+#ifdef __ANDROID__
+            // FIRST. Everything below this line prints, and on Android
+            // nothing printed before it survives.
+            iAndroidOpenLog();
+#endif
             InstallDiagnostics();
             setvbuf(stdout, NULL, _IONBF, 0);
             setvbuf(stderr, NULL, _IONBF, 0);

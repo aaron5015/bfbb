@@ -23,6 +23,17 @@
 #include <emmintrin.h>
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #define BFBB_FRSQRTE_AARCH64 1
+#elif defined(__arm__) && defined(__VFP_FP__) && !defined(__SOFTFP__)
+// 32-bit ARM with a floating-point unit, which on Android means armeabi-v7a:
+// the NDK targets VFPv3-D16 and up, and vsqrt.f64 is in all of them.
+//
+// It is here because armeabi-v7a is a REAL configuration for this port and
+// not a curiosity -- it is what the port falls back to if a device cannot
+// give the game allocator its arena below 4 GB, which is the first question
+// docs/ANDROID.md asks. Without this arm the build lands in the generic case
+// below and carries its recursion hazard into the one configuration chosen
+// for being safer.
+#define BFBB_FRSQRTE_ARM 1
 #endif
 
 #ifdef __cplusplus
@@ -85,6 +96,10 @@ static inline double __frsqrte(double x)
 #elif defined(BFBB_FRSQRTE_AARCH64)
     double r;
     __asm__("fsqrt %d0, %d1" : "=w"(r) : "w"(x));
+    return 1.0 / r;
+#elif defined(BFBB_FRSQRTE_ARM)
+    double r;
+    __asm__("vsqrt.f64 %P0, %P1" : "=w"(r) : "w"(x));
     return 1.0 / r;
 #else
     // Everywhere else, and it carries the recursion hazard above: an

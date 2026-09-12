@@ -17,6 +17,9 @@
 - [RENDERING.md](RENDERING.md) is what could be added to the renderer, in both
   directions: modern effects as optional settings, and a fixed-function mode for
   hardware older than Shader Model 2.0. Nothing in it is implemented.
+- [ANDROID.md](ANDROID.md) is the Android port: the two problems that decide
+  whether it is possible, what has been written so far, and what is still
+  unknown. Partly implemented; nothing in it has been run on a device.
 
 ## Decomp
 
