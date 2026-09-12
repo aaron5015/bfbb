@@ -23,6 +23,7 @@ name: Android
 
 on:
   push:
+    branches-ignore: [librw-android]
     paths:
       - 'android/**'
       - 'CMakeLists.txt'
@@ -34,6 +35,7 @@ on:
       - '.github/workflows/android.yml'
       - '.gitmodules'
   pull_request:
+    branches-ignore: [librw-android]
     paths:
       - 'android/**'
       - 'CMakeLists.txt'
@@ -58,7 +60,16 @@ jobs:
       # Two of the three, as in pc-port.yml: wxWidgets is 300 MB of working
       # tree for a configurator this build switches off anyway.
       - name: Submodules
-        run: git submodule update --init --recursive third_party/librw third_party/SDL
+        run: |
+          # third_party/librw is a branch of THIS repository (see .gitmodules),
+          # and this repository is private -- so unlike SDL, the submodule
+          # clone needs credentials. actions/checkout puts an auth header in
+          # the SUPERPROJECT's local config, and a submodule clone is a fresh
+          # git process that does not read it, so it prompted for a username
+          # and failed on a runner with no terminal. `insteadOf` reaches it
+          # because global config is inherited.
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+          git submodule update --init --recursive third_party/librw third_party/SDL
 
       - name: Check the submodules came down
         run: |
