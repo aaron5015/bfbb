@@ -92,12 +92,33 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
-      # So a failure that only shows up in the packaging is visible, and so
-      # that someone can install the thing and find out what it does on a
-      # device -- which is the only way the questions in docs/ANDROID.md get
-      # answered.
+      # The job's actual assertion, and it is stronger than "gradle exited 0":
+      # that an APK came out and that the game is INSIDE it. A misconfigured
+      # externalNativeBuild produces a perfectly valid APK with no native
+      # library in it and a build that looks green, which is the one way this
+      # job could lie about the only thing it claims.
+      - name: Check the APK came out, with the game in it
+        working-directory: android
+        run: |
+          apk=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          echo "APK: $apk"
+          ls -l "$apk"
+          unzip -l "$apk" | grep '\.so$' || { echo "the APK contains no native libraries at all"; exit 1; }
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmain\.so' \
+            || { echo "the APK has no lib/arm64-v8a/libmain.so -- the native build did not reach it"; exit 1; }
+
+      # So someone can install the thing and find out what it does on a device,
+      # which is the only way the questions in docs/ANDROID.md get answered.
+      #
+      # NOT allowed to fail the job. Artifact storage is an account-wide quota
+      # that fills up from every workflow in every repository, and a build that
+      # compiled and packaged correctly should not go red because there was
+      # nowhere to put a copy of it -- the step above is what decides whether
+      # the APK is good. If this step is skipped, clear some artifacts or wait
+      # for the usage recalculation and re-run.
       - name: Upload
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: bfbb-android-debug
           path: android/app/build/outputs/apk/debug/*.apk

@@ -366,6 +366,43 @@ moving forward moves both halves at once.
 `gcgate.py`, `pclink.py` and `--drift` all stay on a desktop runner. A green
 Android build proves it compiles and nothing more.
 
+Two things about that job are worth knowing, both learned the hard way:
+
+* `third_party/librw` points at a branch of THIS repository, which is private,
+  so the submodule clone needs a token. `actions/checkout` puts its auth
+  header in the superproject's local config and a submodule clone is a fresh
+  git process that does not read it -- so the job asks for a username and
+  dies. `url.insteadOf` in the global config is what reaches it.
+* The upload step cannot fail the job. Artifact storage is an account-wide
+  quota, and a build that compiled and packaged should not go red because
+  there was nowhere to put a copy. What decides whether the APK is good is
+  the step before it, which looks inside for `lib/arm64-v8a/libmain.so` --
+  a misconfigured `externalNativeBuild` yields a valid APK with no native
+  library in it and a green build.
+
+### On the phone itself
+
+You cannot build the APK on an Android device. The NDK ships for x86-64
+Linux, macOS and Windows and for nothing else -- there is no aarch64-Linux
+NDK -- so `externalNativeBuild` has no compiler there, and the Android Gradle
+plugin fetches a `linux-x86_64` `aapt2` besides.
+
+What you CAN do on the device, with no PC and no NDK, is **the arena probe**,
+which is the one measurement that decides the ABI. Termux's clang targets
+`aarch64-linux-android` natively, because Termux is an Android application:
+
+```
+pkg install clang git
+clang -O2 -o arena_probe tools/android/arena_probe.c
+./arena_probe
+```
+
+The caveat is the one in **The low 4 GB** above and no worse: a Termux binary
+is exec'd from the Termux app rather than forked from the zygote with ART
+mapped, so it is the same quality of evidence as the `adb push` route, on the
+same kernel with the same `mmap_min_addr` and the same ASLR. It just needs no
+computer.
+
 ---
 
 ## Phase order
@@ -395,12 +432,12 @@ on top of it:
 * **Whether an arm64 Android process can map the arena below 4 GB.** Phase 1.
   Unanswered until the probe runs on a device, and not settled even then until
   the game itself reaches `iMemInit`.
-* **Whether any of this compiles with a real NDK.** Nothing here has been.
-  What has been checked: the desktop build still configures, builds and passes
-  its tests; the Android-only sources compile against a stubbed `<android/log.h>`
-  with the host's headers; the `zMain.cpp` rename produces the symbol it
-  claims; librw's modified files compile with `RW_GL3` and `LIBRW_SDL3`
-  defined; the ARMv7 `__frsqrte` arm emits `vsqrt.f64`.
+* ~~**Whether any of this compiles with a real NDK.**~~ **Answered: it does.**
+  `.github/workflows/android.yml` builds `assembleDebug` for arm64-v8a on a
+  runner with NDK r28c and produces an APK with `lib/arm64-v8a/libmain.so` in
+  it -- the game, librw and SDL cross-compiled and linked. That is the phase 2
+  milestone for the BUILD, and it is the whole of what it proves: nothing has
+  started the application.
 * **Whether the GLES profile fallback reaches ES 3.1 on a device**, and what
   the render targets and the snapshot readback do there.
 * **What happens to the EGL context on backgrounding**, and which of the three
