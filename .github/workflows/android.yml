@@ -53,6 +53,12 @@ jobs:
     runs-on: ubuntu-latest
     name: assembleDebug (arm64-v8a)
 
+    # To create the rolling prerelease below. Everything else this job does is
+    # a read; naming the two explicitly is what keeps the token from carrying
+    # anything it does not need.
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -116,29 +122,58 @@ jobs:
       # nowhere to put a copy of it -- the step above is what decides whether
       # the APK is good. If this step is skipped, clear some artifacts or wait
       # for the usage recalculation and re-run.
-      - name: Upload
-        id: upload
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: bfbb-android-debug
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-
-      # continue-on-error does not mark the step it spares. It rewrites a
-      # failed step's CONCLUSION to success, and only `outcome` remembers what
-      # happened -- so the step list shows a green tick either way, and a run
-      # where the artifact never uploaded is indistinguishable from one where
-      # it did until you open the log and read to the bottom. Two people have
-      # now been fooled by that, one of them while reporting it.
+      # A RELEASE asset, not an Actions artifact.
       #
-      # So say it out loud, and as an annotation, which is the one place that
-      # survives on the run's summary page.
-      - name: Say whether the APK is downloadable
+      # Artifacts are billed against an account-wide shared storage quota that
+      # every workflow in every repository draws on, and this one was full --
+      # so the APK was built correctly and had nowhere to go, on every run,
+      # for reasons with nothing to do with the port. Release assets are
+      # repository storage instead, which is not that quota.
+      #
+      # One ROLLING prerelease rather than one per push. The asset name is
+      # fixed, so the download URL is stable and can be pasted anywhere:
+      #
+      #   .../releases/download/android-latest/bfbb-arm64-v8a.apk
+      #
+      # and exactly one 8 MB file exists at a time instead of one per commit.
+      # Deleted and recreated rather than uploaded over, so the tag points at
+      # the commit that was actually built -- a fixed tag left where it was
+      # first created is a download that quietly stops matching its label.
+      #
+      # Pushes only. A pull request from a fork gets a read-only token and
+      # could not publish this anyway.
+      - name: Publish the APK as a rolling prerelease
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ steps.upload.outcome }}" = "success" ]; then
-            echo "::notice::APK uploaded -- see the bfbb-android-debug artifact on this run."
-          else
-            echo "::warning::APK NOT uploaded (upload outcome: ${{ steps.upload.outcome }}). The build and the APK check both passed; this is artifact STORAGE, an account-wide quota, and says nothing about the port. Clear space under Settings -> Billing -> Usage, then re-run this job."
-            echo "the APK was built and checked, but there was nowhere to put a copy of it"
-          fi
+          apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
+          cp "$apk" bfbb-arm64-v8a.apk
+
+          cat > notes.md <<'NOTES'
+          The Android port, built by CI. **This is a build, not a release** --
+          see `docs/ANDROID.md` for what does and does not work yet.
+
+          * arm64-v8a, minSdk 24, debug-signed.
+          * It ships NO game data. The assets go in
+            `Android/data/io.github.joeyballentine.bfbb/files/assets`, which the
+            app creates on first run.
+          * Whether it starts at all turns on the game arena landing below 4 GB
+            on your device -- `tools/android/arena_probe.c` is what answers
+            that, and it can be built and run on the phone under Termux.
+          NOTES
+          {
+            echo ""
+            echo "Built from \`$GITHUB_REF_NAME\` at \`$GITHUB_SHA\`."
+          } >> notes.md
+
+          # `|| true` for the first run, when there is no release to delete.
+          gh release delete android-latest --yes --cleanup-tag || true
+
+          gh release create android-latest bfbb-arm64-v8a.apk \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Android build (arm64-v8a)" \
+            --notes-file notes.md
+
+          echo "::notice::APK published: $(gh release view android-latest --json url --jq .url)"

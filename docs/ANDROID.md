@@ -373,19 +373,30 @@ Two things about that job are worth knowing, both learned the hard way:
   header in the superproject's local config and a submodule clone is a fresh
   git process that does not read it -- so the job asks for a username and
   dies. `url.insteadOf` in the global config is what reaches it.
-* The upload step cannot fail the job. Artifact storage is an account-wide
-  quota, and a build that compiled and packaged should not go red because
-  there was nowhere to put a copy. What decides whether the APK is good is
-  the step before it, which looks inside for `lib/arm64-v8a/libmain.so` --
-  a misconfigured `externalNativeBuild` yields a valid APK with no native
-  library in it and a green build.
-* `continue-on-error` does not mark the step it spares: it rewrites a failed
-  step's CONCLUSION to success and leaves the truth in `outcome`, which the
-  API's step listing does not carry. So a run whose artifact never uploaded
-  looks exactly like one whose did. The step after the upload reads `outcome`
-  and says which it was, as an annotation. Do not remove it -- the first
-  thing that happened without it was a green run being reported as having
-  produced a downloadable APK when the quota had silently eaten it.
+* What decides whether the APK is good is the step that looks inside it for
+  `lib/arm64-v8a/libmain.so`. A misconfigured `externalNativeBuild` yields a
+  perfectly valid APK with no native library in it, which packages and
+  publishes and looks green, and that is the one way this job could lie about
+  the only thing it claims.
+* The APK goes to a **release**, not to an Actions artifact. Artifacts are
+  billed against an account-wide shared storage quota that every workflow in
+  every repository draws on; ours was full, so the APK was built correctly and
+  had nowhere to go, run after run, for reasons with nothing to do with the
+  port. Release assets are repository storage instead.
+
+  It is one ROLLING prerelease, `android-latest`, deleted and recreated each
+  time so the tag points at the commit that was actually built. The asset name
+  is fixed, so the download URL is stable:
+
+  ```
+  .../releases/download/android-latest/bfbb-arm64-v8a.apk
+  ```
+
+  and exactly one 8 MB file exists at a time rather than one per commit.
+
+  The job needs `permissions: contents: write` for this. If it ever fails with
+  403, the repository's default workflow token is read-only: Settings →
+  Actions → General → Workflow permissions.
 
 ### On the phone itself
 
