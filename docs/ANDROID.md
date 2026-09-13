@@ -379,6 +379,13 @@ Two things about that job are worth knowing, both learned the hard way:
   the step before it, which looks inside for `lib/arm64-v8a/libmain.so` --
   a misconfigured `externalNativeBuild` yields a valid APK with no native
   library in it and a green build.
+* `continue-on-error` does not mark the step it spares: it rewrites a failed
+  step's CONCLUSION to success and leaves the truth in `outcome`, which the
+  API's step listing does not carry. So a run whose artifact never uploaded
+  looks exactly like one whose did. The step after the upload reads `outcome`
+  and says which it was, as an annotation. Do not remove it -- the first
+  thing that happened without it was a green run being reported as having
+  produced a downloadable APK when the quota had silently eaten it.
 
 ### On the phone itself
 

@@ -117,9 +117,28 @@ jobs:
       # the APK is good. If this step is skipped, clear some artifacts or wait
       # for the usage recalculation and re-run.
       - name: Upload
+        id: upload
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: bfbb-android-debug
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # continue-on-error does not mark the step it spares. It rewrites a
+      # failed step's CONCLUSION to success, and only `outcome` remembers what
+      # happened -- so the step list shows a green tick either way, and a run
+      # where the artifact never uploaded is indistinguishable from one where
+      # it did until you open the log and read to the bottom. Two people have
+      # now been fooled by that, one of them while reporting it.
+      #
+      # So say it out loud, and as an annotation, which is the one place that
+      # survives on the run's summary page.
+      - name: Say whether the APK is downloadable
+        run: |
+          if [ "${{ steps.upload.outcome }}" = "success" ]; then
+            echo "::notice::APK uploaded -- see the bfbb-android-debug artifact on this run."
+          else
+            echo "::warning::APK NOT uploaded (upload outcome: ${{ steps.upload.outcome }}). The build and the APK check both passed; this is artifact STORAGE, an account-wide quota, and says nothing about the port. Clear space under Settings -> Billing -> Usage, then re-run this job."
+            echo "the APK was built and checked, but there was nowhere to put a copy of it"
+          fi
