@@ -7,6 +7,7 @@
 #include <rwcore.h>
 
 #include "iHipoly.h"
+#include "iRasterFill.h"
 #include "iScreen.h"
 #include "rw/backend.h"
 #include "xModel.h"
@@ -638,12 +639,6 @@ static const ToonRampRow kRampRows[ITOON_RAMP_ROWS] = {
     { { 0.34f, 0.40f, 0.62f }, { 1.0f, 0.97f, 0.88f }, 0.45f, 0, 0.0f },
 };
 
-// Which way round a 8888 raster stores its channels on this backend.
-#ifdef RW_D3D9
-static const S32 kRasterIsBGRA = TRUE;
-#else
-static const S32 kRasterIsBGRA = FALSE;
-#endif
 
 static U8 ToByte(F32 v)
 {
@@ -729,10 +724,11 @@ static void WriteRampRow(U8* px, const ToonRampRow* row, S32 bands)
         // Worth noticing that this is the same trap as reading SpongeBob's
         // texture, which is palettised BGRA and comes out cyan taken for RGBA.
         // RenderWare says 8888 and means whatever the device means by it.
-        px[x * 4 + 0] = kRasterIsBGRA ? b : r;
-        px[x * 4 + 1] = g;
-        px[x * 4 + 2] = kRasterIsBGRA ? r : b;
-        px[x * 4 + 3] = 255;
+        // The running backend decides, not the ones compiled in: see iRasterFill.h.
+        px[x * 4 + IRASTERFILL_RED] = r;
+        px[x * 4 + IRASTERFILL_GREEN] = g;
+        px[x * 4 + IRASTERFILL_BLUE] = b;
+        px[x * 4 + IRASTERFILL_ALPHA] = 255;
     }
 }
 
