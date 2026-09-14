@@ -97,3 +97,9 @@ scratch/
 
 # Fonts are fetched by tools/getfont.py, never committed.
 fonts/
+
+# Gradle and the NDK build, under android/
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/build/
