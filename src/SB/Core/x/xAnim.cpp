@@ -1108,6 +1108,18 @@ xAnimState* xAnimTableAddFileID(xAnimTable* table, xAnimFile* file, U32 stateID,
         {
             if (!state->MultiFile)
             {
+#ifdef BFBB_PTR64
+                // Files[] is 8-byte aligned at 64 bits, so it starts at 8 and not
+                // at sizeof(xAnimMultiFileBase), which is 4. A block sized from the
+                // base is 4 bytes short of its last entry's File.
+                state->MultiFile =
+                    (gxAnimUseGrowAlloc ? (xAnimMultiFile*)xMemGrowAllocSize(
+                                              subStateCount * sizeof(xAnimMultiFileEntry) +
+                                              offsetof(xAnimMultiFile, Files)) :
+                                          (xAnimMultiFile*)xMemAllocSize(
+                                              subStateCount * sizeof(xAnimMultiFileEntry) +
+                                              offsetof(xAnimMultiFile, Files)));
+#else
                 state->MultiFile =
                     (gxAnimUseGrowAlloc ? (xAnimMultiFile*)xMemGrowAllocSize(
                                               subStateCount * sizeof(xAnimMultiFileEntry) +
@@ -1115,6 +1127,7 @@ xAnimState* xAnimTableAddFileID(xAnimTable* table, xAnimFile* file, U32 stateID,
                                           (xAnimMultiFile*)xMemAllocSize(
                                               subStateCount * sizeof(xAnimMultiFileEntry) +
                                               sizeof(xAnimMultiFileBase)));
+#endif
 
                 state->MultiFile->Count = 0;
             }
