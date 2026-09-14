@@ -7,7 +7,8 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 
 /**
- * The launcher entry: picks the video profile, then starts the game.
+ * The launcher entry: sends the player to the import screen if there are no
+ * game files, picks the video profile, then starts the game.
  *
  * <p>The first launch asks "vanilla" or "modern". The answer is kept, and the
  * app icon's long-press shortcuts change it. BfbbActivity hands it to the game
@@ -18,6 +19,7 @@ public class ProfileActivity extends Activity {
     static final String PREFS = "bfbb";
     static final String KEY_PROFILE = "profile";
     static final String EXTRA_PROFILE = "profile";
+    static final String EXTRA_IMPORT = "import";
 
     static final String VANILLA = "vanilla";
     static final String MODERN = "modern";
@@ -25,6 +27,14 @@ public class ProfileActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // No game files yet, or the "Import game files" shortcut: the import
+        // screen first, and it comes back here when it is done.
+        if (getIntent().getBooleanExtra(EXTRA_IMPORT, false) || !ImportActivity.assetsPresent(this)) {
+            startActivity(new Intent(this, ImportActivity.class));
+            finish();
+            return;
+        }
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 

@@ -63,6 +63,16 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- Copies the game's files in from a folder the player picks. Handles
+             its own configuration changes so a copy in progress keeps its
+             screen. -->
+        <activity
+            android:name=".ImportActivity"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
+
         <!-- configChanges below lists every configuration change the
              activity handles itself rather than being destroyed and recreated
              for. That is not a nicety: an activity restart destroys the EGL

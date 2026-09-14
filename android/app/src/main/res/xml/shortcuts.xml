@@ -29,4 +29,17 @@
             <extra android:name="profile" android:value="vanilla" />
         </intent>
     </shortcut>
+    <shortcut
+        android:shortcutId="import_files"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/import_short"
+        android:shortcutLongLabel="@string/import_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.joeyballentine.bfbb"
+            android:targetClass="io.github.joeyballentine.bfbb.ProfileActivity">
+            <extra android:name="import" android:value="true" />
+        </intent>
+    </shortcut>
 </shortcuts>

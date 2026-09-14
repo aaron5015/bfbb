@@ -10,4 +10,17 @@
     <string name="profile_modern_long">Play modern (widescreen)</string>
     <string name="profile_vanilla_short">Play vanilla</string>
     <string name="profile_vanilla_long">Play vanilla (original 4:3)</string>
+
+    <string name="import_short">Import game files</string>
+    <string name="import_long">Import game files</string>
+    <string name="import_title">Game files needed</string>
+    <string name="import_explain">The game\'s files do not come with this app. Copy the files from your own Xbox copy of the game onto this device, then choose the folder that holds boot.HIP and font.HIP.</string>
+    <string name="import_choose">Choose folder</string>
+    <string name="import_scanning">Looking for the game files…</string>
+    <string name="import_copying">Copying the game files…</string>
+    <string name="import_progress">Copying %1$s\n%2$s of %3$s</string>
+    <string name="import_not_found">No boot.HIP and font.HIP in that folder or the folders directly inside it. Choose the folder the game\'s files are in.</string>
+    <string name="import_no_space">Not enough free space: the game files need %1$s and %2$s is free.</string>
+    <string name="import_no_storage">This device has no storage the app can copy the files to.</string>
+    <string name="import_failed">The copy did not finish: %1$s</string>
 </resources>
