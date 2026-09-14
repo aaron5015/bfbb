@@ -293,23 +293,6 @@ static S32 RenderWareInit()
     // and GL3 makes its own inside librw, so the two open differently.
     iBackendResolve();
 
-    // **The cartoon look needs Direct3D 9 or OpenGL, and this is where that is
-    // said.**
-    //
-    // Its cel ramp and its hull are shader permutations that librw carries in
-    // the D3D9 tree and the GL3 tree but not the D3D11 one. Left on, a D3D11
-    // device would take the cel path with no shader bound and draw a black
-    // character, which looks like a fault rather than like a setting.
-    if (iScreenToon() && iScreenGetBackend() != iSCREENBACKEND_D3D9 &&
-        iScreenGetBackend() != iSCREENBACKEND_GL3)
-    {
-        printf("bfbb: experimental.toon needs the Direct3D 9 or OpenGL backend; it is off "
-               "on %s\n",
-               iScreenBackendName(iScreenGetBackend()));
-        iScreenSetToon(FALSE, iScreenToonBands(), iScreenToonSaturation(), 0.0f,
-                       iScreenToonStrength(), ITOON_LIGHT_SCENE);
-    }
-
     // The window, where VIInit was. It opens at the render size because that is
     // the least surprising thing to do, not because anything requires it: the
     // port draws into a virtual screen which is scaled into the back buffer at

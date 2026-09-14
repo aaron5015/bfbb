@@ -2471,7 +2471,7 @@ static void test_matfx()
 // to bone 0 with full weight. That is the smallest thing the combined skin+matfx
 // pipeline will draw: it needs positions to skin, normals to reflect, a material
 // to carry the effect, and bone indices and weights in the vertex buffer.
-static RpGeometry* makeSkinnedQuad(RpMaterial* material, rw::Skin** skinOut)
+static RpGeometry* makeNormalQuad(RpMaterial* material)
 {
     RpGeometry* geometry =
         RpGeometryCreate(4, 2, rpGEOMETRYPOSITIONS | rpGEOMETRYNORMALS | rpGEOMETRYTEXTURED);
@@ -2497,6 +2497,16 @@ static RpGeometry* makeSkinnedQuad(RpMaterial* material, rw::Skin** skinOut)
     RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[0], material);
     RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[1], material);
     RpGeometryUnlock(geometry);
+    return geometry;
+}
+
+static RpGeometry* makeSkinnedQuad(RpMaterial* material, rw::Skin** skinOut)
+{
+    RpGeometry* geometry = makeNormalQuad(material);
+    if (geometry == NULL)
+    {
+        return NULL;
+    }
 
     // Built by hand for the reason test_skin gives: there is no
     // RpSkinGeometrySetSkin on the game's list and no skinned model to stream
@@ -2658,6 +2668,131 @@ static void test_skin_matfx()
     RwFrameDestroy(atomicFrame);
     reinterpret_cast<rw::Geometry*>(geometry)->destroy();
     reinterpret_cast<rw::Material*>(material)->destroy();
+}
+
+// The cel look and the hull, on whichever Direct3D device is open.
+//
+// Both backends run shaders compiled from one HLSL source. What this catches is
+// the half that is not shared: a blob the device refuses, and on D3D11 an input
+// layout it refuses -- the hull reads three texture coordinate sets and a mesh
+// that has not been through iToonHullNormals carries one. D3D9 feeds the other
+// two as zeroes; D3D11 skips the draw unless the backend supplies them.
+//
+// NOT checked: what the pixels look like.
+static void test_toon()
+{
+    printf("the cel look\n");
+
+#if defined(RW_D3D9) || defined(RW_D3D11)
+    if (!iBackendIsD3D())
+    {
+        return;
+    }
+
+    check(rw::d3d::default_toon_PS != NULL && rw::d3d::default_tex_toon_PS != NULL,
+          "the device accepted both cel pixel shaders");
+    check(rw::d3d::outline_VS != NULL && rw::d3d::outline_PS != NULL, "and the hull's two");
+    check(rw::d3d9::skin_outline_VS != NULL, "and the skinned hull's");
+
+    RpMaterial* material = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    rw::Skin* skin = NULL;
+    RpGeometry* skinned = makeSkinnedQuad(material, &skin);
+    RpGeometry* rigid = makeNormalQuad(material);
+    check(skinned != NULL && rigid != NULL, "two quads with one texture coordinate set");
+    if (skinned == NULL || rigid == NULL)
+    {
+        return;
+    }
+
+    RpAtomic* skinnedAtomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    RpAtomic* rigidAtomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    RwFrame* frame = RwFrameCreate();
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)
+        ->setGeometry(reinterpret_cast<rw::Geometry*>(skinned), 0);
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)
+        ->setGeometry(reinterpret_cast<rw::Geometry*>(rigid), 0);
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)->setFrame(reinterpret_cast<rw::Frame*>(frame));
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)->setFrame(reinterpret_cast<rw::Frame*>(frame));
+    RpSkinAtomicSetType(skinnedAtomic, rpSKINTYPEGENERIC);
+
+    RwCamera* camera = RwCameraCreate();
+    RwFrame* cameraFrame = RwFrameCreate();
+    RwCameraSetFrame(camera, cameraFrame);
+    RwCameraSetRaster(camera, RwRasterCreate(64, 64, 0, rwRASTERTYPECAMERA));
+    RwCameraSetZRaster(camera, RwRasterCreate(64, 64, 0, rwRASTERTYPEZBUFFER));
+    RwCameraSetNearClipPlane(camera, 0.1f);
+    RwCameraSetFarClipPlane(camera, 100.0f);
+
+    // Unlit, because there is no world here to light a draw, and an unlit
+    // draw takes the cel look only when it says so. The skinned pipeline has no
+    // such switch, so the skinned quad is drawn for its hull alone.
+    rw::d3d::setToonShading(TRUE, 3.0f, 1.0f, 1.0f);
+    rw::d3d::setToonUnlit(TRUE);
+    rw::d3d::setOutline(0.0f, 0.0f, 0.0f, 0.05f);
+    rw::d3d::setOutlineMode(rw::d3d::OUTLINE_PLAIN);
+
+    RwCameraBeginUpdate(camera);
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)->render();
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)->render();
+
+    rw::d3d9::InstanceDataHeader* skinnedHeader = reinterpret_cast<rw::d3d9::InstanceDataHeader*>(
+        reinterpret_cast<rw::Geometry*>(skinned)->instData);
+    rw::d3d9::InstanceDataHeader* rigidHeader = reinterpret_cast<rw::d3d9::InstanceDataHeader*>(
+        reinterpret_cast<rw::Geometry*>(rigid)->instData);
+    check(skinnedHeader != NULL && rigidHeader != NULL, "both quads were instanced by the draw");
+
+    void* boundPS = NULL;
+#ifdef RW_D3D9
+    if (iBackendIsD3D9())
+    {
+        IDirect3DPixelShader9* ps = NULL;
+        rw::d3d::d3ddevice->GetPixelShader(&ps);
+        boundPS = ps;
+        if (ps)
+        {
+            ps->Release();
+        }
+    }
+#endif
+#ifdef RW_D3D11
+    if (iBackendIsD3D11())
+    {
+        ID3D11PixelShader* ps = NULL;
+        rw::d3d::impl11::d3d11context->PSGetShader(&ps, NULL, NULL);
+        boundPS = ps;
+        if (ps)
+        {
+            ps->Release();
+        }
+
+        check(rigidHeader != NULL && rw::d3d::impl11::inputLayoutFor(rigidHeader->vertexDeclaration,
+                                                                     rw::d3d::outline_VS) != NULL,
+              "D3D11 makes the hull's input layout for a mesh without hull normals");
+        check(skinnedHeader != NULL &&
+                  rw::d3d::impl11::inputLayoutFor(skinnedHeader->vertexDeclaration,
+                                                  rw::d3d9::skin_outline_VS) != NULL,
+              "and the skinned hull's");
+    }
+#endif
+    RwCameraEndUpdate(camera);
+
+    check(boundPS != NULL && boundPS == rw::d3d::default_toon_PS,
+          "the rigid quad was drawn with the cel pixel shader");
+
+    rw::d3d::setOutlineMode(rw::d3d::OUTLINE_NONE);
+    rw::d3d::setOutline(0.0f, 0.0f, 0.0f, 0.0f);
+    rw::d3d::setToonUnlit(FALSE);
+    rw::d3d::setToonShading(FALSE, 3.0f, 1.0f, 1.0f);
+
+    RwCameraDestroy(camera);
+    RwFrameDestroy(cameraFrame);
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)->destroy();
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)->destroy();
+    RwFrameDestroy(frame);
+    reinterpret_cast<rw::Geometry*>(skinned)->destroy();
+    reinterpret_cast<rw::Geometry*>(rigid)->destroy();
+    reinterpret_cast<rw::Material*>(material)->destroy();
+#endif
 }
 
 // Stands in for librw's own atomic render callback in the instancing checks.
@@ -3969,6 +4104,7 @@ int main(int argc, char** argv)
     test_skin();
     test_matfx();
     test_skin_matfx();
+    test_toon();
     test_uvxform();
     test_ptank();
     test_clumps();

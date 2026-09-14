@@ -259,6 +259,28 @@ static IDirect3D9* sProbeD3D9;
 // that cannot be written twice, which is mostly rw::EngineOpenParams -- the one
 // librw type whose SHAPE is per backend.
 
+#if defined(RW_D3D9) || defined(RW_D3D8) || defined(RW_D3D11)
+// The cartoon look's settings, for either Direct3D device. Both run librw's one
+// set of toon shaders and read the same rw::d3d state, so they are handed it by
+// one function.
+static void SetD3DToon(void)
+{
+    rw::d3d::setToonShading(iScreenToon(), iScreenToonBands(), iScreenToonSaturation(),
+                            iScreenToonStrength());
+    rw::d3d::setToonFlatten(iScreenToonColors());
+
+    // 0.65 is where the rim starts, and it is not a setting: it is a property of
+    // how wide a line reads, and one knob for the rim is enough.
+    rw::d3d::setToonLook(iScreenToonWrap(), iScreenToonRim(), 0.65f, iScreenToonOcclusion(),
+                         iScreenToonHardness());
+
+    // The ink itself is installed per character by iToonSetOutline, which is the
+    // only thing that knows whose outline it is. Only the width is a setting,
+    // and it rides in alpha.
+    rw::d3d::setOutline(0.35f, 0.35f, 0.35f, iScreenToonOutline());
+}
+#endif
+
 #if defined(RW_D3D9) || defined(RW_D3D8)
 static RwBool OpenDeviceD3D9(void)
 {
@@ -407,19 +429,7 @@ static RwBool OpenDeviceD3D9(void)
     // nothing down the fixed-function path above; iScreenToon is left alone
     // rather than cleared, because the setting is still what the player asked
     // for and the card is what could not do it.
-    rw::d3d::setToonShading(iScreenToon(), iScreenToonBands(), iScreenToonSaturation(),
-                            iScreenToonStrength());
-    rw::d3d::setToonFlatten(iScreenToonColors());
-
-    // 0.65 is where the rim starts, and it is not a setting: it is a property of
-    // how wide a line reads, and one knob for the rim is enough.
-    rw::d3d::setToonLook(iScreenToonWrap(), iScreenToonRim(), 0.65f, iScreenToonOcclusion(),
-                         iScreenToonHardness());
-
-    // The ink itself is installed per character by iToonSetOutline, which is the
-    // only thing that knows whose outline it is. Only the width is a setting,
-    // and it rides in alpha.
-    rw::d3d::setOutline(0.35f, 0.35f, 0.35f, iScreenToonOutline());
+    SetD3DToon();
 
     rw::d3d::setVirtualScreen(iScreenWidth(), iScreenHeight());
     if (!rw::Engine::open(&params))
@@ -468,6 +478,7 @@ static RwBool OpenDeviceD3D11(void)
 
     rw::d3d::setVirtualScreenSamples(iScreenMultiSample());
     rw::d3d::setPerPixelLightingEnabled(iScreenPerPixelLighting());
+    SetD3DToon();
     rw::d3d::setVirtualScreen(iScreenWidth(), iScreenHeight());
     if (!rw::Engine::open(&params))
     {

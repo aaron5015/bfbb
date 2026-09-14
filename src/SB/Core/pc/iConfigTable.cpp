@@ -249,7 +249,7 @@ const iConfigSetting kConfigSettings[] = {
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "experimental", "toon", "off",
       "Draw the game like the cartoon it came from: light cut into steps,\n"
-      "; colour pushed from grey, a line round each character. Direct3D 9 only.",
+      "; colour pushed from grey, a line round each character.",
       ICONFIG_BOOL, NULL, kNone, kNone },
     { "experimental", "world_outline", "on",
       "Draw the level itself with a line round it, the way the models are.\n"

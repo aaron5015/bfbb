@@ -20,20 +20,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-// **D3D9 and GL3 both draw this, and one build carries both.**
+// **Every backend draws this, and one build carries all three.**
 //
-// The cel look is shaders, and librw has them in the D3D9 tree and the GL3 tree
-// but not the D3D11 one. Which of the three is drawing is not known until
-// iBackendResolve has run, so the pick is per call rather than per build --
-// the same dispatch rw/glow.cpp takes, and for the same reason. A backend with
-// no permutation lands on the empty body and the game draws as it did without
-// the setting.
+// The cel look is shaders. librw's two Direct3D backends compile theirs from one
+// HLSL source and share rw::d3d's entry points; GL3 has its own. Which one is
+// drawing is not known until iBackendResolve has run, so the pick is per call
+// rather than per build -- the same dispatch rw/glow.cpp takes, and for the
+// same reason. The NULL backend lands on the empty body.
 namespace toonbackend
 {
     inline void setToonRamp(rw::Texture* t)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonRamp(t);
             return;
@@ -51,8 +50,8 @@ namespace toonbackend
 
     inline void setToonRoomTint(F32 r, F32 g, F32 b)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonRoomTint(r, g, b);
             return;
@@ -72,8 +71,8 @@ namespace toonbackend
 
     inline void clearToonRoomTint()
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::clearToonRoomTint();
             return;
@@ -90,8 +89,8 @@ namespace toonbackend
 
     inline void setToonLightDir(F32 x, F32 y, F32 z)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonLightDir(x, y, z);
             return;
@@ -111,8 +110,8 @@ namespace toonbackend
 
     inline void clearToonLightDir()
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::clearToonLightDir();
             return;
@@ -129,8 +128,8 @@ namespace toonbackend
 
     inline void setOutline(F32 r, F32 g, F32 b, F32 w)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutline(r, g, b, w);
             return;
@@ -151,8 +150,8 @@ namespace toonbackend
 
     inline void setOutlineLower(F32 r, F32 g, F32 b)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineLower(r, g, b);
             return;
@@ -172,8 +171,8 @@ namespace toonbackend
 
     inline void setOutlineFlat(S32 a, S32 b)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineFlat(a, b);
             return;
@@ -192,8 +191,8 @@ namespace toonbackend
 
     inline void setToonRoomScale(F32 scale)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonRoomScale(scale);
             return;
@@ -211,8 +210,8 @@ namespace toonbackend
 
     inline void setOutlineInk(F32 saturation, F32 gamma)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineInk(saturation, gamma);
             return;
@@ -231,8 +230,8 @@ namespace toonbackend
 
     inline void setToonModelShade(F32 amount)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonModelShade(amount);
             return;
@@ -250,8 +249,8 @@ namespace toonbackend
 
     inline void setOutlineInverted(S32 on)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineInverted(on);
             return;
@@ -269,8 +268,8 @@ namespace toonbackend
 
     inline void setOutlineDepthBias(F32 widths)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineDepthBias(widths);
             return;
@@ -288,8 +287,8 @@ namespace toonbackend
 
     inline void setOutlineSplit(F32 y)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineSplit(y);
             return;
@@ -307,8 +306,8 @@ namespace toonbackend
 
     inline void setOutlineMode(S32 mode)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineMode(mode);
             return;
@@ -326,8 +325,8 @@ namespace toonbackend
 
     inline void setToonLook(F32 wrap, F32 rim, F32 rimStart, F32 occlusion, F32 hardness)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonLook(wrap, rim, rimStart, occlusion, hardness);
             return;
@@ -349,8 +348,8 @@ namespace toonbackend
 
     inline void setToonUnlit(S32 on)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonUnlit(on);
             return;
@@ -368,8 +367,8 @@ namespace toonbackend
 
     inline void setToonRoomColor(F32 r, F32 g, F32 b)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonRoomColor(r, g, b);
             return;
@@ -389,8 +388,8 @@ namespace toonbackend
 
     inline void setToonGloss(F32 amount, F32 edge)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonGloss(amount, edge);
             return;
@@ -409,8 +408,8 @@ namespace toonbackend
 
     inline void setToonRimBlend(S32 mode)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonRimBlend(mode);
             return;
@@ -428,8 +427,8 @@ namespace toonbackend
 
     inline void setToonRampRow(S32 row)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonRampRow(row);
             return;
@@ -447,8 +446,8 @@ namespace toonbackend
 
     inline void setOutlineMinWidth(F32 w)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineMinWidth(w);
             return;
@@ -466,8 +465,8 @@ namespace toonbackend
 
     inline void setToonShading(S32 on, F32 bands, F32 saturation, F32 strength)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setToonShading(on, bands, saturation, strength);
             return;
@@ -488,8 +487,8 @@ namespace toonbackend
 
     inline void setOutlineAlpha(S32 allow)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d9::setOutlineAlpha(allow);
             return;
@@ -507,8 +506,8 @@ namespace toonbackend
 
     inline void setOutlineMaxWidth(F32 w)
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
         {
             rw::d3d::setOutlineMaxWidth(w);
             return;
@@ -525,7 +524,7 @@ namespace toonbackend
     }
 } // namespace toonbackend
 
-#if defined(RW_D3D9) || defined(RW_GL3)
+#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
 #define TOON_HAVE_BACKEND 1
 #endif
 

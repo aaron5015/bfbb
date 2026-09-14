@@ -375,11 +375,6 @@ void iScreenSetWorldLightShadows(S32 on);
 // Draw the game like the cartoon it came from: a character's light cut into
 // steps, his colour pushed away from grey, and a black line drawn round him.
 // iToon.h says how each part is made.
-//
-// **Direct3D 9 only.** The cel ramp and the hull are shader permutations that
-// exist in librw's D3D9 tree and nowhere else, so RenderWareInit turns this off
-// on any other backend rather than letting it draw a character with no pixel
-// shader bound.
 S32 iScreenToon();
 F32 iScreenToonBands();
 F32 iScreenToonSaturation();
