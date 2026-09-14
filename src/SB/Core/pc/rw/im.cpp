@@ -12,11 +12,11 @@
 // librw's field order under RenderWare's field names, asserted against the
 // backend's own struct in layout_im2d.cpp.
 //
-//   RxObjSpace3DVertex   x y z  nx ny nz  r g b a (bytes)  u v
-//   gl3::Im3DVertex      x y z  nx ny nz  r g b a (bytes)  u v     -- agrees
+//   RxObjSpace3DVertex   x y z  nx ny nz  colour (4 bytes)  u v
+//   gl3::Im3DVertex      x y z  nx ny nz  b g r a (bytes)   u v    -- agrees
 //
 //   rwGameCube2DVertex   x y z        RwRGBA        u v            -- 24 bytes
-//   gl3::Im2DVertex      x y z w      r g b a       u v            -- 28 bytes
+//   gl3::Im2DVertex      x y z w      b g r a       u v            -- 28 bytes
 //   d3d::Im2DVertex      x y z w      uint32 ARGB   u v            -- 28 bytes
 //
 // The 3D vertex happens to line up with GL3's and needed nothing. The 2D one

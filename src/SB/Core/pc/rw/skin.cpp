@@ -112,13 +112,14 @@ RpAtomic* RpSkinAtomicSetType(RpAtomic* atomic, RpSkinType type)
     // Skin::setPipeline casting the type to void. It honours the type now: the
     // three calls that ask for rpSKINTYPEMATFX (xFX.cpp, zEntCruiseBubble.cpp
     // and iModel.cpp, all wanting an environment-mapped skinned model) reach a
-    // D3D9 pipeline that skins the vertices AND draws the effect, added on the
-    // fork's bfbb-port branch as src/d3d/d3d9skinmatfx.cpp.
+    // pipeline that skins the vertices AND draws the effect, added on the
+    // fork's bfbb-port branch as src/d3d/d3d9skinmatfx.cpp and
+    // src/gl/gl3skinmatfx.cpp.
     //
     // Two things are still RenderWare's and not ours. rpSKINTYPETOON has no
     // pipeline, because nothing in this game asks for one -- these three calls
     // are the whole list. And a backend that registers no combined pipeline
-    // (LIBRW_PLATFORM=NULL, and GL3 until someone writes its shaders) falls
+    // (LIBRW_PLATFORM=NULL) falls
     // back to plain skinning, which loses the effect but never the skinning.
     rw::Skin::setPipeline(reinterpret_cast<rw::Atomic*>(atomic), (rw::int32)type);
     return atomic;

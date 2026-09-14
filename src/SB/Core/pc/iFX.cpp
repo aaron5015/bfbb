@@ -45,8 +45,8 @@
 //
 // A platform whose librw side is not implemented returns nil from
 // GetUVTransformPipeline, and so does this. xFX.cpp:883 then leaves the atomic
-// on its default pipeline and draws it unanimated, which is GL3 today: the
-// state and the pipeline hook are portable, the shader is not written.
+// on its default pipeline and draws it unanimated. D3D9, D3D11 and GL3 all
+// register one; the NULL backend does not.
 //
 // NOT IMPLEMENTED, because the GameCube does not implement it either: the
 // second-pass state. xFXanimUV2PRotMat0, ...2PTrans, ...2PScale and
