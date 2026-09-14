@@ -42,6 +42,27 @@
         android:hardwareAccelerated="true"
         android:isGame="true">
 
+        <!-- The launcher entry. It asks for the video profile once, then starts
+             BfbbActivity; the icon's long-press shortcuts come back through it
+             to change the answer. -->
+        <activity
+            android:name=".ProfileActivity"
+            android:label="@string/app_name"
+            android:theme="@style/ProfileTheme"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
         <!-- configChanges below lists every configuration change the
              activity handles itself rather than being destroyed and recreated
              for. That is not a nicety: an activity restart destroys the EGL
@@ -58,11 +79,6 @@
             android:exported="true"
             android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:preferMinimalPostProcessing="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
 
             <!-- So a controller plugged in over USB reaches this activity. -->
             <intent-filter>

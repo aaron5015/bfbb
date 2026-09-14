@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">BFBB</string>
+
+    <string name="profile_title">How do you want to play?</string>
+    <string name="profile_modern_choice">Modern: widescreen, HUD at the edges, no draw distance limit</string>
+    <string name="profile_vanilla_choice">Vanilla: the original 4:3 picture and draw distance</string>
+
+    <string name="profile_modern_short">Play modern</string>
+    <string name="profile_modern_long">Play modern (widescreen)</string>
+    <string name="profile_vanilla_short">Play vanilla</string>
+    <string name="profile_vanilla_long">Play vanilla (original 4:3)</string>
 </resources>

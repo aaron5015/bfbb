@@ -83,6 +83,17 @@ public class BfbbActivity extends SDLActivity {
         extractButtonGlyphs();
 
         super.onCreate(savedInstanceState);
+
+        // Before SDL_main, which starts once the surface exists. See
+        // ProfileActivity, and ResolveVideoProfile in iSystem.cpp.
+        String profile = getSharedPreferences(ProfileActivity.PREFS, MODE_PRIVATE)
+                .getString(ProfileActivity.KEY_PROFILE, ProfileActivity.MODERN);
+        try {
+            nativeSetenv("BFBB_PROFILE", profile);
+        } catch (UnsatisfiedLinkError e) {
+            // libmain.so did not load; SDLActivity has already said so.
+            Log.w(TAG, "could not pass the video profile", e);
+        }
     }
 
     /**
