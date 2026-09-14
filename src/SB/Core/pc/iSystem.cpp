@@ -596,15 +596,89 @@ static S32 WorldLightingFromConfig()
                                                                   IWORLDLIGHT_OFF;
 }
 
+// video.profile, resolved into the four settings it stands for.
+//
+// vanilla is the Xbox release: 640x480, the interface in a 4:3 box, the
+// console's culling and world clip. modern renders at the display's shape,
+// 1080 lines tall or the display's own height if that is less, with the HUD
+// out at the edges and nothing culled by distance. custom, the default off
+// Android, reads width, height, ui and draw_distance from their own lines.
+//
+// BFBB_PROFILE beats the file, as BFBB_ASSETS does: the Android launcher asks
+// the player once and passes the answer that way, since there is no settings
+// program to run on a phone.
+struct VideoProfile
+{
+    S32 width;
+    S32 height;
+    const char* ui;
+    S32 drawDistance;
+};
+
+static VideoProfile ResolveVideoProfile()
+{
+    VideoProfile p;
+    p.width = iConfigGetInt("video.width", 640);
+    p.height = iConfigGetInt("video.height", 480);
+    p.ui = iConfigGetString("video.ui", "pillarbox");
+    p.drawDistance = iConfigGetBool("video.draw_distance", TRUE);
+
+    const char* name = getenv("BFBB_PROFILE");
+    if (name == NULL || name[0] == '\0')
+    {
+        name = iConfigGetString("video.profile", "custom");
+    }
+
+    if (iHostStrCaseCmp(name, "vanilla") == 0)
+    {
+        p.width = 640;
+        p.height = 480;
+        p.ui = "pillarbox";
+        p.drawDistance = FALSE;
+    }
+    else if (iHostStrCaseCmp(name, "modern") == 0)
+    {
+        S32 dw = 0;
+        S32 dh = 0;
+        S32 longSide = 16;
+        S32 shortSide = 9;
+
+        // The long side across, whichever way up the display reports itself: a
+        // phone asks before its activity has turned to landscape.
+        if (iWindowGetDisplaySize(&dw, &dh))
+        {
+            longSide = dw > dh ? dw : dh;
+            shortSide = dw > dh ? dh : dw;
+        }
+
+        p.height = shortSide < 1080 && shortSide >= 480 ? shortSide : 1080;
+        p.width = (S32)((F64)p.height * longSide / shortSide + 0.5) & ~1;
+        p.ui = "native";
+        p.drawDistance = TRUE;
+    }
+    else if (iHostStrCaseCmp(name, "custom") != 0)
+    {
+        printf("bfbb: config: video.profile '%s' is not custom, vanilla or modern; using custom\n",
+               name);
+        name = "custom";
+    }
+
+    printf("bfbb: video profile %s -- %dx%d, HUD %s, draw distance %s\n", name, (int)p.width,
+           (int)p.height, p.ui, p.drawDistance ? "unlimited" : "console");
+    return p;
+}
+
 static void ApplyConfig()
 {
+    const VideoProfile profile = ResolveVideoProfile();
+
     sWindowMode = WindowModeFromConfig();
     sShadowResPinned = ShadowResolutionFromConfig();
 
     // The render size, before RenderWareInit opens the window at it. Pushed the
     // same way the three render features are, and for a stronger reason: iScreen
     // is read by game code, which must not learn what config.ini is.
-    iScreenSetSize(iConfigGetInt("video.width", 640), iConfigGetInt("video.height", 480));
+    iScreenSetSize(profile.width, profile.height);
     iScreenSetMultiSample(iConfigGetInt("video.msaa", 4));
     iScreenSetPerPixelLighting(iConfigGetBool("video.per_pixel_lighting", FALSE));
     iScreenSetWorldLighting(WorldLightingFromConfig());
@@ -703,7 +777,7 @@ static void ApplyConfig()
 
     // How the interface sits on a screen that is not 4:3. Nothing to report
     // when it cannot matter, which is every 4:3 render size.
-    const char* uiMode = iConfigGetString("video.ui", "pillarbox");
+    const char* uiMode = profile.ui;
     if (iHostStrCaseCmp(uiMode, "native") == 0)
     {
         iScreenSetUIMode(iSCREENUI_NATIVE);
@@ -722,7 +796,7 @@ static void ApplyConfig()
     // into iCamera as well as into iDrawDist because the far clip is a value the
     // camera holds rather than one it asks for each frame; the wrapped distances
     // in zLOD and zEntSimpleObj read the switch itself, at scene setup.
-    S32 drawDistance = iConfigGetBool("video.draw_distance", TRUE);
+    S32 drawDistance = profile.drawDistance;
     iDrawDistSetUnlimited(drawDistance);
     iCameraSetNearFarClip(0.0f, iDrawDistFarClip());
 

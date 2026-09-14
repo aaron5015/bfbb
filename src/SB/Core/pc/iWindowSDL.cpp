@@ -497,6 +497,27 @@ S32 iWindowGetDisplayRefreshRate()
     return (S32)(mode->refresh_rate + 0.5f);
 }
 
+S32 iWindowGetDisplaySize(S32* width, S32* height)
+{
+    // Refcounted, so this neither needs the window nor disturbs one.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+    {
+        return FALSE;
+    }
+
+    const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    S32 ok = mode != NULL && mode->w > 0 && mode->h > 0;
+
+    if (ok)
+    {
+        *width = mode->w;
+        *height = mode->h;
+    }
+
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return ok;
+}
+
 void iWindowPaceFrame()
 {
     if (sFrameRate <= 0)

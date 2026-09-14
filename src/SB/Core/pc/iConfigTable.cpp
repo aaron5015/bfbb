@@ -58,6 +58,14 @@ const iConfigSetting kConfigSettings[] = {
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "video", "mode", "fullscreen", "Window mode: fullscreen, borderless, windowed.", ICONFIG_ENUM,
       "fullscreen|borderless|windowed", kNone, kNone },
+    { "video", "profile",
+#ifdef __ANDROID__
+      "modern",
+#else
+      "custom",
+#endif
+      "Render size, HUD and draw distance: vanilla, modern, or custom (the lines below).",
+      ICONFIG_ENUM, "custom|vanilla|modern", kNone, kNone },
     { "video", "width", "640", "Render width in pixels.", ICONFIG_INT, NULL, 320.0f, 15360.0f },
     { "video", "height", "480",
       "Render height in pixels. A shape other than 4:3 widens the view rather\n"

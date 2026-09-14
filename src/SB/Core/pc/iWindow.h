@@ -139,6 +139,10 @@ S32 iWindowShouldClose();
 
 void iWindowGetSize(S32* width, S32* height);
 
+// The primary display's size in pixels, usable before the window is opened.
+// FALSE when the backend has no display to ask.
+S32 iWindowGetDisplaySize(S32* width, S32* height);
+
 // The mode the window was opened in. iWINDOW_WINDOWED before it is opened, so
 // a caller that asks too early gets the answer that needs nothing done about
 // it rather than one that would put the device into exclusive fullscreen.
