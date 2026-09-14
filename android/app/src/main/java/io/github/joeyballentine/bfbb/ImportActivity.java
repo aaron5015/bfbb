@@ -1,14 +1,21 @@
 package io.github.joeyballentine.bfbb;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.StatFs;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsContract.Document;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -38,6 +45,11 @@ import java.util.Locale;
  * Everything else in the folder -- the .xbe, extraction leftovers -- stays
  * behind.
  *
+ * <p>Or the folder is used where it is: with All files access granted, the
+ * picked folder's path is kept and BfbbActivity passes it to the game as
+ * BFBB_ASSETS, so nothing is copied. That permission is not one Google Play
+ * accepts for a game, which is why copying is the other choice.
+ *
  * <p>The copy goes to a temporary folder that replaces assets/ only once it is
  * complete, so an interrupted import never leaves half of a set. The previous
  * files survive it too, unless there was room for only one copy of the game,
@@ -47,6 +59,12 @@ public class ImportActivity extends Activity {
 
     private static final String TAG = "bfbb";
     private static final int PICK_FOLDER = 1;
+    private static final int PICK_LINK = 2;
+
+    static final String KEY_ASSETS_PATH = "assets_path";
+
+    private boolean mAwaitingPermission;
+    private Button mLink;
 
     private TextView mStatus;
     private ProgressBar mProgress;
@@ -56,11 +74,36 @@ public class ImportActivity extends Activity {
 
     /** Whether a usable set of game files is already in place. */
     static boolean assetsPresent(Activity activity) {
+        if (linkedPath(activity) != null) {
+            return true;
+        }
         File external = activity.getExternalFilesDir(null);
         if (external == null) {
             return false;
         }
         return containsGame(new File(external, "assets"));
+    }
+
+    /**
+     * The folder the player chose to use in place, while it still holds the
+     * game and the app can still read it. Null otherwise, which sends the
+     * next launch back to this screen.
+     */
+    static String linkedPath(Context context) {
+        String path = context.getSharedPreferences(ProfileActivity.PREFS, MODE_PRIVATE)
+                .getString(KEY_ASSETS_PATH, null);
+        if (path == null || !canReadStorage(context) || !containsGame(new File(path))) {
+            return null;
+        }
+        return path;
+    }
+
+    private static boolean canReadStorage(Context context) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            return Environment.isExternalStorageManager();
+        }
+        return context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     private static boolean containsGame(File dir) {
@@ -113,6 +156,11 @@ public class ImportActivity extends Activity {
                 new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER));
         layout.addView(mChoose);
 
+        mLink = new Button(this);
+        mLink.setText(R.string.link_choose);
+        mLink.setOnClickListener(v -> startLink());
+        layout.addView(mLink);
+
         setContentView(layout);
 
         if (sCopy != null) {
@@ -123,15 +171,121 @@ public class ImportActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PICK_FOLDER || resultCode != RESULT_OK || data == null
-                || data.getData() == null) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
-        startCopy(data.getData());
+        if (requestCode == PICK_FOLDER) {
+            startCopy(data.getData());
+        } else if (requestCode == PICK_LINK) {
+            linkFolder(data.getData());
+        }
+    }
+
+    // Coming back from the settings page, or from the permission dialog on an
+    // Android too old to have All files access.
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!mAwaitingPermission) {
+            return;
+        }
+        mAwaitingPermission = false;
+        if (canReadStorage(this)) {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_LINK);
+        } else {
+            mStatus.setText(R.string.link_no_permission);
+        }
+    }
+
+    private void startLink() {
+        if (canReadStorage(this)) {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_LINK);
+            return;
+        }
+
+        mAwaitingPermission = true;
+        if (Build.VERSION.SDK_INT >= 30) {
+            mStatus.setText(R.string.link_permission);
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + getPackageName())));
+            } catch (ActivityNotFoundException e) {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            }
+        } else {
+            requestPermissions(new String[] { Manifest.permission.READ_EXTERNAL_STORAGE }, 1);
+        }
+    }
+
+    private void linkFolder(Uri tree) {
+        String path = treeToPath(tree);
+        if (path == null) {
+            showIdle(getString(R.string.link_not_local));
+            return;
+        }
+
+        File root = findGameDir(new File(path));
+        if (root == null) {
+            showIdle(getString(R.string.import_not_found));
+            return;
+        }
+
+        getSharedPreferences(ProfileActivity.PREFS, MODE_PRIVATE).edit()
+                .putString(KEY_ASSETS_PATH, root.getPath()).apply();
+
+        // A copy made earlier is no longer read, and is most of the space the
+        // app takes up.
+        File external = getExternalFilesDir(null);
+        if (external != null) {
+            final File copied = new File(external, "assets");
+            new Thread(() -> deleteTree(copied)).start();
+        }
+
+        startActivity(new Intent(this, ProfileActivity.class));
+        finish();
+    }
+
+    /**
+     * A picked folder's path on disk, from the external storage provider's
+     * document id: "primary:Download/BFBB" is the device's own storage and
+     * "1A2B-3C4D:BFBB" an SD card. Null for any other provider, whose folders
+     * are not files the game can open.
+     */
+    private static String treeToPath(Uri tree) {
+        if (!"com.android.externalstorage.documents".equals(tree.getAuthority())) {
+            return null;
+        }
+        String id = DocumentsContract.getTreeDocumentId(tree);
+        int colon = id.indexOf(':');
+        if (colon < 0) {
+            return null;
+        }
+        String volume = id.substring(0, colon);
+        String rel = id.substring(colon + 1);
+        String base = "primary".equalsIgnoreCase(volume)
+                ? Environment.getExternalStorageDirectory().getPath()
+                : "/storage/" + volume;
+        return rel.isEmpty() ? base : base + "/" + rel;
+    }
+
+    private static File findGameDir(File dir) {
+        if (containsGame(dir)) {
+            return dir;
+        }
+        File[] kids = dir.listFiles();
+        if (kids != null) {
+            for (File k : kids) {
+                if (k.isDirectory() && containsGame(k)) {
+                    return k;
+                }
+            }
+        }
+        return null;
     }
 
     private void showBusy(String status) {
         mChoose.setEnabled(false);
+        mLink.setEnabled(false);
         mProgress.setVisibility(View.VISIBLE);
         mStatus.setText(status);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -139,6 +293,7 @@ public class ImportActivity extends Activity {
 
     private void showIdle(String status) {
         mChoose.setEnabled(true);
+        mLink.setEnabled(true);
         mProgress.setVisibility(View.GONE);
         mStatus.setText(status);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -226,6 +381,9 @@ public class ImportActivity extends Activity {
 
                 runOnUiThread(() -> {
                     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    // The copy is what the game reads from now on.
+                    getSharedPreferences(ProfileActivity.PREFS, MODE_PRIVATE).edit()
+                            .remove(KEY_ASSETS_PATH).apply();
                     startActivity(new Intent(this, ProfileActivity.class));
                     finish();
                 });

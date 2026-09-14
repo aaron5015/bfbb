@@ -90,6 +90,13 @@ public class BfbbActivity extends SDLActivity {
                 .getString(ProfileActivity.KEY_PROFILE, ProfileActivity.MODERN);
         try {
             nativeSetenv("BFBB_PROFILE", profile);
+
+            // A folder used in place, ahead of iAndroidStartup's default of the
+            // app's own copy. See ImportActivity.
+            String linked = ImportActivity.linkedPath(this);
+            if (linked != null) {
+                nativeSetenv("BFBB_ASSETS", linked);
+            }
         } catch (UnsatisfiedLinkError e) {
             // libmain.so did not load; SDLActivity has already said so.
             Log.w(TAG, "could not pass the video profile", e);

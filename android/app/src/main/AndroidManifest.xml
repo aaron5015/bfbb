@@ -27,16 +27,22 @@
     <!-- The rumble the game already asks for, through xPadRumbleEnable. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- No storage permission, deliberately. The assets live in this
-         application's own directory under Android/data, which needs no
-         permission from this side and is reachable over USB and from a file
-         manager on the other. See docs/ANDROID.md, "Assets". -->
+    <!-- Only for using a game folder where it is instead of copying it in
+         (ImportActivity). Copying needs neither: the copy lives in the app's
+         own directory under Android/data. MANAGE_EXTERNAL_STORAGE is what
+         Android 11 and later grant as All files access; the older permission
+         covers Android 10 and below. -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
         android:theme="@style/AppTheme"
         android:enableOnBackInvokedCallback="false"
         android:hardwareAccelerated="true"

@@ -14,8 +14,12 @@
     <string name="import_short">Import game files</string>
     <string name="import_long">Import game files</string>
     <string name="import_title">Game files needed</string>
-    <string name="import_explain">The game\'s files do not come with this app. Copy the files from your own Xbox copy of the game onto this device, then choose the folder that holds boot.HIP and font.HIP.</string>
-    <string name="import_choose">Choose folder</string>
+    <string name="import_explain">The game\'s files do not come with this app. Put the files from your own Xbox copy of the game on this device, then choose the folder that holds boot.HIP and font.HIP.\n\nCopying them into the app needs no permission but takes up the space twice until you delete the originals. Using the folder where it is needs All files access.</string>
+    <string name="import_choose">Copy into the app</string>
+    <string name="link_choose">Use the folder where it is</string>
+    <string name="link_permission">Allow All files access for BFBB, then come back.</string>
+    <string name="link_no_permission">Using a folder where it is needs All files access. Allow it in Settings, or copy the files into the app instead.</string>
+    <string name="link_not_local">That folder is not on this device\'s storage. Choose a folder on internal storage or an SD card, or copy the files into the app.</string>
     <string name="import_scanning">Looking for the game files…</string>
     <string name="import_copying">Copying the game files…</string>
     <string name="import_progress">Copying %1$s\n%2$s of %3$s</string>
