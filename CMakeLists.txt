@@ -214,8 +214,10 @@ add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 #   D3D11  Direct3D 11, on the same window. Draws levels, characters and the
 #          screen passes; it has no fixed-function path.
 #   GL3    OpenGL 3.3 (falling back through 2.1, GLES 3.1 and GLES 2.0), on an
-#          SDL3 window librw creates. Portable, and the only backend that can
-#          ever run off Windows.
+#          SDL3 window librw creates. Portable.
+#   VULKAN Vulkan 1.3, on an SDL3 window the port creates. The third
+#          implementation of librw's rw::d3d device, so it runs the D3D
+#          pipelines and shaders; portable as well. Not in the default set.
 #
 # BFBB_RENDER_BACKENDS is a LIST, and the executable carries all of it. Which
 # one runs is video.backend in config.ini; rw/backend.cpp is the seam that reads
@@ -248,10 +250,10 @@ if(DEFINED BFBB_RENDER_BACKEND AND NOT DEFINED CACHE{BFBB_RENDER_BACKENDS})
 endif()
 
 set(BFBB_RENDER_BACKENDS "${BFBB_RENDER_BACKENDS_DEFAULT}"
-    CACHE STRING "Render backends to build in, semicolon-separated: D3D9, D3D11, GL3, NULL")
+    CACHE STRING "Render backends to build in, semicolon-separated: D3D9, D3D11, GL3, VULKAN, NULL")
 
 foreach(_backend IN LISTS BFBB_RENDER_BACKENDS)
-  if(NOT _backend MATCHES "^(D3D9|D3D11|GL3|NULL)$")
+  if(NOT _backend MATCHES "^(D3D9|D3D11|GL3|VULKAN|NULL)$")
     message(FATAL_ERROR "unknown render backend '${_backend}' in BFBB_RENDER_BACKENDS")
   endif()
   set(BFBB_BACKEND_${_backend} ON)
@@ -263,7 +265,7 @@ endforeach()
 if(NOT WIN32 AND (BFBB_BACKEND_D3D9 OR BFBB_BACKEND_D3D11))
   message(FATAL_ERROR
     "BFBB_RENDER_BACKENDS names Direct3D, and this is ${CMAKE_SYSTEM_NAME}.\n"
-    "  GL3 is the backend that draws off Windows; NULL is the headless one.")
+    "  GL3 and VULKAN are the backends that draw off Windows; NULL is the headless one.")
 endif()
 
 message(STATUS "bfbb: render backends: ${BFBB_RENDER_BACKENDS}")
@@ -424,7 +426,7 @@ endif()
 # Every backend that draws gets the SDL one, rather than a list to keep in step
 # with iWindowSDL.cpp -- which splits on RW_GL3 and treats everything else as
 # the HWND case. NULL takes the stub instead.
-if(BFBB_BACKEND_D3D9 OR BFBB_BACKEND_D3D11 OR BFBB_BACKEND_GL3)
+if(BFBB_BACKEND_D3D9 OR BFBB_BACKEND_D3D11 OR BFBB_BACKEND_GL3 OR BFBB_BACKEND_VULKAN)
   set(WINDOW_SOURCES ${PC_DIR}/iWindowSDL.cpp)
   set(WINDOW_LIBS bfbb_sdl)
   set(BFBB_NEEDS_SDL ON)
@@ -663,6 +665,26 @@ set(LIBRW_INSTALL OFF CACHE BOOL "" FORCE)
 if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/librw/CMakeLists.txt)
   message(FATAL_ERROR
     "third_party/librw is empty -- run: git submodule update --init --recursive")
+endif()
+
+# Vulkan's three libraries, as targets librw's find_package calls see and skip.
+# volk loads the loader at run time, so these are the whole of what building the
+# backend needs: no Vulkan SDK. Its validation layer is a different matter and
+# comes from the SDK or a driver package when wanted.
+if(BFBB_BACKEND_VULKAN)
+  foreach(_dep Vulkan-Headers volk VulkanMemoryAllocator)
+    if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/${_dep}/CMakeLists.txt)
+      message(FATAL_ERROR
+        "third_party/${_dep} is empty -- run: git submodule update --init --recursive")
+    endif()
+  endforeach()
+  set(VULKAN_HEADERS_INSTALL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers
+      CACHE PATH "" FORCE)
+  add_subdirectory(third_party/Vulkan-Headers EXCLUDE_FROM_ALL)
+  add_subdirectory(third_party/volk EXCLUDE_FROM_ALL)
+  set(VMA_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/VulkanMemoryAllocator EXCLUDE_FROM_ALL)
+  target_compile_options(volk PRIVATE ${BFBB_NO_WARNINGS})
 endif()
 
 add_subdirectory(third_party/librw)

@@ -259,8 +259,8 @@ static IDirect3D9* sProbeD3D9;
 // that cannot be written twice, which is mostly rw::EngineOpenParams -- the one
 // librw type whose SHAPE is per backend.
 
-#if defined(RW_D3D9) || defined(RW_D3D8) || defined(RW_D3D11)
-// The cartoon look's settings, for either Direct3D device. Both run librw's one
+#if defined(RW_D3D_ANY) || defined(RW_D3D8)
+// The cartoon look's settings, for any rw::d3d device. All three run librw's one
 // set of toon shaders and read the same rw::d3d state, so they are handed it by
 // one function.
 static void SetD3DToon(void)
@@ -491,6 +491,36 @@ static RwBool OpenDeviceD3D11(void)
 }
 #endif
 
+#ifdef RW_VULKAN
+static RwBool OpenDeviceVulkan(void)
+{
+    rw::d3d::EngineOpenParams params;
+    params.sdlWindow = (SDL_Window*)iWindowNativeHandle();
+
+    if (params.sdlWindow == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::d3d::setVirtualScreenSamples(iScreenMultiSample());
+    rw::d3d::setPerPixelLightingEnabled(iScreenPerPixelLighting());
+    SetD3DToon();
+    rw::d3d::setVirtualScreen(iScreenWidth(), iScreenHeight());
+
+    // Engine::open throws away what DEVICEOPEN said, as the D3D arms above
+    // describe. librw reports the reason through RWERROR before that, so the
+    // question left here is only whether an instance came up at all.
+    if (!rw::Engine::open(&params))
+    {
+        printf("bfbb: librw refused to open the Vulkan device on this window\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
 #ifdef RW_GL3
 static RwBool OpenDeviceGL3(void)
 {
@@ -649,6 +679,11 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
         opened = OpenDeviceGL3();
         break;
 #endif
+#ifdef RW_VULKAN
+    case iSCREENBACKEND_VULKAN:
+        opened = OpenDeviceVulkan();
+        break;
+#endif
     default:
         opened = OpenDeviceNull();
         break;
@@ -663,7 +698,7 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
     return TRUE;
 }
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
 
 // Pick the display mode for exclusive fullscreen, if that is what was asked for.
 //
@@ -750,7 +785,7 @@ RwBool RwEngineStart(void)
         return FALSE;
     }
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
     if (!iBackendIsNull())
     {
         SelectFullscreenVideoMode();
@@ -833,7 +868,18 @@ RwBool RwEngineStart(void)
 
 #endif
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#ifdef RW_VULKAN
+    // And again. librw has said why through RWERROR by now.
+    if (iBackendIsVulkan() && !rw::d3d::deviceOpen())
+    {
+        printf("bfbb: the Vulkan device did not come up\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+#endif
+
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
     // Said out loud because both can be refused by the card rather than by the
     // setting. Only now: the surfaces are made when the device comes up, and
     // until then there is nothing to have granted anything.
@@ -843,8 +889,8 @@ RwBool RwEngineStart(void)
         S32 perPixel = 0;
         const char* path = "shader";
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
-        if (iBackendIsD3D())
+#if defined(RW_D3D_ANY)
+        if (iBackendIsD3D() || iBackendIsVulkan())
         {
             granted = (S32)rw::d3d::getVirtualScreenSamples();
             perPixel = rw::d3d::getPerPixelLighting();
@@ -1034,8 +1080,8 @@ RwVideoMode* RwEngineGetVideoModeInfo(RwVideoMode* modeinfo, RwInt32 modeIndex)
         RwInt32 screenWidth = 0;
         RwInt32 screenHeight = 0;
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
-        if (iBackendIsD3D())
+#if defined(RW_D3D_ANY)
+        if (iBackendIsD3D() || iBackendIsVulkan())
         {
             rw::d3d::getVirtualScreen(&screenWidth, &screenHeight);
         }

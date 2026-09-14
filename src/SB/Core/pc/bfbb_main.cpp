@@ -497,24 +497,24 @@ namespace
     //
     // librw exports these as public compile definitions, and CMakeLists.txt
     // explains why every target of the port has to see them.
-    const char* const kRenderBackend =
-#if defined(RW_D3D9) && defined(RW_D3D11) && defined(RW_GL3)
-        "D3D9, D3D11 and OpenGL";
-#elif defined(RW_D3D9) && defined(RW_D3D11)
-        "D3D9 and D3D11";
-#elif defined(RW_D3D9) && defined(RW_GL3)
-        "D3D9 and OpenGL";
-#elif defined(RW_D3D11) && defined(RW_GL3)
-        "D3D11 and OpenGL";
-#elif defined(RW_D3D9)
-        "D3D9";
-#elif defined(RW_D3D11)
-        "D3D11";
-#elif defined(RW_GL3)
-        "OpenGL";
-#else
-        "no renderer";
+    //
+    // A list with a separator in front of every name, and the first one skipped
+    // where it is printed: one line per backend, where a sentence would need a
+    // case for every combination.
+    const char* const kRenderBackend = ""
+#ifdef RW_D3D9
+        ", D3D9"
 #endif
+#ifdef RW_D3D11
+        ", D3D11"
+#endif
+#ifdef RW_GL3
+        ", OpenGL"
+#endif
+#ifdef RW_VULKAN
+        ", Vulkan"
+#endif
+        ;
 
     struct StartupBanner
     {
@@ -527,8 +527,9 @@ namespace
             // claiming a gap that has since been filled -- or a backend that is
             // not the one running -- is worse than no banner: it is the first
             // thing anyone reads when something does not work.
-            printf("bfbb: PC port, %s. Movie decoder: %s, movie audio: %s.\n",
-                   kRenderBackend, iFMVDecoderName(), iFMVAudioName());
+            printf("bfbb: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+                   kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
+                   iFMVAudioName());
             if (getenv("BFBB_TEST_CRASH")) { *(volatile int*)0 = 1; }
         }
     };

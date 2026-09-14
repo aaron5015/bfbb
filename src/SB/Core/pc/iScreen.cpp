@@ -330,6 +330,8 @@ const char* iScreenBackendName(iScreenBackend backend)
         return "d3d11";
     case iSCREENBACKEND_GL3:
         return "gl3";
+    case iSCREENBACKEND_VULKAN:
+        return "vulkan";
     case iSCREENBACKEND_NULL:
         return "null";
     default:

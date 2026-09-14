@@ -660,6 +660,10 @@ static void ApplyConfig()
     {
         iScreenSetBackend(iSCREENBACKEND_GL3);
     }
+    else if (iHostStrCaseCmp(backend, "vulkan") == 0)
+    {
+        iScreenSetBackend(iSCREENBACKEND_VULKAN);
+    }
     else
     {
         // No "null" here on purpose. iSCREENBACKEND_NULL is what a build with
@@ -669,7 +673,7 @@ static void ApplyConfig()
         // that HAS a device can usefully be told to run as.
         if (iHostStrCaseCmp(backend, "auto") != 0)
         {
-            printf("bfbb: config: video.backend is not auto, d3d9, d3d11 or gl3, "
+            printf("bfbb: config: video.backend is not auto, d3d9, d3d11, gl3 or vulkan, "
                    "using the default: %s\n",
                    backend);
         }

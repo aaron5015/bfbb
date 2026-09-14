@@ -248,7 +248,9 @@ void iScreenSetPipeline(iScreenPipeline pipeline);
 //          fixed-function path above.
 //   D3D11  Direct3D 11. Windows only, and it cannot be in the same build as
 //          D3D9 -- the two are one namespace in librw.
-//   GL3    OpenGL 3.3. The only backend that runs off Windows.
+//   GL3    OpenGL 3.3. Runs off Windows.
+//   VULKAN Vulkan 1.3. Runs off Windows too. librw's third rw::d3d device, so
+//          it draws with the D3D pipelines and shaders.
 //   NULL   No device at all, which is what a build with no render backend
 //          resolves to. Headless, for compiling and for the self-tests -- NOT
 //          something video.backend offers, because librw's null driver asserts
@@ -264,6 +266,7 @@ enum iScreenBackend
     iSCREENBACKEND_D3D9,
     iSCREENBACKEND_D3D11,
     iSCREENBACKEND_GL3,
+    iSCREENBACKEND_VULKAN,
     iSCREENBACKEND_NULL
 };
 

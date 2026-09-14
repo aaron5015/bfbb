@@ -183,7 +183,9 @@ S32 iWindowOpen(const iWindowParams* params)
     //
     // The rectangle is wanted as much as the size: a monitor left of the
     // primary has a negative origin.
-    SDL_WindowFlags flags = 0;
+    // Vulkan makes its surface on this window, and SDL refuses to make one on a
+    // window that was not created for it.
+    SDL_WindowFlags flags = iBackendIsVulkan() ? SDL_WINDOW_VULKAN : 0;
     S32 x = 0;
     S32 y = 0;
     S32 w = params->width;
@@ -556,11 +558,12 @@ void iWindowGetSize(S32* width, S32* height)
 
 // Whatever the running backend's EngineOpenParams wants, as iWindow.h says: an
 // SDL_Window* under GL3, which librw wrote into the slot itself, and the HWND
-// behind that window under D3D.
+// behind that window under D3D. Vulkan takes the SDL_Window* as well, one the
+// port made.
 void* iWindowNativeHandle()
 {
 #ifdef _WIN32
-    if (!iBackendIsGL3())
+    if (!iBackendIsGL3() && !iBackendIsVulkan())
     {
         if (sWindow == NULL)
         {
