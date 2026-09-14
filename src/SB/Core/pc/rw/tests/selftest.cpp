@@ -1386,8 +1386,8 @@ static void test_perpixel_lighting()
 {
     printf("per-pixel lighting setting\n");
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         const rw::bool32 saved = rw::d3d::getPerPixelLighting();
 
@@ -1456,7 +1456,7 @@ static void test_snapshot()
 
     RwTexture* still = iSnapshotBackgroundTexture();
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
     check(still != NULL, "the frame was copied into a texture");
     if (still != NULL)
     {
@@ -2349,11 +2349,11 @@ static void test_uvxform()
         return;
     }
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
     // Compiled by fxc into headers checked into librw, then handed to the
     // device at driver open. A blob the device rejects leaves these nil, and
     // then every animated surface would draw with no vertex shader at all.
-    if (iBackendIsD3D())
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         check(rw::d3d::uvxform_amb_VS != NULL && rw::d3d::uvxform_amb_dir_VS != NULL &&
                   rw::d3d::uvxform_all_VS != NULL,
@@ -4047,7 +4047,8 @@ static void SelectBackend(int argc, char** argv)
         iScreenBackend backend;
     } kNames[] = { { "d3d9", iSCREENBACKEND_D3D9 },
                    { "d3d11", iSCREENBACKEND_D3D11 },
-                   { "gl3", iSCREENBACKEND_GL3 } };
+                   { "gl3", iSCREENBACKEND_GL3 },
+                   { "vulkan", iSCREENBACKEND_VULKAN } };
 
     for (size_t i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
     {
@@ -4059,7 +4060,7 @@ static void SelectBackend(int argc, char** argv)
         }
     }
 
-    printf("usage: %s [d3d9|d3d11|gl3]\n", argv[0]);
+    printf("usage: %s [d3d9|d3d11|gl3|vulkan]\n", argv[0]);
     exit(2);
 }
 

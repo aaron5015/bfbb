@@ -21,7 +21,7 @@
 
 #include "rw.h"
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 #include "src/d3d/rwd3dimpl.h"
 #endif
 // GL3 needs no header of its own here: rw.h includes src/gl/rwgl3.h and
@@ -37,14 +37,14 @@
 // config.ini's xbox.distortion, pushed down by iSystem.cpp. See glow.cpp.
 static S32 sEnabled = TRUE;
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
 
 // The compiled shader, whichever backend compiled it. void* for the reason
 // glow.cpp gives: a build can carry several, and the handle only ever goes
 // back to the backend that made it.
 typedef void* DistortShader;
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 
 // The compiled pixel shader. Built the way librw builds its own, by the
 // shaders/make_shaders.cmd, which compiles the one source into both trees under
@@ -64,6 +64,12 @@ namespace sm4
 {
 #include "shaders11/distort_PS.h"
 } // namespace sm4
+#endif
+#ifdef RW_VULKAN
+namespace spv
+{
+#include "shadersvk/distort_PS.h"
+} // namespace spv
 #endif
 #endif
 
@@ -128,7 +134,7 @@ static void distortFail(const char* what, long hr)
 // One namespace per backend, both compiled when both are linked; which half
 // runs is video.backend, resolved before the device opened.
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 namespace d3ddistort
 {
 
@@ -143,6 +149,13 @@ namespace d3ddistort
             // D3D11 keeps the system-memory copy in `texture` and the GPU's
             // own in `tex11`; D3D9 has only the one.
             return GETD3DRASTEREXT(r)->tex11;
+        }
+#endif
+#ifdef RW_VULKAN
+        if (iBackendIsVulkan())
+        {
+            // The same arrangement as D3D11's, under `vk`.
+            return GETD3DRASTEREXT(r)->vk;
         }
 #endif
         return GETD3DRASTEREXT(r)->texture;
@@ -277,8 +290,8 @@ namespace gl3distort
 
 static bool distortDeviceReady()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3ddistort::distortDeviceReady();
     }
@@ -294,8 +307,8 @@ static bool distortDeviceReady()
 
 static void distortScreenExtent(RwInt32* w, RwInt32* h)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3ddistort::distortScreenExtent(w, h);
         return;
@@ -312,8 +325,8 @@ static void distortScreenExtent(RwInt32* w, RwInt32* h)
 
 static bool distortCopyFrame(RwRaster* dst)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3ddistort::distortCopyFrame(dst);
     }
@@ -329,8 +342,8 @@ static bool distortCopyFrame(RwRaster* dst)
 
 static bool distortCaptureIsLive()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3ddistort::distortCaptureIsLive();
     }
@@ -346,8 +359,8 @@ static bool distortCaptureIsLive()
 
 static bool distortCreateShader()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3ddistort::distortCreateShader();
     }
@@ -363,8 +376,8 @@ static bool distortCreateShader()
 
 static void distortBindShader()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3ddistort::distortBindShader();
         return;
@@ -381,8 +394,8 @@ static void distortBindShader()
 
 static void distortUnbindShader()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3ddistort::distortUnbindShader();
         return;
@@ -399,8 +412,8 @@ static void distortUnbindShader()
 
 static void distortSetSwirlMap(RwTexture* map)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3ddistort::distortSetSwirlMap(map);
         return;
@@ -417,8 +430,8 @@ static void distortSetSwirlMap(RwTexture* map)
 
 static void distortUploadDisplacement(F32* displace)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3ddistort::distortUploadDisplacement(displace);
         return;
