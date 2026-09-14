@@ -255,6 +255,16 @@ void zCutsceneMgrPlayStart(zCutsceneMgr* t)
             }
             if (cutsceneHackTable[i].renderCB != NULL)
             {
+#ifdef BFBB_PTR64
+                // By name: 0x48 is renderCallBack only while a pointer is 4 bytes.
+                RpAtomic* atomic = (RpAtomic*)t->csn->Data[j].DataPtr;
+                atomic->renderCallBack = cutsceneHackTable[i].renderCB;
+
+                if (atomic->renderCallBack == NULL)
+                {
+                    atomic->renderCallBack = AtomicDefaultRenderCallBack;
+                }
+#else
                 typedef RpAtomic* (*cb)(RpAtomic*);
                 *(cb*)((int*)t->csn->Data[j].DataPtr + 0x12) = cutsceneHackTable[i].renderCB;
 
@@ -262,6 +272,7 @@ void zCutsceneMgrPlayStart(zCutsceneMgr* t)
                 {
                     *(cb*)((int*)t->csn->Data[j].DataPtr + 0x12) = AtomicDefaultRenderCallBack;
                 }
+#endif
             }
         }
     }
