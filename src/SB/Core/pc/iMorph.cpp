@@ -61,7 +61,7 @@ static void MorphCommon(RpAtomic* model, RwMatrixTag* mat, S16** v_array, S16* w
     {
         DirtyMorph* dm = (DirtyMorph*)usr->data;
 
-        s_vTemp = (F32*)((char*)dm + 32);
+        s_vTemp = (F32*)((char*)dm + sizeof(DirtyMorph));
 
         while ((UPtr)s_vTemp & 0xF)
         {
@@ -245,7 +245,7 @@ void iMorphOptimize(RpAtomic* model, S32 normals)
         S32 usridx = RpGeometryAddUserDataArray(geom, "MORPHSTATE", rpINTUSERDATA, numElements);
         RpUserDataArray* usr = RpGeometryGetUserDataArray(geom, usridx);
 
-        memset(usr->data, 0, 0x20);
+        memset(usr->data, 0, sizeof(DirtyMorph));
     }
 }
 
