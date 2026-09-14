@@ -225,6 +225,22 @@ what makes every later phase debuggable, so it is the first thing that runs**:
 
 `adb logcat -s bfbb` is then the whole log and nothing else.
 
+**And the same lines go to a file**, `bfbb-log.txt`, in the external files
+directory beside the assets -- because logcat needs adb, adb needs a computer
+or a phone paired with itself over wireless debugging, and "it closed
+instantly" is the report this port is going to get from people who have
+neither. Lines printed before JNI is up, which is all of the earliest and most
+important ones, are held in memory until `iAndroidStartup` knows where the
+file goes.
+
+Where the output stops is most of the diagnosis, because the order is fixed:
+
+| Last thing printed | Where it died |
+| --- | --- |
+| nothing at all | before native code: `libmain.so` did not load, or `SDL_main` was not found. `AndroidRuntime:E` in logcat has it; the file will not exist |
+| `bfbb: PC port, OpenGL...` | between `dlopen` and `SDL_main` |
+| `bfbb: android -- assets ...` | in `iSystemInit` -- the arena (`iMemInit` prints "outside the low 4 GB" and exits) or the assets |
+
 `iHostPrintCallers` used to print nothing on bionic, which has no
 `execinfo.h`. It now walks the stack with `_Unwind_Backtrace` and names frames
 with `dladdr`. That matters more on a phone than on a desktop, not less: there

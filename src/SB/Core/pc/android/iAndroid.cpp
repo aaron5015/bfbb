@@ -23,6 +23,97 @@ namespace
 
     int sLogPipe[2] = { -1, -1 };
 
+    // ---------------------------------------------------------------------
+    // The same log, in a file the player can open
+
+    // logcat is the right answer for a developer and the wrong one for
+    // everybody else: reading it needs adb, which needs a computer, or a
+    // device paired with itself over wireless debugging. A port whose entire
+    // diagnosis is "which line came last" cannot have its log locked behind
+    // that -- the first thing this build did on a real phone was close
+    // instantly, and the only way to find out why was a cable.
+    //
+    // So every line also goes to bfbb-log.txt in the application's external
+    // files directory, which is the directory the assets are imported into
+    // and is reachable from any file manager on the device.
+    //
+    // Truncated at each launch. It is a record of THIS run; the previous
+    // one's is what the last launch wrote, and keeping both means explaining
+    // which is which to someone reading their first one.
+    pthread_mutex_t sLogLock = PTHREAD_MUTEX_INITIALIZER;
+    FILE* sLogFile;
+
+    // What was printed before the file could be opened.
+    //
+    // The pipe is up during dlopen and the external directory is not knowable
+    // until JNI is, which is several hundred lines of startup later -- and
+    // those are the lines that matter most, because a failure this early is
+    // the one with nothing else to go on. So they are held here until
+    // iAndroidStartup says where to put them.
+    char* sBacklog;
+    size_t sBacklogUsed;
+
+    // Bounds. The backlog covers startup and not a session, and the file is
+    // capped so that a build left running with a debug switch on cannot fill
+    // the device.
+    const size_t kBacklogMax = 64 * 1024;
+    const size_t kLogFileMax = 8 * 1024 * 1024;
+
+    size_t sLogFileWritten;
+    bool sLogFileFull;
+
+    // Caller holds sLogLock.
+    void iAndroidLogToFile(const char* line)
+    {
+        if (sLogFile == NULL)
+        {
+            if (sBacklogUsed >= kBacklogMax)
+            {
+                return;
+            }
+
+            if (sBacklog == NULL)
+            {
+                sBacklog = (char*)malloc(kBacklogMax);
+                if (sBacklog == NULL)
+                {
+                    sBacklogUsed = kBacklogMax;
+                    return;
+                }
+            }
+
+            size_t n = strlen(line);
+            if (sBacklogUsed + n + 1 > kBacklogMax)
+            {
+                n = kBacklogMax - sBacklogUsed - 1;
+            }
+
+            memcpy(sBacklog + sBacklogUsed, line, n);
+            sBacklogUsed += n;
+            sBacklog[sBacklogUsed++] = '\n';
+            return;
+        }
+
+        if (sLogFileFull)
+        {
+            return;
+        }
+
+        sLogFileWritten += fprintf(sLogFile, "%s\n", line);
+
+        // Flushed per line, for the reason bfbb_main.cpp unbuffers stdout: a
+        // crash discards whatever is still in the buffer, and the last line
+        // before a crash is the whole point of the file.
+        fflush(sLogFile);
+
+        if (sLogFileWritten >= kLogFileMax)
+        {
+            fputs("[log truncated: 8 MB]\n", sLogFile);
+            fflush(sLogFile);
+            sLogFileFull = true;
+        }
+    }
+
     // One log line per printf line, rather than per write.
     //
     // bfbb_main.cpp sets both streams unbuffered so that a crash cannot
@@ -67,6 +158,11 @@ namespace
                 {
                     line[used] = '\0';
                     __android_log_write(ANDROID_LOG_INFO, kTag, line);
+
+                    pthread_mutex_lock(&sLogLock);
+                    iAndroidLogToFile(line);
+                    pthread_mutex_unlock(&sLogLock);
+
                     used = 0;
 
                     if (c == '\n')
@@ -90,6 +186,10 @@ namespace
         {
             line[used] = '\0';
             __android_log_write(ANDROID_LOG_INFO, kTag, line);
+
+            pthread_mutex_lock(&sLogLock);
+            iAndroidLogToFile(line);
+            pthread_mutex_unlock(&sLogLock);
         }
 
         return NULL;
@@ -160,6 +260,45 @@ void iAndroidStartup()
     iAndroidSetDir("BFBB_ANDROID_CACHE", cache);
     iAndroidSetDir("BFBB_ANDROID_EXTERNAL", external);
 
+    // The log, somewhere a file manager can reach. Everything printed since
+    // dlopen has been held in memory waiting for this.
+    //
+    // External rather than internal: internal storage is private to the
+    // package and a player cannot open it at all without root, which would
+    // defeat the point. The file sits beside the assets directory they
+    // already have to navigate to.
+    if (external != NULL && external[0] != '\0')
+    {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/bfbb-log.txt", external);
+
+        FILE* f = fopen(path, "w");
+
+        pthread_mutex_lock(&sLogLock);
+        if (f != NULL)
+        {
+            sLogFile = f;
+
+            if (sBacklog != NULL)
+            {
+                fwrite(sBacklog, 1, sBacklogUsed, sLogFile);
+                sLogFileWritten += sBacklogUsed;
+                fflush(sLogFile);
+
+                free(sBacklog);
+                sBacklog = NULL;
+                sBacklogUsed = 0;
+            }
+        }
+        pthread_mutex_unlock(&sLogLock);
+
+        if (f == NULL)
+        {
+            __android_log_print(ANDROID_LOG_ERROR, kTag,
+                                "could not open %s: %s", path, strerror(errno));
+        }
+    }
+
     // Where the assets are, unless something already said.
     //
     // getExternalFilesDir is the only place on a modern Android that both the
@@ -199,5 +338,10 @@ void iAndroidStartup()
     const char* assets = getenv("BFBB_ASSETS");
     printf("bfbb: android -- assets %s\n",
            assets != NULL && assets[0] != '\0' ? assets : "(from config.ini)");
+
+    // Printed rather than assumed, and printed INTO the file it names, so
+    // that the file says what it is to whoever opens it first.
+    printf("bfbb: android -- this log is also %s/bfbb-log.txt\n",
+           external != NULL ? external : "(nowhere: no external storage)");
     fflush(stdout);
 }

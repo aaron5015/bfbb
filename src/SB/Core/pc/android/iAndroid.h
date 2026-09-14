@@ -39,6 +39,14 @@
 //
 // Lines come out under the tag "bfbb" at INFO, so `adb logcat -s bfbb` is the
 // whole log and nothing else.
+//
+// They ALSO go to bfbb-log.txt in the external files directory, which is the
+// same place the assets are imported to and is openable from any file manager
+// on the device. logcat needs adb, which needs a computer or a phone paired
+// with itself; a player who says "it closed instantly" has neither, and that
+// is the report this port is going to get. Lines printed before JNI is up --
+// which is all of the earliest and most important ones -- are held in memory
+// until iAndroidStartup knows where the file goes.
 void iAndroidOpenLog();
 
 // Where the application's directories are, into the environment, for the host
