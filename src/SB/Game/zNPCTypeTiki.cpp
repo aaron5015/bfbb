@@ -368,14 +368,14 @@ void zNPCTiki::Reset()
 
     timeToLive = 0.0f;
     tikiFlag = 0;
-    for (S32 i = 0; i < sizeof(parents[0]); i++)
+    for (S32 i = 0; i < ARRAY_SIZE(parents); i++)
     {
         parents[i] = NULL;
     }
     numParents = 0;
     contactParent = ~0x0;
 
-    for (S32 i = 0; i < sizeof(children[0]); i++)
+    for (S32 i = 0; i < ARRAY_SIZE(children); i++)
     {
         children[i] = NULL;
     }
@@ -1064,7 +1064,7 @@ void zNPCTiki::RemoveChild(zNPCTiki* child)
     if (this->numChildren == 0)
         return;
 
-    while (this->children[i] != child && i < sizeof(this->children[0]))
+    while (this->children[i] != child && i < ARRAY_SIZE(this->children))
     {
         i++;
     }
@@ -1083,7 +1083,7 @@ void zNPCTiki::RemoveParent(zNPCTiki* parent)
     if (this->numParents == 0)
         return;
 
-    while (this->parents[i] != parent && i < sizeof(this->parents[0]))
+    while (this->parents[i] != parent && i < ARRAY_SIZE(this->parents))
     {
         i++;
     }
