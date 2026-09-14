@@ -910,7 +910,11 @@ static void ApplyConfig()
            drawDistance ? "unlimited" : "console", shadows, glow ? "on" : "off",
            distortion ? "on" : "off", snapshot ? "on" : "off", reverb ? "on" : "off",
            rolloff ? "on" : "off");
+#ifdef __ANDROID__
+    printf("bfbb: text rewritten for a device: %s\n", wording ? "on" : "off");
+#else
     printf("bfbb: text rewritten for a PC: %s\n", wording ? "on" : "off");
+#endif
     if (iScreenWorldLighting() != IWORLDLIGHT_OFF)
     {
         printf("bfbb: world lit at run time from %s, contrast %.2f\n",
