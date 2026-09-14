@@ -292,7 +292,12 @@ void iWindowDeferredCreated()
     // fullscreen in the first place when the selected mode is an exclusive one,
     // and a window put into exclusive fullscreen afterwards would be a mode set
     // the renderer does not know happened.
-    if (sMode == iWINDOW_BORDERLESS)
+    //
+    // Fullscreen with no exclusive mode chosen is borderless as well: that is
+    // SelectFullscreenVideoMode's fallback, and librw then made an ordinary
+    // window. A window with a fullscreen mode set is the exclusive one.
+    if (sMode == iWINDOW_BORDERLESS ||
+        (sMode == iWINDOW_FULLSCREEN && SDL_GetWindowFullscreenMode(sWindow) == NULL))
     {
         SDL_SetWindowFullscreenMode(sWindow, NULL);
         SDL_SetWindowFullscreen(sWindow, true);
