@@ -599,15 +599,12 @@ namespace
 
         const S32 upscale = iFontUpscale();
 
-        // font_padding and font_weight, either as set or as measured against
-        // this very atlas at this very size. See iFontAutoFit.
+        // font_padding, either as set or as measured against this very atlas
+        // at this very size. See iFontAutoFit.
         F32 padding = iFontPadding();
-        F32 weight = iFontWeight(face);
 
         iFontAutoFit(face, (const char*)a.char_set, count, a.du, a.dv, targets, upscale,
-                     original != NULL ? &source : NULL, &padding, &weight);
-
-        iFontSetWeight(face, weight);
+                     original != NULL ? &source : NULL, &padding);
 
         const bool rasterized =
             iFontRasterize(face, (const char*)a.char_set, count, a.du, a.dv, targets, upscale,

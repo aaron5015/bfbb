@@ -173,13 +173,6 @@ const iConfigSetting kConfigSettings[] = {
       "; pixels, or auto to measure it. Larger is smaller letters. Negative\n"
       "; grows them past the cell.",
       ICONFIG_FLOAT, "auto", -8.0f, 8.0f },
-    { "font", "weight", "auto",
-      "How much to thicken the face's strokes, in the game's own atlas\n"
-      "; pixels, or auto to measure it. 0 draws the face as it is.\n"
-      "; tools/fontfit runs the same measurement outside the game.",
-      ICONFIG_FLOAT, "auto", -8.0f, 8.0f },
-    { "font", "sans_weight", "auto", "The same, for the sans face.", ICONFIG_FLOAT, "auto", -8.0f,
-      8.0f },
     { "font", "fit", "box",
       "How each glyph fills the space the game's own letter took: box (stretch\n"
       "; it to fit), width (keep the height, let the width be the face's),\n"

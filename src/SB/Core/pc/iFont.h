@@ -131,50 +131,30 @@ S32 iFontUpscale();
 void iFontSetPadding(F32 padding);
 F32 iFontPadding();
 
-// config.ini's [font] weight: how much to thicken a glyph's strokes, in
-// ATLAS pixels. 0 unless set, which is the outline as the face draws it.
-//
-// The game's atlases are hand-drawn and heavier than most text faces at the
-// same size, so an outline substituted for one can land the right size and
-// still read as too light. This grows the ink by a fraction of a pixel in every
-// direction, which is weight rather than size: a stroke gains it on both sides
-// and a letter only on its outside.
-//
-// It does make a glyph fractionally larger -- the growth has to go somewhere --
-// so a heavy setting wants a little more padding to sit back in its box.
-// Per face, because the two are different typefaces and the atlases they stand
-// in for are drawn at different weights: measured against the game's own, the
-// SpongeBob face wants a little and the sans wants none at all.
-void iFontSetWeight(iFontFace face, F32 weight);
-F32 iFontWeight(iFontFace face);
-
 // config.ini's [font] fit: how a glyph is placed in the space the atlas
 // gave it. See iFontFit.
 void iFontSetFit(iFontFace face, iFontFit fit);
 iFontFit iFontFitOf(iFontFace face);
 
-// config.ini's [font] padding = auto and weight = auto, which are
-// both the default: choose the two by measuring, instead of by being told.
+// config.ini's [font] padding = auto, the default: choose it by measuring,
+// instead of by being told.
 //
-// They are the only settings a substituted font has that depend on the FACE and
-// not on the game -- how far short of its ink box a letter should stop, and how
-// much heavier the artwork is than the outline replacing it. Both are answered
-// by the same measurement tools/fontfit reports, so the game can run that sweep
-// itself: the atlas being replaced is already in hand at the point the
-// substitute is built, and rasterising a font is fast enough to do a few dozen
+// It is the one setting a substituted font has that depends on the FACE and not
+// on the game -- how far short of its ink box a letter should stop. It is
+// answered by the same measurement tools/fontfit reports, so the game can run
+// that sweep itself: the atlas being replaced is already in hand at the point
+// the substitute is built, and rasterising a font is fast enough to do a few
 // times before the first frame.
 //
-// Left on, a font drops in and looks right. Set either to a number to pin it.
+// Left on, a font drops in and looks right. Set it to a number to pin it.
 void iFontSetPaddingAuto(S32 on);
 S32 iFontPaddingAuto();
-void iFontSetWeightAuto(iFontFace face, S32 on);
-S32 iFontWeightAuto(iFontFace face);
 
-// Resolve whichever of the two is on auto, against the atlas about to be
-// replaced, and hand back both.
+// Resolve the padding if it is on auto, against the atlas about to be
+// replaced, and hand it back.
 //
 // The search is the one tools/fontfit prints as a table: rasterise the face at
-// each setting, and take the one whose glyphs land on the most of the same
+// each inset, and take the one whose glyphs land on the most of the same
 // pixels as the artwork's -- rejecting any that got there by laying down
 // substantially more ink than the atlas has, because past that point the
 // letters are filling their boxes and agreement stops telling them apart.
@@ -187,11 +167,10 @@ S32 iFontWeightAuto(iFontFace face);
 // Measured once per face and remembered -- the SpongeBob face stands in for two
 // atlases, and the answer is the same both times.
 //
-// FALSE if nothing was measured -- both settings pinned, or no atlas to measure
-// against. `padding` and `weight` come back holding the settings either way.
+// FALSE if nothing was measured -- padding pinned, or no atlas to measure
+// against. `padding` comes back holding the setting either way.
 S32 iFontAutoFit(iFontFace face, const char* charset, S32 count, S32 cellW, S32 cellH,
-                 const iFontCell* cells, S32 upscale, const iFontAtlas* source, F32* padding,
-                 F32* weight);
+                 const iFontCell* cells, S32 upscale, const iFontAtlas* source, F32* padding);
 
 // BFBB_FONTDIFF: draw each glyph of the atlas being replaced over the outline
 // that replaces it, so the two can be compared where the game actually draws
@@ -208,7 +187,7 @@ S32 iFontOverlay();
 // the ink they share over the ink either of them has. Set by the last
 // iFontRasterize that was given an atlas to draw over, and the number
 // tools/fontfit sweeps -- 100 would be the same glyph twice, and what moves it
-// is padding and weight.
+// is padding.
 //
 // Alignment is what it measures first: two glyphs drawn in the same box agree
 // substantially, two drawn in different boxes agree almost nowhere.
@@ -241,10 +220,9 @@ S32 iFontOverlayGlyphs();
 //
 // Everything the substitution reads about the font it replaces, in one blob:
 // the character set, the cell, the ink boxes and the atlas coverage itself.
-// tools/fontfit replays iFontRasterize against it and sweeps padding and weight
-// offline, which is the whole reason this exists -- those two are tuned by
-// their effect on the fit, and launching the game to see one number is a slow
-// way to ask.
+// tools/fontfit replays iFontRasterize against it and sweeps padding offline,
+// which is the whole reason this exists -- padding is tuned by its effect on
+// the fit, and launching the game to see one number is a slow way to ask.
 //
 // Appends, so one launch captures every font. Named by iSystem from the
 // environment; empty writes nothing.

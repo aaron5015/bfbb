@@ -35,8 +35,6 @@ namespace
         stbtt_fontinfo font;
         S32 loaded;
         S32 failed;
-        F32 weight;
-        S32 weightAuto;
         iFontFit fit;
 
         // Whether the characters this face does not have have been named. Once
@@ -51,7 +49,6 @@ namespace
         S32 tuned;
         S32 tunedUpscale;
         F32 tunedPadding;
-        F32 tunedWeight;
     };
 
     face_state sFaces[IFONT_FACE_COUNT];
@@ -79,11 +76,6 @@ namespace
     S32 sSubstituted;
     S32 sGlyphs;
 
-    // One glyph's worth of workspace, for the thickening pass -- a max filter
-    // cannot read and write the same pixels.
-    U8* sScratch;
-    S32 sScratchCapacity;
-
     // Where BFBB_FONTDUMP points, if anywhere.
     char sDumpPath[512];
 
@@ -106,101 +98,6 @@ namespace
             for (S32 x = 0; x < dw; x++)
             {
                 dstRow[x] = srcRow[sx + x * sw / dw];
-            }
-        }
-    }
-
-    // Grow the ink in `w` by `h` coverage bytes outward by `distance` pixels,
-    // 0 to 1. Called once per whole pixel of weight and once more for the
-    // remainder.
-    //
-    // **Why this adds rather than taking a maximum.** The obvious thickening is
-    // to give every pixel the largest of itself and its neighbours, faded by
-    // the distance wanted. That grows the ink by exactly ONE pixel however
-    // faint the fade is, because a neighbour is a whole pixel away -- so the
-    // real distance is one buffer pixel, which is 1/upscale of an ATLAS pixel,
-    // and a weight that reads correctly at one render height is wrong at
-    // another. The setting is in atlas pixels so that it does not depend on the
-    // resolution, and that made it depend on the resolution.
-    //
-    // A glyph edge is not a step, though: it is a ramp about a pixel wide, from
-    // nothing to solid, and the letterform's true edge is where that ramp
-    // passes half. Adding a fraction of full coverage to the ramp slides the
-    // half-way point out by that fraction of a pixel -- which is a real
-    // sub-pixel distance, and the same distance at any upscale.
-    //
-    // Scaled by the neighbourhood rather than added flat: away from any ink
-    // there is no ramp to move and no neighbour to take it from, so nothing
-    // happens. A flat addition would raise the empty space around the letters
-    // into a grey haze over every glyph box.
-    void dilate(U8* pixels, S32 w, S32 h, S32 stride, F32 distance)
-    {
-        if (distance <= 0.0f || w <= 0 || h <= 0)
-        {
-            return;
-        }
-
-        const S32 needed = w * h;
-
-        if (needed > sScratchCapacity)
-        {
-            free(sScratch);
-            sScratch = (U8*)malloc((size_t)needed);
-            if (sScratch == NULL)
-            {
-                sScratchCapacity = 0;
-                return;
-            }
-            sScratchCapacity = needed;
-        }
-
-        for (S32 y = 0; y < h; y++)
-        {
-            memcpy(sScratch + (size_t)y * w, pixels + (size_t)y * stride, (size_t)w);
-        }
-
-        for (S32 y = 0; y < h; y++)
-        {
-            for (S32 x = 0; x < w; x++)
-            {
-                U8 neighbour = 0;
-
-                for (S32 dy = -1; dy <= 1; dy++)
-                {
-                    const S32 sy = y + dy;
-                    if (sy < 0 || sy >= h)
-                    {
-                        continue;
-                    }
-
-                    for (S32 dx = -1; dx <= 1; dx++)
-                    {
-                        const S32 sx = x + dx;
-                        if (sx < 0 || sx >= w || (dx == 0 && dy == 0))
-                        {
-                            continue;
-                        }
-
-                        const U8 v = sScratch[(size_t)sy * w + sx];
-                        if (v > neighbour)
-                        {
-                            neighbour = v;
-                        }
-                    }
-                }
-
-                U8* p = pixels + (size_t)y * stride + x;
-
-                // The brightest coverage anywhere around this pixel, itself
-                // included: how much ink there is locally to move.
-                if (*p > neighbour)
-                {
-                    neighbour = *p;
-                }
-
-                const F32 grown = (F32)*p + distance * (F32)neighbour;
-
-                *p = grown > 255.0f ? (U8)255 : (U8)grown;
             }
         }
     }
@@ -316,7 +213,6 @@ S32 iFontLoad(iFontFace face, const char* path)
     // and that does not exist until the game builds the font. It prints its own
     // line when it does.
     char paddingText[64];
-    char weightText[64];
 
     if (sPaddingAuto)
     {
@@ -328,17 +224,8 @@ S32 iFontLoad(iFontFace face, const char* path)
                 (int)((F32)iFontUpscale() * sPadding + 0.5f));
     }
 
-    if (fs.weightAuto)
-    {
-        strcpy(weightText, "weight auto");
-    }
-    else
-    {
-        sprintf(weightText, "weight %.2f", (double)fs.weight);
-    }
-
-    printf("bfbb: %s rendered from %s (upscale %d, %s, %s, %s)%s\n", faceName(face), path,
-           (int)iFontUpscale(), paddingText, weightText,
+    printf("bfbb: %s rendered from %s (upscale %d, %s, %s)%s\n", faceName(face), path,
+           (int)iFontUpscale(), paddingText,
            fs.fit == IFONT_FIT_NATURAL ? "its own metrics"
                                        : (fs.fit == IFONT_FIT_WIDTH ? "its own width"
                                                                     : "stretched to the box"),
@@ -480,45 +367,6 @@ void iFontSetPaddingAuto(S32 on)
 S32 iFontPaddingAuto()
 {
     return sPaddingAuto;
-}
-
-void iFontSetWeightAuto(iFontFace face, S32 on)
-{
-    if (validFace(face))
-    {
-        sFaces[face].weightAuto = on;
-    }
-}
-
-S32 iFontWeightAuto(iFontFace face)
-{
-    return validFace(face) ? sFaces[face].weightAuto : FALSE;
-}
-
-void iFontSetWeight(iFontFace face, F32 weight)
-{
-    if (!validFace(face))
-    {
-        return;
-    }
-
-    // Clamped rather than refused, like the upscale: too much is a fat blob and
-    // is obvious on sight, not something worth stopping the game for.
-    if (weight < 0.0f)
-    {
-        weight = 0.0f;
-    }
-    if (weight > 4.0f)
-    {
-        weight = 4.0f;
-    }
-
-    sFaces[face].weight = weight;
-}
-
-F32 iFontWeight(iFontFace face)
-{
-    return validFace(face) ? sFaces[face].weight : 0.0f;
 }
 
 void iFontSetFit(iFontFace face, iFontFit fit)
@@ -978,18 +826,6 @@ S32 iFontRasterize(iFontFace face, const char* charset, S32 count, S32 cellW, S3
         stbtt_MakeCodepointBitmap(&font, sAtlas + (size_t)dstY * w + dstX, targetW, targetH, w,
                                   scaleX, scale, codepoint);
 
-        // Weight, in the atlas pixels the setting is written in, at the
-        // resolution this is being drawn at.
-        F32 remaining = sFaces[face].weight * (F32)upscale;
-
-        while (remaining > 0.0f)
-        {
-            dilate(sAtlas + (size_t)dstY * w + dstX, targetW, targetH, w,
-                   remaining < 1.0f ? remaining : 1.0f);
-            remaining -= 1.0f;
-        }
-
-
         drawn++;
 
         if (wantOverlay)
@@ -1084,18 +920,13 @@ S32 iFontRasterize(iFontFace face, const char* charset, S32 count, S32 cellW, S3
 }
 
 S32 iFontAutoFit(iFontFace face, const char* charset, S32 count, S32 cellW, S32 cellH,
-                 const iFontCell* cells, S32 upscale, const iFontAtlas* source, F32* padding,
-                 F32* weight)
+                 const iFontCell* cells, S32 upscale, const iFontAtlas* source, F32* padding)
 {
     F32 resolvedPadding = sPadding;
-    F32 resolvedWeight = iFontWeight(face);
-
-    const S32 searchPadding = sPaddingAuto;
-    const S32 searchWeight = iFontWeightAuto(face);
 
     S32 resolved = FALSE;
 
-    if (validFace(face) && (searchPadding || searchWeight) && iFontAvailable(face))
+    if (validFace(face) && sPaddingAuto && iFontAvailable(face))
     {
         face_state& f = sFaces[face];
 
@@ -1107,7 +938,6 @@ S32 iFontAutoFit(iFontFace face, const char* charset, S32 count, S32 cellW, S32 
         if (f.tuned && f.tunedUpscale == upscale)
         {
             resolvedPadding = f.tunedPadding;
-            resolvedWeight = f.tunedWeight;
             resolved = TRUE;
         }
         else if (source != NULL && source->coverage != NULL && source->width > 0 &&
@@ -1118,38 +948,19 @@ S32 iFontAutoFit(iFontFace face, const char* charset, S32 count, S32 cellW, S32 
             // are three settings between one atlas pixel and none and asking for
             // anything between them measures the same font twice.
             F32 pads[8];
-            S32 padCount = 1;
+            S32 padCount = upscale < 4 ? upscale + 1 : 5;
 
-            if (searchPadding)
+            if (padCount > (S32)(sizeof(pads) / sizeof(pads[0])))
             {
-                padCount = upscale < 4 ? upscale + 1 : 5;
-
-                if (padCount > (S32)(sizeof(pads) / sizeof(pads[0])))
-                {
-                    padCount = (S32)(sizeof(pads) / sizeof(pads[0]));
-                }
-
-                for (S32 i = 0; i < padCount; i++)
-                {
-                    pads[i] = (F32)i / (F32)upscale;
-                }
-            }
-            else
-            {
-                pads[0] = sPadding;
+                padCount = (S32)(sizeof(pads) / sizeof(pads[0]));
             }
 
-            // Fine where it matters and coarse where it does not: past about
-            // half an atlas pixel the strokes have merged and the difference
-            // between one setting and the next is a blob either way.
-            static const F32 kWeights[] = { 0.0f, 0.05f, 0.1f, 0.15f, 0.2f,
-                                            0.3f, 0.4f,  0.6f, 0.8f };
-
-            const S32 weightCount =
-                searchWeight ? (S32)(sizeof(kWeights) / sizeof(kWeights[0])) : 1;
+            for (S32 i = 0; i < padCount; i++)
+            {
+                pads[i] = (F32)i / (F32)upscale;
+            }
 
             const F32 savedPadding = sPadding;
-            const F32 savedWeight = f.weight;
             const S32 savedOverlay = sOverlayOn;
 
             // The agreement is only measured when the overlay plane is being
@@ -1157,85 +968,70 @@ S32 iFontAutoFit(iFontFace face, const char* charset, S32 count, S32 cellW, S32 
             sOverlayOn = TRUE;
 
             F32 bestPadding = pads[0];
-            F32 bestWeight = searchWeight ? kWeights[0] : savedWeight;
             F32 best = -1.0f;
 
-            // The same again ignoring the ink ceiling, for a face already
-            // heavier than the atlas at its lightest -- there is still a best
-            // inset, it just is not one that got there by matching the weight.
-            F32 lightPadding = pads[0];
-            F32 light = -1.0f;
+            // The same again ignoring the ink ceiling, for a face heavier than
+            // the atlas at every inset.
+            F32 anyPadding = pads[0];
+            F32 any = -1.0f;
 
             for (S32 pi = 0; pi < padCount; pi++)
             {
-                for (S32 wi = 0; wi < weightCount; wi++)
+                const U8* pixels = NULL;
+                const U8* overlay = NULL;
+                S32 aw = 0;
+                S32 ah = 0;
+                S32 stride = 0;
+                S32 columns = 0;
+
+                if (!iFontRasterize(face, charset, count, cellW, cellH, cells, upscale, pads[pi],
+                                    source, &pixels, &overlay, &aw, &ah, &stride, &columns))
                 {
-                    const F32 w = searchWeight ? kWeights[wi] : savedWeight;
+                    continue;
+                }
 
-                    f.weight = w;
+                // Past this the substitute is laying down substantially more
+                // ink than the artwork does, which means its letters are
+                // filling their boxes: everything the original has is
+                // covered, the union is the box, and agreement settles at a
+                // number that looks like a fit and is a blob. See
+                // iFontOverlayInk.
+                const F32 kInkCeiling = 1.10f;
 
-                    const U8* pixels = NULL;
-                    const U8* overlay = NULL;
-                    S32 aw = 0;
-                    S32 ah = 0;
-                    S32 stride = 0;
-                    S32 columns = 0;
+                if (sInk <= kInkCeiling && sAgreement > best)
+                {
+                    best = sAgreement;
+                    bestPadding = pads[pi];
+                }
 
-                    if (!iFontRasterize(face, charset, count, cellW, cellH, cells, upscale,
-                                        pads[pi], source, &pixels, &overlay, &aw, &ah, &stride,
-                                        &columns))
-                    {
-                        continue;
-                    }
-
-                    // Past this the substitute is laying down substantially more
-                    // ink than the artwork does, which means its letters are
-                    // filling their boxes: everything the original has is
-                    // covered, the union is the box, and agreement settles at a
-                    // number that looks like a fit and is a blob. See
-                    // iFontOverlayInk.
-                    const F32 kInkCeiling = 1.10f;
-
-                    if (sInk <= kInkCeiling && sAgreement > best)
-                    {
-                        best = sAgreement;
-                        bestPadding = pads[pi];
-                        bestWeight = w;
-                    }
-
-                    if (wi == 0 && sAgreement > light)
-                    {
-                        light = sAgreement;
-                        lightPadding = pads[pi];
-                    }
+                if (sAgreement > any)
+                {
+                    any = sAgreement;
+                    anyPadding = pads[pi];
                 }
             }
 
             if (best < 0.0f)
             {
-                bestPadding = lightPadding;
-                bestWeight = searchWeight ? kWeights[0] : savedWeight;
-                best = light;
+                bestPadding = anyPadding;
+                best = any;
             }
 
             sOverlayOn = savedOverlay;
             sPadding = savedPadding;
-            f.weight = savedWeight;
 
             if (best >= 0.0f)
             {
                 f.tuned = TRUE;
                 f.tunedUpscale = upscale;
                 f.tunedPadding = bestPadding;
-                f.tunedWeight = bestWeight;
 
                 resolvedPadding = bestPadding;
-                resolvedWeight = bestWeight;
                 resolved = TRUE;
 
-                printf("bfbb: %s fits the atlas best at font_padding %.2f, font_weight "
-                       "%.2f -- %.0f%% of the ink lands on the artwork's\n",
-                       faceName(face), (double)bestPadding, (double)bestWeight, (double)best);
+                printf("bfbb: %s fits the atlas best at font_padding %.2f -- %.0f%% of the "
+                       "ink lands on the artwork's\n",
+                       faceName(face), (double)bestPadding, (double)best);
                 fflush(stdout);
             }
         }
@@ -1244,10 +1040,6 @@ S32 iFontAutoFit(iFontFace face, const char* charset, S32 count, S32 cellW, S32 
     if (padding != NULL)
     {
         *padding = resolvedPadding;
-    }
-    if (weight != NULL)
-    {
-        *weight = resolvedWeight;
     }
 
     return resolved;

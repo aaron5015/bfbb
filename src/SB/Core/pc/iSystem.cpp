@@ -837,35 +837,20 @@ static void ApplyConfig()
     // game says which characters it wants.
     iFontSetUpscale(iConfigGetInt("font.upscale", 0));
 
-    // font_padding and font_weight take a number or auto, and auto is the
-    // default: the two depend on the face and on how large it is being drawn,
-    // which is a measurement rather than a preference. iFontAutoFit runs it
-    // once the atlas being replaced is in hand.
+    // font_padding takes a number or auto, and auto is the default: it
+    // depends on the face and on how large it is being drawn, which is a
+    // measurement rather than a preference. iFontAutoFit runs it once the atlas
+    // being replaced is in hand.
     const char* padding = iConfigGetString("font.padding", "auto");
-    const char* sbWeight = iConfigGetString("font.weight", "auto");
-    const char* sansWeight = iConfigGetString("font.sans_weight", "auto");
-
     const S32 paddingAuto = iHostStrCaseCmp(padding, "auto") == 0;
-    const S32 sbWeightAuto = iHostStrCaseCmp(sbWeight, "auto") == 0;
-    const S32 sansWeightAuto = iHostStrCaseCmp(sansWeight, "auto") == 0;
 
     iFontSetPaddingAuto(paddingAuto);
-    iFontSetWeightAuto(IFONT_FACE_SB, sbWeightAuto);
-    iFontSetWeightAuto(IFONT_FACE_SANS, sansWeightAuto);
 
     // Only when there is a number to read: "auto" parses as zero, and that
     // zero would become the setting on the paths where the search cannot run.
     if (!paddingAuto)
     {
         iFontSetPadding(iConfigGetFloat("font.padding", 0.5f));
-    }
-    if (!sbWeightAuto)
-    {
-        iFontSetWeight(IFONT_FACE_SB, iConfigGetFloat("font.weight", 0.0f));
-    }
-    if (!sansWeightAuto)
-    {
-        iFontSetWeight(IFONT_FACE_SANS, iConfigGetFloat("font.sans_weight", 0.0f));
     }
     iFontSetFit(IFONT_FACE_SB, iSystemFontFit(iConfigGetString("font.fit", "box")));
     iFontSetFit(IFONT_FACE_SANS, iSystemFontFit(iConfigGetString("font.sans_fit", "natural")));
@@ -876,7 +861,7 @@ static void ApplyConfig()
     iFontSetOverlay(getenv("BFBB_FONTDIFF") != NULL);
 
     // BFBB_FONTDUMP writes each atlas out for tools/fontfit, which sweeps
-    // font_padding and font_weight against it without the game.
+    // font_padding against it without the game.
     iFontSetDumpPath(getenv("BFBB_FONTDUMP"));
 
     const char* sbFont = iConfigGetString("font.face", "");

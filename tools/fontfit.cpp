@@ -1,11 +1,10 @@
 // Fit a TrueType face to the atlas it stands in for, without the game.
 //
-// `[font] padding` and `[font] weight` are tuned by their effect on
-// one thing: how much of the substituted letterform lands on the ink of the
-// glyph it replaces. That is a number, and asking the game for it means a
+// `[font] padding` is tuned by its effect on one thing: how much of the
+// substituted letterform lands on the ink of the glyph it replaces. That is a number, and asking the game for it means a
 // launch, a load and a look per value. This reads the atlas out of a
 // BFBB_FONTDUMP file, rasterises the same face through the same iFontRasterize
-// the game uses, and sweeps both settings in a second.
+// the game uses, and sweeps the setting in a second.
 //
 //     bfbb.exe with BFBB_FONTDUMP=fonts.bin        (once, to capture the atlas)
 //     fontfit fonts.bin myfont.ttf                 (as often as you like)
@@ -13,8 +12,8 @@
 // The fit is coverage agreement: the ink both letterforms share over the ink
 // either of them has. 100% would be the same glyph twice. It is a guide and not
 // a verdict -- a different typeface is a different typeface, and the point is to
-// find where a face stops disagreeing about SIZE and WEIGHT so that what is left
-// is only the shape you chose it for.
+// find where a face stops disagreeing about SIZE so that what is left is only
+// the shape you chose it for.
 
 #include "iFont.h"
 
@@ -362,7 +361,6 @@ int main(int argc, char** argv)
     // is the setting being honest about its resolution, not the sweep wasting
     // its time -- and it says how finely the value is worth choosing.
     static const F32 kPadding[] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
-    static const F32 kWeight[] = { 0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.6f, 0.8f, 1.0f, 1.4f, 2.0f };
 
     for (S32 fi = 0; fi < sFontCount; fi++)
     {
@@ -372,7 +370,6 @@ int main(int argc, char** argv)
                (int)d.cellW, (int)d.cellH, (int)upscale);
 
         iFontSetPadding(0.25f);
-        iFontSetWeight(IFONT_FACE_SB, 0.0f);
         measure(d, upscale);
 
         printf("  the face supplies %d of them; the rest are drawn from the atlas and are not\n"
@@ -386,93 +383,58 @@ int main(int argc, char** argv)
         }
 
         const size_t pads = sizeof(kPadding) / sizeof(kPadding[0]);
-        const size_t weights = sizeof(kWeight) / sizeof(kWeight[0]);
 
         F32 bestPadding = 0.0f;
-        F32 bestWeight = 0.0f;
         double best = -1.0;
         double bestInk = 0.0;
 
         // The same again with no ink ceiling, for a face that is heavier than
-        // the atlas everywhere -- there is still a best setting, it just is not
-        // one that got there by matching the weight.
+        // the atlas at every inset -- there is still a best setting, it just is
+        // not one that got there by matching the ink.
         F32 anyPadding = 0.0f;
-        F32 anyWeight = 0.0f;
         double any = -1.0;
         double anyInk = 0.0;
-        double lightest = 1e9;
 
-        for (S32 pass = 0; pass < 2; pass++)
+        printf("\n  pad      fit %%    ink x\n");
+
+        for (size_t p = 0; p < pads; p++)
         {
-            printf("\n  %s  ", pass == 0 ? "fit %     " : "ink x     ");
-            for (size_t w = 0; w < weights; w++)
+            iFontSetPadding(kPadding[p]);
+
+            const fit f = measure(d, upscale);
+            printf("  %5.2f  %6.2f  %6.2f\n", (double)kPadding[p], f.agreement, f.ink);
+
+            // The best fit among the settings that have not run away with the
+            // ink. Past kInkCeiling the letters are filling their boxes and
+            // agreement stops meaning anything, so a higher number there is not
+            // a better font -- see iFontOverlayInk.
+            const double kInkCeiling = 1.10;
+
+            if (f.ink <= kInkCeiling && f.agreement > best)
             {
-                printf("  w%-4.1f", (double)kWeight[w]);
+                best = f.agreement;
+                bestInk = f.ink;
+                bestPadding = kPadding[p];
             }
-            printf("\n");
 
-            for (size_t p = 0; p < pads; p++)
+            if (f.agreement > any)
             {
-                printf("  pad %5.2f  ", (double)kPadding[p]);
-
-                for (size_t w = 0; w < weights; w++)
-                {
-                    iFontSetPadding(kPadding[p]);
-                    iFontSetWeight(IFONT_FACE_SB, kWeight[w]);
-
-                    const fit f = measure(d, upscale);
-                    printf("  %6.2f", pass == 0 ? f.agreement : f.ink);
-
-                    // The best fit among the settings that have not run away
-                    // with the ink. Past kInkCeiling the letters are filling
-                    // their boxes and agreement stops meaning anything, so a
-                    // higher number there is not a better font -- see
-                    // iFontOverlayInk.
-                    const double kInkCeiling = 1.10;
-
-                    if (pass == 0 && f.ink <= kInkCeiling && f.agreement > best)
-                    {
-                        best = f.agreement;
-                        bestInk = f.ink;
-                        bestPadding = kPadding[p];
-                        bestWeight = kWeight[w];
-                    }
-
-                    if (pass == 0 && f.ink > 0.0 && f.ink < lightest)
-                    {
-                        lightest = f.ink;
-                    }
-
-                    if (pass == 0 && f.agreement > any)
-                    {
-                        any = f.agreement;
-                        anyInk = f.ink;
-                        anyPadding = kPadding[p];
-                        anyWeight = kWeight[w];
-                    }
-                }
-
-                printf("\n");
+                any = f.agreement;
+                anyInk = f.ink;
+                anyPadding = kPadding[p];
             }
         }
 
         if (best < 0.0)
         {
-            // Nothing in the sweep laid down as little ink as the atlas does,
-            // so this face is heavier than the one it is replacing at every
-            // setting, and thickening it further cannot help. Worth saying
-            // outright rather than recommending the lightest row as a fit.
-            printf("\n  this face is heavier than the atlas at every setting -- the lightest\n"
-                   "  is still %.2fx its ink, so leave weight at 0.\n",
-                   lightest);
             best = any;
+            bestInk = anyInk;
             bestPadding = anyPadding;
-            bestWeight = 0.0f;
         }
 
         printf("\n  best fit %.2f%% at %.2fx the atlas's ink:\n\n"
-               "    [font]\n    padding = %g\n    weight = %g\n",
-               best, best == any ? anyInk : bestInk, (double)bestPadding, (double)bestWeight);
+               "    [font]\n    padding = %g\n",
+               best, bestInk, (double)bestPadding);
     }
 
     return 0;
