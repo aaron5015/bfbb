@@ -141,7 +141,7 @@ app being backgrounded.
 Three concrete items. The first and third are done; the second turned out to
 be smaller than it looked.
 
-**The profile loop, fixed.** `startSDL3` broke out of its loop on the first
+**The profile loop, fixed and verified.** `startSDL3` broke out of its loop on the first
 successful `SDL_CreateWindow` and created the context *after* the loop. A
 window is created from attributes alone and does not fail on a profile the
 driver cannot give -- so the loop always took the first entry, CORE 3.3, and
@@ -151,6 +151,22 @@ the glad load now succeed or fail together, per profile, and a profile that
 fails any of the three falls through to the next. It was a defect on desktop
 too. The same shape is in `startSDL2` and `startGLFW`; nothing in this project
 compiles those arms, so they were left alone.
+
+This one is no longer taken on faith. Mesa's llvmpipe provides both a desktop
+GL and a GLES implementation on an ordinary Linux box, so the fallback can be
+driven from either end without a phone -- see **Testing the GLES arm without a
+device** below. Capping desktop GL at 2.0 and forcing EGL makes the loop walk
+past both CORE entries and land on ES, and `rw_selftest`'s 451 checks pass
+against that context:
+
+```
+bfbb: OpenGL 4.5 (Core Profile) Mesa 25.2.8, llvmpipe -- desktop profile
+bfbb: OpenGL ES 3.2 Mesa 25.2.8, llvmpipe            -- GLES profile
+```
+
+What that does and does not prove: the loop reaches ES, the ES context is
+usable, and the engine comes up on it. It is Mesa's software GLES, not
+Adreno's or Mali's, so it says nothing about a real mobile driver's bugs.
 
 **S3TC, fixed, and not the way the original audit proposed.** Adreno and Mali
 expose ETC and ASTC and no S3TC at all, so `gl3Caps.dxtSupported` is false on
@@ -394,6 +410,11 @@ Two things about that job are worth knowing, both learned the hard way:
   perfectly valid APK with no native library in it, which packages and
   publishes and looks green, and that is the one way this job could lie about
   the only thing it claims.
+* **Actions are billed.** This repository is private, so every run spends
+  minutes and storage from an account-wide allowance, and both have run out at
+  least once. When the budget goes the job does not fail -- it never starts,
+  in three seconds, with no steps and one annotation saying so. A public
+  repository would pay nothing for either.
 * The APK goes to a **release**, not to an Actions artifact. Artifacts are
   billed against an account-wide shared storage quota that every workflow in
   every repository draws on; ours was full, so the APK was built correctly and
@@ -413,6 +434,42 @@ Two things about that job are worth knowing, both learned the hard way:
   The job needs `permissions: contents: write` for this. If it ever fails with
   403, the repository's default workflow token is read-only: Settings →
   Actions → General → Workflow permissions.
+
+### Testing the GLES arm without a device
+
+Mesa ships both a desktop GL and a GLES implementation for llvmpipe, so a
+Linux box with no GPU at all can run the port's renderer both ways. This is
+what turned "the GLES arm has never run" into something checkable.
+
+```
+apt-get install libgl-dev libegl-dev libgles-dev libglx-dev libgl1-mesa-dri \
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+    libxfixes-dev libxkbcommon-dev libxss-dev libxtst-dev xvfb
+
+cmake -S . -B build-gl3 -G Ninja -DBFBB_RENDER_BACKENDS=GL3
+ninja -C build-gl3
+
+cd build-gl3
+export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+
+# desktop GL
+xvfb-run -a -s "-screen 0 1280x720x24" ./rw_selftest
+
+# GLES: cap desktop GL below what librw asks for, and force EGL, so the
+# profile loop walks past both CORE entries
+SDL_VIDEO_FORCE_EGL=1 MESA_GL_VERSION_OVERRIDE=2.0 \
+  xvfb-run -a -s "-screen 0 1280x720x24" ./rw_selftest
+
+# and the Adreno/Mali case, with no S3TC
+SDL_VIDEO_FORCE_EGL=1 MESA_GL_VERSION_OVERRIDE=2.0 \
+  MESA_EXTENSION_OVERRIDE=-GL_EXT_texture_compression_s3tc \
+  xvfb-run -a -s "-screen 0 1280x720x24" ./rw_selftest
+```
+
+`rw_selftest` rather than `bfbb`, because the game exits at the asset check
+long before the renderer starts. `RwEngineStart` now prints which OpenGL it
+got, which profile that was, and whether S3TC is there -- so one line of the
+log says what the device gave, on a desktop and on a phone alike.
 
 ### On the phone itself
 
@@ -472,8 +529,15 @@ on top of it:
   it -- the game, librw and SDL cross-compiled and linked. That is the phase 2
   milestone for the BUILD, and it is the whole of what it proves: nothing has
   started the application.
-* **Whether the GLES profile fallback reaches ES 3.1 on a device**, and what
-  the render targets and the snapshot readback do there.
+* ~~**Whether the GLES profile fallback reaches ES 3.1.**~~ It reaches ES and
+  the engine runs on it -- on Mesa's software GLES, which is not a mobile
+  driver. What the render targets and the snapshot readback do on Adreno or
+  Mali is still open, and needs textures and a device.
+* **Whether a DXT texture actually survives the CPU decompress path.** The
+  capability detection is exercised -- with S3TC forced off the port reports
+  `S3TC no` and the engine still comes up -- but no compressed texture has
+  been through `convertTexToCurrentPlatform`'s Image path, because that needs
+  game assets. db05 is the level that would show it.
 * **What happens to the EGL context on backgrounding**, and which of the three
   answers above the port ends up needing.
 * **Where the button glyphs live.** `src/SB/Core/pc/res/buttons` is staged

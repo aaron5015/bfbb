@@ -40,11 +40,6 @@
 #endif
 
 #ifdef __ANDROID__
-// __android_log_print. Part of the NDK's platform libraries, not of anything
-// the port links on top of them -- which is what lets the host seam use it
-// without learning about SDL.
-#include <android/log.h>
-
 // Where the app's own directories are. Android has no fixed answer to any of
 // the four questions below -- the paths carry the package name and the user
 // id -- and the calls that do answer them are JNI, which this layer has no
@@ -599,24 +594,11 @@ const char* iHostName()
 #endif
 }
 
-#ifdef __ANDROID__
-// Android is the one POSIX host where the caller's own print is NOT enough.
-// The header says a startup failure printed to a console nobody is looking at
-// is a game that appears to do nothing; on a phone there is no console at all,
-// and the process simply disappears. logcat is not the player, but it is the
-// only place the message can still be read after the fact, and an ERROR-level
-// line is what `adb logcat *:E` shows without being asked.
-//
-// It does not block, because there is nothing to dismiss. The header allows
-// that -- "returns having done nothing on a host with no way to show one" --
-// and a message box drawn by the game is a later phase's work.
-void iHostErrorBox(const char* title, const char* message)
-{
-    __android_log_print(ANDROID_LOG_ERROR, "bfbb", "%s: %s",
-                        title != NULL ? title : "error",
-                        message != NULL ? message : "");
-}
-#else
+// Android's is in android/iAndroid.cpp, and is the one host where this is a
+// real dialog. It needs SDL to put one on screen, which is a library that sits
+// ON this layer rather than under it -- so it lives in the Android shim, which
+// is allowed to know about SDL, instead of dragging SDL into the OS seam.
+#ifndef __ANDROID__
 // Nothing portable to show one with. X11, Wayland, macOS and a headless
 // server disagree completely, and none of it belongs in the host seam for
 // the sake of one message the caller has already printed. Deliberately

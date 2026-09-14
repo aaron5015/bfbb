@@ -250,6 +250,48 @@ void iAndroidOpenLog()
     pthread_detach(pump);
 }
 
+// ---------------------------------------------------------------------------
+// The one host where iHostErrorBox is a real dialog
+//
+// Defined HERE rather than in iHostPosix.cpp beside the other POSIX arms,
+// because putting a message on an Android screen means asking SDL, and SDL is
+// a library that sits ON the platform layer rather than under it. The host
+// seam is the OS half and stays that way; the shim is the file that is
+// already allowed to know about both.
+//
+// It earns the exception. On every other host a startup failure has already
+// been printed to a console someone can read, and iHost.h says so: "returns
+// having done nothing on a host with no way to show one". On a phone there is
+// no console, the log file this shim writes is not somewhere anyone thinks to
+// look before they have been told it exists, and the failure the player
+// actually meets is the application closing the instant they open it. The
+// first real device this port ran on did exactly that, and what it was trying
+// to say was "the game's files were not found" -- a sentence that fixes the
+// problem the moment it is read.
+//
+// SDL_ShowSimpleMessageBox blocks until the dialog is dismissed, which is what
+// iHost.h promises and what the caller wants: every one of these is followed
+// by exit().
+void iHostErrorBox(const char* title, const char* message)
+{
+    const char* t = (title != NULL) ? title : "Error";
+    const char* m = (message != NULL) ? message : "";
+
+    // logcat as well as the dialog, and at ERROR so `adb logcat *:E` shows it
+    // without being asked. The dialog is for the player; this is for whoever
+    // they send the log to.
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "%s: %s", t, m);
+
+    if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, t, m, NULL))
+    {
+        // No dialog: too early for the Activity, or the framework refused.
+        // Nothing more to do -- the caller has printed the same text and the
+        // header allows this to have reached nobody.
+        __android_log_print(ANDROID_LOG_ERROR, kTag,
+                            "could not show the message box: %s", SDL_GetError());
+    }
+}
+
 void iAndroidStartup()
 {
     const char* internal = SDL_GetAndroidInternalStoragePath();

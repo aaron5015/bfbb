@@ -818,6 +818,37 @@ RwBool RwEngineStart(void)
             return FALSE;
         }
 
+        // WHICH OpenGL came up, which nothing said before.
+        //
+        // librw asks for GL 3.3, GL 2.1, GLES 3.1 and GLES 2.0 in that order and
+        // takes the first that gives a window, a context and a full set of entry
+        // points -- and then never mentions which it was. On a desktop that is
+        // merely unhelpful. On a phone it is the whole question: the GLES arm is
+        // the one the port has never run, `gl3Caps.gles` is what selects the ES
+        // shader preamble and half a dozen behaviours in gl3raster.cpp, and a
+        // device that quietly landed on GLES 2.0 draws differently from one that
+        // got 3.1 for reasons no other line of output would explain.
+        //
+        // Printed before the virtual screen is built, so that a driver that dies
+        // inside the first framebuffer it is asked for has already said what it
+        // was. glGetString is the driver's own answer rather than what was asked
+        // for, which is the point -- a context can come back older than the
+        // request.
+        {
+            const GLubyte* version = glGetString(GL_VERSION);
+            const GLubyte* renderer = glGetString(GL_RENDERER);
+
+            printf("bfbb: OpenGL %s, %s -- %s\n",
+                   version != NULL ? (const char*)version : "(no version)",
+                   renderer != NULL ? (const char*)renderer : "(no renderer)",
+                   rw::gl3::gl3Caps.gles ? "GLES profile" : "desktop profile");
+            printf("bfbb:   S3TC %s\n",
+                   rw::gl3::gl3Caps.dxtSupported
+                       ? "yes"
+                       : "no -- compressed textures decompress on the CPU");
+            fflush(stdout);
+        }
+
         // Build the virtual screen now rather than leaving it to whichever camera
         // raster is created first. There is a context to build it in from here, the
         // sample count it is granted is what the report below prints, and D3D9 makes
