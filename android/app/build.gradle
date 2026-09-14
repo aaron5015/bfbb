@@ -12,6 +12,11 @@ plugins {
 // SDLActivity against a newer libSDL3 is a missing-method crash at startup.
 def sdlJava = file('../../third_party/SDL/android-project/app/src/main/java')
 
+// The button prompt glyphs. A desktop build copies res/buttons beside the
+// executable; here they go in the APK's assets and BfbbActivity extracts them
+// into internal storage, which is where the game looks.
+def portRes = file('../../src/SB/Core/pc/res')
+
 android {
     namespace = 'io.github.joeyballentine.bfbb'
     compileSdk = 35
@@ -88,7 +93,13 @@ android {
     sourceSets {
         main {
             java.srcDirs += sdlJava
+            assets.srcDirs += portRes
         }
+    }
+
+    // res/ also holds the Windows icon and resource scripts.
+    androidResources {
+        ignoreAssetsPattern '!*.ico:!*.rc'
     }
 
     externalNativeBuild {

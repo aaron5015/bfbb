@@ -1,9 +1,17 @@
 package io.github.joeyballentine.bfbb;
 
+import android.content.pm.PackageManager;
+import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.util.Log;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 import org.libsdl.app.SDLActivity;
 
@@ -72,6 +80,86 @@ public class BfbbActivity extends SDLActivity {
             Log.w(TAG, "no external files directory; assets must come from config.ini");
         }
 
+        extractButtonGlyphs();
+
         super.onCreate(savedInstanceState);
+    }
+
+    /**
+     * Copies the button prompt glyphs out of the APK into internal storage,
+     * where the game reads them from (files/buttons/&lt;set&gt;/*.png).
+     *
+     * <p>Once per install or update: a marker holds the package's last update
+     * time, so a new APK replaces the old glyphs and an unchanged one costs a
+     * single small read.
+     */
+    private void extractButtonGlyphs() {
+        String stamp;
+        try {
+            stamp = Long.toString(getPackageManager()
+                    .getPackageInfo(getPackageName(), 0).lastUpdateTime);
+        } catch (PackageManager.NameNotFoundException e) {
+            return;
+        }
+
+        File root = new File(getFilesDir(), "buttons");
+        File marker = new File(root, ".extracted");
+
+        if (stamp.equals(readSmallFile(marker))) {
+            return;
+        }
+
+        try {
+            copyAssetTree(getAssets(), "buttons", root);
+            writeSmallFile(marker, stamp);
+        } catch (IOException e) {
+            // Not fatal: the game draws the disc's own prompts without them.
+            Log.w(TAG, "could not extract the button glyphs", e);
+        }
+    }
+
+    private static void copyAssetTree(AssetManager assets, String path, File dest)
+            throws IOException {
+        String[] children = assets.list(path);
+
+        if (children == null || children.length == 0) {
+            // A file. AssetManager.list gives nothing for one.
+            File parent = dest.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                throw new IOException("could not create " + parent);
+            }
+            try (InputStream in = assets.open(path);
+                 OutputStream out = new FileOutputStream(dest)) {
+                byte[] buffer = new byte[16384];
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                }
+            }
+            return;
+        }
+
+        if (!dest.exists() && !dest.mkdirs()) {
+            throw new IOException("could not create " + dest);
+        }
+        for (String child : children) {
+            copyAssetTree(assets, path + "/" + child, new File(dest, child));
+        }
+    }
+
+    private static String readSmallFile(File file) {
+        try (InputStream in = new FileInputStream(file)) {
+            byte[] buffer = new byte[64];
+            int n = in.read(buffer);
+            return n > 0 ? new String(buffer, 0, n, StandardCharsets.UTF_8) : null;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static void writeSmallFile(File file, String text) throws IOException {
+        try (OutputStream out = new FileOutputStream(file)) {
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+        }
     }
 }
