@@ -299,6 +299,10 @@ void iAndroidStartup()
     // manifest's sensorLandscape and leaves a rotation-locked phone in portrait.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 
+    // The back button to the game as a key press rather than to the activity,
+    // which would finish. iPadHostSDL.cpp turns it into Start.
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+
     const char* internal = SDL_GetAndroidInternalStoragePath();
     const char* cache = SDL_GetAndroidCachePath();
     const char* external = SDL_GetAndroidExternalStoragePath();
