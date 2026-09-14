@@ -849,7 +849,15 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                                                      XCUTSCENE_STREAM_RECORD_SIZE);
                                     numFrame = mphpayload[0];
                                     numRun = mphpayload[1];
+#ifdef BFBB_PTR64
+                                    // Past the payload's two counts. &mphdata[1] steps
+                                    // sizeof(xCutsceneData), 24 bytes at 64 bits, over a
+                                    // 16-byte record.
+                                    xCutsceneMphFrame* mphFrame =
+                                        (xCutsceneMphFrame*)(mphpayload + 2);
+#else
                                     xCutsceneMphFrame* mphFrame = (xCutsceneMphFrame*)((U32*)&mphdata[1] + 2);
+#endif
                                     xCutsceneMphRun* mphRun = (xCutsceneMphRun*)&mphFrame[numFrame];
                                     xMorphTargetFile* mphFile = (xMorphTargetFile*)((U8*)mphdata +
                                                                   ((numFrame * 2 + numRun * 2 + 5) *
