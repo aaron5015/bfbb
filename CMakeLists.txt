@@ -837,6 +837,7 @@ target_compile_options(bfbb_rw PRIVATE ${BFBB_NO_WARNINGS})
 # is the right way round.
 add_library(bfbb_platform STATIC
   ${PC_DIR}/iBoot.cpp
+  ${PC_DIR}/iCameraLook.cpp
   ${PC_DIR}/iConfig.cpp
   ${PC_DIR}/iConfigTable.cpp
   ${PC_DIR}/iDrawDist.cpp

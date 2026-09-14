@@ -113,6 +113,15 @@ void xPadAnalogIsDigital(F32, F32);
 inline F32 normalize_analog(S32 v, S32 v_min, S32 v_max, S32 dead_center, S32 dead_min,
                             S32 dead_max);
 
+// PLATFORM_PC: a drag on the touchscreen turning the camera. Declared here
+// rather than included from pc/ because zCamera.cpp is decomp and already has
+// this header; the definitions are in pc/iCameraLook.h.
+#ifdef PLATFORM_PC
+S32 iCameraLookActive();
+F32 iCameraLookYaw();
+F32 iCameraLookPitch();
+#endif
+
 // PLATFORM_PC: a bit of its own for showing the HUD, which the GameCube read
 // off Z along with the near camera because it had no button to spare. The Xbox
 // had two -- white and black, and its status prompt draws the black one -- so
