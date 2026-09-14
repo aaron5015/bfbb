@@ -235,6 +235,17 @@ S32 iWindowOpen(const iWindowParams* params)
         SDL_SetWindowPosition(sWindow, x, y);
     }
 
+#ifdef __ANDROID__
+    // Android hides the status and navigation bars only for a fullscreen
+    // window, and a borderless one leaves them drawn over the game. GL3's window
+    // is made fullscreen in iWindowDeferredCreated.
+    if (sMode != iWINDOW_WINDOWED)
+    {
+        SDL_SetWindowFullscreen(sWindow, true);
+        SDL_SyncWindow(sWindow);
+    }
+#endif
+
     // What the window actually got, in pixels, which is what the back buffer is
     // sized in and what every other part of the port pairs with. Read rather
     // than assumed: for a frameless window covering a monitor it is the
