@@ -11,3 +11,4 @@
 
 # decomp-toolkit writes files with LF
 config/**/*.txt  text eol=lf
+*.cmd  text eol=crlf

@@ -32,7 +32,7 @@
 // approximately 5 instruction slots used (2 texture, 3 arithmetic)
 #endif
 
-const BYTE g_ps20_main[] =
+const BYTE distort_PS[] =
 {
       0,   2, 255, 255, 254, 255, 
      54,   0,  67,  84,  65,  66, 

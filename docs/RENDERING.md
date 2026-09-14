@@ -50,7 +50,10 @@ render resolution is already the shape the engine is in. See
 [RESOLUTION.md](RESOLUTION.md).
 
 The current hardware floor is Shader Model 2.0: everything compiles to `vs_2_0`
-and `ps_2_0` (`shaders/make_default.cmd`, `rw/shaders/make_shaders.cmd`).
+and `ps_2_0`, except the cel look's two `ps_3_0` pixel shaders
+(`shaders/make_shaders.cmd`, `rw/shaders/make_shaders.cmd`). The same sources
+compile to shader model 4 for the D3D11 backend; `shaders/rwshader.h` is what
+differs between the two.
 
 ## What the assets are
 

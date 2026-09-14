@@ -48,28 +48,23 @@ static S32 sEnabled = TRUE;
 typedef void* GlowShader;
 
 #if defined(RW_D3D9) || defined(RW_D3D11)
-// fxc gives every blob in a tree the same name, so each gets a namespace of its
-// own, and the tree is named in the include because a build can carry both
-// Direct3D backends and the two trees use the same file names.
+// One source, compiled into both trees under one name by shaders/make_shaders.cmd.
+// The tree is named in the include because a build can carry both Direct3D
+// backends and the two trees use the same file names; RWD3D_SHADER picks the
+// running backend's.
 #ifdef RW_D3D9
-namespace bright_ps_sm2
-{
-#include "shaders/glow_bright_PS.h"
-}
-namespace blur_ps_sm2
+namespace sm2
 {
 #include "shaders/glow_blur_PS.h"
-}
+#include "shaders/glow_bright_PS.h"
+} // namespace sm2
 #endif
 #ifdef RW_D3D11
-namespace bright_ps_sm4
-{
-#include "shaders11/glow_bright_PS.h"
-}
-namespace blur_ps_sm4
+namespace sm4
 {
 #include "shaders11/glow_blur_PS.h"
-}
+#include "shaders11/glow_bright_PS.h"
+} // namespace sm4
 #endif
 #endif
 
@@ -190,20 +185,8 @@ namespace d3dglow
 
     static bool glowCreateShaders()
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
-        {
-            sBrightShader = rw::d3d::createPixelShader((void*)bright_ps_sm2::g_ps20_main);
-            sBlurShader = rw::d3d::createPixelShader((void*)blur_ps_sm2::g_ps20_main);
-        }
-#endif
-#ifdef RW_D3D11
-        if (iBackendIsD3D11())
-        {
-            sBrightShader = rw::d3d::createPixelShader((void*)bright_ps_sm4::g_main);
-            sBlurShader = rw::d3d::createPixelShader((void*)blur_ps_sm4::g_main);
-        }
-#endif
+        sBrightShader = rw::d3d::createPixelShader(RWD3D_SHADER(glow_bright_PS));
+        sBlurShader = rw::d3d::createPixelShader(RWD3D_SHADER(glow_blur_PS));
         return sBrightShader != NULL && sBlurShader != NULL;
     }
 

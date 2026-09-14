@@ -11,17 +11,20 @@
 // composite blends by source alpha, so the glow goes on at full strength and
 // what governs it is the threshold above and the blur weights after.
 
+#include "rwshader.h"
+
 struct VS_out
 {
-    float4 Position  : POSITION;
+    float4 Position  : SV_POSITION;
     float3 TexCoord0 : TEXCOORD0;
     float4 Color     : COLOR0;
 };
 
-sampler2D src : register(s0);
+RW_TEXTURE(src, 0);
 
-float4 main(VS_out input) : COLOR
+float4 main(VS_out input) : SV_Target
 {
-    float3 c = tex2D(src, input.TexCoord0.xy).rgb;
+    float3 c = RW_SAMPLE(src, input.TexCoord0.xy).rgb;
+    RW_ALPHA_TEST(1.0f);
     return float4(saturate(c * 2.0f - 1.0f), 1.0f);
 }

@@ -14,28 +14,31 @@
 // are the same kernel turned through ninety degrees -- so one shader does both
 // and the caller supplies the axis.
 
+#include "rwshader.h"
+
 struct VS_out
 {
-    float4 Position  : POSITION;
+    float4 Position  : SV_POSITION;
     float3 TexCoord0 : TEXCOORD0;
     float4 Color     : COLOR0;
 };
 
-sampler2D src : register(s0);
+RW_TEXTURE(src, 0);
 
 // c0 is librw's fog colour, so these start at c1.
 float4 weights : register(c1);   // the four tap weights
 float4 offs01  : register(c2);   // taps 0 and 1, in texture coordinates
 float4 offs23  : register(c3);   // taps 2 and 3
 
-float4 main(VS_out input) : COLOR
+float4 main(VS_out input) : SV_Target
 {
     float2 uv = input.TexCoord0.xy;
 
-    float4 c  = tex2D(src, uv + offs01.xy) * weights.x;
-    c += tex2D(src, uv + offs01.zw) * weights.y;
-    c += tex2D(src, uv + offs23.xy) * weights.z;
-    c += tex2D(src, uv + offs23.zw) * weights.w;
+    float4 c  = RW_SAMPLE(src, uv + offs01.xy) * weights.x;
+    c += RW_SAMPLE(src, uv + offs01.zw) * weights.y;
+    c += RW_SAMPLE(src, uv + offs23.xy) * weights.z;
+    c += RW_SAMPLE(src, uv + offs23.zw) * weights.w;
 
+    RW_ALPHA_TEST(c.a);
     return c;
 }

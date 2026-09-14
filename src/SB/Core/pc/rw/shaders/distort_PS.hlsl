@@ -4,7 +4,7 @@
 // coordinates, and read a copy of the screen at the displaced position.
 //
 // This is a reimplementation of the Xbox release's pixel shader, not a
-// translation of it -- that one is Xbox microcode and D3D9 will not take it.
+// translation of it -- that one is Xbox microcode and D3D will not take it.
 // What is reproduced is the behaviour the disassembly describes: one scalar
 // offset field, one rotating displacement vector, one dependent read. See
 // distort.cpp for where each number comes from.
@@ -14,9 +14,11 @@
 // SRC ONE / DEST ZERO with a white vertex colour, which is a straight
 // overwrite of the frame buffer, and tinting or fogging it would be neither.
 
+#include "rwshader.h"
+
 struct VS_out
 {
-    float4 Position  : POSITION;
+    float4 Position  : SV_POSITION;
     float3 TexCoord0 : TEXCOORD0;
     float4 Color     : COLOR0;
 };
@@ -25,8 +27,8 @@ struct VS_out
 // the other way round (0 = swirl, 2 = screen); the order is ours because stage
 // 0 is the one librw's render state binds, and the screen copy is the texture
 // that changes every frame.
-sampler2D screen : register(s0);
-sampler2D swirl  : register(s1);
+RW_TEXTURE(screen, 0);
+RW_TEXTURE(swirl, 1);
 
 // xy: the displacement vector, already in texture-coordinate units and already
 // scaled by the effect's strength. zw unused.
@@ -35,7 +37,7 @@ sampler2D swirl  : register(s1);
 // (PSLOC_fogColor in rwd3d.h).
 float4 displace : register(c1);
 
-float4 main(VS_out input) : COLOR
+float4 main(VS_out input) : SV_Target
 {
     float2 uv = input.TexCoord0.xy;
 
@@ -48,7 +50,9 @@ float4 main(VS_out input) : COLOR
     // PS_DOTMAPPING_MINUS1_TO_1_D3D for both dot-product stages, which is D3D's
     // signed reading of an unsigned byte -- (2v - 255)/255, so 0 is -1, 128 is
     // 0 and 255 is +1. Halving that would halve the whole effect.
-    float d = tex2D(swirl, uv).r * 2.0f - 1.0f;
+    float d = RW_SAMPLE(swirl, uv).r * 2.0f - 1.0f;
 
-    return tex2D(screen, uv + d * displace.xy);
+    float4 c = RW_SAMPLE(screen, uv + d * displace.xy);
+    RW_ALPHA_TEST(c.a);
+    return c;
 }

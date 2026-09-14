@@ -26,7 +26,7 @@
 // approximately 4 instruction slots used (1 texture, 3 arithmetic)
 #endif
 
-const BYTE g_ps20_main[] =
+const BYTE glow_bright_PS[] =
 {
       0,   2, 255, 255, 254, 255, 
      30,   0,  67,  84,  65,  66, 

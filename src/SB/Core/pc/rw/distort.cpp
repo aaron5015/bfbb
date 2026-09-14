@@ -47,23 +47,23 @@ typedef void* DistortShader;
 #if defined(RW_D3D9) || defined(RW_D3D11)
 
 // The compiled pixel shader. Built the way librw builds its own, by the
-// make_shaders.cmd in each shaders directory. fxc gives every blob in a tree
-// the same name, so each gets a namespace of its own, and the tree is named in
-// the include because a build can carry both Direct3D backends.
+// shaders/make_shaders.cmd, which compiles the one source into both trees under
+// one name. The tree is named in the include because a build can carry both
+// Direct3D backends; RWD3D_SHADER picks the running backend's.
 //
 // What it computes is read off the Xbox's D3DPIXELSHADERDEF, not guessed; the
 // decode is in iDistort.h.
 #ifdef RW_D3D9
-namespace distort_ps_sm2
+namespace sm2
 {
 #include "shaders/distort_PS.h"
-} // namespace distort_ps_sm2
+} // namespace sm2
 #endif
 #ifdef RW_D3D11
-namespace distort_ps_sm4
+namespace sm4
 {
 #include "shaders11/distort_PS.h"
-} // namespace distort_ps_sm4
+} // namespace sm4
 #endif
 #endif
 
@@ -176,18 +176,7 @@ namespace d3ddistort
 
     static bool distortCreateShader()
     {
-#ifdef RW_D3D9
-        if (iBackendIsD3D9())
-        {
-            sPixelShader = rw::d3d::createPixelShader((void*)distort_ps_sm2::g_ps20_main);
-        }
-#endif
-#ifdef RW_D3D11
-        if (iBackendIsD3D11())
-        {
-            sPixelShader = rw::d3d::createPixelShader((void*)distort_ps_sm4::g_main);
-        }
-#endif
+        sPixelShader = rw::d3d::createPixelShader(RWD3D_SHADER(distort_PS));
         return sPixelShader != NULL;
     }
 
