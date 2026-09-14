@@ -46,13 +46,11 @@ android {
                 // shared runtime would be a second .so in the APK for one
                 // library's benefit.
                 //
-                // BFBB_RENDER_BACKENDS: GL3 is the only backend that draws
-                // off Windows. It is also the default off Windows, and is
-                // named anyway because a default that changes is a build that
-                // changes without this file being edited.
+                // BFBB_RENDER_BACKENDS: the two backends that draw off
+                // Windows. video.backend picks between them at run time.
                 arguments '-DANDROID_STL=c++_static',
                           '-DANDROID_PLATFORM=android-24',
-                          '-DBFBB_RENDER_BACKENDS=GL3'
+                          '-DBFBB_RENDER_BACKENDS=GL3;VULKAN'
 
                 // Just the game. Without this, AGP builds every target the
                 // CMake project defines -- which here would include librw's
