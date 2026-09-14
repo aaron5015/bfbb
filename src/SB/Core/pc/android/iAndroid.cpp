@@ -294,6 +294,11 @@ void iHostErrorBox(const char* title, const char* message)
 
 void iAndroidStartup()
 {
+    // Landscape either way up. With no hint, SDL gives a resizable window
+    // SCREEN_ORIENTATION_FULL_USER when it creates it, which overrides the
+    // manifest's sensorLandscape and leaves a rotation-locked phone in portrait.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+
     const char* internal = SDL_GetAndroidInternalStoragePath();
     const char* cache = SDL_GetAndroidCachePath();
     const char* external = SDL_GetAndroidExternalStoragePath();
