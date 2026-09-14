@@ -47,6 +47,7 @@
 #include "iDistort.h"
 #include "iGlow.h"
 #include "iScreen.h"
+#include "iTouchOverlay.h"
 #include "iWindow.h"
 
 #include <stdarg.h>
@@ -693,6 +694,9 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
     {
         return FALSE;
     }
+
+    // The on-screen controls draw on the present; a no-op on other backends.
+    iTouchOverlayInstall();
 
     sGlobals.engineStatus = rwENGINESTATUSOPENED;
     return TRUE;

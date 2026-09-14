@@ -361,7 +361,7 @@ set(INPUT_LIBS)
 if(BFBB_INPUT_BACKEND STREQUAL "null")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostNull.cpp)
 elseif(BFBB_INPUT_BACKEND STREQUAL "sdl")
-  set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp)
+  set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp ${PC_DIR}/iPadTouch.cpp)
 
   # So the self-test knows which backend it is linked against: the contract it
   # checks is the same either way, but "no controller on port 0" means an
@@ -808,7 +808,8 @@ file(GLOB RW_SHIM_SOURCES ${PC_DIR}/rw/*.cpp)
 # iScreen is in here rather than in the platform layer because
 # rw/engine_start.cpp sets the virtual screen from it, and bfbb_rw does not
 # link bfbb_platform. It holds one size and depends on nothing.
-add_library(bfbb_rw STATIC ${RW_SHIM_SOURCES} ${WINDOW_SOURCES} ${PC_DIR}/iScreen.cpp)
+add_library(bfbb_rw STATIC ${RW_SHIM_SOURCES} ${WINDOW_SOURCES} ${PC_DIR}/iScreen.cpp
+  ${PC_DIR}/iTouchOverlay.cpp)
 
 target_include_directories(bfbb_rw PUBLIC
   ${PC_DIR}/compat
@@ -1715,6 +1716,11 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   ${PC_DIR}/iPadLayout.cpp
   ${PC_DIR}/iPadBind.cpp
   ${PC_DIR}/iPadStick.cpp
+
+  # What iPadTouch.cpp hands on: the camera it turns and the shapes it draws.
+  # Neither needs the renderer.
+  ${PC_DIR}/iCameraLook.cpp
+  ${PC_DIR}/iTouchOverlay.cpp
 
   ${INPUT_SOURCES}
   ${AUDIO_SOURCES}

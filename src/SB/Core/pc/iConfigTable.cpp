@@ -148,6 +148,9 @@ const iConfigSetting kConfigSettings[] = {
       "; off (the ones on the disc), or a folder name under buttons/. The glyph\n"
       "; follows your binding, not the console named here.",
       ICONFIG_STRING, "auto|xbox|gamecube|ps2|off", kNone, kNone },
+    { "input", "touch_controls", "auto",
+      "On-screen controls for a touchscreen: auto (on for Android), on, off.",
+      ICONFIG_ENUM, "auto|on|off", kNone, kNone },
     { "audio", "soundtrack", "",
       "Folder of your own music to play instead of the game's. Empty uses the\n"
       "; game's. The port matches a file to a track by asset name, or by a\n"

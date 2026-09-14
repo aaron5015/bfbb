@@ -30,6 +30,7 @@
 #include "iPadBind.h"
 #include "iPadKeyboard.h"
 #include "iPadStick.h"
+#include "iPadTouch.h"
 #include "xPad.h"
 
 #include <SDL3/SDL.h>
@@ -382,6 +383,7 @@ void iPadHostInit()
     ChooseController();
     iPadBindLoad(IPAD_BIND_PAD, kPadTokens, kPadTokenCount, sPadBind);
     iPadKeyboardInit();
+    iPadTouchInit();
 
     // XInput has no notion of focus and this backend should not grow one: the
     // keyboard already stops when the window loses focus, and a controller that
@@ -598,6 +600,10 @@ void iPadHostPoll()
     {
         iPadKeyboardPoll(&sState[0]);
     }
+
+    // The on-screen controls add to whatever holds port 0, and stand aside
+    // while a controller there is in use.
+    iPadTouchPoll(&sState[0], !sKeyboardOnPort0);
 
     if (sHotkey != NULL)
     {
