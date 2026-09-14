@@ -1228,15 +1228,22 @@ if(WIN32)
   # dbghelp is the crash handler in bfbb_main.cpp; see the comment there.
   target_link_libraries(bfbb PRIVATE user32 gdi32 dbghelp)
 
-  # EXPERIMENT: 64MB stack, to test whether the boot fault is stack depth.
+  # No /STACK: the reserve in the PE header applies to every thread created
+  # without an explicit size, driver threads included, so a large one is paid
+  # once per thread out of a 32-bit address space.
   #
-  # The reserve is written into the PE header by the linker, so it is spelled by
-  # whichever one the driver runs: /STACK for link.exe and lld-link, --stack for
-  # the BFD linker MinGW drives.
-  if(MINGW)
-    target_link_options(bfbb PRIVATE -Wl,--stack,67108864)
-  else()
-    target_link_options(bfbb PRIVATE -Xlinker /STACK:67108864)
+  # Large-address-aware gives a 32-bit process 4 GB on 64-bit Windows instead of
+  # 2. Game pointers stay low regardless: iHostReserveLow places the arena. A
+  # 64-bit image is large-address-aware already.
+  #
+  # The flag is spelled by whichever linker the driver runs: /LARGEADDRESSAWARE
+  # for link.exe and lld-link, --large-address-aware for MinGW's BFD linker.
+  if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    if(MINGW)
+      target_link_options(bfbb PRIVATE -Wl,--large-address-aware)
+    else()
+      target_link_options(bfbb PRIVATE -Xlinker /LARGEADDRESSAWARE)
+    endif()
   endif()
 endif()
 
