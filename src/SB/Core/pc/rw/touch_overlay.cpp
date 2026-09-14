@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef RW_GL3
+#if defined(RW_GL3) || defined(RW_VULKAN)
 namespace
 {
     // 5x7, top row first, most significant of the five bits on the left.
@@ -47,8 +47,10 @@ namespace
         return NULL;
     }
 
+#ifdef RW_GL3
     // Every shape, circle or box, filled or outlined, is one signed distance to
-    // a rounded box, so there is one program and one draw call.
+    // a rounded box, so there is one program and one draw call. The Vulkan
+    // device has the same shader, in librw's shaders/overlay.frag.
     const char* kVertexSrc =
         "uniform vec2 u_screen;\n"
         "VSIN(0) vec2 in_pos;\n"
@@ -87,7 +89,9 @@ namespace
         "    float a = clamp(0.5 - d, 0.0, 1.0);\n"
         "    FRAGCOLOR(vec4(v_color.rgb, v_color.a * a));\n"
         "}\n";
+#endif
 
+    // Twelve floats, which is also rw::d3d::implvk::drawPresentOverlay's vertex.
     struct Vertex
     {
         F32 x, y;
@@ -102,6 +106,7 @@ namespace
 
     Vertex sVertices[kMaxQuads * 6];
 
+#ifdef RW_GL3
     GLuint sProgram;
     GLint sScreenLoc = -1;
     GLuint sVbo;
@@ -173,6 +178,7 @@ namespace
         }
         return true;
     }
+#endif
 
     void Quad(Vertex*& v, F32 cx, F32 cy, F32 hw, F32 hh, F32 corner, F32 stroke, F32 r,
               F32 g, F32 b, F32 a)
@@ -201,27 +207,12 @@ namespace
         }
     }
 
-    rw::bool32 Draw(rw::int32 winWidth, rw::int32 winHeight)
+    // The submitted shapes as triangles in sVertices, labels included. Returns
+    // the vertex count.
+    S32 BuildVertices()
     {
-        iTouchOverlaySetWindowSize(winWidth, winHeight);
-
         const iTouchOverlayShape* shapes;
         S32 shapeCount = iTouchOverlayShapes(&shapes);
-
-        if (shapeCount == 0 || sFailed)
-        {
-            return 0;
-        }
-
-        if (!sBuilt)
-        {
-            sBuilt = true;
-            if (!Build())
-            {
-                sFailed = true;
-                return 1;
-            }
-        }
 
         Vertex* v = sVertices;
         for (S32 i = 0; i < shapeCount; i++)
@@ -256,7 +247,31 @@ namespace
             }
         }
 
-        GLsizei vertexCount = (GLsizei)(v - sVertices);
+        return (S32)(v - sVertices);
+    }
+
+#ifdef RW_GL3
+    rw::bool32 DrawGL(rw::int32 winWidth, rw::int32 winHeight)
+    {
+        iTouchOverlaySetWindowSize(winWidth, winHeight);
+
+        const iTouchOverlayShape* shapes;
+        if (iTouchOverlayShapes(&shapes) == 0 || sFailed)
+        {
+            return 0;
+        }
+
+        if (!sBuilt)
+        {
+            sBuilt = true;
+            if (!Build())
+            {
+                sFailed = true;
+                return 1;
+            }
+        }
+
+        GLsizei vertexCount = (GLsizei)BuildVertices();
 
         glViewport(0, 0, winWidth, winHeight);
         glDisable(GL_DEPTH_TEST);
@@ -297,6 +312,23 @@ namespace
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         return 1;
     }
+#endif
+
+#ifdef RW_VULKAN
+    rw::bool32 DrawVulkan(rw::int32 winWidth, rw::int32 winHeight)
+    {
+        iTouchOverlaySetWindowSize(winWidth, winHeight);
+
+        S32 vertexCount = BuildVertices();
+        if (vertexCount == 0)
+        {
+            return 0;
+        }
+
+        rw::d3d::implvk::drawPresentOverlay((const rw::float32*)sVertices, vertexCount);
+        return 1;
+    }
+#endif
 } // namespace
 #endif
 
@@ -305,7 +337,13 @@ void iTouchOverlayInstall()
 #ifdef RW_GL3
     if (iBackendIsGL3())
     {
-        rw::gl3::setPresentOverlay(Draw);
+        rw::gl3::setPresentOverlay(DrawGL);
+    }
+#endif
+#ifdef RW_VULKAN
+    if (iBackendIsVulkan())
+    {
+        rw::d3d::implvk::setPresentOverlay(DrawVulkan);
     }
 #endif
 }
