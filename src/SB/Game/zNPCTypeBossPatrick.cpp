@@ -349,11 +349,11 @@ void zNPCBPatrick::Init(xEntAsset* asset)
     this->round = 1;
     this->firstTimeR1Csn = 1;
     Pat_ResetGlobalStuff();
-    this->boundList = (xEnt**)xMemAlloc(gActiveHeap, 0x10, 0);
+    this->boundList = (xEnt**)xMemAlloc(gActiveHeap, 4 * sizeof(xEnt*), 0);
 
     for (S32 i = 0; i < 4; i++)
     {
-        this->boundList[i] = (xEnt*)xMemAlloc(gActiveHeap, 0xd0, 0);
+        this->boundList[i] = (xEnt*)xMemAlloc(gActiveHeap, sizeof(xEnt), 0);
         xEnt* ent = this->boundList[i];
 
         ent->id = i;
