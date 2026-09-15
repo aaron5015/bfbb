@@ -5844,7 +5844,7 @@ void zEntPlayer_Init(xEnt* ent, xEntAsset* asset)
     }
 
     globals.player.model_spongebob = ent->model;
-    memset(&globals.player.sb_models, 0, 56);
+    memset(&globals.player.sb_models, 0, sizeof(globals.player.sb_models));
     index = 0;
 
     for (m = globals.player.model_spongebob; m != NULL; m = m->Next)
