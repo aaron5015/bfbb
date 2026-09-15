@@ -11922,6 +11922,7 @@ static void zEntPlayerSurfDamageUpdate(xEnt* ent, xScene* sc, F32 dt)
                     damaged = 1;
                     break;
                 case 1:
+                {
                     xEnt* cent = (xEnt*)coll->optr;
 
                     if (cent && cent->baseType == eBaseTypeEGenerator &&
@@ -11929,6 +11930,7 @@ static void zEntPlayerSurfDamageUpdate(xEnt* ent, xScene* sc, F32 dt)
                     {
                         break;
                     }
+                }
                     // fall through
                 case 2:
                 case 3:
