@@ -1244,7 +1244,7 @@ namespace bungee_state
         }
     } // namespace
 
-    void load(class xBase& data, class xDynAsset& asset, unsigned long)
+    void load(class xBase& data, class xDynAsset& asset, size_t)
     {
         xBaseInit(&data, &asset);
         hook_type& hook = (hook_type&)data;
