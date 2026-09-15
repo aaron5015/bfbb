@@ -48,9 +48,10 @@ android {
                 //
                 // BFBB_RENDER_BACKENDS: the two backends that draw off
                 // Windows. video.backend picks between them at run time.
+                // -Pbfbb.backends=GL3 or =VULKAN builds an APK with one.
                 arguments '-DANDROID_STL=c++_static',
                           '-DANDROID_PLATFORM=android-24',
-                          '-DBFBB_RENDER_BACKENDS=GL3;VULKAN'
+                          '-DBFBB_RENDER_BACKENDS=' + (project.findProperty('bfbb.backends') ?: 'GL3;VULKAN')
 
                 // Just the game. Without this, AGP builds every target the
                 // CMake project defines -- which here would include librw's
