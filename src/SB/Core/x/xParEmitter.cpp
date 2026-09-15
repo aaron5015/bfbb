@@ -226,7 +226,7 @@ S32 xParEmitterEventCB(xBase* to, xBase* from, U32 toEvent, const F32* toParam,
         }
         break;
     case eEventEmit:
-        memset(&sp8, 0, 0x16C);
+        memset(&sp8, 0, sizeof(sp8));
         // A thirtieth of a second's worth: two console frames.
 #ifdef PLATFORM_PC
         xParEmitterEmitCustom((xParEmitter*)from, 0.033333335f, &sp8, 2.0f);
