@@ -501,7 +501,7 @@ void xEntBoulder_Update(xEntBoulder* ent, xScene* sc, F32 dt)
         // NPC
         for (iter_npc = ent->collis->npc_sidx; iter_npc < ent->collis->npc_eidx; iter_npc++)
         {
-            zNPCCommon* npc = (zNPCCommon*)(ent->collis->colls[iter_npc].optr);
+            zNPCCommon* npc = (zNPCCommon*)(xEnt*)(ent->collis->colls[iter_npc].optr);
 
             if (ent->basset->flags & 1)
             {

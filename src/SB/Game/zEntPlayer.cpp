@@ -9213,7 +9213,7 @@ void zEntPlayer_CheckCritterContact(xEnt* player, F32 dt)
             continue;
         }
 
-        zNPCCommon* npc = (zNPCCommon*)colrec->optr;
+        zNPCCommon* npc = (zNPCCommon*)(xEnt*)(colrec->optr);
 
         if (npc->baseType != eBaseTypeNPC)
         {
@@ -12092,7 +12092,7 @@ static void zEntPlayerDriveUpdate(xEnt* ent, xScene* sc, F32 dt)
         }
 
         if ((plat->baseType == eBaseTypeNPC &&
-             (((xNPCBasic*)plat)->SelfType() & 0xffffff00) == 'NTT\0') ||
+             (((xNPCBasic*)(xEnt*)plat)->SelfType() & 0xffffff00) == 'NTT\0') ||
             plat->baseType == eBaseTypeBoulder)
         {
             xEntDriveMount(drv, (xEnt*)plat, 0.15f, coll);
