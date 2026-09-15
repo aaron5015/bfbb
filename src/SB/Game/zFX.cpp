@@ -357,7 +357,7 @@ void zFXGoo_SceneEnter()
     zFXGooInstance* goo = zFXGooInstances;
     for (i = 0; i < 24; i++)
     {
-        memset(goo, 0, 4);
+        memset(&goo->atomic, 0, sizeof(RpAtomic*));
         goo->state = zFXGooStateInactive;
         goo++;
     }
