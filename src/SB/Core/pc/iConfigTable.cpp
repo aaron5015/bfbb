@@ -87,7 +87,12 @@ const iConfigSetting kConfigSettings[] = {
       "Draw everything however far away. Off restores the console's culling,\n"
       "; detail swaps and 400-unit world clip.",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "video", "msaa", "4",
+    { "video", "msaa",
+#ifdef __ANDROID__
+      "1",
+#else
+      "4",
+#endif
       "Samples per pixel, for smoother edges: 1 (off), 2, 4, 8. A count the card\n"
       "; will not grant falls back to off.",
       ICONFIG_ENUM, "1|2|4|8", kNone, kNone },
