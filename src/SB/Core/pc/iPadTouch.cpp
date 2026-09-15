@@ -93,7 +93,7 @@ namespace
     // and frames arrive at different rates, so the distance moved in one frame
     // jitters; the camera takes this share of what is still owed each frame,
     // which evens it out and still turns it exactly as far as the finger went.
-    const F32 kCameraSmoothing = 0.04f;
+    const F32 kCameraSmoothing = 0.08f;
 
     bool sEnabled;
 
