@@ -3265,7 +3265,7 @@ S32 zNPCCommon::LassoInit()
     lassdata = PRIV_GetLassoData();
     if (lassdata != NULL)
     {
-        memset(lassdata, 0, 0x18);
+        memset(lassdata, 0, sizeof(zNPCLassoInfo));
         lassdata->stage = LASS_STAT_PENDING;
         lassdata->lassoee = this;
     }
