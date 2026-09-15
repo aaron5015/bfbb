@@ -1,7 +1,9 @@
 # Battle for Bikini Bottom: Unofficial PC port (WIP)
 
-A native PC build of SpongeBob SquarePants: Battle for Bikini Bottom, compiled
-from decompiled game code and librw. This is not an emulator or wrapper.
+A native PC and Android build of SpongeBob SquarePants: Battle for Bikini Bottom,
+compiled from decompiled game code and librw. This is not an emulator or wrapper.
+
+Discord: https://discord.gg/5gcmHBVFzU
 
 **This is still a work in progress.** I believe now it is in a state where it can be fully played through without any game breaking issues for casual play, but there are still many bugs that need to be fixed and it is definitely not ready for speedrunning yet (though many of the same tricks/glitches still work).
 
@@ -9,7 +11,7 @@ There are no downloads or releases. You have to build the game yourself and get 
 
 The xbox assets are live-patched to change xbox wording to pc terminology for a better experience. There is currently no support for GameCube or PS2 assets (which are lower quality anyway, so this is the better PC-like experience anyway).
 
-This branch (`treedome`) is the PC port. For the full decomp it is based on, see the `duplotron` branch.
+This branch (`treedome`) is the PC and Android port. For the full decomp it is based on, see the `duplotron` branch.
 
 This project is LLM-driven. I am trying to make it as good of an experience as possible, but I am not a C++ expert nor am I that knowledgeable on renderware semantics. An official hand-made PC port made by people that know what they are doing will surely come at some point, but for now this is the best we have.
 
@@ -29,8 +31,8 @@ the GameCube build uses. Changes there have to keep the GameCube build byte iden
 
 ## What the port adds
 
-Everything here is on by default and has a switch in `config.ini`. See
-**Settings** below.
+Everything here has a switch in `config.ini`, which `bfbb_config.exe` edits. The
+`[experimental]` ones are off by default. See **Settings** below.
 
 ### Xbox parity
 
@@ -46,16 +48,18 @@ were recovered from the `.xbe`.
 | Cave reverb | `[xbox] reverb` | In the Mermalair and the caves. The game side already worked on both consoles; `iSndSetEnvironmentalEffect` was the empty part. The Xbox's reverb is DSP microcode that is not on the disc, so its twelve I3DL2 parameters were read out of the binary and fed to a reverb built on Microsoft's published I3DL2 design. |
 | Sound rolloff | `[xbox] sound_rolloff` | Mixes sound effects the way the xbox Directsound implementation does, fixing various sound issues like the Kelp Forest waterfall. |
 
-### New on PC
+### New in the port
 
 | Feature | Setting | What it does |
 | --- | --- | --- |
+| Renderer | `[video] backend` | Direct3D 9, Direct3D 11, OpenGL or Vulkan. See **Build** for which ones a build carries. |
+| Video profile | `[video] profile` | `vanilla`: 640x480, 4:3 HUD, console draw distance. `modern`: the display's aspect ratio at up to 1080 lines, HUD at the screen edges, no draw distance limit. `custom`: the individual settings below. Defaults to `modern` on Android and `custom` elsewhere. |
 | Resolution | `[video] width`, `height` | Renders at any size and scales the result to the display. Any size that is not 4:3 gives widescreen: the camera keeps the same vertical view and adds width, so nothing is stretched. `docs/RESOLUTION.md`. |
 | Window mode | `[video] mode` | Exclusive fullscreen, borderless, or windowed. Separate from the render size. |
 | UI anchoring | `[video] ui` | The HUD either stays in a centred 4:3 box as the console drew it, or moves out to the real screen edges. |
 | Field of view | `[video] fov` | Widens or narrows the camera from the game's own 75 degrees. Applied as a difference, so the cutscene cameras and the Cruise Bubble's zoom keep their relative angles. |
 | Frame rate and vsync | `[video] framerate`, `vsync` | Any rate, the monitor's refresh rate, or uncapped. The port runs one simulation step per frame, so this is the speed of the game as well as the picture. `docs/UNCAPPED.md` lists what was converted off a per-frame rate and what has not been swept yet. |
-| Antialiasing | `[video] msaa` | Multi-Sample Anti-Aliasing |
+| Antialiasing | `[video] msaa` | Multi-Sample Anti-Aliasing. Off by default. |
 | Per-pixel lighting | `[video] per_pixel_lighting` | Sums the lights per pixel instead of per vertex, so curved surfaces on low-polygon models stop shading in flat facets. Affects characters and objects; the level's lighting is baked into its vertex colours and does not change. |
 | Fixed-function mode | `[video] pipeline` | Draws through Direct3D 9's own transform, lighting and texture stages instead of shaders, which lowers the bar from a 2002 card to a 1999 one. Not finished: the glow, the distortion and per-pixel lighting are all shaders and turn themselves off, and environment mapping is missing. `docs/RENDERING.md`. |
 | Shadow resolution | `[video] shadow_resolution` | Character shadows scale with the render size instead of staying at the consoles' 256 pixels. |
@@ -64,6 +68,9 @@ were recovered from the `.xbe`.
 | Soundtrack replacement | `[audio] soundtrack` | Play your own files instead of the game's music. The game's music is mono, as are all 3537 of its sounds, so this is mainly how to get a stereo soundtrack in. Looping tracks loop where the game's version ended, not where your file does. |
 | Controllers | `[input] controller`, `[pad]`, `[keyboard]` | Controllers go through SDL, so any modern pad works and one `[pad]` section fits them all. Every button is remappable. |
 | Stick tuning | `[input] deadzone`, `camera_sensitivity` | How much slack a stick has before the game sees it, and how fast the right stick moves the camera. |
+| Control presets | `[input] preset` | Start from the Xbox, PS2 or GameCube control layout. `auto` follows the connected controller. `[pad]` lines override it. |
+| Button prompts | `[input] button_icons` | Draw Xbox, GameCube or PS2 button icons, or a custom set from a folder under `buttons/`. The icon follows the button's binding. |
+| Touch controls | `[input] touch_controls` | On-screen stick, buttons and camera drag. On by default on Android. Hidden while a controller is in use. |
 | Boot straight into a level | `[game] boot` | Names a scene to start in, skipping the menu. Retail's `SB.INI` has the same switch, but it lives with the assets, so two instances share it; `config.ini` is per instance and wins over it. |
 | Skip the logos | `[game] intro_movies` | Off goes straight to the title screen. |
 | Save folder | `[game] save_folder` | Where saves go. Empty is this machine's per-user data folder. |
@@ -73,6 +80,8 @@ were recovered from the `.xbe`.
 | PC wording | `[assets] platform_wording` | The Xbox text is rewritten as it loads, so nothing offers to reboot to the dashboard or calls a save folder a memory card. The files on disc are never touched. |
 | Original-game bugs | `[fixes] menu_rope`, `sky_clip` | Can be disabled for a more console-accurate experience. |
 | Smoothed geometry | `[experimental] hipoly_assets`, `hipoly_factor` | Tessellates the level and its models into curved PN-triangle patches as they load, so rocks, coral, trees and characters lose their facets while walls, and any floor with a decal lying on it, stay where they were. The collision tree is rebuilt to match. Nothing on disk changes; loads take a few seconds longer. `hipoly_passes` runs the smoothing again over its own output on models, `hipoly_factor` scales how far everything rounds, `hipoly_fillet` rounds the sharp folds of the rock over as well, `hipoly_inset` says how much of the rounding cuts corners in instead of bowing faces out, and the other `hipoly_` keys are the individual knobs. F8 swaps the shipped geometry back in and out, for before-and-after shots. `src/SB/Core/pc/iHipolyTess.cpp` and `iHipolyFillet.cpp` say what they do to a mesh. |
+| Toon shading | `[experimental] toon` | Cel shading: light in steps, raised saturation, and ink outlines on characters. `world_outline` outlines the level too, `toon_all` extends it to every model, and the other `toon_` keys tune it. Not available in fixed-function mode. |
+| World lighting | `[experimental] world_lighting` | Lights the level at runtime instead of using its baked vertex colours. `on` uses the level's own light kit where it has one, `bake` fits lights to the baked colours. The level loses the occlusion baked into those colours. `world_light_shadows` traces static shadows at load. `day_night_cycle` rotates the sun. |
 
 ### Fixed bugs
 
@@ -115,7 +124,10 @@ exits before the window opens. It tells you the path it looked in and whether
 
 ## Building
 
-Windows only (for now). The output is a 32-bit executable by default. A 64-bit
+These steps are for Windows. Linux and macOS also build, with plain CMake and
+the GL3 backend, but get less testing. For Android, see **Android** below.
+
+The Windows output is a 32-bit executable by default. A 64-bit
 build works too and plays -- pass `x64` as the second argument to the build
 script. 32-bit stays the default because it is the configuration that gets
 played; see the comment above `BFBB_BUILD_32BIT` in `CMakeLists.txt`.
@@ -258,9 +270,10 @@ misbehaves needs a line in a settings file rather than a different build.
 
 | Backend | What it is |
 | --- | --- |
-| `D3D9` | Direct3D 9, on an SDL3 window. The one the port is playtested on, and the only one with the fixed-function path. |
-| `D3D11` | Direct3D 11, on the same window. Draws levels and characters, and the screen passes. Still missing the fixed-function path. |
-| `GL3` | OpenGL 3.3, falling back through 2.1, GLES 3.1 and GLES 2.0. The only backend that runs off Windows. All three screen passes; still missing some of the ported Xbox features. |
+| `D3D9` | Direct3D 9. The only one with the fixed-function path. |
+| `D3D11` | Direct3D 11. |
+| `GL3` | OpenGL 3.3, falling back through 2.1, GLES 3.1, 3.0 and 2.0. Runs on Windows, Linux, macOS and Android. |
+| `VULKAN` | Vulkan 1.3. Runs on Windows and Android. Not in the default Windows set: `build-release.bat VULKAN` builds it alone. |
 | `NULL` | No renderer at all. Headless, and what the self-tests are built against. Not something `video.backend` offers. |
 
 Both scripts take a backend as their first argument, which builds only that one:
@@ -330,12 +343,45 @@ anything.
 | Switching `BFBB_BUILD_32BIT` does nothing | `CMAKE_CXX_FLAGS_INIT` is read once, when the language is enabled. Configure a fresh directory. |
 | The game starts and the window is blank | Almost always the asset path. The startup check catches a missing `FONT.HIP` or `boot.HIP`, but not a folder holding the wrong extraction. |
 
+## Android
+
+arm64 only, Android 7.0 or newer. Vulkan needs a Vulkan 1.3 driver.
+
+### Build the APK
+
+Needs Gradle 8.9, JDK 17, the Android SDK, and the NDK version pinned in
+`android/app/build.gradle`. Clone with submodules as above, then:
+
+```sh
+cd android
+gradle assembleDebug
+```
+
+The APK is `android/app/build/outputs/apk/debug/app-debug.apk`. It carries GL3
+and Vulkan, and uses GL3. `-Pbfbb.backends=GL3` or `-Pbfbb.backends=VULKAN`
+builds an APK with only that renderer.
+
+### First launch
+
+1. Pick the Xbox game folder. The app either copies the files into its own
+   storage, or reads them in place (needs "All files access").
+2. Pick `modern` or `vanilla` for `[video] profile`.
+
+Long-press the app icon to switch profiles or import the files again. The back
+button pauses. A controller hides the touch controls.
+
+`docs/ANDROID.md` has the details.
+
 ## Settings
 
 `config.ini` is written next to the executable on first run, with every setting
 at its default and a comment saying what it does. Read that file for what the
 values mean. Only `[assets] path` has to be filled in, and `BFBB_ASSETS`
 overrides it when set.
+
+`bfbb_config.exe`, built beside the game on desktop, edits `config.ini` with
+controls and lists the values each setting accepts. Android has no
+configurator.
 
 A newer build appends settings an older `config.ini` predates rather than
 rewriting it, so your edits survive an update.
