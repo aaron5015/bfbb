@@ -5606,11 +5606,11 @@ void zNPCSlick::SlipSlidenAway(F32 dt)
 
     tmr_moreorless -= nsteps * (1.0f / 60.0f);
     moreorless -= nsteps;
-#else
-    moreorless--;
-#endif
 
     if (moreorless < 0)
+#else
+    if (--moreorless < 0)
+#endif
     {
         moreorless = 8;
 
