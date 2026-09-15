@@ -90,61 +90,63 @@ namespace
 
     void trigger_pads(U32 pressed)
     {
-        if ((pressed & 0x10) != 0)
+        if ((pressed & XPAD_BUTTON_UP) != 0)
         {
-            trigger(73);
+            trigger(eEventPadPressUp);
         }
-        if ((pressed & 0x40) != 0)
+        if ((pressed & XPAD_BUTTON_DOWN) != 0)
         {
-            trigger(74);
+            trigger(eEventPadPressDown);
         }
-        if ((pressed & 0x80) != 0)
+        if ((pressed & XPAD_BUTTON_LEFT) != 0)
         {
-            trigger(76);
+            trigger(eEventPadPressLeft);
         }
-        if ((pressed & 0x20) != 0)
+        if ((pressed & XPAD_BUTTON_RIGHT) != 0)
         {
-            trigger(75);
+            trigger(eEventPadPressRight);
         }
-        if ((pressed & 1) != 0)
+        if ((pressed & XPAD_BUTTON_START) != 0)
         {
-            trigger(71);
+            trigger(eEventPadPressStart);
         }
-        if ((pressed & 2) != 0)
+        if ((pressed & XPAD_BUTTON_SELECT) != 0)
         {
-            trigger(72);
+            trigger(eEventPadPressSelect);
         }
-        if ((pressed & 0x1000) != 0)
+        if ((pressed & XPAD_BUTTON_R1) != 0)
         {
-            trigger(69);
+            trigger(eEventPadPressR1);
         }
-        if ((pressed & 0x2000) != 0)
+        if ((pressed & XPAD_BUTTON_R2) != 0)
         {
-            trigger(70);
+            trigger(eEventPadPressR2);
         }
-        if ((pressed & 0x100) != 0)
+        if ((pressed & XPAD_BUTTON_L1) != 0)
         {
-            trigger(67);
+            trigger(eEventPadPressL1);
         }
-        if ((pressed & 0x200) != 0)
+        if ((pressed & XPAD_BUTTON_L2) != 0)
         {
-            trigger(68);
+            trigger(eEventPadPressL2);
         }
-        if ((pressed & 0x10000) != 0)
+        if ((pressed & XPAD_BUTTON_X) != 0)
         {
-            trigger(63);
+            trigger(eEventPadPressX);
         }
-        if ((pressed & 0x20000) != 0)
+        if ((pressed & XPAD_BUTTON_O) != 0)
         {
-            trigger(65);
+            trigger(eEventPadPressO);
         }
-        if ((pressed & 0x40000) != 0)
+        // The SQUARE and TRIANGLE bits raise each other's events. That is
+        // retail; the bit names are the decomp's.
+        if ((pressed & XPAD_BUTTON_SQUARE) != 0)
         {
-            trigger(66);
+            trigger(eEventPadPressTriangle);
         }
-        if ((pressed & 0x80000) != 0)
+        if ((pressed & XPAD_BUTTON_TRIANGLE) != 0)
         {
-            trigger(64);
+            trigger(eEventPadPressSquare);
         }
     }
 
