@@ -12075,7 +12075,8 @@ static void zEntPlayerDriveUpdate(xEnt* ent, xScene* sc, F32 dt)
         return;
     }
 
-    xSurface* surf = zSurfaceGetSurface(coll);
+    xSurface* surf;
+    surf = zSurfaceGetSurface(coll);
 
     if (surf && !surf->state && zSurfaceGetDamageType(surf))
     {
