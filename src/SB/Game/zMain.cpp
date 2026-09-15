@@ -103,7 +103,7 @@ void main(S32 argc, char** argv)
     S32 i;
     char* tmpStr;
 
-    memset(&globals, 0, 0x1fc8);
+    memset(&globals, 0, sizeof(globals));
     globals.firstStartPressed = TRUE;
     iSystemInit(FALSE); // 0x6d2
     zMainOutputMgrSetup();
