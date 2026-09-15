@@ -134,27 +134,9 @@ namespace
         {
             trigger(63);
         }
-        // **The two the Xbox archives moved, swapped back.**
-        //
-        // A talkbox link names an event and the text beside it names a picture,
-        // and on these archives the two disagree: the exit prompt in the three
-        // ambush levels reads {i:button_picture_03}, which is the cancel
-        // picture and the button printed B, while the link that exits is on the
-        // circle event, which is the button printed X. Retail Xbox draws a B
-        // and answers to it, so its own trigger_pads cannot have been this one.
-        //
-        // Swapping the pair here puts the event under the button its picture
-        // names, on every preset -- the picture is drawn from the player's own
-        // glyph set and both halves move together. Same fault and same answer as
-        // the bungee exit, one layer down: there the code named the button, here
-        // the archive does.
         if ((pressed & 0x20000) != 0)
         {
-#ifdef PLATFORM_PC
-            trigger(64);
-#else
             trigger(65);
-#endif
         }
         if ((pressed & 0x40000) != 0)
         {
@@ -162,11 +144,7 @@ namespace
         }
         if ((pressed & 0x80000) != 0)
         {
-#ifdef PLATFORM_PC
-            trigger(65);
-#else
             trigger(64);
-#endif
         }
     }
 
@@ -1722,7 +1700,7 @@ void ztalkbox::update_all(xScene& s, F32 dt)
         if ((tp == TP_ACTIVE && !globals.player.ControlOff) ||
             (tp == TP_TRAPPED && globals.player.ControlOff))
         {
-            trigger_pads(*pad_pressed());
+            trigger_pads(iPadTalkBoxButtons(*pad_pressed()));
         }
     }
 

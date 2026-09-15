@@ -26,4 +26,8 @@ void iPadStopRumble();
 void iPadStartRumble(_tagxPad* pad, _tagxRumble* rumble);
 void iPadKill();
 
+// The pad bits a talk box's links were authored against, from the bits the pad
+// reads. The Xbox archives transpose O and TRIANGLE. See iPad.cpp.
+U32 iPadTalkBoxButtons(U32 pressed);
+
 #endif
