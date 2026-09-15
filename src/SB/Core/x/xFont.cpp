@@ -16,6 +16,18 @@
 #include <stdio.h>
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\strtoul.h>
 
+// basic_rect<F32> is specialized below; its first use is several hundred lines above.
+template <> basic_rect<F32>& basic_rect<F32>::scale(F32 x, F32 y);
+template <> basic_rect<F32>& basic_rect<F32>::scale(F32 x, F32 y, F32 w, F32 h);
+template <> basic_rect<F32>& basic_rect<F32>::assign(F32 x, F32 y, F32 w, F32 h);
+template <> bool basic_rect<F32>::empty() const;
+template <> void basic_rect<F32>::clip(basic_rect<F32>& a, basic_rect<F32>& b) const;
+template <> basic_rect<F32>& basic_rect<F32>::operator|=(const basic_rect<F32>& other);
+template <> void basic_rect<F32>::set_bounds(F32 x1, F32 y1, F32 x2, F32 y2);
+template <> void basic_rect<F32>::get_bounds(F32& x1, F32& y1, F32& x2, F32& y2) const;
+template <> basic_rect<F32>& basic_rect<F32>::move(F32 x, F32 y);
+template <> basic_rect<F32>& basic_rect<F32>::scale(F32 s);
+
 /* xtextbox flags */
 
 #define FLAG_UNK40 0x40
