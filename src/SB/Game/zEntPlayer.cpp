@@ -2754,8 +2754,7 @@ static U32 LedgeGrabCB(xAnimTransition*, xAnimSingle*, void* object)
 {
     zEntPlayer_SNDStop(ePlayerSnd_Heli);
     globals.player.s->ledge.tmr = 0.00001f;
-    // FIXME: figure out the type of object (local variable missing from dwarf)
-    globals.player.s->ledge.startrot = *(*((F32**)object + 0x48 / 4) + 0xb8 / 4);
+    globals.player.s->ledge.startrot = ((xEnt*)object)->frame->rot.angle;
 
     F32 endrot = globals.player.s->ledge.endrot;
     F32 startrot = globals.player.s->ledge.startrot;
