@@ -134,11 +134,6 @@ namespace
         {
             trigger(63);
         }
-        if ((pressed & 0x40000) != 0)
-        {
-            trigger(66);
-        }
-#ifdef PLATFORM_PC
         // **The two the Xbox archives moved, swapped back.**
         //
         // A talkbox link names an event and the text beside it names a picture,
@@ -155,22 +150,24 @@ namespace
         // the archive does.
         if ((pressed & 0x20000) != 0)
         {
+#ifdef PLATFORM_PC
             trigger(64);
-        }
-        if ((pressed & 0x80000) != 0)
-        {
-            trigger(65);
-        }
 #else
-        if ((pressed & 0x20000) != 0)
-        {
             trigger(65);
+#endif
+        }
+        if ((pressed & 0x40000) != 0)
+        {
+            trigger(66);
         }
         if ((pressed & 0x80000) != 0)
         {
+#ifdef PLATFORM_PC
+            trigger(65);
+#else
             trigger(64);
-        }
 #endif
+        }
     }
 
     static void flush_triggered()
