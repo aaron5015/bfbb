@@ -190,8 +190,8 @@ static void NPCPS_MsgPoolReset(NPCPSData* npc)
 static void NPCPS_CltPoolInit(NPCPSData* npc, S32 unk)
 {
     XOrdInit(&npc->cltlist, unk, 0);
-    npc->cltblob = (NPCPSClt*)xMemAlloc(gActiveHeap, unk * 16, 0);
-    memset(npc->cltblob, 0, unk * 16);
+    npc->cltblob = (NPCPSClt*)xMemAlloc(gActiveHeap, unk * sizeof(NPCPSClt), 0);
+    memset(npc->cltblob, 0, unk * sizeof(NPCPSClt));
     NPCPS_CltPoolReset(npc);
 }
 
