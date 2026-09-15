@@ -671,7 +671,7 @@ xSpline3* AllocSpline3(xVec3* points, F32* time, U32 numpoints, U32 numalloc, U3
 {
     xSpline3* spl;
 
-    spl = (xSpline3*)xMemAlloc(gActiveHeap, 0x2c, 0);
+    spl = (xSpline3*)xMemAlloc(gActiveHeap, sizeof(xSpline3), 0);
     if (numalloc < numpoints)
     {
         numalloc = numpoints;
