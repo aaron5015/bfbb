@@ -679,7 +679,7 @@ static void ApplyConfig()
     // same way the three render features are, and for a stronger reason: iScreen
     // is read by game code, which must not learn what config.ini is.
     iScreenSetSize(profile.width, profile.height);
-    iScreenSetMultiSample(iConfigGetInt("video.msaa", 4));
+    iScreenSetMultiSample(iConfigGetInt("video.msaa", 1));
     iScreenSetPerPixelLighting(iConfigGetBool("video.per_pixel_lighting", FALSE));
     iScreenSetWorldLighting(WorldLightingFromConfig());
     iScreenSetWorldLightContrast(iConfigGetFloat("experimental.world_light_contrast", 1.0f));

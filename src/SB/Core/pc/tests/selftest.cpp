@@ -383,7 +383,7 @@ static void test_config()
 
             check(strstr(grown, "; Settings added by a newer build") != NULL,
                   "the appended block says where it came from");
-            check(strstr(grown, "msaa = 4") != NULL,
+            check(strstr(grown, "msaa = 1") != NULL,
                   "a setting the file never had is appended at its default");
             check(strstr(grown, "shadow_resolution = auto") != NULL, "and so is another");
 
@@ -467,7 +467,7 @@ static void test_config()
         check(strstr(buf, "framerate = 60") != NULL, "and the frame rate at the console's");
         check(strstr(buf, "vsync = on") != NULL, "and vsync");
         check(strstr(buf, "draw_distance = on") != NULL, "and the draw distance");
-        check(strstr(buf, "msaa = 4") != NULL, "and the sample count");
+        check(strstr(buf, "msaa = 1") != NULL, "and the sample count");
         check(strstr(buf, "per_pixel_lighting = off") != NULL, "and per-pixel lighting");
         check(strstr(buf, "pipeline = auto") != NULL, "and the render pipeline");
         check(strstr(buf, "[xbox]") != NULL, "it has the [xbox] section header");
