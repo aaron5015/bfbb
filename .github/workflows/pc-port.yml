@@ -21,17 +21,11 @@
 #
 # No paths filter: bfbb.exe links the game code as well as the port, so a
 # change anywhere under src/ can break this and a filter would let it through.
-# librw-android is not this project. It is a branch of librw kept in this
-# repository because third_party/librw points at it (see .gitmodules), so it
-# carries a renderer's source tree at the root and none of the port's -- every
-# job below would fail on it for reasons that say nothing about either.
 name: PC port
 
 on:
   push:
-    branches-ignore: [librw-android]
   pull_request:
-    branches-ignore: [librw-android]
 
 jobs:
   build:
@@ -68,16 +62,7 @@ jobs:
       # configurator this job does not build. Only the package job needs it.
       - name: Submodules
         shell: bash
-        run: |
-          # third_party/librw is a branch of THIS repository (see .gitmodules),
-          # and this repository is private -- so unlike SDL, the submodule
-          # clone needs credentials. actions/checkout puts an auth header in
-          # the SUPERPROJECT's local config, and a submodule clone is a fresh
-          # git process that does not read it, so it prompted for a username
-          # and failed on a runner with no terminal. `insteadOf` reaches it
-          # because global config is inherited.
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
-          git submodule update --init --recursive third_party/librw third_party/SDL
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
 
       # librw is the renderer, and SDL reads the controllers and, under GL3,
       # owns the window. Neither is vendored as source in the tree, and CMake's
@@ -168,16 +153,7 @@ jobs:
       # configurator this job does not build. Only the package job needs it.
       - name: Submodules
         shell: bash
-        run: |
-          # third_party/librw is a branch of THIS repository (see .gitmodules),
-          # and this repository is private -- so unlike SDL, the submodule
-          # clone needs credentials. actions/checkout puts an auth header in
-          # the SUPERPROJECT's local config, and a submodule clone is a fresh
-          # git process that does not read it, so it prompted for a username
-          # and failed on a runner with no terminal. `insteadOf` reaches it
-          # because global config is inherited.
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
-          git submodule update --init --recursive third_party/librw third_party/SDL
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
 
       - name: Install Ninja
         uses: seanmiddleditch/gha-setup-ninja@v5
@@ -268,16 +244,7 @@ jobs:
       # wx this job installs a packaged copy of below.
       - name: Submodules
         shell: bash
-        run: |
-          # third_party/librw is a branch of THIS repository (see .gitmodules),
-          # and this repository is private -- so unlike SDL, the submodule
-          # clone needs credentials. actions/checkout puts an auth header in
-          # the SUPERPROJECT's local config, and a submodule clone is a fresh
-          # git process that does not read it, so it prompted for a username
-          # and failed on a runner with no terminal. `insteadOf` reaches it
-          # because global config is inherited.
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
-          git submodule update --init --recursive third_party/librw third_party/SDL
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
 
       - name: Check the submodules came down
         shell: bash
@@ -423,14 +390,6 @@ jobs:
       - name: Submodules
         shell: bash
         run: |
-          # third_party/librw is a branch of THIS repository (see .gitmodules),
-          # and this repository is private -- so unlike SDL, the submodule
-          # clone needs credentials. actions/checkout puts an auth header in
-          # the SUPERPROJECT's local config, and a submodule clone is a fresh
-          # git process that does not read it, so it prompted for a username
-          # and failed on a runner with no terminal. `insteadOf` reaches it
-          # because global config is inherited.
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
           git submodule update --init --recursive third_party/librw third_party/SDL
           if [ "$RUNNER_OS" = "Windows" ]; then
             git submodule update --init --recursive third_party/wxWidgets

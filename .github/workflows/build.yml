@@ -20,9 +20,9 @@ name: Build
 # one apiece forever. Ignoring them at the trigger means no run at all.
 on:
   push:
-    branches-ignore: [duplotron, treedome, librw-android]
+    branches-ignore: [duplotron, treedome]
   pull_request:
-    branches-ignore: [duplotron, treedome, librw-android]
+    branches-ignore: [duplotron, treedome]
 
 jobs:
   build:

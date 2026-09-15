@@ -201,8 +201,7 @@ for it to link anyway. glad holds every entry point as a function pointer and
 fills them from `SDL_GL_GetProcAddress`, so librw refers to no GL symbol at
 link time. The Android arm skips the lookup.
 
-All four changes are on the `librw-android` branch of this repository, not on
-the `librw` fork; `.gitmodules` points `third_party/librw` there.
+All four changes are on the `bfbb-port` branch of the librw fork.
 
 ### The entry point
 
