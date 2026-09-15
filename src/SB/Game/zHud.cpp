@@ -175,7 +175,7 @@ namespace zhud
     void zhud::destroy()
     {
         inited = false;
-        memset(widgets, 0x0, 0x24);
+        memset(widgets, 0x0, sizeof(widgets));
         xhud::destroy();
         last_paused = true;
     }
