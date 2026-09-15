@@ -39,6 +39,12 @@ void iTimeExit();
 iTime iTimeGet();
 F32 iTimeDiffSec(iTime t0, iTime t1);
 F32 iTimeDiffSec(iTime time);
+// Stop and restart iTimeGet's clock. A phone blocks the game thread while the
+// app is in the background, and without this the first frame back would see
+// the whole absence as one frame's delta. The clock reads the moment of
+// suspension until it is resumed.
+void iTimeSuspend();
+void iTimeResume();
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 void iProfileClear(U32 sceneID);

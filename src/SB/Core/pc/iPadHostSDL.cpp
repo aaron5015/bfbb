@@ -31,6 +31,7 @@
 #include "iPadKeyboard.h"
 #include "iPadStick.h"
 #include "iPadTouch.h"
+#include "iTime.h"
 #include "xPad.h"
 
 #include <SDL3/SDL.h>
@@ -65,6 +66,26 @@ static bool SDLCALL WatchBackButton(void*, SDL_Event* e)
     return true;
 }
 #endif
+
+// Android and iOS block the game thread while the app is in the background.
+// The game clock stops for that time, so the frame after it is an ordinary
+// frame and not the whole absence at once. A watch and not a case in the event
+// pump: both events reach the queue before the pump drains it, so only the
+// watch sees when each happened. Desktop SDL sends neither.
+//
+// Not in iWindowSDL.cpp: that is in bfbb_rw, which does not link the clock.
+static bool SDLCALL WatchBackground(void*, SDL_Event* e)
+{
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+    {
+        iTimeSuspend();
+    }
+    else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND)
+    {
+        iTimeResume();
+    }
+    return true;
+}
 
 static S32 sPinnedSlot = -1;
 static bool sReady;
@@ -406,6 +427,7 @@ void iPadHostInit()
 #ifdef __ANDROID__
     SDL_AddEventWatch(WatchBackButton, NULL);
 #endif
+    SDL_AddEventWatch(WatchBackground, NULL);
 
     // XInput has no notion of focus and this backend should not grow one: the
     // keyboard already stops when the window loses focus, and a controller that
