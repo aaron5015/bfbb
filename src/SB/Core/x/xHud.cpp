@@ -64,7 +64,7 @@ namespace xhud
 
     block_allocator::block_allocator(U32 a0, U32 a1)
     {
-        _block_size = ALIGN(a0, 4) + 4;
+        _block_size = ALIGN(a0, sizeof(holder)) + sizeof(holder);
         _top = NULL;
         _next_alloc = _head_alloc;
         _head_alloc = this;

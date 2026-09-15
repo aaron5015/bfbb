@@ -489,11 +489,13 @@ xAnimFile* xAnimFileNewBilinear(void** rawData, const char* name, U32 flags, xAn
     xAnimFile* afile;
     if (gxAnimUseGrowAlloc)
     {
-        afile = (xAnimFile*)xMemGrowAlloc(gActiveHeap, numX * numY * 4 + sizeof(xAnimFile));
+        afile = (xAnimFile*)xMemGrowAlloc(gActiveHeap,
+                                          numX * numY * sizeof(void*) + sizeof(xAnimFile));
     }
     else
     {
-        afile = (xAnimFile*)xMemAlloc(gActiveHeap, numX * numY * 4 + sizeof(xAnimFile), 0);
+        afile = (xAnimFile*)xMemAlloc(gActiveHeap,
+                                      numX * numY * sizeof(void*) + sizeof(xAnimFile), 0);
     }
 
     if (numX > 1 || numY > 1)

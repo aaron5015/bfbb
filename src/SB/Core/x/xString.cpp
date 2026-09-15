@@ -111,7 +111,7 @@ char* xStrTokBuffer(const char* string, const char* control, void* buffer)
     U8* ctrl;
     U8 map[32];
     char* dest = (char*)buffer;
-    dest += 4;
+    dest += sizeof(char*);
 
     for (S32 i = 0; i < 32; i++)
     {
@@ -156,7 +156,7 @@ char* xStrTokBuffer(const char* string, const char* control, void* buffer)
         return NULL;
     }
 
-    return (char*)buffer + 4;
+    return (char*)buffer + sizeof(char*);
 }
 
 #define XSTR_UPPER(c) ((c) >= 'a' && (c) <= 'z' ? (c)-32 : (c))
