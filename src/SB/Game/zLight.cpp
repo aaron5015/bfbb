@@ -291,7 +291,7 @@ void zLightAddLocal(xEnt* ent)
     default_light_pos.y += 1.0f;
     if (!ent->entShadow)
     {
-        ent->entShadow = (xEntShadow*)xMemAlloc(gActiveHeap, 40, 0);
+        ent->entShadow = (xEntShadow*)xMemAlloc(gActiveHeap, sizeof(xEntShadow), 0);
         xEntInitShadow(*ent, *ent->entShadow);
         ent->entShadow->pos = default_light_pos;
         ent->entShadow->vec = sDefaultShadowVec;
