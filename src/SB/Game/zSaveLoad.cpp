@@ -178,7 +178,7 @@ void zSaveLoad_Tick()
     xParMgrUpdate(time_elapsed);
     zSceneUpdate(time_elapsed);
 
-    xMat4x3 playerMat = *xEntGetFrame(&(xEnt)globals.player.ent);
+    xMat4x3 playerMat = *xEntGetFrame(&(xEnt&)globals.player.ent);
     playerMat.pos.y += 0.6f;
 
     xSndSetListenerData(SND_LISTENER_CAMERA, &globals.camera.mat);
