@@ -81,6 +81,15 @@ android {
         debug {
             // The native half is what is being debugged; leave it alone.
             jniDebuggable = true
+
+            // Optimised, with symbols. AGP builds a debug variant's native
+            // code as CMake Debug, which is -O0: the game at a third of its
+            // speed, and every frame time measured against it wrong.
+            externalNativeBuild {
+                cmake {
+                    arguments '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+                }
+            }
         }
     }
 
