@@ -1160,7 +1160,7 @@ S32 NPCC_bnd_ofBase(xBase* tgt, xBound* bnd)
     case eBaseTypeDestructObj:
     case eBaseTypeNPC:
     case eBaseTypeBoulder:
-        *bnd = *(xBound*)((int)tgt + 0x64);
+        *bnd = ((xEnt*)tgt)->bound;
         break;
     default:
         retval = 0;
