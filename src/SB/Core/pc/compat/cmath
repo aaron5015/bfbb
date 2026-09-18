@@ -1,0 +1,15 @@
+#ifndef BFBB_PC_COMPAT_CMATH
+#define BFBB_PC_COMPAT_CMATH
+
+// The std:: spellings of the f-suffixed math functions that the game uses live
+// in _stdfloatmath.h, shared with compat/<math.h>.
+//
+// It shadows the system header on the PC include path and chains to it with
+// include_next, so everything standard still comes from the system.
+#include_next <cmath>
+
+#include <math.h>
+
+#include "_stdfloatmath.h"
+
+#endif

@@ -1,0 +1,1090 @@
+// RenderWare C API: bringing librw up, and RwEngineInstance.
+//
+// Nothing else in this directory can run until this does. librw's objects are
+// allocated out of plugin-extended blocks whose sizes are only known after the
+// modules have registered, and Frame::updateObjects walks `rw::engine`'s dirty
+// list -- so a Frame::create() against a dead engine either allocates zero
+// bytes or dereferences a null engine. Both were observed before this file
+// existed.
+//
+// librw's sequence is init -> open -> start, and it is not optional:
+//
+//   Engine::init()   installs the memory functions, opens the plugin list and
+//                    registers the core modules (Frame, Image, Raster,
+//                    Texture) plus every platform's driver plugins. After this
+//                    the per-object plugin sizes are still growing.
+//   Engine::open()   allocates `rw::engine` itself, points it at the render
+//                    device, and allocates the per-platform Driver blocks.
+//                    Object sizes are frozen here.
+//   Engine::start()  runs the plugin constructors -- which is what finally
+//                    calls frameOpen() to initialise engine->frameDirtyList --
+//                    and registers the image file formats.
+//
+// That maps one-to-one onto RenderWare's own RwEngineInit/Open/Start, including
+// the rule that plugin attaches (RpWorldPluginAttach and friends, librw's
+// rw::registerHAnimPlugin() and friends) go strictly between init and open.
+// The GameCube's RenderWareInit in iSystem.cpp already sequences it that way,
+// so it needs no changes to work here.
+
+#include <rwcore.h>
+
+// BEFORE librw's headers, and that ordering is load-bearing: rwd3d.h declares
+// EngineOpenParams as { HWND window; } only when _D3D9_H_ is already defined,
+// and as { uint32 please_include_windows_h; } otherwise. Including these after
+// rw.h gives the second one and a compile error that names the fix.
+#if defined(RW_D3D9) || defined(RW_D3D8)
+#include <windows.h>
+#include <d3d9.h>
+#endif
+#ifdef RW_D3D11
+#include <windows.h>
+#include <d3d11.h>
+#endif
+
+#include "rw.h"
+
+#include "backend.h"
+#include "iDistort.h"
+#include "iGlow.h"
+#include "iScreen.h"
+#include "iWindow.h"
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// ---------------------------------------------------------------------------
+// Memory
+//
+// The two libraries disagree about allocator signatures: RenderWare's take a
+// size, librw's also take a duration hint (MEMDUR_FRAME, MEMDUR_GLOBAL, ...)
+// used only by its debug allocation tracker. Since the game's allocator has no
+// notion of duration there is nothing to map the hint onto, and dropping it
+// loses nothing -- librw's own default memfuncs drop it too.
+//
+// The indirection exists so there is exactly ONE allocator: whatever the game
+// passed to RwEngineInit is what librw allocates from, and it is also what the
+// RwMalloc/RwFree macros reach through RWSRCGLOBAL(memoryFuncs).
+
+static void* shimMalloc(size_t size, rw::uint32 hint)
+{
+    return RWSRCGLOBAL(memoryFuncs).rwmalloc(size);
+}
+
+static void* shimRealloc(void* mem, size_t size, rw::uint32 hint)
+{
+    return RWSRCGLOBAL(memoryFuncs).rwrealloc(mem, size);
+}
+
+static void shimFree(void* mem)
+{
+    RWSRCGLOBAL(memoryFuncs).rwfree(mem);
+}
+
+// RwEngineInit accepts a null memFuncs, and RenderWare then uses the C library.
+// Spelling that out here rather than passing null through to librw keeps the
+// single-allocator property: the RwMalloc macros and librw still agree.
+static const RwMemoryFunctions sCLibraryMemoryFunctions = { malloc, free, realloc, calloc };
+
+// ---------------------------------------------------------------------------
+// Strings
+//
+// RWSRCGLOBAL(stringFuncs) is a full dispatch table in retail, and xFX.cpp
+// calls through it directly (`RwEngineInstance->stringFuncs.vecStrcmp`). The
+// table is filled in completely rather than only where there is a caller
+// today, because a half-filled one is a null pointer waiting for whichever
+// call site is ported next.
+//
+// The three search functions need wrappers: C++ overloads strchr/strrchr/strstr
+// on constness, so neither overload has RenderWare's `RwChar*(const RwChar*)`
+// signature and the table cannot take their address directly.
+
+static RwChar* shimStrrchr(const RwChar* string, int findThis)
+{
+    return const_cast<RwChar*>(strrchr(string, findThis));
+}
+
+static RwChar* shimStrchr(const RwChar* string, int findThis)
+{
+    return const_cast<RwChar*>(strchr(string, findThis));
+}
+
+static RwChar* shimStrstr(const RwChar* string, const RwChar* findThis)
+{
+    return const_cast<RwChar*>(strstr(string, findThis));
+}
+
+// _strupr/_strlwr are Microsoft's, and the port also builds against POSIX (see
+// iHostPosix.cpp), which has no portable spelling of either. Four lines each is
+// cheaper than another compat header.
+static RwChar* shimStrupr(RwChar* string)
+{
+    for (RwChar* p = string; *p != '\0'; p++)
+    {
+        if (*p >= 'a' && *p <= 'z')
+        {
+            *p = (RwChar)(*p - ('a' - 'A'));
+        }
+    }
+    return string;
+}
+
+static RwChar* shimStrlwr(RwChar* string)
+{
+    for (RwChar* p = string; *p != '\0'; p++)
+    {
+        if (*p >= 'A' && *p <= 'Z')
+        {
+            *p = (RwChar)(*p + ('a' - 'A'));
+        }
+    }
+    return string;
+}
+
+// stricmp comes from the compat layer (src/SB/Core/pc/compat/string.h), which
+// is the one of these with no portable spelling.
+static const RwStringFunctions sStringFunctions = {
+    sprintf,     vsprintf,   strcpy,     strncpy, strcat,  strncat,
+    shimStrrchr, shimStrchr, shimStrstr, strcmp,  strncmp, stricmp,
+    strlen,      shimStrupr, shimStrlwr, strtok,  sscanf,
+};
+
+// ---------------------------------------------------------------------------
+// RwEngineInstance
+//
+// RenderWare allocates this; the shim gives it static storage instead, because
+// there is no plugin mechanism extending RwGlobals on this side -- librw's
+// engine plugins extend `rw::engine`, which is a different object. The pointer
+// is still nulled by RwEngineTerm so that a use-after-term faults where it
+// happens rather than reading a stale but plausible struct.
+//
+// RwGlobals and rw::Engine agree on their first two fields and on nothing after
+// them, so this is a second structure and not an alias. What that costs is
+// listed field by field in RwEngineInit.
+
+static RwGlobals sGlobals;
+
+RwGlobals* RwEngineInstance;
+
+RwBool RwEngineInit(const RwMemoryFunctions* memFuncs, RwUInt32 initFlags, RwUInt32 resArenaSize)
+{
+    if (RwEngineInstance != NULL)
+    {
+        return FALSE;
+    }
+
+    memset(&sGlobals, 0, sizeof(sGlobals));
+
+    sGlobals.memoryFuncs = (memFuncs != NULL) ? *memFuncs : sCLibraryMemoryFunctions;
+    sGlobals.stringFuncs = sStringFunctions;
+
+    // RwGlobals::resArenaInitSize is where RenderWare records this, and the
+    // GameCube passes 0x60000. librw has no resource arena at all -- it
+    // allocates raster and geometry instance data on demand -- so the number is
+    // recorded and nothing sizes anything from it.
+    sGlobals.resArenaInitSize = resArenaSize;
+
+    // Not filled in, each for a reason, and each left null so that a call
+    // through it faults at the call site instead of reading a wrong value:
+    //
+    //   memoryAlloc/memoryFree  RenderWare's free lists. librw has none; every
+    //                           object type allocates through rwMalloc.
+    //   dOpenDevice, stdFunc    retail's driver dispatch tables. On this side
+    //                           RwRenderStateSet and the rest are shim
+    //                           functions, not entries dispatched through here.
+    //   fileFuncs               librw owns file access through
+    //                           rw::engine->filefuncs, which Engine::open sets
+    //                           to the C library. Nothing above the seam reads
+    //                           RwGlobals::fileFuncs.
+    //   metrics                 librw keeps no per-frame counters.
+    //
+    // curCamera and curWorld are the exception that needs following up: they
+    // are read directly by xCutscene.cpp and xFX.cpp, and librw keeps the same
+    // two in rw::engine->currentCamera/currentWorld. Because game code reads
+    // them as struct fields there is no call to hook, so whoever writes
+    // RwCameraBeginUpdate/RwCameraEndUpdate and RpWorldRender has to assign
+    // both copies. Until then they stay null.
+
+    // The dirty-frame list is librw's -- rw::engine->frameDirtyList, which
+    // frameOpen() initialises during RwEngineStart. This one is initialised as
+    // an empty list rather than left as null links so that a traversal of it
+    // terminates immediately, which is the truth: it never has anything in it.
+    rwLinkListInitialize(&sGlobals.dirtyFrameList);
+
+    // rwENGINEINITNOFREELISTS asks RenderWare not to use free lists. librw has
+    // no free lists to disable, so both values of the flag describe what it
+    // already does.
+    (void)initFlags;
+
+    rw::MemoryFunctions memoryFunctions;
+    memoryFunctions.rwmalloc = shimMalloc;
+    memoryFunctions.rwrealloc = shimRealloc;
+    memoryFunctions.rwfree = shimFree;
+
+    // Left null on purpose: librw fills these two in with its own wrappers that
+    // abort on a failed allocation, which is the behaviour we want and cannot
+    // write here without duplicating it.
+    memoryFunctions.rwmustmalloc = NULL;
+    memoryFunctions.rwmustrealloc = NULL;
+
+    // RwEngineInstance has to be live before this call, not after it: librw
+    // allocates during init, and shimMalloc reads the table through it.
+    RwEngineInstance = &sGlobals;
+
+    if (!rw::Engine::init(&memoryFunctions))
+    {
+        RwEngineInstance = NULL;
+        return FALSE;
+    }
+
+    sGlobals.engineStatus = rwENGINESTATUSINITED;
+    return TRUE;
+}
+
+#ifdef RW_D3D9
+// The probe's IDirect3D9, kept alive for as long as the engine is open. See the
+// comment at the probe in RwEngineOpen for why it is not released there.
+static IDirect3D9* sProbeD3D9;
+#endif
+
+// The device, one function per backend.
+//
+// Each is compiled when its backend is LINKED and called when its backend is
+// the one RUNNING, which are two different questions once an executable can
+// carry several. They were arms of one #if/#elif inside RwEngineOpen while only
+// one could ever be built.
+//
+// Everything they share is in RwEngineOpen below; what is in here is the part
+// that cannot be written twice, which is mostly rw::EngineOpenParams -- the one
+// librw type whose SHAPE is per backend.
+
+#if defined(RW_D3D9) || defined(RW_D3D8)
+static RwBool OpenDeviceD3D9(void)
+{
+    rw::d3d::EngineOpenParams params;
+    params.window = (HWND)iWindowNativeHandle();
+
+    if (params.window == NULL)
+    {
+        // A D3D device cannot be created without one, and librw would assert
+        // rather than say so.
+        return FALSE;
+    }
+
+    // **Check for a usable adapter BEFORE handing librw the window.**
+    //
+    // librw does not tell you when the device fails to open: Engine::open calls
+    // device.system(DEVICEOPEN, ...) and DISCARDS the result (engine.cpp:276),
+    // then sets Engine::state = Opened and returns 1. The fault lands later,
+    // inside RwEngineStart, dereferencing a nil d3d9Globals.d3d9 with nothing
+    // on screen to explain it -- and checking AFTER the fact does not work
+    // either, because by then the device query faults on the same nil pointer.
+    //
+    // So the probe happens here, with its own IDirect3D9 that is released
+    // again. It is a few lines and it turns a segfault into a sentence.
+    //
+    // Worth knowing while reading librw's output: it reports BOTH of openD3D's
+    // failures with the same string, "Direct3DCreate9() failed". The second
+    // one, at d3d/d3ddevice.cpp:1533, actually means Direct3DCreate9 SUCCEEDED
+    // and no adapter reported D3DDEVTYPE_HAL support -- a very different
+    // problem, and usually an environmental one rather than a missing D3D9.
+    D3DCAPS9 caps;
+    memset(&caps, 0, sizeof(caps));
+
+    {
+        IDirect3D9* probe = Direct3DCreate9(D3D_SDK_VERSION);
+
+        if (probe == NULL)
+        {
+            printf("bfbb: Direct3DCreate9 failed -- this machine has no usable "
+                   "Direct3D 9 runtime\n");
+            fflush(stdout);
+            return FALSE;
+        }
+
+        bool haveHardwareAdapter = false;
+
+        for (UINT adapter = 0; adapter < probe->GetAdapterCount(); adapter++)
+        {
+            if (SUCCEEDED(probe->GetDeviceCaps(adapter, D3DDEVTYPE_HAL, &caps)))
+            {
+                haveHardwareAdapter = true;
+                break;
+            }
+        }
+
+        // NOT released here.
+        //
+        // Releasing the last reference tears down D3D9's process-wide state,
+        // and openD3D creates a second IDirect3D9 a few instructions later --
+        // a destroy/recreate cycle that this machine has been seen to fault
+        // inside, at Direct3DCreate9Ex+0x25472 writing address 0x14, with the
+        // probe itself having succeeded moments before. Holding the reference
+        // keeps that state alive across the handover, which is also what an
+        // ordinary D3D application does: it creates the object once.
+        //
+        // Released in RwEngineClose, beside the engine it belongs to.
+        sProbeD3D9 = probe;
+
+        if (!haveHardwareAdapter)
+        {
+            // Environmental far more often than not: an adapter whose display
+            // is asleep or switched off can stop reporting HAL support, and a
+            // remote session has no hardware adapter at all.
+            printf("bfbb: Direct3D 9 is present but no adapter reports hardware "
+                   "support (checked %u)\n",
+                   (unsigned)probe->GetAdapterCount());
+            fflush(stdout);
+            return FALSE;
+        }
+    }
+
+    // Fix the size the game renders at, before the device is made.
+    //
+    // The game's framebuffer is a fixed part of its design -- zGame.cpp builds
+    // the main camera's raster at one size and never changes it, and librw takes
+    // the viewport from that raster while the back buffer follows the window. So
+    // a window larger than the raster does not enlarge the picture, it leaves
+    // the picture at its own size in the top-left corner with the rest of the
+    // window around it. A virtual screen makes the picture the thing that
+    // scales.
+    //
+    // The size comes from iScreen, which is the same thing every camera raster
+    // in the game is built from. They have to agree: a camera raster that does
+    // not match the virtual screen fails to bind a depth surface and draws
+    // nothing at all.
+    //
+    // NOT from the window. The two are equal in windowed mode and are not in the
+    // other two -- borderless and exclusive fullscreen both cover a monitor,
+    // and the whole point of the virtual screen is that what the game renders at
+    // is not what the display is doing. Taking the window's size here would make
+    // `mode = fullscreen` silently override the resolution setting.
+    //
+    // Read now, before anything can resize the window: this is the size the port
+    // booted with, and it is deliberately NOT updated afterwards.
+    // Samples first: the surfaces are made when the size is set, and how many
+    // samples they carry has to be decided before they exist.
+    rw::d3d::setVirtualScreenSamples(iScreenMultiSample());
+    rw::d3d::setPerPixelLightingEnabled(iScreenPerPixelLighting());
+
+    // Which of the two D3D9 paths draws, resolved out of AUTO now that the
+    // adapter caps have been read.
+    //
+    // driverOpen reads this to pick the pipelines' render callbacks AND to
+    // decide whether to compile a shader at all, so it has to be set before
+    // Engine::open and not changed afterwards. librw asserts on a shader it
+    // asked for and did not get, so a card below Shader Model 2.0 has to be
+    // sent down the fixed-function path here rather than after a failed
+    // compile.
+    //
+    // The version words are packed major.minor -- D3DVS_VERSION(2, 0) -- and
+    // both stages are checked, because the default shaders come as a pair and
+    // a card with one and not the other is no use to either path.
+    {
+        bool haveShaderModel2 = caps.VertexShaderVersion >= D3DVS_VERSION(2, 0) &&
+                                caps.PixelShaderVersion >= D3DPS_VERSION(2, 0);
+        iScreenPipeline pipeline = iScreenGetPipeline();
+
+        if (pipeline == iSCREENPIPE_SHADER && !haveShaderModel2)
+        {
+            // Asked for by name, so it stands -- but librw's assert is a poor
+            // way to find out why the game closed.
+            printf("bfbb: video.pipeline = shader, but this adapter reports no "
+                   "Shader Model 2.0 (vs %u.%u, ps %u.%u)\n",
+                   (unsigned)((caps.VertexShaderVersion >> 8) & 0xFF),
+                   (unsigned)(caps.VertexShaderVersion & 0xFF),
+                   (unsigned)((caps.PixelShaderVersion >> 8) & 0xFF),
+                   (unsigned)(caps.PixelShaderVersion & 0xFF));
+            fflush(stdout);
+        }
+
+        rw::d3d::setFixedFunctionEnabled(pipeline == iSCREENPIPE_FIXED ||
+                                         (pipeline == iSCREENPIPE_AUTO && !haveShaderModel2));
+    }
+
+    // The cartoon look. Every part of it is a shader permutation, so it draws
+    // nothing down the fixed-function path above; iScreenToon is left alone
+    // rather than cleared, because the setting is still what the player asked
+    // for and the card is what could not do it.
+    rw::d3d::setToonShading(iScreenToon(), iScreenToonBands(), iScreenToonSaturation(),
+                            iScreenToonStrength());
+    rw::d3d::setToonFlatten(iScreenToonColors());
+
+    // 0.65 is where the rim starts, and it is not a setting: it is a property of
+    // how wide a line reads, and one knob for the rim is enough.
+    rw::d3d::setToonLook(iScreenToonWrap(), iScreenToonRim(), 0.65f, iScreenToonOcclusion(),
+                         iScreenToonHardness());
+
+    // The ink itself is installed per character by iToonSetOutline, which is the
+    // only thing that knows whose outline it is. Only the width is a setting,
+    // and it rides in alpha.
+    rw::d3d::setOutline(0.35f, 0.35f, 0.35f, iScreenToonOutline());
+
+    rw::d3d::setVirtualScreen(iScreenWidth(), iScreenHeight());
+    if (!rw::Engine::open(&params))
+    {
+        printf("bfbb: librw refused to open the D3D9 device on this window\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
+#ifdef RW_D3D11
+static RwBool OpenDeviceD3D11(void)
+{
+    rw::d3d::EngineOpenParams params;
+    params.window = (HWND)iWindowNativeHandle();
+
+    if (params.window == NULL)
+    {
+        return FALSE;
+    }
+
+    // The same probe the D3D9 arm above does and for the same reason: librw
+    // discards what DEVICEOPEN said, so a machine with no usable adapter faults
+    // later with nothing on screen to explain it. D3D11 asks in one call --
+    // creating a device with no swap chain costs a device and tells you
+    // everything the caps query would.
+    {
+        ID3D11Device* probe = NULL;
+        HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, NULL, 0,
+                                       D3D11_SDK_VERSION, &probe, NULL, NULL);
+
+        if (FAILED(hr))
+        {
+            printf("bfbb: no adapter on this machine reports Direct3D 11 hardware "
+                   "support (hr=0x%08lx)\n",
+                   (unsigned long)hr);
+            fflush(stdout);
+            return FALSE;
+        }
+
+        probe->Release();
+    }
+
+    rw::d3d::setVirtualScreenSamples(iScreenMultiSample());
+    rw::d3d::setPerPixelLightingEnabled(iScreenPerPixelLighting());
+    rw::d3d::setVirtualScreen(iScreenWidth(), iScreenHeight());
+    if (!rw::Engine::open(&params))
+    {
+        printf("bfbb: librw refused to open the D3D11 device on this window\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
+#ifdef RW_GL3
+static RwBool OpenDeviceGL3(void)
+{
+    // **librw makes the window here; the port only says what to make.**
+    //
+    // The opposite way round from D3D9 above, and the reason is in iWindow.h:
+    // a GL context and the window it draws into have to be created together,
+    // so EngineOpenParams carries an out-parameter for the window rather than
+    // a handle to one. iWindowSDL.cpp's iWindowOpen therefore recorded the
+    // request and created nothing; this is where the request is handed over.
+    //
+    // What actually creates it is RwEngineStart, not this call -- librw's
+    // openSDL3 only brings SDL's video subsystem up and enumerates the display
+    // modes, and startSDL3 does the rest. That is the same split D3D9 has,
+    // where DEVICEOPEN takes the window and DEVICEINIT makes the device, and it
+    // is what leaves SelectFullscreenVideoMode below a moment to run in.
+    const iWindowDeferred* deferred = iWindowDeferredParams();
+
+    if (deferred == NULL || deferred->handleSlot == NULL)
+    {
+        // The GL3 build was linked against a window backend that owns its own
+        // window rather than deferring it, and there is nothing to hand librw.
+        printf("bfbb: the GL3 backend needs a deferred-window iWindow (iWindowSDL.cpp), "
+               "and iWindowOpen must have run first\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    rw::gl3::setPerPixelLightingEnabled(iScreenPerPixelLighting());
+
+    // The cartoon look, the same set the D3D9 arm above pushes. 0.65 is where
+    // the rim starts and is not a setting: it is a property of how wide a line
+    // reads, and one knob for the rim is enough. The ink itself is installed per
+    // character by iToonSetOutline, which is the only thing that knows whose
+    // outline it is; only the width is a setting, and it rides in alpha.
+    rw::gl3::setToonShading(iScreenToon(), iScreenToonBands(), iScreenToonSaturation(),
+                            iScreenToonStrength());
+    rw::gl3::setToonFlatten(iScreenToonColors());
+    rw::gl3::setToonLook(iScreenToonWrap(), iScreenToonRim(), 0.65f, iScreenToonOcclusion(),
+                         iScreenToonHardness());
+    rw::gl3::setOutline(0.35f, 0.35f, 0.35f, iScreenToonOutline());
+
+    rw::gl3::EngineOpenParams params;
+    params.window = (SDL_Window**)deferred->handleSlot;
+    params.width = deferred->width;
+    params.height = deferred->height;
+    params.windowtitle = deferred->title;
+
+#if defined(LIBRW_SDL2) || defined(LIBRW_SDL3)
+    // Read by librw's SDL2 arm only. Its SDL3 arm ignores it and takes
+    // fullscreen from the selected video mode instead, which is the path
+    // SelectFullscreenVideoMode drives -- so this is FALSE rather than the
+    // port's mode, and the one backend that reads it still agrees with the
+    // other about what "windowed" means.
+    params.fullscreen = FALSE;
+#endif
+
+    // The same fixed size the D3D9 arm above sets, for the same reason and from
+    // the same source.
+    //
+    // GL3 can run without one -- a Raster::CAMERA is the default framebuffer,
+    // and the viewport follows the window, so the picture fills whatever it is
+    // given. What it does not do is keep its shape: the camera's projection is
+    // fixed at startup and nothing revisits it, so a window resized to a
+    // different aspect ratio stretches the picture. D3D9 never had that,
+    // because its virtual screen is blitted in as the largest rectangle of the
+    // right shape that fits.
+    //
+    // So GL3 has one too, and the two backends now differ in how they present
+    // rather than in what the game sees. The camera raster gets an FBO of its
+    // own at the size below, everything draws into that at that resolution, and
+    // showRaster scales it into the window with black bars.
+    //
+    // NOT from the window, for the reason the D3D9 arm gives: the two are equal
+    // in windowed mode and are not in either fullscreen mode, and taking the
+    // window's size would make `mode = fullscreen` silently override the
+    // resolution setting.
+    //
+    // The samples go in first, for the reason the D3D9 arm gives: they are a
+    // property of the surface, and the surface is built the first time a camera
+    // raster asks for it.
+    rw::gl3::setVirtualScreenSamples(iScreenMultiSample());
+    rw::gl3::setVirtualScreen(iScreenWidth(), iScreenHeight());
+    if (!rw::Engine::open(&params))
+    {
+        printf("bfbb: librw refused to open an OpenGL device\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
+static RwBool OpenDeviceNull(void)
+{
+    // LIBRW_PLATFORM=NULL. The null device ignores the argument entirely, and
+    // there is no window -- which is what lets the shim's own tests run
+    // headless.
+    if (!rw::Engine::open(NULL))
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+RwBool RwEngineOpen(RwEngineOpenParams* initParams)
+{
+    if (RwEngineInstance == NULL)
+    {
+        return FALSE;
+    }
+
+    // librw's EngineOpenParams is declared per backend and there is nothing in
+    // RwEngineOpenParams to translate from: its displayID is a pointer to the
+    // GameCube's RwGameCubeDeviceConfig, which describes a console's video
+    // encoder. So the parameters are built from the port's own window instead,
+    // and initParams is ignored -- iSystem.cpp opens the window before it
+    // reaches here, which is the same order gc/iSystem.cpp uses when it calls
+    // VIInit before RwEngineOpen.
+    //
+    // This is the one place in the shim that has to know which backend was
+    // linked, because EngineOpenParams is the only librw type whose SHAPE
+    // changes with it. Everything else the port touches is backend-neutral.
+    (void)initParams;
+
+    // Before the device opens, because opening it builds shaders and a uniform
+    // registered after a shader was built is a printf in every later flush of
+    // it. Both are no-ops on a backend whose shader constants are numbered.
+    // The notes on the definitions have the rest.
+    iGlowRegisterShaderUniforms();
+    iDistortRegisterShaderUniforms();
+
+    // The backend. Already done by RenderWareInit before the window was
+    // opened; repeated here because this is the call that has to have it, and
+    // because the shim's own tests reach RwEngineOpen without iSystem.
+    iBackendResolve();
+
+    RwBool opened = FALSE;
+
+    switch (iScreenGetBackend())
+    {
+#if defined(RW_D3D9) || defined(RW_D3D8)
+    case iSCREENBACKEND_D3D9:
+        opened = OpenDeviceD3D9();
+        break;
+#endif
+#ifdef RW_D3D11
+    case iSCREENBACKEND_D3D11:
+        opened = OpenDeviceD3D11();
+        break;
+#endif
+#ifdef RW_GL3
+    case iSCREENBACKEND_GL3:
+        opened = OpenDeviceGL3();
+        break;
+#endif
+    default:
+        opened = OpenDeviceNull();
+        break;
+    }
+
+    if (!opened)
+    {
+        return FALSE;
+    }
+
+    sGlobals.engineStatus = rwENGINESTATUSOPENED;
+    return TRUE;
+}
+
+#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+
+// Pick the display mode for exclusive fullscreen, if that is what was asked for.
+//
+// Between RwEngineOpen and RwEngineStart is the only moment this can be done:
+// makeVideoModeList runs inside Engine::open, and startD3D reads the choice
+// inside Engine::start. A D3D9 device is created windowed or not, and cannot
+// change its mind without a reset.
+//
+// The same arithmetic serves GL3, which is why this is not two functions.
+// librw's startSDL3 also reads the selected mode -- an entry carrying
+// VIDEOMODEEXCLUSIVE makes it create the window fullscreen at that mode, and
+// index 0 makes it create an ordinary one -- so under both backends the mode is
+// the only thing that can ask for exclusive fullscreen, and it must be asked
+// before the window or the device exists.
+//
+// librw's list is the desktop's current mode as index 0 with no flags -- that
+// is the WINDOWED entry -- followed by every exclusive mode the adapter
+// enumerates. So leaving it alone is windowed, which is what borderless wants
+// too: borderless is a WS_POPUP the size of the monitor and the renderer has no
+// reason to know it is one.
+//
+// The mode chosen is the one matching the DESKTOP's resolution, so entering the
+// game does not change what the monitor is doing. The render size is a separate
+// setting and stays separate: the picture is scaled onto whatever the display
+// is, so there is nothing to gain by making the monitor match it and a mode set
+// on every launch to lose.
+static void SelectFullscreenVideoMode()
+{
+    if (iWindowGetMode() != iWINDOW_FULLSCREEN)
+    {
+        return;
+    }
+
+    // Index 0, read before anything changes the current mode, is the desktop's
+    // own. rw::Engine::getVideoModeInfo rather than RwEngineGetVideoModeInfo
+    // below, which answers for the CURRENT mode with the virtual screen's size
+    // -- true for the game and wrong for choosing a display mode.
+    rw::VideoMode desktop;
+    if (rw::Engine::getVideoModeInfo(&desktop, 0) == NULL)
+    {
+        printf("bfbb: the adapter would not report its desktop mode; staying windowed\n");
+        fflush(stdout);
+        return;
+    }
+
+    rw::int32 count = rw::Engine::getNumVideoModes();
+    for (rw::int32 i = 1; i < count; i++)
+    {
+        rw::VideoMode mode;
+        if (rw::Engine::getVideoModeInfo(&mode, i) == NULL)
+        {
+            continue;
+        }
+
+        if ((mode.flags & rw::VIDEOMODEEXCLUSIVE) == 0)
+        {
+            continue;
+        }
+
+        if (mode.width == desktop.width && mode.height == desktop.height &&
+            mode.depth == desktop.depth)
+        {
+            rw::Engine::setVideoMode(i);
+            printf("bfbb: exclusive fullscreen at %dx%d\n", (int)mode.width, (int)mode.height);
+            fflush(stdout);
+            return;
+        }
+    }
+
+    // Not fatal, and not silent. A borderless window at the same size is what
+    // is left, which looks identical and differs only in who owns the display.
+    printf("bfbb: no exclusive mode matches the desktop's %dx%d; running borderless "
+           "instead\n",
+           (int)desktop.width, (int)desktop.height);
+    fflush(stdout);
+}
+
+#endif
+
+RwBool RwEngineStart(void)
+{
+    if (RwEngineInstance == NULL)
+    {
+        return FALSE;
+    }
+
+#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+    if (!iBackendIsNull())
+    {
+        SelectFullscreenVideoMode();
+    }
+#endif
+
+    if (!rw::Engine::start())
+    {
+        return FALSE;
+    }
+
+#ifdef RW_GL3
+    if (iBackendIsGL3())
+    {
+        // The window exists from here and not before, so this is the first moment
+        // its real size can be read or borderless applied. See iWindow.h.
+        iWindowDeferredCreated();
+
+        // Engine::start DISCARDS what the device said, exactly as it does for D3D9
+        // below -- so a startSDL3 that failed to create a window or a GL context
+        // still reports success and everything afterwards draws into nothing. The
+        // slot librw writes the window into is the port's own, so checking it needs
+        // no access to librw's internals.
+        if (iWindowNativeHandle() == NULL)
+        {
+            printf("bfbb: SDL opened a video device but no window or OpenGL context came up\n");
+            printf(
+                "bfbb:   (librw asks for GL 3.3, GL 2.1, GLES 3.1 and GLES 2.0 in that order)\n");
+            fflush(stdout);
+            return FALSE;
+        }
+
+        // Build the virtual screen now rather than leaving it to whichever camera
+        // raster is created first. There is a context to build it in from here, the
+        // sample count it is granted is what the report below prints, and D3D9 makes
+        // its surfaces at this same point -- when the device comes up.
+        rw::gl3::virtualScreenFramebuffer();
+    }
+#endif
+
+#ifdef RW_D3D9
+    if (iBackendIsD3D9())
+    {
+        // Engine::start DISCARDS what the device said.
+        //
+        // engine.cpp:311 is `engine->device.system(DEVICEINIT, nil, 0);` with the
+        // result thrown away, and DEVICEINIT is where the d3d9 backend actually
+        // creates the device -- d3ddevice.cpp:1622. So start() reports success
+        // whether or not there is a device, and everything afterwards runs against
+        // a null one and dies somewhere with no bearing on the cause. That is what
+        // an intermittent segfault inside RwFrameCreate turned out to be.
+        //
+        // Engine::open discards its DEVICEOPEN result the same way, but the device
+        // does not exist yet at that point, so this is the first place worth
+        // asking. The adapter probe in RwEngineOpen catches the case where no
+        // adapter admits to hardware support; this catches the case where one does
+        // and the device still fails to come up, which on a working machine is
+        // usually a display that has gone to sleep.
+        if (rw::d3d::d3ddevice == NULL)
+        {
+            printf("bfbb: Direct3D 9 reported a hardware adapter but the device did not "
+                   "come up\n");
+            printf("bfbb:   (a display that is asleep or switched off does this)\n");
+            fflush(stdout);
+            return FALSE;
+        }
+    }
+
+#endif
+
+#ifdef RW_D3D11
+    // Same discarded result, same question. See the D3D9 arm above.
+    if (iBackendIsD3D11() && rw::d3d::d3d11device == NULL)
+    {
+        printf("bfbb: Direct3D 11 reported a hardware adapter but the device did "
+               "not come up\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+#endif
+
+#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+    // Said out loud because both can be refused by the card rather than by the
+    // setting. Only now: the surfaces are made when the device comes up, and
+    // until then there is nothing to have granted anything.
+    if (!iBackendIsNull())
+    {
+        S32 granted = 0;
+        S32 perPixel = 0;
+        const char* path = "shader";
+
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
+        {
+            granted = (S32)rw::d3d::getVirtualScreenSamples();
+            perPixel = rw::d3d::getPerPixelLighting();
+        }
+#endif
+#ifdef RW_D3D9
+        if (iBackendIsD3D9() && rw::d3d::getFixedFunction())
+        {
+            path = "fixed-function";
+        }
+#endif
+#ifdef RW_GL3
+        if (iBackendIsGL3())
+        {
+            granted = (S32)rw::gl3::getVirtualScreenSamples();
+            perPixel = rw::gl3::getPerPixelLighting();
+        }
+#endif
+
+        S32 asked = iScreenMultiSample();
+        printf("bfbb: %s backend, %s pipeline; %dx MSAA%s; per-pixel lighting %s\n",
+               iScreenBackendName(iScreenGetBackend()), path, (int)granted,
+               granted >= asked ? "" : " (asked for more; the card refused)",
+               perPixel ? "on" : "off");
+        fflush(stdout);
+    }
+#endif
+
+    sGlobals.engineStatus = rwENGINESTATUSSTARTED;
+    return TRUE;
+}
+
+// The three teardown calls return void in librw and RwBool in RenderWare, so
+// the result is taken from the engine state afterwards. That is a real check
+// and not a constant: librw refuses to stop an engine that is not started, to
+// close one that is not open, and to term one that is not initialised, and in
+// each of those cases the state does not move.
+
+RwBool RwEngineStop(void)
+{
+    if (RwEngineInstance == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::Engine::stop();
+
+    if (rw::Engine::state != rw::Engine::Opened)
+    {
+        return FALSE;
+    }
+
+    sGlobals.engineStatus = rwENGINESTATUSOPENED;
+    return TRUE;
+}
+
+RwBool RwEngineClose(void)
+{
+    if (RwEngineInstance == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::Engine::close();
+
+    if (rw::Engine::state != rw::Engine::Initialized)
+    {
+        return FALSE;
+    }
+
+#ifdef RW_D3D9
+    // After librw has closed its own, so that the probe's reference is the last
+    // one released rather than the one that pulls D3D9 down early. Nothing to
+    // release when another backend ran: the probe is only ever made by
+    // OpenDeviceD3D9.
+    if (sProbeD3D9 != NULL)
+    {
+        sProbeD3D9->Release();
+        sProbeD3D9 = NULL;
+    }
+#endif
+
+    sGlobals.engineStatus = rwENGINESTATUSINITED;
+    return TRUE;
+}
+
+RwBool RwEngineTerm(void)
+{
+    if (RwEngineInstance == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::Engine::term();
+
+    if (rw::Engine::state != rw::Engine::Dead)
+    {
+        return FALSE;
+    }
+
+    sGlobals.engineStatus = rwENGINESTATUSIDLE;
+    RwEngineInstance = NULL;
+    return TRUE;
+}
+
+// ---------------------------------------------------------------------------
+// Video modes
+//
+// librw answers these through the render device, and the NULL backend is not a
+// render device: its deviceSystem() returns 1 for every request it does not
+// recognise, so it claims one video mode, claims mode 1 is current, and reports
+// success from DEVICEGETVIDEOMODEINFO without writing anything to the struct it
+// was handed. Forwarding blindly would hand xScrFx an uninitialised width and
+// height off its own stack.
+//
+// So the null device is detected and reported as what it is -- no video modes.
+// The functions below are the real forwarding path and start working the moment
+// a GL3 or D3D9 librw is linked; until then there is no screen to have a size.
+
+// types.h:146 defines `null` as a macro and librw has a NAMESPACE of that name,
+// so `rw::null::deviceSystem` stops parsing as soon as anything pulls types.h
+// in ahead of it -- which the windows.h at the top of this file now does. The
+// error it gives ("expected unqualified-id") names neither the macro nor the
+// header, so the push/pop is worth more than the two lines it costs.
+#pragma push_macro("null")
+#undef null
+
+static bool haveRenderDevice()
+{
+    return rw::engine != NULL && rw::engine->device.system != rw::null::deviceSystem;
+}
+
+#pragma pop_macro("null")
+
+RwInt32 RwEngineGetCurrentVideoMode(void)
+{
+    if (!haveRenderDevice())
+    {
+        // RenderWare numbers video modes from 0, so there is no index that
+        // means "none". -1 is out of range for every caller that would then
+        // pass it to RwEngineGetVideoModeInfo, which fails on it.
+        return -1;
+    }
+
+    return rw::Engine::getCurrentVideoMode();
+}
+
+RwVideoMode* RwEngineGetVideoModeInfo(RwVideoMode* modeinfo, RwInt32 modeIndex)
+{
+    if (modeinfo == NULL || !haveRenderDevice())
+    {
+        return NULL;
+    }
+
+    rw::VideoMode mode;
+    if (rw::Engine::getVideoModeInfo(&mode, modeIndex) == NULL)
+    {
+        return NULL;
+    }
+
+    modeinfo->width = mode.width;
+    modeinfo->height = mode.height;
+    modeinfo->depth = mode.depth;
+    modeinfo->flags = (RwVideoModeFlag)mode.flags;
+
+    // **The CURRENT mode's size is the SCREEN THE GAME DRAWS INTO.**
+    //
+    // On the console a video mode IS the framebuffer -- there is one, it is the
+    // screen, and RenderWare's width and height are the pixels the game draws
+    // into. librw's D3D9 backend enumerates the ADAPTER's display modes
+    // instead, so the current one comes back as the desktop's resolution:
+    // 3840x2160 on the machine this was found on, against a 640x480 window.
+    //
+    // That is not academic. xScrFx.cpp:86 draws its full-screen rectangle from
+    // (0,0) to (width,height) in SCREEN coordinates, and xScrFx.cpp:185, 255
+    // and 270 size their effects the same way. With the desktop's numbers the
+    // screen fades, the letterbox bars and the death vignette are all sized for
+    // a rectangle six times wider than the thing being drawn into, so they
+    // cover a corner of it or miss entirely.
+    //
+    // Only the CURRENT mode is rewritten. RwEngineGetVideoModeInfo is also a
+    // mode ENUMERATOR -- a caller walking indices wants each mode's real size,
+    // and lying about all of them would break the enumeration to fix the one
+    // reading the game actually makes.
+    if (modeIndex == rw::Engine::getCurrentVideoMode())
+    {
+        RwInt32 screenWidth = 0;
+        RwInt32 screenHeight = 0;
+
+#if defined(RW_D3D9) || defined(RW_D3D11)
+        if (iBackendIsD3D())
+        {
+            rw::d3d::getVirtualScreen(&screenWidth, &screenHeight);
+        }
+#endif
+#ifdef RW_GL3
+        // iScreen's size rather than the device's, and it is emphatically NOT
+        // what the device would report: librw's SDL3 arm enumerates the
+        // DISPLAY's modes, so the current one comes back as the desktop's
+        // resolution. The question being asked is how big the thing the game
+        // draws into is, in the game's own coordinates, which is the camera
+        // raster's size.
+        if (iBackendIsGL3())
+        {
+            screenWidth = iScreenWidth();
+            screenHeight = iScreenHeight();
+        }
+#endif
+
+        // The virtual screen, NOT the window. What the game asks this question
+        // for is the size of the thing it is drawing into, and once the picture
+        // is scaled at present time that stops being the window: a full-screen
+        // rectangle sized to a maximised window would be several times the
+        // surface it lands on. Reporting the window here is what left the fades
+        // and the letterbox bars covering the whole window while the game
+        // itself occupied a corner of it.
+        if (screenWidth <= 0 || screenHeight <= 0)
+        {
+            iWindowGetSize(&screenWidth, &screenHeight);
+        }
+
+        if (screenWidth > 0 && screenHeight > 0)
+        {
+            modeinfo->width = screenWidth;
+            modeinfo->height = screenHeight;
+        }
+    }
+
+    // librw's VideoMode stops there. refRate and format are RenderWare's and
+    // have no source on this side, so they are zeroed rather than guessed --
+    // nothing in the game reads either one.
+    modeinfo->refRate = 0;
+    modeinfo->format = 0;
+
+    return modeinfo;
+}
+
+// librw has no resource arena.
+//
+// RenderWare's is a fixed block that instanced geometry is packed into and
+// evicted from -- RwResourcesAllocateResEntry hands out of it, and running out
+// is why the console sizes it at 0x60000 before anything loads. librw
+// allocates instanced data per object and frees it with the object, so there is
+// no arena to size and nothing to run out of.
+//
+// TRUE rather than FALSE: the caller asked for an arena of at most this size
+// and got one that cannot be exceeded, which is the outcome it wanted.
+// iSystem.cpp does not check the result, but RenderWareInit's early returns
+// treat FALSE from anything as a failed startup.
+RwBool RwResourcesSetArenaSize(RwUInt32 size)
+{
+    (void)size;
+    return TRUE;
+}

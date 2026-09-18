@@ -1,0 +1,4123 @@
+// Checks the RenderWare shim by RUNNING it.
+//
+// This is the same bargain as tests/selftest.cpp: the GameCube side is scored
+// by a byte-identical DOL and a port has no equivalent, so every claim the shim
+// makes gets exercised and its answer checked. It matters more here than
+// anywhere else in the layer, because the shim compiled and linked cleanly for
+// a whole commit before anyone discovered that it could not create a frame.
+//
+// Not in CMakeLists.txt, because librw is not vendored yet. Build it by hand
+// with the command in README.md.
+
+// Makes librw's rwd3d.h declare d3ddevice, which the combined skin+matfx
+// render check reads: nothing short of asking the device tells you whether a
+// draw bound the shader and the constants it was supposed to. It has to be
+// defined before rw.h is pulled in below, and it does nothing at all under
+// LIBRW_PLATFORM=NULL, where rwd3d.h skips the whole block.
+#define WITH_D3D
+
+#include <stdio.h>
+#include <stdlib.h>
+#if defined(_WIN32) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#endif
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
+
+#include <rwcore.h>
+#include <rpcollis.h>
+#include <rpcollbsptree.h>
+#include <rphanim.h>
+#include <rpmatfx.h>
+#include <rpptank.h>
+#include <rpskin.h>
+#include <rpusrdat.h>
+#include <rpworld.h>
+#include <rtintsec.h>
+#include <rtquat.h>
+#include <rtslerp.h>
+
+// ../stream.h rather than "rw.h": it pulls in librw's header itself, and that
+// header has no include guard, so including both redefines everything in it.
+// It is also the only way to reach an RwStream's members, which are private to
+// the shim by design.
+#include "../stream.h"
+
+// AFTER stream.h, which is what pulls in librw: backend.h reaches types.h,
+// and types.h has `#define null 0` in it, which turns librw's `namespace null`
+// into a syntax error.
+#include "../backend.h"
+
+// --- the watchdog -----------------------------------------------------------
+//
+// A test that hangs is worse than a test that fails: on a build machine it is a
+// job that runs to its timeout with nothing to show, and on a desktop it is a
+// window that has to be closed by hand. This kills the run after a while and
+// says which check it got to, which is the whole diagnosis for a hang.
+//
+// BFBB_SELFTEST_TIMEOUT overrides the seconds; 0 turns it off, which is what a
+// debugger session wants.
+//
+// Raw threads rather than <thread>: a MinGW build needs a pthreads runtime for
+// the standard one, and the rest of the port does not depend on having it.
+
+static const char* sWatchdogWhat = "startup";
+
+static void watchdogFired(void)
+{
+#ifdef _WIN32
+    // WriteFile on the raw handle rather than fprintf, and TerminateProcess
+    // rather than exit, because the wedged thread may be holding a lock that
+    // either of those would wait on:
+    //
+    //   - fprintf takes the CRT's lock on stderr.
+    //   - exit runs the atexit handlers, which would wait on whatever wedged.
+    //   - _exit skips those but still ends in ExitProcess, which takes the
+    //     loader lock. A graphics driver call is exactly the kind of thing that
+    //     wedges while holding it, so the watchdog hung instead of firing.
+    //
+    // TerminateProcess on the current process takes no lock and always returns.
+    char msg[256];
+    DWORD written;
+    int n = _snprintf(msg, sizeof(msg), "\nrw_selftest: TIMED OUT waiting on: %s\n", sWatchdogWhat);
+
+    if (n > 0)
+    {
+        WriteFile(GetStdHandle(STD_ERROR_HANDLE), msg, (DWORD)n, &written, NULL);
+    }
+
+    TerminateProcess(GetCurrentProcess(), 4);
+#else
+    fprintf(stderr, "\nrw_selftest: TIMED OUT waiting on: %s\n", sWatchdogWhat);
+    fflush(stderr);
+    _exit(4);
+#endif
+}
+
+#ifdef _WIN32
+static DWORD WINAPI watchdogThread(LPVOID arg)
+{
+    Sleep((DWORD)(uintptr_t)arg * 1000);
+    watchdogFired();
+    return 0;
+}
+#else
+static void* watchdogThread(void* arg)
+{
+    sleep((unsigned)(uintptr_t)arg);
+    watchdogFired();
+    return NULL;
+}
+#endif
+
+// A fault ends the run instead of parking it.
+//
+// The default for an unhandled exception is Windows Error Reporting, which
+// suspends every thread in the process -- including the watchdog's -- while it
+// talks to the reporting service. A crash in driver code therefore looked
+// exactly like a hang that no timeout could break, which is what this is here
+// to stop. The handler names the last check that finished, which is as much of
+// a backtrace as this needs.
+#ifdef _WIN32
+static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep)
+{
+    char msg[256];
+    DWORD written;
+    int n = _snprintf(msg, sizeof(msg), "\nrw_selftest: CRASHED, code 0x%08lx at %p, after: %s\n",
+                      (unsigned long)ep->ExceptionRecord->ExceptionCode,
+                      ep->ExceptionRecord->ExceptionAddress, sWatchdogWhat);
+
+    if (n > 0)
+    {
+        WriteFile(GetStdHandle(STD_ERROR_HANDLE), msg, (DWORD)n, &written, NULL);
+    }
+
+    TerminateProcess(GetCurrentProcess(), 3);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
+// Every way this can stop writes to stderr rather than opening a window.
+//
+// A test run that stops for a modal dialog looks exactly like a test run that
+// hangs: on a build machine, a job that runs to its timeout with nothing to
+// show, and on a desktop, a window someone has to close by hand.
+static void makeFailuresHeadless(void)
+{
+#ifdef _WIN32
+    // No "the program has stopped working" box, and no error-reporting round
+    // trip behind it.
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    SetUnhandledExceptionFilter(crashFilter);
+
+    // abort -- which is where a failed assert and an uncaught exception both
+    // end up -- writes its message and dies, rather than reporting the fault.
+    //
+    // MSVC's runtime only. MinGW's CRT does not export _set_abort_behavior,
+    // and its abort raises SIGABRT rather than reporting a fault, so there is
+    // nothing there to turn off.
+#ifndef __MINGW32__
+    _set_abort_behavior(_WRITE_ABORT_MSG, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
+#endif
+
+#if defined(_WIN32) && defined(_DEBUG)
+    _set_error_mode(_OUT_TO_STDERR);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+}
+
+static void startWatchdog(void)
+{
+    unsigned seconds = 180;
+    const char* env = getenv("BFBB_SELFTEST_TIMEOUT");
+
+    if (env != NULL)
+    {
+        seconds = (unsigned)strtoul(env, NULL, 10);
+    }
+
+    if (seconds == 0)
+    {
+        return;
+    }
+
+#ifdef _WIN32
+    HANDLE h = CreateThread(NULL, 0, watchdogThread, (LPVOID)(uintptr_t)seconds, 0, NULL);
+    if (h != NULL)
+    {
+        CloseHandle(h);
+    }
+#else
+    pthread_t t;
+    pthread_create(&t, NULL, watchdogThread, (void*)(uintptr_t)seconds);
+    pthread_detach(t);
+#endif
+}
+
+// RwGameCubeSetAlphaCompare, and the GX_* constants xModelBucket.cpp calls it
+// with. Included rather than declared by hand -- which is what the rest of this
+// file does for a shim-private entry point -- for the reason engine.cpp gives
+// on the definition: the header wraps it in extern "C", and a prototype written
+// here would get C++ linkage and fail to resolve to the function under test.
+#include <rwsdk/driver/gcn/dlrendst.h>
+
+#include "iWindow.h"
+
+// The animated-UV pipeline's game-side half. Compiled into this test (see
+// CMakeLists.txt) so that the translation from the game's globals into librw's
+// matrix can be exercised, which is the part of that path a headless check can
+// actually reach.
+#include "iFX.h"
+#include "iFixes.h"
+#include "iSnapshot.h"
+
+// WITH_D3D above drags in d3d9.h and windows.h behind it, and windows.h still
+// carries the 16-bit memory model's `near` and `far` as empty macros. This file
+// has a float comparison called near(). Undefined after ALL the includes, so
+// that anything added above is covered too.
+#undef near
+#undef far
+
+static int failures;
+
+// Set when the render backend could not be opened. Everything after
+// test_engine_startup dereferences an open engine, so the run stops rather than
+// segfaulting in whichever test touches one first.
+static bool sEngineUnusable;
+
+static bool near(float a, float b)
+{
+    float d = a - b;
+    return d > -0.0005f && d < 0.0005f;
+}
+
+static void check(bool ok, const char* what)
+{
+    // The last check that finished, which is what the watchdog names when the
+    // next one does not.
+    sWatchdogWhat = what;
+
+    printf("  %-58s %s\n", what, ok ? "ok" : "FAIL");
+    if (!ok)
+    {
+        failures++;
+    }
+}
+
+// The game's allocator, stood in for. RwEngineInit's whole reason to take a
+// RwMemoryFunctions is that the game allocates RenderWare's objects out of its
+// own heap; if librw were still calling malloc directly, nothing else in the
+// port would notice, so it is counted here.
+static int sNumAlloc;
+static int sNumFree;
+
+static void* testMalloc(size_t size)
+{
+    sNumAlloc++;
+    return malloc(size);
+}
+
+static void testFree(void* mem)
+{
+    if (mem != NULL)
+    {
+        sNumFree++;
+    }
+    free(mem);
+}
+
+static void* testRealloc(void* mem, size_t size)
+{
+    return realloc(mem, size);
+}
+
+static void* testCalloc(size_t numObj, size_t sizeObj)
+{
+    return calloc(numObj, sizeObj);
+}
+
+static void test_engine_startup()
+{
+    printf("RwEngine\n");
+
+    RwMemoryFunctions memoryFns = { testMalloc, testFree, testRealloc, testCalloc };
+
+    check(RwEngineInit(&memoryFns, 0, 0x60000) != FALSE, "RwEngineInit");
+    check(RwEngineInstance != NULL, "RwEngineInstance is live after init");
+    check(RwEngineInstance->engineStatus == rwENGINESTATUSINITED, "engineStatus is INITED");
+
+    // Refused rather than accepted twice: a second init would strand librw's
+    // first plugin list and every object allocated against its sizes.
+    check(RwEngineInit(&memoryFns, 0, 0x60000) == FALSE, "a second RwEngineInit is refused");
+
+    // Strictly between init and open, which is not a style choice: each of
+    // these registers plugins that grow the size of an atomic, a geometry or a
+    // material, and Engine::open freezes those sizes. Attaching after open
+    // would hand out plugin offsets past the end of every object allocated
+    // afterwards. iSystem.cpp's RWAttachPlugins sequences the real game's
+    // calls in exactly this window.
+    check(RpWorldPluginAttach() != FALSE, "RpWorldPluginAttach");
+    check(RpWorldPluginAttach() != FALSE, "and again -- attaching twice is idempotent");
+    check(RpSkinPluginAttach() != FALSE, "RpSkinPluginAttach");
+    check(RpMatFXPluginAttach() != FALSE, "RpMatFXPluginAttach");
+    check(RpPTankPluginAttach() != FALSE, "RpPTankPluginAttach");
+    check(_rpPTankAtomicDataOffset > 0, "RpPTank got a slot in the atomic's plugin block");
+
+    // The collision plugin exists to make RpCollisionGeometryGetData answer
+    // NULL, which sounds like nothing and is not: RWPLUGINOFFSET is
+    // `base + offset`, so it is never NULL and the macro's ternary always
+    // dereferences. With the offset left at 0 it would read a geometry's own
+    // first word as an RpCollisionData* and hand xCollide.cpp garbage that
+    // passes its `colldata && colldata->tree` check.
+    check(RpCollisionPluginAttach() != FALSE, "RpCollisionPluginAttach");
+
+    // The same SEVEN the game attaches, in the same order (iSystem.cpp's
+    // RWAttachPlugins). Attaching a different set than the game does makes this
+    // test a check of a configuration nothing ships -- and HAnim in particular
+    // registers an Engine plugin and a Frame plugin, so it changes the size and
+    // the lifecycle of objects every other check here creates.
+    check(RpHAnimPluginAttach() != FALSE, "RpHAnimPluginAttach");
+    check(RpUserDataPluginAttach() != FALSE, "RpUserDataPluginAttach");
+    check(_rpCollisionGeometryDataOffset > 0,
+          "RpCollision got a slot in the geometry's plugin block, not offset zero");
+
+    // A real backend needs a window before the engine can open on it -- D3D9
+    // creates its device against an HWND -- so this test opens one, the way
+    // iSystem.cpp will. Under LIBRW_PLATFORM=NULL there is nothing to open and
+    // the test stays headless, which is what lets it run on a build machine.
+#ifndef RW_NULL
+    // Which backend draws, before the window rather than before the device --
+    // the same order, and for the same reason, as iSystem.cpp's
+    // RenderWareInit. GL3 makes its own window inside librw and iWindowOpen
+    // only records the request, and it records nothing unless it already knows
+    // GL3 is the one running. Without this a build carrying GL3 alone opened
+    // an ordinary window and then had nothing to hand librw.
+    iBackendResolve();
+
+    iWindowParams windowParams;
+    windowParams.title = "bfbb rw_selftest";
+    windowParams.width = 640;
+    windowParams.height = 480;
+    windowParams.mode = iWINDOW_WINDOWED;
+    check(iWindowOpen(&windowParams) != FALSE, "iWindowOpen for the render backend");
+    printf("  (window backend: %s)\n", iWindowBackendName());
+#endif
+
+    RwEngineOpenParams params;
+    params.displayID = NULL;
+    check(RwEngineOpen(&params) != FALSE, "RwEngineOpen");
+
+    // Everything after this dereferences an open engine. Bailing out here turns
+    // "the backend could not start" into one reported failure instead of a
+    // segfault twenty checks later, which is how this first ran under D3D9.
+    if (RwEngineInstance->engineStatus != rwENGINESTATUSOPENED)
+    {
+        check(false, "engineStatus is OPENED -- stopping, the rest needs an open engine");
+
+        // And stop the WHOLE run, not just this function. Everything below
+        // dereferences an open engine, so carrying on segfaults in the first
+        // test that touches one -- which reads as a broken shim when the real
+        // answer is already printed above, usually that no adapter reported
+        // hardware support because the display is asleep.
+        sEngineUnusable = true;
+        return;
+    }
+    check(true, "engineStatus is OPENED");
+
+    check(RwEngineStart() != FALSE, "RwEngineStart");
+    check(RwEngineInstance->engineStatus == rwENGINESTATUSSTARTED, "engineStatus is STARTED");
+
+    check(sNumAlloc > 0, "librw allocated through the memory functions it was given");
+
+    // xFX.cpp calls through this table by hand.
+    check(RwEngineInstance->stringFuncs.vecStrcmp("spec3", "spec3") == 0 &&
+              RwEngineInstance->stringFuncs.vecStrcmp("spec3", "spec4") != 0,
+          "RwEngineInstance->stringFuncs.vecStrcmp");
+
+    RwVideoMode videoMode;
+#ifdef RW_NULL
+    // No renderer is linked, so there is no video mode. The shim has to say so
+    // instead of forwarding librw's null device, which reports success without
+    // writing to the struct -- xScrFx would size a full-screen rectangle from
+    // whatever was on its own stack.
+    check(RwEngineGetCurrentVideoMode() == -1, "no current video mode without a backend");
+    check(RwEngineGetVideoModeInfo(&videoMode, 0) == NULL, "no video mode info without a backend");
+#else
+    // With a backend the forwarding path is live, and this is the first thing
+    // that proves it: a mode index that is not -1, and a mode whose width and
+    // height were actually written rather than left as whatever was on the
+    // stack. xScrFx sizes its full-screen rectangle from exactly this.
+    check(RwEngineGetCurrentVideoMode() >= 0, "the backend reports a current video mode");
+    memset(&videoMode, 0xCD, sizeof(videoMode));
+    check(RwEngineGetVideoModeInfo(&videoMode, RwEngineGetCurrentVideoMode()) == &videoMode,
+          "RwEngineGetVideoModeInfo");
+    check(videoMode.width > 0 && videoMode.height > 0,
+          "and it wrote a real width and height into the caller's struct");
+#endif
+}
+
+static void test_frames()
+{
+    printf("RwFrame\n");
+
+    RwFrame* frame = RwFrameCreate();
+    check(frame != NULL, "RwFrameCreate");
+    if (frame == NULL)
+    {
+        return;
+    }
+
+    RwV3d t = { 1.0f, 2.0f, 3.0f };
+    RwFrameTranslate(frame, &t, rwCOMBINEREPLACE);
+
+    // Read out of the RenderWare struct, not through an accessor: this is the
+    // whole point of mirroring librw's layout, and about 120 sites in the game
+    // do exactly this.
+    check(frame->modelling.pos.x == 1.0f && frame->modelling.pos.y == 2.0f &&
+              frame->modelling.pos.z == 3.0f,
+          "RwFrameTranslate lands in ->modelling.pos");
+
+    RwMatrix* ltm = RwFrameGetLTM(frame);
+    check(ltm->pos.x == 1.0f && ltm->pos.y == 2.0f && ltm->pos.z == 3.0f,
+          "LTM of a root frame is its modelling matrix");
+
+    // A parented frame is what actually walks engine->frameDirtyList, which is
+    // the structure that does not exist until RwEngineStart has run.
+    RwFrame* child = RwFrameCreate();
+    check(child != NULL, "RwFrameCreate for a child");
+    if (child == NULL)
+    {
+        RwFrameDestroy(frame);
+        return;
+    }
+
+    // RwFrameAddChild is not written yet, so the hierarchy is built through
+    // librw. Legal precisely because RwFrame IS rw::Frame here.
+    reinterpret_cast<rw::Frame*>(frame)->addChild(reinterpret_cast<rw::Frame*>(child));
+
+    RwV3d ct = { 0.0f, 0.0f, 5.0f };
+    RwFrameTranslate(child, &ct, rwCOMBINEREPLACE);
+
+    RwMatrix* childLtm = RwFrameGetLTM(child);
+    check(childLtm->pos.x == 1.0f && childLtm->pos.y == 2.0f && childLtm->pos.z == 8.0f,
+          "child LTM composes with its parent");
+
+    // Moving the parent has to invalidate the child, which is the dirty list
+    // doing its job rather than getLTM recomputing unconditionally.
+    RwV3d pt = { 10.0f, 0.0f, 0.0f };
+    RwFrameTranslate(frame, &pt, rwCOMBINEPOSTCONCAT);
+    childLtm = RwFrameGetLTM(child);
+    check(childLtm->pos.x == 11.0f && childLtm->pos.y == 2.0f && childLtm->pos.z == 8.0f,
+          "moving a parent updates the child LTM");
+
+    RwFrameDestroy(child);
+    RwFrameDestroy(frame);
+    check(RwFrameDestroy(NULL) == FALSE, "RwFrameDestroy(NULL) is refused");
+}
+
+static void test_values()
+{
+    printf("RwV3d / RwMatrix\n");
+
+    RwV3d v = { 3.0f, 4.0f, 0.0f };
+    check(RwV3dLength(&v) == 5.0f, "RwV3dLength");
+}
+
+static void test_streams()
+{
+    printf("RwStream\n");
+
+    // A write stream on an EMPTY RwMemory, which is how FullAtomicDupe in
+    // xModelBucket.cpp opens one. librw's own memory stream cannot do this --
+    // it truncates at the buffer it was handed -- so this is the check that
+    // says the hand-written one in stream.cpp earns its place.
+    RwMemory mem = { NULL, 0 };
+    RwStream* stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMWRITE, &mem);
+    check(stream != NULL, "RwStreamOpen(rwSTREAMMEMORY, rwSTREAMWRITE) on an empty block");
+    if (stream == NULL)
+    {
+        return;
+    }
+
+    // Past any plausible initial capacity, so the block has to be grown.
+    const RwUInt32 payload = 9000;
+    rw::writeChunkHeader(stream, rw::ID_TEXDICTIONARY, (rw::int32)payload);
+
+    RwUInt32 written = 0;
+    for (RwUInt32 i = 0; i < payload; i++)
+    {
+        RwUInt8 byte = (RwUInt8)(i & 0xFF);
+        written += stream->write8(&byte, 1);
+    }
+    check(written == payload, "a memory write stream grows instead of truncating");
+
+    check(RwStreamClose(stream, &mem) != FALSE, "RwStreamClose");
+    check(mem.start != NULL && mem.length == 12 + payload,
+          "RwStreamClose hands the block back through its RwMemory");
+
+    // Read it back the way zAssetTypes.cpp reads a TXD out of a HIP block.
+    stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+    check(stream != NULL, "RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD)");
+
+    RwUInt32 length = 0;
+    RwUInt32 version = 0;
+    check(RwStreamFindChunk(stream, rwID_TEXDICTIONARY, &length, &version) != FALSE,
+          "RwStreamFindChunk finds the chunk that was written");
+    check(length == payload, "RwStreamFindChunk reports the chunk length");
+
+    RwUInt8 buf[16];
+    memset(buf, 0, sizeof(buf));
+    check(stream->read8(buf, 16) == 16 && buf[0] == 0 && buf[15] == 15,
+          "the bytes read back are the bytes written");
+    RwStreamClose(stream, NULL);
+
+    // A chunk that is not there has to end the search rather than run off the
+    // end of the block.
+    stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+    check(RwStreamFindChunk(stream, rwID_CLUMP, NULL, NULL) == FALSE,
+          "RwStreamFindChunk stops at the end of the block");
+    RwStreamClose(stream, NULL);
+
+    stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+    RwChunkHeaderInfo info;
+    memset(&info, 0xCD, sizeof(info));
+    check(RwStreamReadChunkHeaderInfo(stream, &info) == stream, "RwStreamReadChunkHeaderInfo");
+    check(info.type == (RwUInt32)rwID_TEXDICTIONARY && info.length == payload,
+          "the chunk header info matches what was written");
+    check(info.version == (RwUInt32)rw::version && info.buildNum == (RwUInt32)rw::build,
+          "the library version and build come back unpacked");
+    check(info.isComplex != FALSE, "isComplex: 3.2 and later pack version and build together");
+
+    // Past the end: eof, not a read off the end of the block.
+    stream->seek((rw::int32)mem.length - 4, 0);
+    check(stream->read8(buf, 16) == 4 && stream->eof(), "a short read at the end reports eof");
+    check(RwStreamReadChunkHeaderInfo(stream, &info) == NULL,
+          "RwStreamReadChunkHeaderInfo fails at eof rather than inventing a chunk");
+    RwStreamClose(stream, NULL);
+
+    RwFree(mem.start);
+
+    // Deliberately unimplemented, and they say so rather than half-working.
+    RwMemory unused = { NULL, 0 };
+    check(RwStreamOpen(rwSTREAMFILE, rwSTREAMREAD, &unused) == NULL,
+          "rwSTREAMFILE is refused rather than faked");
+    check(RwStreamOpen(rwSTREAMCUSTOM, rwSTREAMREAD, &unused) == NULL,
+          "rwSTREAMCUSTOM is refused rather than faked");
+    check(RwStreamClose(NULL, NULL) == FALSE, "RwStreamClose(NULL) is refused");
+}
+
+static RwTexture* countTextures(RwTexture* texture, void* data)
+{
+    (*(int*)data)++;
+    return texture;
+}
+
+static RwTexture* stopAfterFirst(RwTexture* texture, void* data)
+{
+    (*(int*)data)++;
+    return NULL;
+}
+
+static void test_textures()
+{
+    printf("RwTexture / RwTexDictionary\n");
+
+    // The rasters are NULL on purpose. RwRasterCreate cannot run here: librw's
+    // null driver asserts in rasterCreate, because allocating pixels is the one
+    // thing that genuinely needs a backend. Everything the dictionary does is
+    // independent of it.
+    RwTexture* a = RwTextureCreate(NULL);
+    RwTexture* b = RwTextureCreate(NULL);
+    check(a != NULL && b != NULL, "RwTextureCreate");
+    if (a == NULL || b == NULL)
+    {
+        return;
+    }
+
+    check(a->refCount == 1, "a new texture starts with one reference");
+    // RwTextureSetName is not written yet, so the name goes in through librw
+    // and comes back out through RenderWare's macro. Which is the point: it is
+    // the same 32 bytes.
+    strcpy(reinterpret_cast<rw::Texture*>(a)->name, "sand_bottom");
+    check(strcmp(RwTextureGetName(a), "sand_bottom") == 0,
+          "librw's name and RwTextureGetName are the same 32 bytes");
+
+    // The filter/addressing word is packed by macros reading the mirrored
+    // field, so this checks the layout and the bit positions at once.
+    RwTextureSetFilterMode(a, rwFILTERLINEARMIPLINEAR);
+    RwTextureSetAddressing(a, rwTEXTUREADDRESSCLAMP);
+    check(RwTextureGetFilterMode(a) == rwFILTERLINEARMIPLINEAR, "RwTextureGetFilterMode");
+    check(RwTextureGetAddressing(a) == rwTEXTUREADDRESSCLAMP, "RwTextureGetAddressing");
+    check(reinterpret_cast<rw::Texture*>(a)->getFilter() == rw::Texture::LINEARMIPLINEAR,
+          "librw reads back the filter the RenderWare macro wrote");
+
+    // RwTexDictionaryCreate is not on the game's list, so the dictionary comes
+    // from librw -- legal because an RwTexDictionary IS an rw::TexDictionary.
+    rw::TexDictionary* raw = rw::TexDictionary::create();
+    RwTexDictionary* dict = reinterpret_cast<RwTexDictionary*>(raw);
+    check(dict != NULL, "a texture dictionary to put them in");
+    if (dict == NULL)
+    {
+        return;
+    }
+
+    raw->add(reinterpret_cast<rw::Texture*>(a));
+    raw->add(reinterpret_cast<rw::Texture*>(b));
+    check(a->dict == dict, "RwTexture::dict points at the dictionary that holds it");
+
+    int seen = 0;
+    check(RwTexDictionaryForAllTextures(dict, countTextures, &seen) == dict,
+          "RwTexDictionaryForAllTextures returns its dictionary");
+    check(seen == 2, "RwTexDictionaryForAllTextures visits every texture");
+
+    seen = 0;
+    RwTexDictionaryForAllTextures(dict, stopAfterFirst, &seen);
+    check(seen == 1, "a callback returning NULL stops the walk");
+
+    check(RwTexDictionaryRemoveTexture(a) == a, "RwTexDictionaryRemoveTexture");
+    check(a->dict == NULL, "a removed texture no longer names a dictionary");
+    check(RwTexDictionaryRemoveTexture(a) == NULL,
+          "removing a texture that is in no dictionary is refused");
+
+    seen = 0;
+    RwTexDictionaryForAllTextures(dict, countTextures, &seen);
+    check(seen == 1, "the removed texture is gone from the walk");
+
+    // This is exactly what RWTX_Read in zAssetTypes.cpp does: pull the one
+    // texture it wants out, then destroy the dictionary and everything left in
+    // it. `b` goes with the dictionary; `a` is ours to destroy.
+    check(RwTexDictionaryDestroy(dict) != FALSE, "RwTexDictionaryDestroy");
+
+    check(RwTextureDestroy(a) != FALSE, "RwTextureDestroy");
+    check(RwTextureDestroy(NULL) == FALSE, "RwTextureDestroy(NULL) is refused");
+    check(RwTexDictionaryDestroy(NULL) == FALSE, "RwTexDictionaryDestroy(NULL) is refused");
+
+    // A TXD stream read cannot be exercised without a backend -- the textures
+    // inside one are native rasters -- but the failure path checks the wiring:
+    // an RwStream* has to arrive at librw as an rw::Stream*.
+    RwUInt8 notATxd[16];
+    memset(notATxd, 0, sizeof(notATxd));
+    RwMemory mem = { notATxd, sizeof(notATxd) };
+    RwStream* stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+    check(RwTexDictionaryStreamRead(stream) == NULL,
+          "RwTexDictionaryStreamRead rejects a stream with no dictionary in it");
+    RwStreamClose(stream, NULL);
+    check(RwTexDictionaryStreamRead(NULL) == NULL, "RwTexDictionaryStreamRead(NULL) is refused");
+}
+
+static void test_images()
+{
+    printf("RwImage\n");
+
+    RwImage* image = RwImageCreate(64, 32, 32);
+    check(image != NULL, "RwImageCreate");
+    if (image == NULL)
+    {
+        return;
+    }
+
+    check(image->width == 64 && image->height == 32 && image->depth == 32,
+          "the size lands in RwImage's own fields");
+    check(RwImageGetPixels(image) == NULL, "a new image has no pixels yet");
+
+    check(RwImageAllocatePixels(image) == image, "RwImageAllocatePixels");
+    check(RwImageGetPixels(image) != NULL, "RwImageAllocatePixels allocated them");
+    check(RwImageGetStride(image) == 64 * 4, "a 32-bit image strides four bytes per pixel");
+
+    // Written through the RenderWare accessor and read back through librw's
+    // field, which is the mirroring doing its job.
+    RwImageGetPixels(image)[7] = 0xAB;
+    check(reinterpret_cast<rw::Image*>(image)->pixels[7] == 0xAB,
+          "librw sees the pixels the RenderWare macro handed out");
+
+    // A palettised image gets a palette too, and only then.
+    RwImage* paletted = RwImageCreate(16, 16, 8);
+    RwImageAllocatePixels(paletted);
+    check(RwImageGetPalette(paletted) != NULL, "an 8-bit image is given a palette");
+    check(RwImageGetPalette(image) == NULL, "a 32-bit image is not");
+    RwImageDestroy(paletted);
+
+    check(RwImageDestroy(image) != FALSE, "RwImageDestroy");
+    check(RwImageDestroy(NULL) == FALSE, "RwImageDestroy(NULL) is refused");
+
+    // RwImageSetFromRaster is NOT exercised: it goes through the driver's
+    // rasterToImage, and there is no driver here. It needs a GL3 or D3D9 librw.
+    check(RwImageSetFromRaster(NULL, NULL) == NULL, "RwImageSetFromRaster(NULL, NULL) is refused");
+}
+
+// The alpha classification a DXT surface gets at load, which decides whether a
+// texture is blended, cut or left alone entirely.
+//
+// Worth checking by hand because every one of the three formats hides its
+// alpha somewhere different -- DXT1 in the ORDER of its two colour endpoints,
+// DXT3 in a nibble per texel, DXT5 in two endpoints plus a 3-bit index whose
+// ramp changes shape depending on which endpoint is larger -- and a bit order
+// got wrong in any of them misreads the artwork rather than failing.
+static void test_alpha_kind()
+{
+    printf("\nDXT alpha classification\n");
+
+    // DXT1 carries its transparency in the block mode: colour endpoints stored
+    // high-to-low are the four-colour opaque mode, low-to-high reserves index
+    // three for a hole.
+    const RwUInt8 dxt1Opaque[8] = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const RwUInt8 dxt1Keyed[8] = { 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00 };
+    const RwUInt8 dxt1NoHole[8] = { 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+
+    check(rw::classifyDXTAlpha(1, dxt1Opaque, 4, 4) == rw::ALPHAOPAQUE,
+          "a four-colour DXT1 block is opaque");
+    check(rw::classifyDXTAlpha(1, dxt1Keyed, 4, 4) == rw::ALPHAKEYED,
+          "a three-colour DXT1 block using its hole is keyed");
+    check(rw::classifyDXTAlpha(1, dxt1NoHole, 4, 4) == rw::ALPHAOPAQUE,
+          "and is opaque when it never indexes the hole -- the mode alone is not "
+          "transparency");
+
+    // DXT3 stores four bits per texel outright, low nibble first, so 15 is the
+    // only opaque value and 0 the only clear one.
+    RwUInt8 dxt3[16];
+    memset(dxt3, 0, sizeof(dxt3));
+    memset(dxt3, 0xFF, 8);
+    check(rw::classifyDXTAlpha(3, dxt3, 4, 4) == rw::ALPHAOPAQUE,
+          "every DXT3 nibble at 15 is opaque");
+
+    dxt3[0] = 0x0F; // texel 0 opaque, texel 1 clear
+    check(rw::classifyDXTAlpha(3, dxt3, 4, 4) == rw::ALPHAKEYED,
+          "a DXT3 nibble at 0 among opaque ones is keyed");
+
+    // A cutout is antialiased in the source, so its edge texels land in
+    // between and a strict test would call every real cutout graded. What
+    // separates the two is how much of the surface is edge: one texel in
+    // sixteen is a punched-out shape, a quarter of them is a gradient.
+    dxt3[0] = 0x8F; // texel 1 lands in between
+    check(rw::classifyDXTAlpha(3, dxt3, 4, 4) == rw::ALPHAKEYED,
+          "one nibble in between is an antialiased edge, still keyed");
+
+    dxt3[0] = 0x88; // texels 0 and 1
+    dxt3[1] = 0x88; // texels 2 and 3 -- a quarter of the block
+    check(rw::classifyDXTAlpha(3, dxt3, 4, 4) == rw::ALPHAGRADED,
+          "and enough of them in between makes the surface graded");
+    dxt3[0] = 0xFF;
+    dxt3[1] = 0xFF;
+
+    // DXT5: alpha0 above alpha1 is the eight-value ramp, and every index in
+    // between the two endpoints lands off both ends.
+    RwUInt8 dxt5[16];
+    memset(dxt5, 0, sizeof(dxt5));
+    dxt5[0] = 0xFF;
+    dxt5[1] = 0x00;
+    check(rw::classifyDXTAlpha(5, dxt5, 4, 4) == rw::ALPHAOPAQUE,
+          "a DXT5 block indexing only its high endpoint is opaque");
+
+    dxt5[2] = 0x09; // texels 0 and 1 take index 1, the low endpoint
+    check(rw::classifyDXTAlpha(5, dxt5, 4, 4) == rw::ALPHAKEYED,
+          "one indexing both endpoints, 255 and 0, is keyed");
+
+    dxt5[2] = 0x02; // texel 0 takes index 2, six sevenths of the way up
+    check(rw::classifyDXTAlpha(5, dxt5, 4, 4) == rw::ALPHAKEYED,
+          "and one reaching an interpolated step is still keyed");
+
+    dxt5[2] = 0x92; // texels 0, 1 and 2 all take index 2
+    check(rw::classifyDXTAlpha(5, dxt5, 4, 4) == rw::ALPHAGRADED,
+          "three of them is a ramp, not an edge");
+
+    // A surface smaller than the 4x4 block grid is padded out to it, and what
+    // the encoder left in the padding is not the artwork. Reading it would
+    // classify a small opaque texture off whatever happened to be there.
+    memset(dxt3, 0, sizeof(dxt3));
+    dxt3[0] = 0xFF; // texels 0 and 1 -- the top row of a 2x2
+    dxt3[1] = 0x08; // texel 2, outside a 2-wide surface, in between
+    dxt3[2] = 0xFF; // texels 4 and 5 -- the bottom row
+    check(rw::classifyDXTAlpha(3, dxt3, 4, 4) == rw::ALPHAKEYED,
+          "the padding of a 2x2 surface is read as transparency in a whole block");
+    check(rw::classifyDXTAlpha(3, dxt3, 2, 2) == rw::ALPHAOPAQUE,
+          "and is not read at all at the surface's real size");
+
+    check(rw::classifyDXTAlpha(2, dxt3, 4, 4) == rw::ALPHAGRADED,
+          "a format that is not DXT1, 3 or 5 is graded -- the safe answer, and "
+          "the one every raster had before this existed");
+}
+
+static void test_cameras()
+{
+    printf("RwCamera\n");
+
+    RwCamera* camera = RwCameraCreate();
+    check(camera != NULL, "RwCameraCreate");
+    if (camera == NULL)
+    {
+        return;
+    }
+
+    // Read out of the RenderWare struct, which is the mirroring doing its job:
+    // librw's Camera::create wrote these and RwCamera names them elsewhere in
+    // the struct than the console does.
+    check(camera->nearPlane == 0.05f && camera->farPlane == 10.0f && camera->fogPlane == 5.0f,
+          "librw's clip plane defaults land in RwCamera's own fields");
+    check(camera->projectionType == rwPERSPECTIVE, "and so does the projection type");
+    check(RwCameraGetViewWindow(camera)->x == 1.0f && RwCameraGetViewWindow(camera)->y == 1.0f,
+          "RwCameraGetViewWindow reads the mirrored field");
+    check(RwCameraGetRaster(camera) == NULL && RwCameraGetZRaster(camera) == NULL,
+          "a new camera has no rasters");
+
+    // With a real backend the camera needs somewhere to draw before anything
+    // begins an update on it: librw hands camera->frameBuffer to the device as
+    // its render target, and a NULL one faults inside the driver rather than
+    // failing. iCamera.cpp:27-28 attaches exactly these two, and this is the
+    // same pair -- so it is also the first exercise of RwRasterCreate's SUCCESS
+    // path, which LIBRW_PLATFORM=NULL could never reach (its driver asserts in
+    // rasterCreate). See rw/TODO.md, "Recorded but not rendered".
+#ifndef RW_NULL
+    RwRaster* cameraRaster = RwRasterCreate(640, 480, 0, rwRASTERTYPECAMERA);
+    RwRaster* zRaster = RwRasterCreate(640, 480, 0, rwRASTERTYPEZBUFFER);
+    check(cameraRaster != NULL, "RwRasterCreate(rwRASTERTYPECAMERA) with a backend linked");
+    check(zRaster != NULL, "RwRasterCreate(rwRASTERTYPEZBUFFER) with a backend linked");
+    check(cameraRaster != NULL && cameraRaster->width == 640 && cameraRaster->height == 480,
+          "and the raster came back the size it was asked for");
+    RwCameraSetRaster(camera, cameraRaster);
+    RwCameraSetZRaster(camera, zRaster);
+    check(RwCameraGetRaster(camera) == cameraRaster, "RwCameraSetRaster");
+#endif
+    check(RwCameraGetWorld(camera) == NULL, "and is in no world");
+
+    RwCameraSetProjection(camera, rwPARALLEL);
+    check(RwCameraGetProjection(camera) == rwPARALLEL, "RwCameraSetProjection");
+    check(reinterpret_cast<rw::Camera*>(camera)->projection == rw::Camera::PARALLEL,
+          "librw reads back the projection the RenderWare call wrote");
+    RwCameraSetProjection(camera, rwPERSPECTIVE);
+
+    RwV2d vw = { 0.5f, 0.375f };
+    RwCameraSetViewWindow(camera, &vw);
+    check(RwCameraGetViewWindow(camera)->x == 0.5f && RwCameraGetViewWindow(camera)->y == 0.375f,
+          "RwCameraSetViewWindow");
+
+    RwCameraSetNearClipPlane(camera, 0.1f);
+    RwCameraSetFarClipPlane(camera, 400.0f);
+    check(RwCameraGetNearClipPlane(camera) == 0.1f && RwCameraGetFarClipPlane(camera) == 400.0f,
+          "RwCameraSetNearClipPlane / RwCameraSetFarClipPlane");
+
+    // ---- the curCamera landmine ----
+    //
+    // This is the check the whole camera group exists for. RwEngineInstance is
+    // a SECOND RwGlobals, not an alias onto rw::engine, so begin/end have to
+    // write both copies -- xCutscene.cpp:716 and xFX.cpp:3044 read
+    // RwEngineInstance->curCamera as a struct field and there is no call to
+    // hook. Nothing else in the port would notice this being wrong until
+    // someone played a cutscene.
+    check(RwEngineInstance->curCamera == NULL, "curCamera is null before an update");
+
+    // A camera needs a FRAME before a real device begins an update on it.
+    // d3ddevice.cpp:1228 opens with
+    //
+    //     Matrix::invert(&inv, cam->getFrame()->getLTM());
+    //
+    // so a frameless camera dereferences NULL inside the driver -- no error, no
+    // return value, just a fault. LIBRW_PLATFORM=NULL's beginUpdate does
+    // nothing at all and never noticed, which is why this test did not attach
+    // one until a backend was linked. zGame.cpp and iCamera.cpp:24-31 always
+    // attach one, so the game was never going to hit this; the test was.
+    RwFrame* cameraFrame = RwFrameCreate();
+    check(cameraFrame != NULL, "a frame for the camera to sit on");
+    RwCameraSetFrame(camera, cameraFrame);
+
+    check(RwCameraBeginUpdate(camera) == camera, "RwCameraBeginUpdate");
+    check(RwEngineInstance->curCamera == camera,
+          "RwCameraBeginUpdate sets RwEngineInstance->curCamera");
+    check(rw::engine->currentCamera == reinterpret_cast<rw::Camera*>(camera),
+          "and rw::engine->currentCamera, which is the other copy");
+    check(RwCameraGetCurrentCamera() == camera,
+          "RwCameraGetCurrentCamera, the macro eleven more game files use");
+    check(RwEngineInstance->curWorld == rw::engine->currentWorld,
+          "curWorld agrees with librw's copy too");
+
+    check(RwCameraEndUpdate(camera) == camera, "RwCameraEndUpdate");
+    // zGame.cpp:910 and zNPCTypePrawn.cpp:1718 both use "curCamera is not null"
+    // as "an update is in progress" and call EndUpdate on the strength of it,
+    // so leaving it set would end an update that had already ended.
+    check(RwEngineInstance->curCamera == NULL, "RwCameraEndUpdate nulls curCamera again");
+    check(rw::engine->currentCamera == NULL, "in both copies");
+    check(RwEngineInstance->curWorld == NULL && rw::engine->currentWorld == NULL,
+          "and curWorld with it");
+
+    // ---- the frustum ----
+    //
+    // The planes only exist once the camera has been synced through its frame,
+    // which is librw's cameraSync running off the frame's update. The frame is
+    // attached through librw because RwCameraSetFrame's helper is not written
+    // yet -- legal because an RwCamera IS an rw::Camera.
+    RwFrame* frame = RwFrameCreate();
+    reinterpret_cast<rw::Camera*>(camera)->setFrame(reinterpret_cast<rw::Frame*>(frame));
+    check(RwCameraGetFrame(camera) == frame, "RwCameraGetFrame after attaching one");
+
+    RwV2d square = { 1.0f, 1.0f };
+    RwCameraSetViewWindow(camera, &square);
+    RwCameraSetNearClipPlane(camera, 1.0f);
+    RwCameraSetFarClipPlane(camera, 100.0f);
+    rw::Frame::syncDirty();
+
+    // Default frame is the identity, so the camera sits at the origin looking
+    // down +z with a 90-degree square view window.
+    RwSphere infront = { { 0.0f, 0.0f, 10.0f }, 1.0f };
+    RwSphere behind = { { 0.0f, 0.0f, -10.0f }, 1.0f };
+    RwSphere beyondFar = { { 0.0f, 0.0f, 200.0f }, 1.0f };
+    RwSphere onTheNearPlane = { { 0.0f, 0.0f, 1.0f }, 1.0f };
+
+    check(RwCameraFrustumTestSphere(camera, &infront) == rwSPHEREINSIDE,
+          "RwCameraFrustumTestSphere: a sphere down the view axis is inside");
+    check(RwCameraFrustumTestSphere(camera, &behind) == rwSPHEREOUTSIDE,
+          "a sphere behind the camera is outside");
+    check(RwCameraFrustumTestSphere(camera, &beyondFar) == rwSPHEREOUTSIDE,
+          "a sphere past the far plane is outside");
+    check(RwCameraFrustumTestSphere(camera, &onTheNearPlane) == rwSPHEREBOUNDARY,
+          "a sphere straddling the near plane is on the boundary");
+
+    // The same planes the game reads by hand -- iCamera.cpp:131 pulls six of
+    // them out by index into an xVec4 array and iModel.cpp:468 walks them --
+    // read here through RenderWare's own struct rather than librw's.
+    //
+    // The INDEX ORDER is the part worth pinning down, because iCamera.cpp picks
+    // planes 0 through 5 by number and gets a different plane if librw's order
+    // is not RenderWare's. librw builds them far, near, right, top, left,
+    // bottom, with each normal pointing out of the frustum: the far plane's is
+    // the camera's own `at`, at the far distance, and the near plane's is its
+    // negation.
+    check(camera->frustumPlanes[0].plane.normal.z == 1.0f &&
+              camera->frustumPlanes[0].plane.distance == 100.0f,
+          "frustumPlanes[0] is the far plane, where SetFarClipPlane put it");
+    check(camera->frustumPlanes[1].plane.normal.z == -1.0f &&
+              camera->frustumPlanes[1].plane.distance == -1.0f,
+          "frustumPlanes[1] is the near plane, facing the other way");
+    check(camera->frustumBoundBox.sup.z == 100.0f && camera->frustumBoundBox.inf.z == 1.0f,
+          "frustumBoundBox spans near to far");
+
+    // ---- refitting a skydome inside the far plane ----
+    //
+    // iFixes.h has the bug and the argument. What matters here is the property
+    // the fix rests on: shrinking about the eye must not move anything on
+    // screen, so every point has to keep its DIRECTION from the eye and only
+    // its distance may change.
+    {
+        RwCameraBeginUpdate(camera);
+
+        RwV3d eye = { 0.0f, 0.0f, 0.0f };
+
+        RwMatrix mat;
+        RwMatrixSetIdentity(&mat);
+        mat.pos.x = 3.0f;
+        mat.pos.y = 20.0f;
+        mat.pos.z = -7.0f;
+
+        RwMatrix before = mat;
+        RwMatrix saved;
+
+        // Well inside a 100-unit far plane, which is every level but GL03.
+        RwSphere fits = { { 0.0f, 0.0f, 0.0f }, 50.0f };
+        check(iFixSkyDomeToFarPlane(&mat, &eye, &fits, &saved) == FALSE,
+              "a dome already inside the far plane is not refitted");
+        check(mat.pos.y == before.pos.y && mat.right.x == before.right.x,
+              "and its matrix is not touched");
+
+        // GL03's shape: a shell far enough out that not one vertex of it is
+        // inside the frustum.
+        RwSphere tooBig = { { 0.0f, 20.0f, 0.0f }, 400.0f };
+        check(iFixSkyDomeToFarPlane(&mat, &eye, &tooBig, &saved) == TRUE,
+              "a dome past the far plane is refitted");
+        check(saved.pos.y == before.pos.y && saved.right.x == before.right.x,
+              "the caller gets the matrix it had back to restore");
+
+        // 0.98 of the far plane over the sphere's own reach from the eye.
+        F32 k = (0.98f * 100.0f) / (20.0f + 400.0f);
+        check(near(mat.right.x, k) && near(mat.up.y, k) && near(mat.at.z, k),
+              "the basis shrinks by the far plane over the dome's reach");
+
+        // The property itself, on a point that is not the origin of anything:
+        // the same corner of the model, placed by each matrix, has to sit on
+        // one ray out of the eye.
+        RwV3d corner = { 11.0f, -5.0f, 2.0f };
+        RwV3d was, now;
+        RwV3dTransformPoints(&was, &corner, 1, &before);
+        RwV3dTransformPoints(&now, &corner, 1, &mat);
+        check(near(now.x - eye.x, k * (was.x - eye.x)) &&
+                  near(now.y - eye.y, k * (was.y - eye.y)) &&
+                  near(now.z - eye.z, k * (was.z - eye.z)),
+              "and every point keeps its direction from the eye, so the picture does not move");
+
+        RwV3d d = { now.x - eye.x, now.y - eye.y, now.z - eye.z };
+        check(sqrtf(d.x * d.x + d.y * d.y + d.z * d.z) < 100.0f,
+              "the refitted dome is inside the far plane it was clipped by");
+
+        mat = before;
+        iFixSetSkyClip(FALSE);
+        check(iFixSkyDomeToFarPlane(&mat, &eye, &tooBig, &saved) == FALSE,
+              "fixes.sky_clip off leaves the dome where the game put it");
+        check(mat.pos.y == before.pos.y && mat.right.x == before.right.x, "and the matrix with it");
+        iFixSetSkyClip(TRUE);
+
+        RwCameraEndUpdate(camera);
+    }
+
+    reinterpret_cast<rw::Camera*>(camera)->setFrame(NULL);
+    RwFrameDestroy(frame);
+
+    // Only the refusals are checkable for these two. RwCameraShowRaster reaches
+    // Raster::show, which is the device's flip; RwCameraClear reaches the
+    // device's clearCamera. LIBRW_PLATFORM=NULL has neither -- its clearCamera
+    // is an empty function -- so a success here would prove nothing about what
+    // ends up on screen. Whoever links GL3 or D3D9 finishes these.
+#ifdef RW_NULL
+    check(RwCameraShowRaster(camera, NULL, rwRASTERFLIPWAITVSYNC) == NULL,
+          "RwCameraShowRaster refuses a camera with no frame buffer");
+#else
+    // With a backend linked this camera HAS a frame buffer -- attached above,
+    // because beginUpdate needs one -- so there is nothing left to refuse and
+    // the old check was only ever testing the absence of a renderer. What
+    // showing it actually puts on screen still is not checked here: that needs
+    // a frame drawn first, and this test draws nothing.
+    check(RwCameraGetRaster(camera) != NULL,
+          "the camera has a frame buffer, so RwCameraShowRaster has nothing to refuse");
+#endif
+    check(RwCameraShowRaster(NULL, NULL, 0) == NULL, "RwCameraShowRaster(NULL) is refused");
+    check(RwCameraClear(NULL, NULL, rwCAMERACLEARZ) == NULL, "RwCameraClear(NULL) is refused");
+
+    check(RwCameraDestroy(camera) != FALSE, "RwCameraDestroy");
+    check(RwCameraDestroy(NULL) == FALSE, "RwCameraDestroy(NULL) is refused");
+}
+
+static void test_lights()
+{
+    printf("RpLight\n");
+
+    RpLight* light = RpLightCreate(rpLIGHTPOINT);
+    check(light != NULL, "RpLightCreate");
+    if (light == NULL)
+    {
+        return;
+    }
+
+    check(RpLightGetType(light) == rpLIGHTPOINT, "RpLightGetType reads the mirrored object");
+    check(RpLightGetFlags(light) == (rpLIGHTLIGHTATOMICS | rpLIGHTLIGHTWORLD),
+          "a new light lights both atomics and the world");
+
+    RwRGBAReal green = { 0.0f, 1.0f, 0.25f, 1.0f };
+    check(RpLightSetColor(light, &green) == light, "RpLightSetColor");
+    check(RpLightGetColor(light)->red == 0.0f && RpLightGetColor(light)->green == 1.0f &&
+              RpLightGetColor(light)->blue == 0.25f,
+          "the colour lands in RpLight's own field");
+    check(reinterpret_cast<rw::Light*>(light)->color.green == 1.0f,
+          "librw reads back the colour the RenderWare call wrote");
+    check(light->object.object.privateFlags == 0, "a coloured light is not flagged as grey");
+
+    RwRGBAReal grey = { 0.5f, 0.5f, 0.5f, 1.0f };
+    RpLightSetColor(light, &grey);
+    check(light->object.object.privateFlags != 0,
+          "and a grey one is -- the flag both libraries use to take a cheaper path");
+
+    check(RpLightSetRadius(light, 12.5f) == light, "RpLightSetRadius");
+    check(RpLightGetRadius(light) == 12.5f, "the radius lands in RpLight's own field");
+    check(reinterpret_cast<rw::Light*>(light)->radius == 12.5f, "and librw agrees");
+
+    // Stored as -cos(angle), not as the angle, which is the thing a hand-written
+    // assignment to the field would get wrong.
+    check(RpLightSetConeAngle(light, 0.0f) == light, "RpLightSetConeAngle");
+    check(light->minusCosAngle == -1.0f, "a zero cone angle stores -cos(0) = -1");
+    RpLightSetConeAngle(light, rwPIOVER2);
+    check(light->minusCosAngle > -0.0001f && light->minusCosAngle < 0.0001f,
+          "and a right angle stores -cos(pi/2) = 0");
+
+    check(RpLightDestroy(light) != FALSE, "RpLightDestroy");
+    check(RpLightDestroy(NULL) == FALSE, "RpLightDestroy(NULL) is refused");
+    check(RpLightSetColor(NULL, &grey) == NULL, "RpLightSetColor(NULL) is refused");
+}
+
+// Counts calls without ever being reached, which is the point: nothing may call
+// back out of RpCollisionWorldForAllIntersections while it is unimplemented,
+// least of all with a made-up triangle.
+static int sWorldTrianglesSeen;
+
+static RpCollisionTriangle* countWorldTriangleCB(RpIntersection*, RpWorldSector*,
+                                                 RpCollisionTriangle* tri, RwReal, void*)
+{
+    sWorldTrianglesSeen++;
+    return tri;
+}
+
+static void test_worlds()
+{
+    printf("RpWorld\n");
+
+    // sup then inf, which is RwBBox's own order and the opposite of the one
+    // most engines use.
+    RwBBox bbox = { { 10.0f, 20.0f, 30.0f }, { -1.0f, -2.0f, -3.0f } };
+
+    RpWorld* world = RpWorldCreate(&bbox);
+    check(world != NULL, "RpWorldCreate");
+    if (world == NULL)
+    {
+        return;
+    }
+
+    // The head of the struct is librw's, so this reads the type librw's own
+    // World::create wrote.
+    check(world->object.type == rpWORLD, "a new world is an rpWORLD object");
+    check(reinterpret_cast<rw::World*>(world)->object.type == rpWORLD,
+          "and an RpWorld* IS an rw::World*");
+
+    // The plugin block. Everything checked here lives in memory librw allocated
+    // for the port at the offset RpWorldPluginAttach asked for, so a wrong
+    // offset shows up as one of these reading back something else.
+    check(RpWorldGetBBox(world)->sup.x == 10.0f && RpWorldGetBBox(world)->sup.z == 30.0f &&
+              RpWorldGetBBox(world)->inf.y == -2.0f,
+          "the caller's bounding box lands in RpWorld::boundingBox");
+    check(RpWorldGetNumMaterials(world) == 0, "a new world has no materials");
+    check(world->matList.materials == NULL, "and no material array to free");
+    check(world->rootSector == NULL, "and no root sector -- there is no world reader");
+    check(RpWorldGetRenderOrder(world) == rpWORLDRENDERNARENDERORDER,
+          "RpWorld::renderOrder starts at NA rather than at whatever rwMalloc returned");
+
+    RpWorld* unbounded = RpWorldCreate(NULL);
+    check(unbounded != NULL, "RpWorldCreate(NULL) is allowed -- an unbounded world");
+    RpWorldDestroy(unbounded);
+
+    // --- cameras -----------------------------------------------------------
+
+    RwCamera* camera = RwCameraCreate();
+    check(camera != NULL, "a camera to put in it");
+    if (camera == NULL)
+    {
+        return;
+    }
+
+    check(RwCameraGetWorld(camera) == NULL, "which is in no world to start with");
+    check(RpWorldAddCamera(world, camera) == world, "RpWorldAddCamera");
+    check(RwCameraGetWorld(camera) == world, "and RwCameraGetWorld answers with the RpWorld");
+    check(RpWorldAddCamera(world, camera) == NULL,
+          "adding it twice is refused rather than asserted on");
+
+    // curWorld is the reason RwCameraBeginUpdate mirrors librw's engine rather
+    // than assigning its own: librw's beginUpdate chain sets currentWorld from
+    // the camera's world, and until there was a world to put a camera in, that
+    // could only be checked against NULL.
+    //
+    // The frame and the rasters are the same requirement as in test_cameras:
+    // a real device's beginUpdate dereferences the camera's frame and renders
+    // into its frame buffer. See the note there.
+#ifndef RW_NULL
+    RwCameraSetFrame(camera, RwFrameCreate());
+    RwCameraSetRaster(camera, RwRasterCreate(640, 480, 0, rwRASTERTYPECAMERA));
+    RwCameraSetZRaster(camera, RwRasterCreate(640, 480, 0, rwRASTERTYPEZBUFFER));
+#endif
+
+    RwCameraBeginUpdate(camera);
+    check(RwEngineInstance->curWorld == world,
+          "an update on it makes it RwEngineInstance->curWorld");
+    RwCameraEndUpdate(camera);
+    check(RwEngineInstance->curWorld == NULL, "and ending the update clears it");
+
+    RpWorld* other = RpWorldCreate(&bbox);
+    check(RpWorldRemoveCamera(other, camera) == NULL,
+          "removing a camera from a world it is not in is refused");
+    check(RpWorldRemoveCamera(world, camera) == world, "RpWorldRemoveCamera");
+    check(RwCameraGetWorld(camera) == NULL, "and the camera is in no world again");
+    RpWorldDestroy(other);
+
+    // librw asserts a camera has left its world before it may be destroyed, so
+    // this getting as far as returning TRUE is itself the check that the remove
+    // above really unhooked it.
+    check(RwCameraDestroy(camera) != FALSE, "the camera destroys cleanly afterwards");
+
+    // --- lights ------------------------------------------------------------
+    //
+    // The two lists are the assertion that matters here. librw splits lights
+    // into "local" (positioned) and "global" (directional and ambient) where
+    // RenderWare splits them into lightList and directionalLightList, and the
+    // mirror claims those are the same two lists under different names. Reading
+    // them back through RenderWare's names is what checks that claim.
+
+    RpLight* point = RpLightCreate(rpLIGHTPOINT);
+    RpLight* directional = RpLightCreate(rpLIGHTDIRECTIONAL);
+    check(point != NULL && directional != NULL, "a positioned light and a directional one");
+    if (point == NULL || directional == NULL)
+    {
+        return;
+    }
+
+    check(rwLinkListEmpty(&world->lightList) && rwLinkListEmpty(&world->directionalLightList),
+          "a new world's light lists are both empty");
+
+    check(RpWorldAddLight(world, point) == world, "RpWorldAddLight, positioned");
+    check(!rwLinkListEmpty(&world->lightList), "the point light lands in RpWorld::lightList");
+    check(rwLinkListEmpty(&world->directionalLightList), "and not in the directional one");
+
+    check(RpWorldAddLight(world, directional) == world, "RpWorldAddLight, directional");
+    check(!rwLinkListEmpty(&world->directionalLightList),
+          "the directional light lands in RpWorld::directionalLightList");
+
+    check(RpWorldAddLight(world, point) == NULL, "adding a light twice is refused");
+    check(RpWorldRemoveLight(NULL, point) == NULL, "RpWorldRemoveLight(NULL, ...) is refused");
+
+    check(RpWorldRemoveLight(world, point) == world, "RpWorldRemoveLight");
+    check(rwLinkListEmpty(&world->lightList), "and the list is empty again");
+    check(RpWorldRemoveLight(world, point) == NULL,
+          "removing it a second time is refused rather than corrupting the list");
+    check(RpLightDestroy(point) != FALSE, "a removed light destroys cleanly");
+
+    // --- refusals ----------------------------------------------------------
+
+    check(RpWorldStreamRead(NULL) == NULL, "RpWorldStreamRead is not implemented and says so");
+
+    RpIntersection isx;
+    isx.type = rpINTERSECTSPHERE;
+    isx.t.sphere.center.x = 0.0f;
+    isx.t.sphere.center.y = 0.0f;
+    isx.t.sphere.center.z = 0.0f;
+    isx.t.sphere.radius = 1000.0f;
+    sWorldTrianglesSeen = 0;
+    check(RpCollisionWorldForAllIntersections(world, &isx, countWorldTriangleCB, NULL) == NULL,
+          "RpCollisionWorldForAllIntersections is not implemented and says so");
+    check(sWorldTrianglesSeen == 0, "and reports no triangles rather than invented ones");
+
+    // --- destroy -----------------------------------------------------------
+    //
+    // The directional light and a clump are deliberately left in the world.
+    // RenderWare would leave both holding a link into freed memory; the shim
+    // detaches them, so that destroying either afterwards is safe instead of
+    // tripping librw's assert at a call site with nothing to do with this one.
+    //
+    // The clump is made through librw rather than through RpClumpCreate,
+    // because what is being checked is RpWorldDestroy's walk of the clump list,
+    // not the clump shim.
+    rw::Clump* clump = rw::Clump::create();
+    reinterpret_cast<rw::World*>(world)->addClump(clump);
+    check(clump->world == reinterpret_cast<rw::World*>(world), "a clump in the world too");
+
+    check(RpWorldDestroy(world) != FALSE, "RpWorldDestroy with a light and a clump still in it");
+    check(directional->world == NULL, "which took the light back out of it first");
+    check(clump->world == NULL, "and the clump");
+    check(RpLightDestroy(directional) != FALSE, "so the light still destroys cleanly");
+    clump->destroy();
+
+    check(RpWorldDestroy(NULL) == FALSE, "RpWorldDestroy(NULL) is refused");
+    check(RpWorldAddLight(NULL, NULL) == NULL, "RpWorldAddLight(NULL, NULL) is refused");
+    check(RpWorldAddCamera(NULL, NULL) == NULL, "RpWorldAddCamera(NULL, NULL) is refused");
+}
+
+// The null device swallows every render state, so what actually reaches librw
+// cannot be read back out of it. These stand in for the device's own entry
+// points for the length of one call, which is what makes the state-id mapping
+// and the fog colour swizzle checkable without a backend.
+static int sCapturedState;
+static void* sCapturedValue;
+
+static void captureSetRenderState(rw::int32 state, void* value)
+{
+    sCapturedState = state;
+    sCapturedValue = value;
+}
+
+// Defined in renderstate.cpp. Declared here rather than pulled from a header so
+// that a change to the signature is caught at link time.
+void rwSetColorWriteMask(RwUInt32 mask);
+
+// The GameCube alpha compare sets TWO librw states per call, and the capture
+// above keeps only the last one, so it gets a hook of its own that sorts them.
+// Both start at -1 before each call, so "the shim never set this one" is a
+// failure rather than a value that happens to look right.
+static rw::int32 sAlphaFunc;
+static rw::int32 sAlphaRef;
+
+static void captureAlphaState(rw::int32 state, void* value)
+{
+    if (state == rw::ALPHATESTFUNC)
+    {
+        sAlphaFunc = (rw::int32)(uintptr_t)value;
+    }
+    else if (state == rw::ALPHATESTREF)
+    {
+        sAlphaRef = (rw::int32)(uintptr_t)value;
+    }
+}
+
+static void setAlphaCompare(RwInt32 comp0, RwUInt8 ref0, RwInt32 op, RwInt32 comp1, RwUInt8 ref1)
+{
+    sAlphaFunc = -1;
+    sAlphaRef = -1;
+    RwGameCubeSetAlphaCompare(comp0, ref0, op, comp1, ref1);
+}
+
+// Every render state librw has, set and read back on whichever backend this was
+// linked against.
+//
+// This is the check that would have caught COLORWRITEMASK. A backend's
+// setRenderState is one switch over the whole enum, and a state it has no case
+// for used to be accepted and dropped on the floor -- so the state existed on
+// D3D9, did nothing on GL3, and every depth-priming pass painted. The switches
+// are exhaustive now and the build fails on a missing case, but that only
+// covers a case that is absent; this covers one that is present and wrong, and
+// it covers the Get side, which no compiler check reaches.
+//
+// Each state is saved, given a probe value deliberately unlike the one the
+// engine resets to, read back, and put straight back. Nothing here is left
+// changed for the tests that follow.
+static void checkRenderStateRoundTrip(rw::int32 state, rw::uint32 probe, const char* name)
+{
+    const rw::uint32 saved = rw::GetRenderState(state);
+
+    rw::SetRenderState(state, probe);
+    const rw::uint32 got = rw::GetRenderState(state);
+
+    rw::SetRenderState(state, saved);
+
+    char what[96];
+    snprintf(what, sizeof(what), "%s round-trips", name);
+    check(got == probe, what);
+}
+
+static void test_renderstate_roundtrip()
+{
+    printf("librw render states\n");
+
+#ifdef RW_NULL
+    // The null device keeps nothing: its getRenderState answers 0 to every
+    // question (third_party/librw/src/engine.cpp). There is no round trip to
+    // check, and asserting one would only assert that the stub is a stub.
+    printf("  (the null device records no render state; skipped)\n");
+#else
+    // A known baseline for the two axes, because TEXTUREADDRESS answers only
+    // when they agree -- RenderWare's own behaviour, and what the C-API test
+    // above checks. With them apart, its Get would report 0 and the save and
+    // restore below would write 0 back as if it were an addressing mode.
+    rw::SetRenderState(rw::TEXTUREADDRESSU, rw::Texture::WRAP);
+    rw::SetRenderState(rw::TEXTUREADDRESSV, rw::Texture::WRAP);
+
+    checkRenderStateRoundTrip(rw::TEXTUREADDRESS, rw::Texture::CLAMP, "TEXTUREADDRESS");
+    checkRenderStateRoundTrip(rw::TEXTUREADDRESSU, rw::Texture::MIRROR, "TEXTUREADDRESSU");
+    checkRenderStateRoundTrip(rw::TEXTUREADDRESSV, rw::Texture::MIRROR, "TEXTUREADDRESSV");
+    checkRenderStateRoundTrip(rw::TEXTUREFILTER, rw::Texture::NEAREST, "TEXTUREFILTER");
+    checkRenderStateRoundTrip(rw::VERTEXALPHA, TRUE, "VERTEXALPHA");
+    checkRenderStateRoundTrip(rw::SRCBLEND, rw::BLENDDESTALPHA, "SRCBLEND");
+    checkRenderStateRoundTrip(rw::DESTBLEND, rw::BLENDDESTALPHA, "DESTBLEND");
+    checkRenderStateRoundTrip(rw::ZTESTENABLE, FALSE, "ZTESTENABLE");
+    checkRenderStateRoundTrip(rw::ZWRITEENABLE, FALSE, "ZWRITEENABLE");
+    checkRenderStateRoundTrip(rw::FOGENABLE, TRUE, "FOGENABLE");
+    checkRenderStateRoundTrip(rw::FOGCOLOR, 0x11223344, "FOGCOLOR");
+    checkRenderStateRoundTrip(rw::CULLMODE, rw::CULLFRONT, "CULLMODE");
+    checkRenderStateRoundTrip(rw::STENCILENABLE, TRUE, "STENCILENABLE");
+    checkRenderStateRoundTrip(rw::STENCILFAIL, rw::STENCILINVERT, "STENCILFAIL");
+    checkRenderStateRoundTrip(rw::STENCILZFAIL, rw::STENCILINCSAT, "STENCILZFAIL");
+    checkRenderStateRoundTrip(rw::STENCILPASS, rw::STENCILREPLACE, "STENCILPASS");
+    checkRenderStateRoundTrip(rw::STENCILFUNCTION, rw::STENCILGREATER, "STENCILFUNCTION");
+    checkRenderStateRoundTrip(rw::STENCILFUNCTIONREF, 0x5A, "STENCILFUNCTIONREF");
+    checkRenderStateRoundTrip(rw::STENCILFUNCTIONMASK, 0x0F, "STENCILFUNCTIONMASK");
+    checkRenderStateRoundTrip(rw::STENCILFUNCTIONWRITEMASK, 0xF0, "STENCILFUNCTIONWRITEMASK");
+    checkRenderStateRoundTrip(rw::ALPHATESTFUNC, rw::ALPHALESS, "ALPHATESTFUNC");
+    checkRenderStateRoundTrip(rw::ALPHATESTREF, 0x5A, "ALPHATESTREF");
+    checkRenderStateRoundTrip(rw::GSALPHATEST, TRUE, "GSALPHATEST");
+    checkRenderStateRoundTrip(rw::GSALPHATESTREF, 0x5A, "GSALPHATESTREF");
+    checkRenderStateRoundTrip(rw::COLORWRITEMASK, rw::COLORWRITERED | rw::COLORWRITEBLUE,
+                              "COLORWRITEMASK");
+
+    // TEXTURERASTER is the one state that carries a pointer rather than a
+    // value, so it goes through the pointer pair. Nil rather than a made-up
+    // address: the backends bind whatever they are handed.
+    void* const savedRaster = rw::GetRenderStatePtr(rw::TEXTURERASTER);
+    rw::SetRenderStatePtr(rw::TEXTURERASTER, NULL);
+    check(rw::GetRenderStatePtr(rw::TEXTURERASTER) == NULL, "TEXTURERASTER round-trips");
+    rw::SetRenderStatePtr(rw::TEXTURERASTER, savedRaster);
+#endif
+}
+
+// Per-pixel lighting is a setting, and a setting that is accepted and ignored is
+// the failure this file exists to catch. The picture it makes is not something a
+// test can judge -- only the game can -- but whether librw took the answer is.
+//
+// Deliberately not on a live device: rwd3d.h promises this is safe to set before
+// one exists, because RenderWareInit pushes it in before rw::Engine::open.
+static void test_perpixel_lighting()
+{
+    printf("per-pixel lighting setting\n");
+
+#if defined(RW_D3D9) || defined(RW_D3D11)
+    if (iBackendIsD3D())
+    {
+        const rw::bool32 saved = rw::d3d::getPerPixelLighting();
+
+        rw::d3d::setPerPixelLightingEnabled(TRUE);
+        check(rw::d3d::getPerPixelLighting() != 0, "on is remembered");
+
+        rw::d3d::setPerPixelLightingEnabled(FALSE);
+        check(rw::d3d::getPerPixelLighting() == 0, "off is remembered");
+
+        // Any non-zero means on, because iConfigGetBool answers with whatever
+        // it parsed rather than with 1.
+        rw::d3d::setPerPixelLightingEnabled(37);
+        check(rw::d3d::getPerPixelLighting() != 0, "a non-zero other than 1 is on");
+
+        rw::d3d::setPerPixelLightingEnabled(saved);
+        return;
+    }
+#endif
+#ifdef RW_GL3
+    if (iBackendIsGL3())
+    {
+        const rw::bool32 saved = rw::gl3::getPerPixelLighting();
+
+        rw::gl3::setPerPixelLightingEnabled(TRUE);
+        check(rw::gl3::getPerPixelLighting() != 0, "on is remembered");
+
+        rw::gl3::setPerPixelLightingEnabled(FALSE);
+        check(rw::gl3::getPerPixelLighting() == 0, "off is remembered");
+
+        rw::gl3::setPerPixelLightingEnabled(37);
+        check(rw::gl3::getPerPixelLighting() != 0, "a non-zero other than 1 is on");
+
+        rw::gl3::setPerPixelLightingEnabled(saved);
+        return;
+    }
+#endif
+    check(TRUE, "this backend has no shaders to light anything with");
+}
+
+// The loading-screen still: capture the frame, latch it, and be handed a
+// texture over it.
+//
+// What this is really checking is that the backend can copy its frame buffer
+// into a texture at all -- the one thing the effect needs and the reason it was
+// D3D9-only. Everything above the copy is backend-independent, so a failure
+// here is a failure of the copy.
+//
+// It runs on a live engine with nothing drawn, so the captured frame is
+// whatever the device cleared to. That is not a problem: this asks whether a
+// capture HAPPENED, and only the game can say whether it looks right.
+static void test_snapshot()
+{
+    printf("iSnapshot\n");
+
+    // Nothing captured and nothing latched, which is the state at boot: the
+    // first loading screen of a session has no previous frame to stand on.
+    iSnapshotRelease();
+    check(iSnapshotBackgroundTexture() == NULL, "no still before anything has been captured");
+
+    iSnapshotCapture();
+
+    // Latched second, because a capture while latched is refused -- that is
+    // what stops the presents made under the loading screen overwriting the
+    // picture with itself.
+    iSnapshotLatch();
+
+    RwTexture* still = iSnapshotBackgroundTexture();
+
+#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+    check(still != NULL, "the frame was copied into a texture");
+    if (still != NULL)
+    {
+        check(still->raster != NULL, "and the texture has a raster");
+        check(still->raster != NULL && still->raster->width > 0 && still->raster->height > 0,
+              "of the size the port is rendering at");
+    }
+
+    // Refused while latched, so the loading screen holds the frame it started
+    // with rather than the frames drawn over it.
+    iSnapshotCapture();
+    check(iSnapshotBackgroundTexture() == still,
+          "and a capture made while latched leaves it alone");
+#else
+    // LIBRW_PLATFORM=NULL renders nothing to copy. Answering NULL is the
+    // supported behaviour, not a failure: zGame falls back to the background
+    // texture asset, which is what the GameCube and PS2 releases draw.
+    check(still == NULL, "the null device has no frame to capture, and says so");
+#endif
+
+    iSnapshotRelease();
+    check(iSnapshotBackgroundTexture() == NULL,
+          "and releasing it puts the loading screen back to the asset");
+}
+
+static void test_renderstate()
+{
+    printf("RwRenderState\n");
+
+    // A Set has to be readable by the matching Get, because that is the whole
+    // basis of xfont::set_render_state / restore_render_state and of every
+    // other overlay in the game. librw cannot answer this: rw::GetRenderState
+    // asks the device, and the null device answers 0 to everything.
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+
+    RwBlendFunction src = rwBLENDNABLEND;
+    RwBlendFunction dst = rwBLENDNABLEND;
+    check(RwRenderStateGet(rwRENDERSTATESRCBLEND, &src) != FALSE, "RwRenderStateGet(SRCBLEND)");
+    check(RwRenderStateGet(rwRENDERSTATEDESTBLEND, &dst) != FALSE, "RwRenderStateGet(DESTBLEND)");
+    check(src == rwBLENDSRCALPHA && dst == rwBLENDINVSRCALPHA,
+          "a Get returns what the matching Set was given");
+
+    // The blend factors the GameCube driver refuses, which the shim has to
+    // refuse the same way: GX has one enum value for the source colour and the
+    // destination colour, so the src slot cannot name the source and the dst
+    // slot cannot name the destination. Fourteen of the game's smoke and steam
+    // particle systems ask for src rwBLENDSRCCOLOR and rely on it being
+    // ignored, leaving the rwBLENDSRCALPHA zRenderState had just set.
+    check(RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCCOLOR) == FALSE,
+          "SRCBLEND refuses rwBLENDSRCCOLOR, as the GameCube driver does");
+    check(RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDINVSRCCOLOR) == FALSE,
+          "and rwBLENDINVSRCCOLOR");
+    check(RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDDESTCOLOR) == FALSE,
+          "DESTBLEND refuses rwBLENDDESTCOLOR");
+    check(RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVDESTCOLOR) == FALSE,
+          "and rwBLENDINVDESTCOLOR");
+    check(RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHASAT) == FALSE,
+          "and neither slot takes rwBLENDSRCALPHASAT");
+    check(RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDSRCALPHASAT) == FALSE,
+          "in either direction");
+    check(RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDNABLEND) == FALSE,
+          "nor rwBLENDNABLEND, which is not a factor at all");
+
+    src = rwBLENDNABLEND;
+    dst = rwBLENDNABLEND;
+    RwRenderStateGet(rwRENDERSTATESRCBLEND, &src);
+    RwRenderStateGet(rwRENDERSTATEDESTBLEND, &dst);
+    check(src == rwBLENDSRCALPHA && dst == rwBLENDINVSRCALPHA,
+          "a refused factor leaves the one in force alone, cache included");
+
+    // The ones both slots do take still go through.
+    check(RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDDESTCOLOR) != FALSE,
+          "SRCBLEND takes rwBLENDDESTCOLOR, which GX can express");
+    check(RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDSRCCOLOR) != FALSE,
+          "and DESTBLEND takes rwBLENDSRCCOLOR");
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
+    RwBool zwrite = 123;
+    RwBool valpha = 123;
+    RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, &zwrite);
+    RwRenderStateGet(rwRENDERSTATEVERTEXALPHAENABLE, &valpha);
+    check(zwrite == TRUE && valpha == FALSE, "the boolean states round-trip");
+
+    RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void*)rwFILTERLINEAR);
+    RwTextureFilterMode filter = rwFILTERNAFILTERMODE;
+    RwRenderStateGet(rwRENDERSTATETEXTUREFILTER, &filter);
+    check(filter == rwFILTERLINEAR, "and so does the filter mode");
+
+    // Recorded but not rendered: librw has no shade mode at all, so the Set
+    // says FALSE. It still has to round-trip, because xFont.cpp:626 saves it
+    // and xFont.cpp:649 puts it back.
+    check(RwRenderStateSet(rwRENDERSTATESHADEMODE, (void*)rwSHADEMODEFLAT) == FALSE,
+          "SHADEMODE reports that librw did not take it");
+    RwShadeMode shade = rwSHADEMODENASHADEMODE;
+    check(RwRenderStateGet(rwRENDERSTATESHADEMODE, &shade) != FALSE && shade == rwSHADEMODEFLAT,
+          "but it is still recorded, so xfont can restore it");
+
+    check(RwRenderStateSet(rwRENDERSTATEFOGDENSITY, (void*)0) == FALSE,
+          "FOGDENSITY is refused rather than recorded under a guessed encoding");
+    RwUInt32 density = 0xCDCDCDCD;
+    check(RwRenderStateGet(rwRENDERSTATEFOGDENSITY, &density) == FALSE && density == 0xCDCDCDCD,
+          "and a Get for it leaves the caller's variable alone");
+
+    // The combined address query answers only when the two axes agree, which is
+    // what RenderWare does.
+    RwRenderStateSet(rwRENDERSTATETEXTUREADDRESS, (void*)rwTEXTUREADDRESSWRAP);
+    RwTextureAddressMode addr = rwTEXTUREADDRESSNATEXTUREADDRESS;
+    check(RwRenderStateGet(rwRENDERSTATETEXTUREADDRESS, &addr) != FALSE &&
+              addr == rwTEXTUREADDRESSWRAP,
+          "TEXTUREADDRESS sets and gets both axes");
+    RwRenderStateSet(rwRENDERSTATETEXTUREADDRESSV, (void*)rwTEXTUREADDRESSCLAMP);
+    check(RwRenderStateGet(rwRENDERSTATETEXTUREADDRESS, &addr) == FALSE,
+          "and refuses the combined query once the axes differ");
+    RwRenderStateSet(rwRENDERSTATETEXTUREADDRESS, (void*)rwTEXTUREADDRESSWRAP);
+
+    // What actually reaches librw. The device's setRenderState is replaced for
+    // the length of these calls, because the null device keeps nothing.
+    void (*saved)(rw::int32, void*) = rw::engine->device.setRenderState;
+    rw::engine->device.setRenderState = captureSetRenderState;
+
+    sCapturedState = -1;
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    check(sCapturedState == rw::VERTEXALPHA && sCapturedValue == (void*)1,
+          "rwRENDERSTATEVERTEXALPHAENABLE reaches librw as VERTEXALPHA");
+
+    sCapturedState = -1;
+    RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)rwCULLMODECULLBACK);
+    check(sCapturedState == rw::CULLMODE && sCapturedValue == (void*)rw::CULLBACK,
+          "and rwCULLMODECULLBACK reaches it as CULLBACK");
+
+    // The one conversion in this file that would be invisible if it were wrong.
+    // iCamera.cpp:373 packs the fog colour ARGB by hand; librw's backends read
+    // red out of the LOW byte. Forwarding the word unchanged would swap red and
+    // blue in every foggy level and nothing would fail.
+    sCapturedState = -1;
+    const RwUInt32 argb = 0xFF204080; // a=FF r=20 g=40 b=80
+    RwRenderStateSet(rwRENDERSTATEFOGCOLOR, (void*)argb);
+    check(sCapturedState == rw::FOGCOLOR, "rwRENDERSTATEFOGCOLOR reaches librw as FOGCOLOR");
+    check(sCapturedValue == (void*)0xFF804020,
+          "with red and blue swapped, which is the packing librw reads");
+
+    rw::engine->device.setRenderState = saved;
+
+    RwUInt32 fog = 0;
+    check(RwRenderStateGet(rwRENDERSTATEFOGCOLOR, &fog) != FALSE && fog == argb,
+          "and a Get hands back the same ARGB word the Set was given");
+
+    check(RwRenderStateSet((RwRenderState)999, NULL) == FALSE, "an unknown state is refused");
+    check(RwRenderStateGet(rwRENDERSTATESRCBLEND, NULL) == FALSE,
+          "RwRenderStateGet(NULL) is refused");
+
+    // RxRenderStateVectorLoadDriverState is the same copy, handed over whole.
+    // xShadowSimple.cpp:687 unpacks bits 2 and 3 of Flags by hand, so those two
+    // are what this checks.
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDDESTCOLOR);
+
+    RxRenderStateVector rsv;
+    memset(&rsv, 0xCD, sizeof(rsv));
+    check(RxRenderStateVectorLoadDriverState(&rsv) == &rsv, "RxRenderStateVectorLoadDriverState");
+    check(((rsv.Flags >> 2) & 1) == 1, "Flags bit 2 is z-write, as xShadowSimple reads it");
+    check(((rsv.Flags >> 3) & 1) == 0, "Flags bit 3 is vertex alpha, as xShadowSimple reads it");
+    check(rsv.SrcBlend == rwBLENDDESTCOLOR, "and the blend functions come across whole");
+    check(RxRenderStateVectorLoadDriverState(NULL) == NULL,
+          "RxRenderStateVectorLoadDriverState(NULL) is refused");
+
+    // The colour write mask, which iDraw.cpp:iDrawSetFBMSK forwards to. It is
+    // not a RenderWare render state -- see the comment on it in
+    // renderstate.cpp -- so it is reached by name rather than through
+    // RwRenderStateSet.
+    //
+    // Through the capture hook, not through rw::GetRenderState. These read the
+    // value back out of the device when they were written, which works on D3D9
+    // and cannot on LIBRW_PLATFORM=NULL, whose getRenderState returns 0 to
+    // every question (third_party/librw/src/engine.cpp:461) -- so two of the
+    // three failed there and the third passed only because it was checking for
+    // 0. What is under test is that the shim forwards the mask it was given,
+    // and the hook says that on both backends.
+    //
+    // The three values that matter are the ones the game passes: everything on,
+    // everything off, and the alpha-only case the bubble parameters produce.
+    void (*savedMask)(rw::int32, void*) = rw::engine->device.setRenderState;
+    rw::engine->device.setRenderState = captureSetRenderState;
+
+    sCapturedState = -1;
+    rwSetColorWriteMask(rw::COLORWRITEALL);
+    check(sCapturedState == rw::COLORWRITEMASK &&
+              (RwUInt32)(uintptr_t)sCapturedValue == rw::COLORWRITEALL,
+          "the colour write mask lets every channel through");
+
+    sCapturedState = -1;
+    rwSetColorWriteMask(0);
+    check(sCapturedState == rw::COLORWRITEMASK && (RwUInt32)(uintptr_t)sCapturedValue == 0,
+          "and can shut all four off, which is what a depth-priming pass wants");
+
+    sCapturedState = -1;
+    rwSetColorWriteMask(rw::COLORWRITEALPHA);
+    check(sCapturedState == rw::COLORWRITEMASK &&
+              (RwUInt32)(uintptr_t)sCapturedValue == rw::COLORWRITEALPHA,
+          "and can leave alpha on with colour off");
+
+    rw::engine->device.setRenderState = savedMask;
+
+    // Back to normal, so nothing after this draws into a masked frame buffer.
+    rwSetColorWriteMask(rw::COLORWRITEALL);
+
+    // The GameCube alpha compare -- cutout transparency, and the one state in
+    // the port that decides whether foliage has leaves or is a green rectangle.
+    //
+    // Reached by name for the same reason as the colour write mask, and checked
+    // through the device hook rather than through a Get for two reasons: it
+    // sets a PAIR of librw states and both have to be seen, and going through
+    // the hook makes this checkable under LIBRW_PLATFORM=NULL, whose device
+    // answers 0 to every question.
+    //
+    // GX takes two comparisons and a boolean op where librw takes one
+    // comparison and one reference, so the whole of what this checks is the
+    // reduction: which single test comes out, and what reference goes with it.
+    saved = rw::engine->device.setRenderState;
+    rw::engine->device.setRenderState = captureAlphaState;
+
+    // The two states xModelBucket.cpp:520-533 actually produces. ALWAYS is the
+    // identity for AND, so each pair collapses to its other side -- and it is
+    // the SIDE that moves between them, which is exactly the thing a reduction
+    // written for one of the two would get wrong on the other.
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_GEQUAL, 128);
+    check(sAlphaFunc == rw::ALPHAGREATEREQUAL && sAlphaRef == 128,
+          "a bucket with an alpha reference cuts out at that reference");
+
+    setAlphaCompare(GX_GEQUAL, 1, GX_AOP_AND, GX_ALWAYS, 0);
+    check(sAlphaFunc == rw::ALPHAGREATEREQUAL && sAlphaRef == 1,
+          "and one without discards only fully transparent pixels");
+
+    // The reference is 8-bit on both sides, so the top of the range has to
+    // survive. A scaling step slipped in anywhere would show up here.
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_GEQUAL, 255);
+    check(sAlphaFunc == rw::ALPHAGREATEREQUAL && sAlphaRef == 255,
+          "the reference reaches librw unscaled");
+
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+    check(sAlphaFunc == rw::ALPHAALWAYS && sAlphaRef == 0, "two ALWAYS sides are no test at all");
+
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_LESS, 64);
+    check(sAlphaFunc == rw::ALPHALESS && sAlphaRef == 64,
+          "GX_LESS maps across as well, though nothing asks for it");
+
+    // The cases the shim cannot express. Both have to come out as "let
+    // everything through" rather than as a guess: an alpha test that rejects
+    // too much makes geometry vanish, and one that rejects too little only
+    // makes it opaque, which is what this function did before it was written.
+    setAlphaCompare(GX_GEQUAL, 32, GX_AOP_OR, GX_LESS, 200);
+    check(sAlphaFunc == rw::ALPHAALWAYS && sAlphaRef == 0,
+          "a genuine two-sided test falls back to passing everything");
+
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_EQUAL, 5);
+    check(sAlphaFunc == rw::ALPHAALWAYS && sAlphaRef == 0,
+          "and so does a comparison librw has no spelling for");
+
+    // Both states, every time. If the fallback above left the reference alone
+    // instead of clearing it, the previous bucket's 255 would still be in the
+    // device and would come back the moment anything set the function without
+    // the reference -- so the fallback is checked immediately after the call
+    // that loads the highest reference there is.
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_GEQUAL, 255);
+    setAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_EQUAL, 5);
+    check(sAlphaRef == 0, "and clears the reference with it rather than leaving a stale one");
+
+    rw::engine->device.setRenderState = saved;
+}
+
+static int sIm2DPrim;
+static void* sIm2DVerts;
+static int sIm2DCount;
+static int sIm3DPrim;
+static int sIm3DEnds;
+
+static int sIm2DIndexedPrim;
+static int sIm2DIndexCount;
+
+// The indexed form needed standing in for too, and that it did not is how this
+// test faulted the first time a real backend was linked: the three stubs below
+// covered im2DRenderPrimitive, im3DRenderPrimitive and im3DEnd, so the indexed
+// call went to D3D9's real rasteriser -- outside any camera update, with no
+// render target bound.
+static void captureIm2DRenderIndexedPrimitive(rw::PrimitiveType type, void* verts,
+                                              rw::int32 numVerts, void* indices,
+                                              rw::int32 numIndices)
+{
+    (void)verts;
+    (void)numVerts;
+    (void)indices;
+    sIm2DIndexedPrim = (int)type;
+    sIm2DIndexCount = (int)numIndices;
+}
+
+static int sIm3DTransforms;
+
+// The last of the four. im3DTransform builds the device's own transformed
+// vertex buffer, so on D3D9 it is real work against real state -- the same
+// reason the indexed 2D call needed standing in for.
+static void captureIm3DTransform(void* verts, rw::int32 num, rw::Matrix* world, rw::uint32 flags)
+{
+    (void)verts;
+    (void)num;
+    (void)world;
+    (void)flags;
+    sIm3DTransforms++;
+}
+
+static void captureIm2DRenderPrimitive(rw::PrimitiveType type, void* verts, rw::int32 num)
+{
+    sIm2DPrim = type;
+    sIm2DVerts = verts;
+    sIm2DCount = num;
+}
+
+static void captureIm3DRenderPrimitive(rw::PrimitiveType type)
+{
+    sIm3DPrim = type;
+}
+
+static void captureIm3DEnd(void)
+{
+    sIm3DEnds++;
+}
+
+static void test_immediate()
+{
+    printf("RwIm2D / RwIm3D\n");
+
+    // The depth range, which is the DEVICE's and is not the same on all of
+    // them: D3D9 and the null device clip to 0..1, OpenGL to -1..1. What is
+    // being checked is that the shim forwards whatever the linked device says
+    // rather than answering from a constant of its own -- xFont.cpp:425,
+    // zGame.cpp:848 and zEntPlayerOOBState.cpp:220 put their overlays at these
+    // numbers, and an overlay at 0 on a device whose near plane is -1 sits in
+    // the middle of the depth buffer instead of in front of it.
+    const RwReal wantedNearZ = iBackendIsGL3() ? -1.0f : 0.0f;
+    check(RwIm2DGetNearScreenZ() == wantedNearZ, "RwIm2DGetNearScreenZ comes from the device");
+    check(RwIm2DGetFarScreenZ() == 1.0f, "RwIm2DGetFarScreenZ comes from the device");
+
+    RwIm2DVertex quad[4];
+    memset(quad, 0, sizeof(quad));
+
+    void (*savedIm2D)(rw::PrimitiveType, void*, rw::int32) = rw::engine->device.im2DRenderPrimitive;
+    void (*savedIm3D)(rw::PrimitiveType) = rw::engine->device.im3DRenderPrimitive;
+    void (*savedEnd)(void) = rw::engine->device.im3DEnd;
+    void (*savedIm2DIndexed)(rw::PrimitiveType, void*, rw::int32, void*, rw::int32) =
+        rw::engine->device.im2DRenderIndexedPrimitive;
+    rw::engine->device.im2DRenderIndexedPrimitive = captureIm2DRenderIndexedPrimitive;
+    rw::engine->device.im2DRenderPrimitive = captureIm2DRenderPrimitive;
+    void (*savedIm3DTransform)(void*, rw::int32, rw::Matrix*, rw::uint32) =
+        rw::engine->device.im3DTransform;
+    rw::engine->device.im3DTransform = captureIm3DTransform;
+    rw::engine->device.im3DRenderPrimitive = captureIm3DRenderPrimitive;
+    rw::engine->device.im3DEnd = captureIm3DEnd;
+
+    sIm2DPrim = -1;
+    check(RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, quad, 4) != FALSE, "RwIm2DRenderPrimitive");
+    check(sIm2DPrim == rw::PRIMTYPETRISTRIP && sIm2DVerts == quad && sIm2DCount == 4,
+          "the primitive type, the vertices and the count all arrive unchanged");
+
+    check(RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, NULL, 4) == FALSE,
+          "RwIm2DRenderPrimitive(NULL) is refused");
+    check(RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, quad, 0) == FALSE,
+          "and so is a zero-vertex primitive");
+
+    RwImVertexIndex indices[6] = { 0, 1, 2, 0, 2, 3 };
+    sIm2DIndexedPrim = -1;
+    check(RwIm2DRenderIndexedPrimitive(rwPRIMTYPETRILIST, quad, 4, indices, 6) != FALSE,
+          "RwIm2DRenderIndexedPrimitive");
+    check(sIm2DIndexedPrim == rw::PRIMTYPETRILIST && sIm2DIndexCount == 6,
+          "the primitive type and index count arrive unchanged");
+    check(RwIm2DRenderIndexedPrimitive(rwPRIMTYPETRILIST, quad, 4, NULL, 6) == FALSE,
+          "RwIm2DRenderIndexedPrimitive with no indices is refused");
+
+    // Every one of the twenty call sites uses the result of RwIm3DTransform as
+    // "may I render now", so a NULL here would silently stop every effect in
+    // the game from drawing. Nothing dereferences it -- see the comment in
+    // im.cpp.
+    RwIm3DVertex verts[4];
+    memset(verts, 0, sizeof(verts));
+    sIm3DTransforms = 0;
+    check(RwIm3DTransform(verts, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL,
+          "RwIm3DTransform reports success");
+    check(sIm3DTransforms == 1, "and reaches the device once");
+    check(RwIm3DTransform(NULL, 4, NULL, 0) == NULL, "RwIm3DTransform(NULL) is refused");
+    check(RwIm3DTransform(verts, 0, NULL, 0) == NULL, "and so is a zero-vertex transform");
+
+    sIm3DPrim = -1;
+    check(RwIm3DRenderPrimitive(rwPRIMTYPETRILIST) != FALSE, "RwIm3DRenderPrimitive");
+    check(sIm3DPrim == rw::PRIMTYPETRILIST, "the primitive type arrives unchanged");
+
+    sIm3DEnds = 0;
+    check(RwIm3DEnd() != FALSE, "RwIm3DEnd");
+    check(sIm3DEnds == 1, "and reaches the device once");
+
+    rw::engine->device.im2DRenderIndexedPrimitive = savedIm2DIndexed;
+    rw::engine->device.im2DRenderPrimitive = savedIm2D;
+    rw::engine->device.im3DTransform = savedIm3DTransform;
+    rw::engine->device.im3DRenderPrimitive = savedIm3D;
+    rw::engine->device.im3DEnd = savedEnd;
+}
+
+// A unit quad in the XZ plane, as two triangles, used by the geometry and
+// intersection tests. Four vertices from (-1,0,-1) to (1,0,1); triangle 0 is
+// the half with z < x, triangle 1 the half with z > x.
+static RpGeometry* makeQuad()
+{
+    RpGeometry* geometry = RpGeometryCreate(4, 2, rpGEOMETRYPOSITIONS | rpGEOMETRYTEXTURED);
+    if (geometry == NULL)
+    {
+        return NULL;
+    }
+
+    RwV3d* v = geometry->morphTarget[0].verts;
+    v[0].x = -1.0f;
+    v[0].y = 0.0f;
+    v[0].z = -1.0f;
+    v[1].x = 1.0f;
+    v[1].y = 0.0f;
+    v[1].z = -1.0f;
+    v[2].x = 1.0f;
+    v[2].y = 0.0f;
+    v[2].z = 1.0f;
+    v[3].x = -1.0f;
+    v[3].y = 0.0f;
+    v[3].z = 1.0f;
+
+    RpGeometryTriangleSetVertexIndices(geometry, &geometry->triangles[0], 0, 1, 2);
+    RpGeometryTriangleSetVertexIndices(geometry, &geometry->triangles[1], 0, 2, 3);
+    return geometry;
+}
+
+static RpMaterial* countMaterialsCB(RpMaterial* material, void* data)
+{
+    (void)material;
+    (*(int*)data)++;
+    return material;
+}
+
+static RpMaterial* stopAfterFirstCB(RpMaterial* material, void* data)
+{
+    (void)material;
+    (*(int*)data)++;
+    return NULL;
+}
+
+static void test_geometry()
+{
+    printf("RpGeometry / RpMaterial / RpMorphTarget\n");
+
+    RpGeometry* geometry = makeQuad();
+    check(geometry != NULL, "RpGeometryCreate");
+    if (geometry == NULL)
+    {
+        return;
+    }
+
+    // Read out of the RenderWare struct, which is the mirroring doing its job:
+    // zFX.cpp and xJSP.cpp reach for exactly these fields.
+    check(geometry->numVertices == 4 && geometry->numTriangles == 2,
+          "a new geometry has the counts it was asked for");
+    check(geometry->numMorphTargets == 1,
+          "RpGeometryCreate makes the one morph target RenderWare's does");
+    check(geometry->numTexCoordSets == 1, "rpGEOMETRYTEXTURED means one texture coordinate set");
+    check(geometry->morphTarget != NULL && geometry->morphTarget[0].verts != NULL,
+          "the morph target has vertices");
+    check(geometry->morphTarget[0].parentGeom == geometry,
+          "the morph target points back at its geometry");
+    check(geometry->refCount == 1, "a new geometry starts with one reference");
+
+    // The whole contract of the collision plugin, checked on a real geometry.
+    // A model with no collision tree has to report NOT HAVING ONE; every caller
+    // then takes its brute-force path (xCollide.cpp:2093) or skips the query
+    // outright (xShadow.cpp:1454).
+    check(RpCollisionGeometryGetData(geometry) == NULL,
+          "a geometry with no collision data reports none");
+
+    RwUInt16 a = 0;
+    RwUInt16 b = 0;
+    RwUInt16 c = 0;
+    RpGeometryTriangleGetVertexIndices(geometry, &geometry->triangles[1], &a, &b, &c);
+    check(a == 0 && b == 2 && c == 3, "RpGeometryTriangleGet/SetVertexIndices round-trip");
+
+    // No material yet: librw writes 0xFFFF into a fresh triangle's index and
+    // RenderWare reads that as -1, so this checks the two agree on "none".
+    check(RpGeometryTriangleGetMaterial(geometry, &geometry->triangles[0]) == NULL,
+          "a triangle with no material has no material");
+
+    RpMaterial* material = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    check(material != NULL, "a material to put on it");
+    if (material == NULL)
+    {
+        return;
+    }
+
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[0], material);
+    check(geometry->matList.numMaterials == 1,
+          "RpGeometryTriangleSetMaterial appends to the material list");
+    check(RpGeometryTriangleGetMaterial(geometry, &geometry->triangles[0]) == material,
+          "RpGeometryTriangleGetMaterial finds it again");
+    check(material->refCount == 2, "the geometry took a reference on it");
+
+    // The same material on a second triangle must not append it twice.
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[1], material);
+    check(geometry->matList.numMaterials == 1, "a material shared by two triangles appears once");
+
+    int seen = 0;
+    check(RpGeometryForAllMaterials(geometry, countMaterialsCB, &seen) == geometry,
+          "RpGeometryForAllMaterials");
+    check(seen == 1, "it visited the one material");
+
+    RpMaterial* second = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[1], second);
+    check(geometry->matList.numMaterials == 2, "a second material appends");
+
+    seen = 0;
+    RpGeometryForAllMaterials(geometry, stopAfterFirstCB, &seen);
+    check(seen == 1, "a callback returning NULL stops the walk early");
+
+    // RpMaterialSetTexture is reference counted, which is what lets
+    // zParPTank.cpp hand over a texture it found in a dictionary.
+    RwTexture* texture = RwTextureCreate(NULL);
+    check(texture != NULL && texture->refCount == 1, "a texture for the material");
+    RpMaterialSetTexture(material, texture);
+    check(material->texture == texture, "RpMaterialSetTexture");
+    check(texture->refCount == 2, "the material took a reference on the texture");
+    RpMaterialSetTexture(material, NULL);
+    check(material->texture == NULL && texture->refCount == 1,
+          "setting it back to NULL gives the reference up again");
+    RwTextureDestroy(texture);
+
+    // Bounding sphere of the quad: centre at the origin, radius to a corner.
+    // The morph target's own sphere is stamped first so that "it does not
+    // store the result" is a real check and not a read of whatever
+    // RpGeometryCreate left there.
+    geometry->morphTarget[0].boundingSphere.radius = 99.0f;
+
+    RwSphere sphere;
+    sphere.center.x = 99.0f;
+    sphere.radius = 99.0f;
+    check(RpMorphTargetCalcBoundingSphere(&geometry->morphTarget[0], &sphere) ==
+              &geometry->morphTarget[0],
+          "RpMorphTargetCalcBoundingSphere");
+    check(near(sphere.center.x, 0.0f) && near(sphere.center.y, 0.0f) && near(sphere.center.z, 0.0f),
+          "the quad's bounding sphere is centred on the origin");
+    check(near(sphere.radius, 1.41421f), "and reaches its corners");
+    check(near(geometry->morphTarget[0].boundingSphere.radius, 99.0f),
+          "it computes into the caller's sphere and does not store it");
+
+    // Lock throws the mesh away and unlock rebuilds it, which is the half of
+    // RenderWare's pair that matters here.
+    check(RpGeometryUnlock(geometry) == geometry, "RpGeometryUnlock");
+    check(geometry->mesh != NULL, "unlocking built the mesh");
+    check(geometry->mesh->numMeshes == 2, "one mesh per material");
+
+    check(RpGeometryLock(geometry, 1 /* rpGEOMETRYLOCKPOLYGONS */) == geometry, "RpGeometryLock");
+    check(geometry->mesh == NULL, "locking the polygons threw the mesh away");
+    check(geometry->lockedSinceLastInst & 1, "and recorded that it did");
+
+    RpGeometryUnlock(geometry);
+    check(geometry->mesh != NULL, "unlocking built it again");
+
+    // A vertex-only lock leaves the mesh alone: the indices still describe the
+    // triangles, only the positions moved. xCutscene.cpp locks this way every
+    // frame it morphs a model.
+    RpGeometryLock(geometry, 2 /* rpGEOMETRYLOCKVERTICES */);
+    check(geometry->mesh != NULL, "locking only the vertices keeps the mesh");
+    RpGeometryUnlock(geometry);
+
+    reinterpret_cast<rw::Material*>(second)->destroy();
+    reinterpret_cast<rw::Material*>(material)->destroy();
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+}
+
+// What RpAtomicForAllIntersections handed back, for the checks below.
+struct IsxLog
+{
+    int calls;
+    RwIntPtr lastIndex;
+    RwReal lastDistance;
+    RwV3d lastVertex0;
+    RwV3d lastNormal;
+};
+
+static RpCollisionTriangle* logIsxCB(RpIntersection* intersection, RpCollisionTriangle* tri,
+                                     RwReal distance, void* data)
+{
+    (void)intersection;
+    IsxLog* log = (IsxLog*)data;
+    log->calls++;
+    log->lastIndex = tri->index;
+    log->lastDistance = distance;
+    log->lastVertex0 = *tri->vertices[0];
+    log->lastNormal = tri->normal;
+    return tri;
+}
+
+static RpCollisionTriangle* stopIsxCB(RpIntersection* intersection, RpCollisionTriangle* tri,
+                                      RwReal distance, void* data)
+{
+    logIsxCB(intersection, tri, distance, data);
+    return NULL;
+}
+
+static void test_atomics()
+{
+    printf("RpAtomic\n");
+
+    RpAtomic* atomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    check(atomic != NULL, "an atomic to hang it all off");
+    if (atomic == NULL)
+    {
+        return;
+    }
+
+    RwFrame* frame = RwFrameCreate();
+    check(RpAtomicSetFrame(atomic, frame) == atomic, "RpAtomicSetFrame");
+    check(RpAtomicGetFrame(atomic) == frame, "the atomic is on the frame");
+
+    RpGeometry* geometry = makeQuad();
+    RpMorphTargetCalcBoundingSphere(&geometry->morphTarget[0],
+                                    &geometry->morphTarget[0].boundingSphere);
+
+    check(RpAtomicSetGeometry(atomic, geometry, 0) == atomic, "RpAtomicSetGeometry");
+    check(RpAtomicGetGeometry(atomic) == geometry, "the atomic has the geometry");
+    check(geometry->refCount == 2, "and took a reference on it");
+    check(near(RpAtomicGetBoundingSphere(atomic)->radius, 1.41421f),
+          "it copied morph target 0's bounding sphere");
+
+    // --- intersections ----------------------------------------------------
+    //
+    // The primitive goes in in WORLD space and the triangles come back in
+    // OBJECT space. Moving the frame is what tells the two apart, and getting
+    // it backwards is the failure that would make every collision in the game
+    // happen at the origin.
+
+    RwV3d ten = { 10.0f, 0.0f, 0.0f };
+    RwFrameTranslate(frame, &ten, rwCOMBINEREPLACE);
+
+    RpIntersection isx;
+    IsxLog log;
+
+    // A sphere half a unit above the quad, in world space, so over the moved
+    // atomic rather than over the origin.
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTSPHERE;
+    isx.t.sphere.center.x = 10.0f;
+    isx.t.sphere.center.y = 0.5f;
+    isx.t.sphere.center.z = 0.0f;
+    isx.t.sphere.radius = 1.0f;
+    check(RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log) == atomic,
+          "RpAtomicForAllIntersections, sphere");
+    check(log.calls == 2, "a sphere over the middle of the quad hits both triangles");
+    check(near(log.lastDistance, 0.5f), "and reports the distance from its centre");
+    check(near(log.lastVertex0.x, -1.0f), "the triangle comes back in object space");
+    check(near(log.lastNormal.y, 1.0f) || near(log.lastNormal.y, -1.0f),
+          "with a unit normal off the quad's plane");
+
+    // Same sphere at the origin: the atomic is ten units away, so nothing.
+    memset(&log, 0, sizeof(log));
+    isx.t.sphere.center.x = 0.0f;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 0, "and the frame is honoured -- at the origin it misses entirely");
+
+    // A line straight down through triangle 0's half of the quad. t comes back
+    // normalised along the segment, which is what rayHitsEnvCB scales.
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTLINE;
+    isx.t.line.start.x = 10.3f;
+    isx.t.line.start.y = 1.0f;
+    isx.t.line.start.z = -0.3f;
+    isx.t.line.end.x = 10.3f;
+    isx.t.line.end.y = -1.0f;
+    isx.t.line.end.z = -0.3f;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 1, "a line through one half of the quad hits one triangle");
+    check(log.lastIndex == 0, "and it is the triangle that half belongs to");
+    check(near(log.lastDistance, 0.5f), "at the halfway point of the segment");
+
+    // Off the edge of the quad entirely.
+    memset(&log, 0, sizeof(log));
+    isx.t.line.start.x = 20.0f;
+    isx.t.line.end.x = 20.0f;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 0, "a line beside the quad hits nothing");
+
+    // A box around the whole quad, again in world space.
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTBOX;
+    isx.t.box.inf.x = 9.0f;
+    isx.t.box.inf.y = -1.0f;
+    isx.t.box.inf.z = -2.0f;
+    isx.t.box.sup.x = 11.0f;
+    isx.t.box.sup.y = 1.0f;
+    isx.t.box.sup.z = 2.0f;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 2, "a box around the quad hits both triangles");
+
+    // The early stop iCollide.cpp uses once its collision array is full.
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTSPHERE;
+    isx.t.sphere.center.x = 10.0f;
+    RpAtomicForAllIntersections(atomic, &isx, stopIsxCB, &log);
+    check(log.calls == 1, "a callback returning NULL stops the walk early");
+
+    // Neither of these is a triangle query on either side.
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTPOINT;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 0, "a point intersection against an atomic is refused");
+
+    RpAtomicSetFrame(atomic, NULL);
+    RwFrameDestroy(frame);
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+    reinterpret_cast<rw::Atomic*>(atomic)->destroy();
+}
+
+static void test_skin()
+{
+    printf("RpSkin\n");
+
+    RpGeometry* geometry = makeQuad();
+    if (geometry == NULL)
+    {
+        return;
+    }
+
+    check(RpSkinGeometryGetSkin(geometry) == NULL, "an unskinned geometry has no skin");
+    check(RpSkinGetNumBones(NULL) == 0, "RpSkinGetNumBones(NULL) is refused");
+
+    // There is no RpSkinGeometrySetSkin on the game's list and no skinned
+    // model to stream in here, so the skin is built the way librw's own stream
+    // reader builds one: allocate, init for the bone and vertex counts, attach.
+    // What is being checked is the four accessors' strides, which is where a
+    // wrong cast would silently mix up bones.
+    rw::Skin* skin = rwNewT(rw::Skin, 1, rw::MEMDUR_EVENT | rw::ID_SKIN);
+    memset(skin, 0, sizeof(*skin));
+    skin->init(3, 3, geometry->numVertices);
+    rw::Skin::set(reinterpret_cast<rw::Geometry*>(geometry), skin);
+
+    check(RpSkinGeometryGetSkin(geometry) == reinterpret_cast<RpSkin*>(skin),
+          "RpSkinGeometryGetSkin finds the skin in the geometry's plugin block");
+
+    RpSkin* rpskin = RpSkinGeometryGetSkin(geometry);
+    check(RpSkinGetNumBones(rpskin) == 3, "RpSkinGetNumBones");
+
+    // Bone 1's matrix is the second sixteen floats.
+    skin->inverseMatrices[16 + 12] = 7.0f; // bone 1, pos.x
+    const RwMatrix* mats = RpSkinGetSkinToBoneMatrices(rpskin);
+    check(mats != NULL && near(mats[1].pos.x, 7.0f),
+          "RpSkinGetSkinToBoneMatrices strides one RwMatrix per bone");
+
+    // Vertex 2's weights are the third group of four floats.
+    skin->weights[2 * 4 + 1] = 0.25f;
+    const RwMatrixWeights* weights = RpSkinGetVertexBoneWeights(rpskin);
+    check(weights != NULL && near(weights[2].w1, 0.25f),
+          "RpSkinGetVertexBoneWeights strides four floats per vertex");
+
+    // Vertex 2's bone indices are the third group of four bytes, and the game
+    // unpacks index j with (word >> 8*j) & 0xff.
+    skin->indices[2 * 4 + 0] = 5;
+    skin->indices[2 * 4 + 3] = 9;
+    const RwUInt32* indices = RpSkinGetVertexBoneIndices(rpskin);
+    check(indices != NULL && ((indices[2] >> 0) & 0xFF) == 5 && ((indices[2] >> 24) & 0xFF) == 9,
+          "RpSkinGetVertexBoneIndices packs four of librw's index bytes per vertex");
+
+    // RpSkinAtomicSetType picks a pipeline, and the type is now honoured:
+    // rpSKINTYPEMATFX gets the combined skin+matfx pipeline on a backend that
+    // registered one and everything else gets the plain skinning pipeline.
+    // Written against matfxPipelines[] rather than against a backend name
+    // because LIBRW_PLATFORM=NULL has no combined pipeline and must fall back,
+    // which is the behaviour under test as much as the D3D9 one is.
+    rw::ObjPipeline* plainSkin = rw::skinGlobals.pipelines[rw::platform];
+    rw::ObjPipeline* matfxSkin = rw::skinGlobals.matfxPipelines[rw::platform];
+
+    RpAtomic* atomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    check(RpSkinAtomicSetType(atomic, rpSKINTYPEMATFX) == atomic, "RpSkinAtomicSetType");
+    check(atomic->pipeline != NULL &&
+              reinterpret_cast<void*>(atomic->pipeline) ==
+                  reinterpret_cast<void*>(matfxSkin ? matfxSkin : plainSkin),
+          "rpSKINTYPEMATFX asks for the combined skin+matfx pipeline");
+
+    RpSkinAtomicSetType(atomic, rpSKINTYPEGENERIC);
+    check(reinterpret_cast<void*>(atomic->pipeline) == reinterpret_cast<void*>(plainSkin),
+          "rpSKINTYPEGENERIC still gets the plain skinning pipeline");
+
+    // Nothing in the game asks for this one -- the only three RpSkinAtomicSetType
+    // calls in src/SB all pass rpSKINTYPEMATFX -- so it is not implemented, and
+    // what is checked is that it degrades to skinning rather than to nothing.
+    RpSkinAtomicSetType(atomic, rpSKINTYPETOON);
+    check(reinterpret_cast<void*>(atomic->pipeline) == reinterpret_cast<void*>(plainSkin),
+          "rpSKINTYPETOON, which no model in this game asks for, falls back to it too");
+
+#ifdef RW_D3D9
+    if (iBackendIsD3D9())
+    {
+        check(matfxSkin != NULL, "the D3D9 backend registered a combined skin+matfx pipeline");
+        // The two skinning pipelines MUST instance identically. librw caches the
+        // instanced vertex buffer on the geometry and never rebuilds it because the
+        // atomic changed pipeline, so an atomic that moves between them would
+        // otherwise hand a skinning shader a buffer laid out with no bones in it.
+        check(matfxSkin != NULL && plainSkin != NULL &&
+                  reinterpret_cast<rw::d3d9::ObjPipeline*>(matfxSkin)->instanceCB ==
+                      reinterpret_cast<rw::d3d9::ObjPipeline*>(plainSkin)->instanceCB,
+              "and it instances vertices exactly as the plain one does");
+        check(matfxSkin != NULL && plainSkin != NULL &&
+                  reinterpret_cast<rw::d3d9::ObjPipeline*>(matfxSkin)->renderCB !=
+                      reinterpret_cast<rw::d3d9::ObjPipeline*>(plainSkin)->renderCB,
+              "and renders through a callback of its own");
+    }
+#endif
+
+    reinterpret_cast<rw::Atomic*>(atomic)->destroy();
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+}
+
+// The xFXanimUV* state, which lives in xFX.cpp in the real build and is
+// declared extern by iFX.cpp. Defined here instead, because these four pairs of
+// floats ARE the whole interface between those two files, and standing them up
+// is cheaper and clearer than linking the game in to get them.
+float xFXanimUVRotMat0[2] = { 1.0f, 0.0f };
+float xFXanimUVRotMat1[2] = { 0.0f, 1.0f };
+float xFXanimUVTrans[2] = { 0.0f, 0.0f };
+float xFXanimUVScale[2] = { 1.0f, 1.0f };
+
+// Stood in for librw's render, so that the matrix iFX.cpp builds can be read
+// without a draw. iFXanimUVCreatePipe wraps whatever impl.render it finds and
+// calls through it, so installing this one FIRST makes it the thing the wrapper
+// calls -- and rw::uvTransform at that moment is exactly what a real draw would
+// have uploaded to the vertex shader.
+static rw::float32 sCapturedUVTransform[rw::NUMUVTRANSFORMELEMENTS];
+static int sCapturedUVRenders;
+
+static void captureUVRender(rw::ObjPipeline*, rw::Atomic*)
+{
+    memcpy(sCapturedUVTransform, rw::uvTransform, sizeof(sCapturedUVTransform));
+    sCapturedUVRenders++;
+}
+
+// Animated UVs: the texture coordinate transform, the pipeline that applies it,
+// and iFX.cpp's translation of the game's state into it.
+//
+// What this canNOT check is what the shader DOES with the matrix. That needs a
+// frame and a pair of eyes; nothing here proves a conveyor belt scrolls. What
+// it does check is every step up to the shader -- that the pipeline exists,
+// that the device accepted the three compiled vertex shaders, that the
+// transform reads as the identity until something sets it, that the four
+// globals land in the slots the GameCube's 2x4 texgen put them in, and that a
+// draw leaves the transform where it found it.
+static void test_uvxform()
+{
+    printf("animated UVs\n");
+
+    check(memcmp(rw::uvTransform, rw::UVTRANSFORM_IDENTITY, sizeof(rw::uvTransform)) == 0,
+          "the texture coordinate transform starts as the identity");
+
+    const rw::float32 probe[rw::NUMUVTRANSFORMELEMENTS] = { 2.0f, 3.0f, 4.0f, 5.0f,
+                                                            6.0f, 7.0f, 8.0f, 9.0f };
+    rw::SetUVTransform(probe);
+    check(memcmp(rw::uvTransform, probe, sizeof(probe)) == 0, "rw::SetUVTransform");
+    rw::SetUVTransform(NULL);
+    check(memcmp(rw::uvTransform, rw::UVTRANSFORM_IDENTITY, sizeof(probe)) == 0,
+          "rw::SetUVTransform(nil) puts the identity back");
+
+    rw::ObjPipeline* pipe = rw::GetUVTransformPipeline();
+
+#ifdef RW_NULL
+    // No renderer at all, so nothing to animate with.
+    //
+    // The contract is that this is SAFE rather than an error: xFX.cpp:883
+    // leaves the atomic on its default pipeline and the surface draws with
+    // static texture coordinates. Checked rather than skipped, because
+    // "answers NULL" is the behaviour the game depends on and a pipeline that
+    // half exists would be worse than none.
+    check(pipe == NULL, "no shader for animated UVs on this backend, so no pipeline");
+    check(iFXanimUVCreatePipe() == NULL,
+          "and iFXanimUVCreatePipe says so rather than handing back one that cannot draw");
+    return;
+#else
+    check(pipe != NULL, "the backend has a pipeline for animated UVs");
+    if (pipe == NULL)
+    {
+        return;
+    }
+
+#if defined(RW_D3D9) || defined(RW_D3D11)
+    // Compiled by fxc into headers checked into librw, then handed to the
+    // device at driver open. A blob the device rejects leaves these nil, and
+    // then every animated surface would draw with no vertex shader at all.
+    if (iBackendIsD3D())
+    {
+        check(rw::d3d::uvxform_amb_VS != NULL && rw::d3d::uvxform_amb_dir_VS != NULL &&
+                  rw::d3d::uvxform_all_VS != NULL,
+              "the device accepted all three UV-transform vertex shaders");
+    }
+#endif
+
+    void (*librwRender)(rw::ObjPipeline*, rw::Atomic*) = pipe->impl.render;
+    pipe->impl.render = captureUVRender;
+
+    check(reinterpret_cast<void*>(iFXanimUVCreatePipe()) == reinterpret_cast<void*>(pipe),
+          "iFXanimUVCreatePipe hands back librw's pipeline");
+    check(pipe->impl.render != captureUVRender, "with its own render in front of librw's");
+
+    // Eight different values, so that a transposed matrix or a swapped slot
+    // cannot pass. xFXanimUVSetAngle writes the rotation as cos/-sin/sin/cos;
+    // these stand in for what it would have written.
+    xFXanimUVRotMat0[0] = 0.25f;
+    xFXanimUVRotMat0[1] = -0.5f;
+    xFXanimUVRotMat1[0] = 0.5f;
+    xFXanimUVRotMat1[1] = 0.75f;
+    xFXanimUVTrans[0] = 1.5f;
+    xFXanimUVTrans[1] = 2.5f;
+    xFXanimUVScale[0] = 3.5f;
+    xFXanimUVScale[1] = 4.5f;
+
+    sCapturedUVRenders = 0;
+    pipe->impl.render(pipe, NULL);
+    check(sCapturedUVRenders == 1, "a draw through it reaches librw's render");
+
+    // Row order is the GameCube's: rotation, then translation, then scale, and
+    // BOTH of the last two columns are constants that add to the coordinate.
+    // gc/iFX.cpp builds the same eight floats in the same order.
+    const rw::float32 wanted[rw::NUMUVTRANSFORMELEMENTS] = { 0.25f, -0.5f, 1.5f, 3.5f,
+                                                             0.5f,  0.75f, 2.5f, 4.5f };
+    check(memcmp(sCapturedUVTransform, wanted, sizeof(wanted)) == 0,
+          "the xFXanimUV globals reach the matrix in the GameCube's slots");
+    check(memcmp(rw::uvTransform, rw::UVTRANSFORM_IDENTITY, sizeof(wanted)) == 0,
+          "and the draw put the transform back when it was done");
+
+    // Unwrapped again, so that nothing after this draws through a render
+    // callback that belongs to one test.
+    pipe->impl.render = librwRender;
+#endif
+}
+
+static void test_matfx()
+{
+    printf("RpMatFX\n");
+
+    RpMaterial* material = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    check(material != NULL, "a material to put an effect on");
+    if (material == NULL)
+    {
+        return;
+    }
+
+    check(RpMatFXMaterialGetEffects(material) == rpMATFXEFFECTNULL,
+          "a material with no effect block has no effect");
+
+    check(RpMatFXMaterialSetEffects(material, rpMATFXEFFECTENVMAP) == material,
+          "RpMatFXMaterialSetEffects");
+    check(RpMatFXMaterialGetEffects(material) == rpMATFXEFFECTENVMAP,
+          "RpMatFXMaterialGetEffects reads it back");
+
+    RwTexture* env = RwTextureCreate(NULL);
+    RwFrame* frame = RwFrameCreate();
+    check(RpMatFXMaterialSetupEnvMap(material, env, frame, FALSE, 0.75f) == material,
+          "RpMatFXMaterialSetupEnvMap");
+
+    rw::MatFX* fx = rw::MatFX::get(reinterpret_cast<rw::Material*>(material));
+    check(fx != NULL, "the effect block exists");
+    check(reinterpret_cast<RwTexture*>(fx->getEnvTexture()) == env, "it kept the texture");
+    check(reinterpret_cast<RwFrame*>(fx->getEnvFrame()) == frame, "and the frame");
+    check(near(fx->getEnvCoefficient(), 0.75f), "and the coefficient");
+    check(env->refCount == 2, "setting an env map texture takes a reference on it");
+
+    check(RpMatFXMaterialSetEnvMapCoefficient(material, 0.25f) == material,
+          "RpMatFXMaterialSetEnvMapCoefficient");
+    check(near(fx->getEnvCoefficient(), 0.25f), "which is what xFX.cpp calls every frame");
+
+    // The bump map lives in the other slot, and only when the effect asks for
+    // both. On an env-map-only material a bump setup is a no-op on both sides.
+    check(RpMatFXMaterialSetupBumpMap(material, NULL, NULL, 0.5f) == material,
+          "RpMatFXMaterialSetupBumpMap on a material with no bump effect is harmless");
+    check(near(fx->getEnvCoefficient(), 0.25f), "and left the env map alone");
+
+    RpMatFXMaterialSetEffects(material, rpMATFXEFFECTBUMPENVMAP);
+    RwTexture* bump = RwTextureCreate(NULL);
+    RpMatFXMaterialSetupBumpMap(material, bump, frame, 0.5f);
+    check(near(fx->getBumpCoefficient(), 0.5f), "RpMatFXMaterialSetupBumpMap sets the coefficient");
+    check(reinterpret_cast<RwTexture*>(fx->getBumpTexture()) == bump, "and the texture");
+
+    check(RpMatFXMaterialSetBumpMapCoefficient(material, 0.125f) == material,
+          "RpMatFXMaterialSetBumpMapCoefficient");
+    check(near(fx->getBumpCoefficient(), 0.125f), "reads back");
+
+    // On an UNSKINNED atomic -- this one has no geometry at all -- the plain
+    // material-effects pipeline is the right answer. The skinned case is in
+    // test_skin_matfx below, where it has to be a different pipeline.
+    RpAtomic* atomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    check(RpMatFXAtomicEnableEffects(atomic) == atomic, "RpMatFXAtomicEnableEffects");
+    check(reinterpret_cast<void*>(atomic->pipeline) ==
+              reinterpret_cast<void*>(rw::matFXGlobals.pipelines[rw::platform]),
+          "it put the atomic on librw's material-effects pipeline");
+
+    reinterpret_cast<rw::Atomic*>(atomic)->destroy();
+    RwFrameDestroy(frame);
+    reinterpret_cast<rw::Material*>(material)->destroy();
+    RwTextureDestroy(bump);
+    RwTextureDestroy(env);
+}
+
+// A quad with normals, one material and a one-bone skin that binds every vertex
+// to bone 0 with full weight. That is the smallest thing the combined skin+matfx
+// pipeline will draw: it needs positions to skin, normals to reflect, a material
+// to carry the effect, and bone indices and weights in the vertex buffer.
+static RpGeometry* makeNormalQuad(RpMaterial* material)
+{
+    RpGeometry* geometry =
+        RpGeometryCreate(4, 2, rpGEOMETRYPOSITIONS | rpGEOMETRYNORMALS | rpGEOMETRYTEXTURED);
+    if (geometry == NULL)
+    {
+        return NULL;
+    }
+
+    RwV3d* v = geometry->morphTarget[0].verts;
+    RwV3d* n = geometry->morphTarget[0].normals;
+    for (int i = 0; i < 4; i++)
+    {
+        v[i].x = (i == 1 || i == 2) ? 1.0f : -1.0f;
+        v[i].y = 0.0f;
+        v[i].z = (i >= 2) ? 1.0f : -1.0f;
+        n[i].x = 0.0f;
+        n[i].y = 1.0f;
+        n[i].z = 0.0f;
+    }
+
+    RpGeometryTriangleSetVertexIndices(geometry, &geometry->triangles[0], 0, 1, 2);
+    RpGeometryTriangleSetVertexIndices(geometry, &geometry->triangles[1], 0, 2, 3);
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[0], material);
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[1], material);
+    RpGeometryUnlock(geometry);
+    return geometry;
+}
+
+static RpGeometry* makeSkinnedQuad(RpMaterial* material, rw::Skin** skinOut)
+{
+    RpGeometry* geometry = makeNormalQuad(material);
+    if (geometry == NULL)
+    {
+        return NULL;
+    }
+
+    // Built by hand for the reason test_skin gives: there is no
+    // RpSkinGeometrySetSkin on the game's list and no skinned model to stream
+    // in here. Skin::init does not zero what it allocates, so every weight and
+    // index has to be written -- a stray weight would move a vertex off screen
+    // and the draw would still succeed, which is the failure this avoids.
+    rw::Skin* skin = rwNewT(rw::Skin, 1, rw::MEMDUR_EVENT | rw::ID_SKIN);
+    memset(skin, 0, sizeof(*skin));
+    skin->init(1, 1, 4);
+    skin->numWeights = 1;
+    skin->usedBones[0] = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        skin->weights[i * 4 + 0] = 1.0f;
+        skin->weights[i * 4 + 1] = 0.0f;
+        skin->weights[i * 4 + 2] = 0.0f;
+        skin->weights[i * 4 + 3] = 0.0f;
+        skin->indices[i * 4 + 0] = 0;
+        skin->indices[i * 4 + 1] = 0;
+        skin->indices[i * 4 + 2] = 0;
+        skin->indices[i * 4 + 3] = 0;
+    }
+    rw::Skin::set(reinterpret_cast<rw::Geometry*>(geometry), skin);
+
+    *skinOut = skin;
+    return geometry;
+}
+
+// The bug this whole pipeline exists to fix: a skinned, environment-mapped
+// model -- SpongeBob's bubble, the cruise bubble, every shiny character -- used
+// to render through plain skinning with the effect silently dropped, because
+// librw's Skin::setPipeline cast the type away and had only one pipeline to
+// give. The pipeline SELECTION is checked in test_skin; this checks that the
+// selected pipeline actually draws the effect.
+static void test_skin_matfx()
+{
+    printf("RpSkin with RpMatFX\n");
+
+    RpMaterial* material = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    rw::Skin* skin = NULL;
+    RpGeometry* geometry = makeSkinnedQuad(material, &skin);
+    check(geometry != NULL && skin != NULL, "a skinned quad with a material on it");
+    if (geometry == NULL)
+    {
+        return;
+    }
+
+    RpAtomic* atomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    reinterpret_cast<rw::Atomic*>(atomic)->setGeometry(reinterpret_cast<rw::Geometry*>(geometry),
+                                                       0);
+    RwFrame* atomicFrame = RwFrameCreate();
+    reinterpret_cast<rw::Atomic*>(atomic)->setFrame(reinterpret_cast<rw::Frame*>(atomicFrame));
+
+    // This is what AtomicDisableMatFX does to a bubble every frame, through
+    // RpMatFXAtomicEnableEffects, before pass 1: the atomic is put back on the
+    // effects pipeline WITHOUT anyone calling RpSkinAtomicSetType again. For a
+    // skinned atomic that has to still be a skinning pipeline, or the pass
+    // instances the geometry with no bones in it and every later pass -- which
+    // is where the effect lives -- reads the bones that are not there.
+    RpMatFXAtomicEnableEffects(atomic);
+    rw::ObjPipeline* matfxSkin = rw::skinGlobals.matfxPipelines[rw::platform];
+    check(reinterpret_cast<void*>(atomic->pipeline) ==
+              reinterpret_cast<void*>(matfxSkin ? matfxSkin :
+                                                  rw::skinGlobals.pipelines[rw::platform]),
+          "enabling effects on a SKINNED atomic keeps it on a skinning pipeline");
+
+#ifdef RW_D3D9
+    if (iBackendIsD3D9())
+    {
+        // --- the draw ----------------------------------------------------------
+        //
+        // Everything above is a pointer comparison. This runs the pipeline against
+        // the real device the test opened, and then asks the device what the draw
+        // left behind. Two things are worth asking about, and both are things that
+        // would still have "worked" -- drawn a model, reported no error -- if the
+        // shader and the C++ disagreed:
+        //
+        //   - the env coefficient, which only the env path writes, and only to the
+        //     pixel shader constant the env pixel shader reads;
+        //   - the texture matrix, which the combined vertex shader reads from a
+        //     register the plain matfx shader does not use, because the bone
+        //     matrices are sitting where matfx normally puts it. Getting that base
+        //     wrong is silent: the shader samples a matrix of zeroes and the model
+        //     renders with the env map collapsed to one texel.
+        //
+        // NOT checked here, and not checkable this way: what the pixels look like.
+        // A shader that compiles, binds, and is fed the right constants can still
+        // be wrong, and only a playtest says otherwise.
+        RwRaster* envRaster = RwRasterCreate(64, 64, 32, rwRASTERTYPETEXTURE | rwRASTERFORMAT8888);
+        RwTexture* envTex = RwTextureCreate(envRaster);
+        check(envTex != NULL && envRaster != NULL,
+              "an env map texture with a real raster behind it");
+
+        RwFrame* envFrame = RwFrameCreate();
+        RpMatFXMaterialSetEffects(material, rpMATFXEFFECTENVMAP);
+        RpMatFXMaterialSetupEnvMap(material, envTex, envFrame, FALSE, 0.75f);
+
+        RwCamera* camera = RwCameraCreate();
+        RwCameraSetFrame(camera, RwFrameCreate());
+        RwCameraSetRaster(camera, RwRasterCreate(64, 64, 0, rwRASTERTYPECAMERA));
+        RwCameraSetZRaster(camera, RwRasterCreate(64, 64, 0, rwRASTERTYPEZBUFFER));
+        RwCameraSetNearClipPlane(camera, 0.1f);
+        RwCameraSetFarClipPlane(camera, 100.0f);
+
+        // Poisoned first, so that reading them back is a check on the draw rather
+        // than on whatever the last test left in the constant file.
+        const float poison[4] = { -1.0f, -1.0f, -1.0f, -1.0f };
+        rw::d3d::d3ddevice->SetPixelShaderConstantF(1, poison, 1);
+        rw::d3d::d3ddevice->SetVertexShaderConstantF(233, poison, 1);
+
+        RwCameraBeginUpdate(camera);
+        reinterpret_cast<rw::Atomic*>(atomic)->render();
+        RwCameraEndUpdate(camera);
+
+        float ps1[4];
+        rw::d3d::d3ddevice->GetPixelShaderConstantF(1, ps1, 1);
+        check(near(ps1[0], 0.75f),
+              "the env map coefficient reached the shininess the env pixel shader reads");
+
+        float texMat[4];
+        rw::d3d::d3ddevice->GetVertexShaderConstantF(233, texMat, 1);
+        check(!near(texMat[0], -1.0f),
+              "and the env texture matrix reached the register past the bone matrices");
+
+        IDirect3DVertexShader9* envVS = NULL;
+        rw::d3d::d3ddevice->GetVertexShader(&envVS);
+        check(envVS != NULL, "the draw bound a vertex shader that exists");
+
+        // The same atomic, the same pipeline, with the effect taken off the
+        // material -- which is exactly the state AtomicDisableMatFX leaves a bubble
+        // in for pass 1. It must fall back to the plain skinning shader, not draw
+        // an env map off a material that no longer has one.
+        RpMatFXMaterialSetEffects(material, rpMATFXEFFECTNULL);
+        RwCameraBeginUpdate(camera);
+        reinterpret_cast<rw::Atomic*>(atomic)->render();
+        RwCameraEndUpdate(camera);
+
+        IDirect3DVertexShader9* plainVS = NULL;
+        rw::d3d::d3ddevice->GetVertexShader(&plainVS);
+        check(plainVS != NULL && plainVS != envVS,
+              "a mesh with no effect on it falls back to a different, plain skinning shader");
+
+        if (envVS)
+        {
+            envVS->Release();
+        }
+        if (plainVS)
+        {
+            plainVS->Release();
+        }
+
+        RwCameraDestroy(camera);
+        RwFrameDestroy(envFrame);
+        RwTextureDestroy(envTex);
+    }
+#endif
+
+    reinterpret_cast<rw::Atomic*>(atomic)->destroy();
+    RwFrameDestroy(atomicFrame);
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+    reinterpret_cast<rw::Material*>(material)->destroy();
+}
+
+// The cel look and the hull, on whichever Direct3D device is open.
+//
+// Both backends run shaders compiled from one HLSL source. What this catches is
+// the half that is not shared: a blob the device refuses, and on D3D11 an input
+// layout it refuses -- the hull reads three texture coordinate sets and a mesh
+// that has not been through iToonHullNormals carries one. D3D9 feeds the other
+// two as zeroes; D3D11 skips the draw unless the backend supplies them.
+//
+// NOT checked: what the pixels look like.
+static void test_toon()
+{
+    printf("the cel look\n");
+
+#if defined(RW_D3D9) || defined(RW_D3D11)
+    if (!iBackendIsD3D())
+    {
+        return;
+    }
+
+    check(rw::d3d::default_toon_PS != NULL && rw::d3d::default_tex_toon_PS != NULL,
+          "the device accepted both cel pixel shaders");
+    check(rw::d3d::outline_VS != NULL && rw::d3d::outline_PS != NULL, "and the hull's two");
+    check(rw::d3d9::skin_outline_VS != NULL, "and the skinned hull's");
+
+    RpMaterial* material = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    rw::Skin* skin = NULL;
+    RpGeometry* skinned = makeSkinnedQuad(material, &skin);
+    RpGeometry* rigid = makeNormalQuad(material);
+    check(skinned != NULL && rigid != NULL, "two quads with one texture coordinate set");
+    if (skinned == NULL || rigid == NULL)
+    {
+        return;
+    }
+
+    RpAtomic* skinnedAtomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    RpAtomic* rigidAtomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    RwFrame* frame = RwFrameCreate();
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)
+        ->setGeometry(reinterpret_cast<rw::Geometry*>(skinned), 0);
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)
+        ->setGeometry(reinterpret_cast<rw::Geometry*>(rigid), 0);
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)->setFrame(reinterpret_cast<rw::Frame*>(frame));
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)->setFrame(reinterpret_cast<rw::Frame*>(frame));
+    RpSkinAtomicSetType(skinnedAtomic, rpSKINTYPEGENERIC);
+
+    RwCamera* camera = RwCameraCreate();
+    RwFrame* cameraFrame = RwFrameCreate();
+    RwCameraSetFrame(camera, cameraFrame);
+    RwCameraSetRaster(camera, RwRasterCreate(64, 64, 0, rwRASTERTYPECAMERA));
+    RwCameraSetZRaster(camera, RwRasterCreate(64, 64, 0, rwRASTERTYPEZBUFFER));
+    RwCameraSetNearClipPlane(camera, 0.1f);
+    RwCameraSetFarClipPlane(camera, 100.0f);
+
+    // Unlit, because there is no world here to light a draw, and an unlit
+    // draw takes the cel look only when it says so. The skinned pipeline has no
+    // such switch, so the skinned quad is drawn for its hull alone.
+    rw::d3d::setToonShading(TRUE, 3.0f, 1.0f, 1.0f);
+    rw::d3d::setToonUnlit(TRUE);
+    rw::d3d::setOutline(0.0f, 0.0f, 0.0f, 0.05f);
+    rw::d3d::setOutlineMode(rw::d3d::OUTLINE_PLAIN);
+
+    RwCameraBeginUpdate(camera);
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)->render();
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)->render();
+
+    rw::d3d9::InstanceDataHeader* skinnedHeader = reinterpret_cast<rw::d3d9::InstanceDataHeader*>(
+        reinterpret_cast<rw::Geometry*>(skinned)->instData);
+    rw::d3d9::InstanceDataHeader* rigidHeader = reinterpret_cast<rw::d3d9::InstanceDataHeader*>(
+        reinterpret_cast<rw::Geometry*>(rigid)->instData);
+    check(skinnedHeader != NULL && rigidHeader != NULL, "both quads were instanced by the draw");
+
+    void* boundPS = NULL;
+#ifdef RW_D3D9
+    if (iBackendIsD3D9())
+    {
+        IDirect3DPixelShader9* ps = NULL;
+        rw::d3d::d3ddevice->GetPixelShader(&ps);
+        boundPS = ps;
+        if (ps)
+        {
+            ps->Release();
+        }
+    }
+#endif
+#ifdef RW_D3D11
+    if (iBackendIsD3D11())
+    {
+        ID3D11PixelShader* ps = NULL;
+        rw::d3d::impl11::d3d11context->PSGetShader(&ps, NULL, NULL);
+        boundPS = ps;
+        if (ps)
+        {
+            ps->Release();
+        }
+
+        check(rigidHeader != NULL && rw::d3d::impl11::inputLayoutFor(rigidHeader->vertexDeclaration,
+                                                                     rw::d3d::outline_VS) != NULL,
+              "D3D11 makes the hull's input layout for a mesh without hull normals");
+        check(skinnedHeader != NULL &&
+                  rw::d3d::impl11::inputLayoutFor(skinnedHeader->vertexDeclaration,
+                                                  rw::d3d9::skin_outline_VS) != NULL,
+              "and the skinned hull's");
+    }
+#endif
+    RwCameraEndUpdate(camera);
+
+    check(boundPS != NULL && boundPS == rw::d3d::default_toon_PS,
+          "the rigid quad was drawn with the cel pixel shader");
+
+    rw::d3d::setOutlineMode(rw::d3d::OUTLINE_NONE);
+    rw::d3d::setOutline(0.0f, 0.0f, 0.0f, 0.0f);
+    rw::d3d::setToonUnlit(FALSE);
+    rw::d3d::setToonShading(FALSE, 3.0f, 1.0f, 1.0f);
+
+    RwCameraDestroy(camera);
+    RwFrameDestroy(cameraFrame);
+    reinterpret_cast<rw::Atomic*>(skinnedAtomic)->destroy();
+    reinterpret_cast<rw::Atomic*>(rigidAtomic)->destroy();
+    RwFrameDestroy(frame);
+    reinterpret_cast<rw::Geometry*>(skinned)->destroy();
+    reinterpret_cast<rw::Geometry*>(rigid)->destroy();
+    reinterpret_cast<rw::Material*>(material)->destroy();
+#endif
+}
+
+// Stands in for librw's own atomic render callback in the instancing checks.
+// The real one rasterises, and this target has no device to rasterise onto;
+// what is under test is what the ptank writes into the geometry before the
+// draw, not the draw.
+static RpAtomic* noopRenderCB(RpAtomic* atomic)
+{
+    return atomic;
+}
+
+static void test_ptank()
+{
+    printf("RpPTank\n");
+
+    // Array of structures, which is what xPtankPool.cpp asks for: every cluster
+    // interleaved into one record per particle, so all of them share the
+    // record's stride. That shared stride is the whole point -- xPtankPool.h's
+    // lock_block reads the stride out of the position lock alone and then
+    // advances position, colour, size and UV by it.
+    RwUInt32 flags = rpPTANKDFLAGPOSITION | rpPTANKDFLAGCOLOR | rpPTANKDFLAGVTX2TEXCOORDS |
+                     rpPTANKDFLAGSTRUCTURE;
+    RpAtomic* ptank = RpPTankAtomicCreate(64, flags, 0);
+    check(ptank != NULL, "RpPTankAtomicCreate");
+    if (ptank == NULL)
+    {
+        return;
+    }
+
+    RpPTankAtomicExtPrv* ext = RPATOMICPTANKPLUGINDATA(ptank);
+    check(ext != NULL, "the tank is reachable through RPATOMICPTANKPLUGINDATA");
+    check(ext->maxPCount == 64 && ext->actPCount == 0, "with the particle count it was given");
+    check(ext->isAStructure == FALSE, "and in array-of-structures form");
+    check(ext->publicData.format.numClusters == 3, "three clusters were asked for");
+
+    // xPtankPool.cpp and zParPTank.cpp both read this, and a ptank with no
+    // material would fault there rather than here.
+    check(ptank->geometry != NULL, "a ptank has a geometry");
+    check(ptank->geometry->numVertices == 64 * 4, "four billboard vertices per particle");
+    check(ptank->geometry->numTriangles == 64 * 2, "two triangles per particle");
+    check(ptank->geometry->matList.numMaterials == 1 &&
+              ptank->geometry->matList.materials[0] != NULL,
+          "and a material for the game to hang a texture on");
+
+    RpPTankLockStruct pos;
+    RpPTankLockStruct uv;
+    memset(&pos, 0, sizeof(pos));
+    memset(&uv, 0, sizeof(uv));
+
+    check(RpPTankAtomicLock(ptank, &pos, rpPTANKDFLAGPOSITION, rpPTANKLOCKWRITE) != FALSE,
+          "RpPTankAtomicLock, positions");
+    check(pos.data != NULL &&
+              pos.stride >= (RwInt32)(sizeof(RwV3d) + sizeof(RwRGBA) + 2 * sizeof(RwTexCoords)),
+          "an array-of-structures position cluster strides one whole record");
+
+    check(RpPTankAtomicLock(ptank, &uv, rpPTANKDFLAGVTX2TEXCOORDS, rpPTANKLOCKWRITE) != FALSE,
+          "RpPTankAtomicLock, texture coordinates");
+    check(uv.data != NULL && uv.stride == pos.stride,
+          "and every other cluster strides by exactly the same record");
+    check(uv.data > pos.data && uv.data < pos.data + pos.stride,
+          "because they are interleaved inside one record per particle");
+
+    // A cluster this ptank was not created with, and a multi-cluster lock,
+    // are both refused rather than answered with something plausible.
+    RpPTankLockStruct nope;
+    check(RpPTankAtomicLock(ptank, &nope, rpPTANKDFLAGNORMAL, rpPTANKLOCKWRITE) == FALSE,
+          "locking a cluster the format does not have is refused");
+    check(RpPTankAtomicLock(ptank, &nope, rpPTANKDFLAGPOSITION | rpPTANKDFLAGCOLOR,
+                            rpPTANKLOCKWRITE) == FALSE,
+          "locking two clusters at once is refused");
+
+    // The game writes through the pointers it was handed, so this is what a
+    // particle update actually does.
+    *(RwV3d*)(pos.data + 3 * pos.stride) = ptank->geometry->morphTarget[0].verts[0];
+    ((RwTexCoords*)(uv.data + 3 * uv.stride))[1].u = 0.5f;
+
+    check(RpPTankAtomicUnlock(ptank) == ptank, "RpPTankAtomicUnlock");
+    check(ext->lockFlags == 0, "which clears the lock");
+    check((ext->instFlags & rpPTANKIFLAGPOSITION) && (ext->instFlags & rpPTANKIFLAGVTX2TEXCOORDS),
+          "and marks both written clusters for re-instancing");
+    check(!(ext->instFlags & rpPTANKIFLAGCOLOR), "but not the one that was never locked");
+
+    // Reading back through the cluster the game kept: the data survived.
+    check(near(((RwTexCoords*)(ext->publicData.clusters[RPPTANKSIZEVTX2TEXCOORDS].data +
+                               3 * uv.stride))[1]
+                   .u,
+               0.5f),
+          "what was written through the lock is still there afterwards");
+
+    RpPTankAtomicDestroy(ptank);
+
+    // Array form -- zParPTank.cpp's -- is the structure-of-arrays layout: each
+    // cluster its own contiguous block, striding by its own size alone. That
+    // caller multiplies each lock's own stride by the particle index, so it is
+    // correct under either layout; this pins which one it actually gets.
+    RpAtomic* aos = RpPTankAtomicCreate(
+        16, rpPTANKDFLAGPOSITION | rpPTANKDFLAGVTX2TEXCOORDS | rpPTANKDFLAGARRAY, 0);
+    check(aos != NULL, "RpPTankAtomicCreate, array form");
+    if (aos == NULL)
+    {
+        return;
+    }
+
+    RpPTankLockStruct aosPos;
+    RpPTankLockStruct aosUv;
+    RpPTankAtomicLock(aos, &aosPos, rpPTANKDFLAGPOSITION, rpPTANKLOCKWRITE);
+    RpPTankAtomicLock(aos, &aosUv, rpPTANKDFLAGVTX2TEXCOORDS, rpPTANKLOCKWRITE);
+    check(aosPos.stride == (RwInt32)sizeof(RwV3d),
+          "an array-form position cluster strides one RwV3d");
+    check(aosUv.stride == (RwInt32)(2 * sizeof(RwTexCoords)),
+          "and its UV cluster strides two RwTexCoords");
+    check(aosUv.data >= aosPos.data + 16 * aosPos.stride,
+          "because each cluster is a separate contiguous block");
+    RpPTankAtomicUnlock(aos);
+
+    RpPTankAtomicDestroy(aos);
+
+    check(RpPTankAtomicCreate(0, rpPTANKDFLAGPOSITION, 0) == NULL,
+          "a ptank with no particles is refused");
+    check(RpPTankAtomicLock(NULL, &aosPos, rpPTANKDFLAGPOSITION, rpPTANKLOCKWRITE) == FALSE,
+          "RpPTankAtomicLock(NULL, ...) is refused");
+
+    // --- instancing -------------------------------------------------------
+    //
+    // The billboards themselves. A ptank's vertices are zeroed at create, so
+    // every triangle is degenerate until something turns the particle clusters
+    // into corners; that is what the atomic's render callback now does, and it
+    // needs the camera to know which way "up" is on screen.
+    RpAtomic* bb = RpPTankAtomicCreate(
+        8, rpPTANKDFLAGPOSITION | rpPTANKDFLAGSIZE | rpPTANKDFLAGCOLOR | rpPTANKDFLAGSTRUCTURE, 0);
+    check(bb != NULL, "RpPTankAtomicCreate for the instancing checks");
+    if (bb == NULL)
+    {
+        return;
+    }
+
+    RpPTankAtomicExtPrv* bext = RPATOMICPTANKPLUGINDATA(bb);
+    bext->defaultRenderCB = noopRenderCB;
+
+    // xPtankPool gives every ptank an identity frame; without one librw's
+    // render path has no transform to place the atomic with.
+    RwFrame* bframe = RwFrameCreate();
+    RpAtomicSetFrame(bb, bframe);
+
+    RpPTankLockStruct bpos;
+    RpPTankLockStruct bsize;
+    RpPTankLockStruct bcol;
+    RpPTankAtomicLock(bb, &bpos, rpPTANKDFLAGPOSITION, rpPTANKLOCKWRITE);
+    RpPTankAtomicLock(bb, &bsize, rpPTANKDFLAGSIZE, rpPTANKLOCKWRITE);
+    RpPTankAtomicLock(bb, &bcol, rpPTANKDFLAGCOLOR, rpPTANKLOCKWRITE);
+
+    // One particle, four units wide and two tall, somewhere off the origin so
+    // that a quad built at the wrong place is obvious.
+    RwV3d* bp = (RwV3d*)bpos.data;
+    bp->x = 10.0f;
+    bp->y = 20.0f;
+    bp->z = 30.0f;
+
+    RwV2d* bs = (RwV2d*)bsize.data;
+    bs->x = 4.0f;
+    bs->y = 2.0f;
+
+    RwRGBA* bc = (RwRGBA*)bcol.data;
+    bc->red = 1;
+    bc->green = 2;
+    bc->blue = 3;
+    bc->alpha = 4;
+
+    RpPTankAtomicUnlock(bb);
+    bext->actPCount = 1;
+
+    // An identity camera frame, so its right is +x and its up is +y and the
+    // expected corners can be written down exactly.
+    RwCamera* bcam = RwCameraCreate();
+    RwFrame* bcamFrame = RwFrameCreate();
+    RwCameraSetFrame(bcam, bcamFrame);
+
+    rw::Camera* wasCurrent = rw::engine->currentCamera;
+    rw::engine->currentCamera = reinterpret_cast<rw::Camera*>(bcam);
+
+    bb->renderCallBack(bb);
+
+    rw::V3d* bv = reinterpret_cast<rw::Geometry*>(bb->geometry)->morphTargets[0].vertices;
+
+    // Top-left, top-right, bottom-right, bottom-left -- the winding the index
+    // buffer was built for.
+    check(near(bv[0].x, 8.0f) && near(bv[0].y, 21.0f) && near(bv[0].z, 30.0f),
+          "the billboard's top-left corner is half a size out along -x and +y");
+    check(near(bv[1].x, 12.0f) && near(bv[1].y, 21.0f), "top-right");
+    check(near(bv[2].x, 12.0f) && near(bv[2].y, 19.0f), "bottom-right");
+    check(near(bv[3].x, 8.0f) && near(bv[3].y, 19.0f), "bottom-left");
+
+    rw::RGBA* bcv = reinterpret_cast<rw::Geometry*>(bb->geometry)->colors;
+    check(bcv != NULL && bcv[0].red == 1 && bcv[0].green == 2 && bcv[0].blue == 3 &&
+              bcv[0].alpha == 4,
+          "the particle's colour reaches all four corners");
+    check(bcv != NULL && bcv[3].red == 1 && bcv[3].alpha == 4, "including the last one");
+
+    // Everything past the active count has to stay degenerate, or a tank that
+    // shrinks keeps drawing the particles it no longer has.
+    check(bv[4].x == 0.0f && bv[4].y == 0.0f && bv[4].z == 0.0f,
+          "particles past the active count are left degenerate");
+
+    // And a tank that shrinks gets its tail cleared rather than keeping the
+    // corners from last frame.
+    bext->actPCount = 0;
+    bb->renderCallBack(bb);
+    check(bv[0].x == 0.0f && bv[0].y == 0.0f && bv[0].z == 0.0f,
+          "dropping the active count to zero clears the billboards it had");
+
+    // With no camera there is no facing, and instancing must decline rather
+    // than read a null pointer.
+    rw::engine->currentCamera = NULL;
+    bext->actPCount = 1;
+    bb->renderCallBack(bb);
+    check(bv[0].x == 0.0f, "with no current camera the vertices are left alone");
+
+    rw::engine->currentCamera = wasCurrent;
+
+    RpAtomicSetFrame(bb, NULL);
+    RwFrameDestroy(bframe);
+    RpPTankAtomicDestroy(bb);
+    RwCameraSetFrame(bcam, NULL);
+    RwFrameDestroy(bcamFrame);
+    RwCameraDestroy(bcam);
+}
+
+static RpAtomic* countAtomicCB(RpAtomic* atomic, void* data)
+{
+    (void)atomic;
+    (*(int*)data)++;
+    return atomic;
+}
+
+static RpAtomic* stopAtomicCB(RpAtomic* atomic, void* data)
+{
+    (void)atomic;
+    (*(int*)data)++;
+    return NULL;
+}
+
+static RpAtomic* recordAtomicCB(RpAtomic* atomic, void* data)
+{
+    RpAtomic*** cursor = (RpAtomic***)data;
+    **cursor = atomic;
+    (*cursor)++;
+    return atomic;
+}
+
+// An atomic on its own child frame under `root`, parked at x = `x` so that the
+// stream round trip below can tell one from another: atomics carry no name, but
+// their frames carry a matrix.
+static RpAtomic* makeClumpAtomic(RwFrame* root, RpGeometry* geometry, float x)
+{
+    RpAtomic* atomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    if (atomic == NULL)
+    {
+        return NULL;
+    }
+
+    RwFrame* frame = RwFrameCreate();
+    RwV3d t = { x, 0.0f, 0.0f };
+    RwFrameTranslate(frame, &t, rwCOMBINEREPLACE);
+    reinterpret_cast<rw::Frame*>(root)->addChild(reinterpret_cast<rw::Frame*>(frame));
+
+    RpAtomicSetFrame(atomic, frame);
+    RpAtomicSetGeometry(atomic, geometry, 0);
+    return atomic;
+}
+
+static void test_clumps()
+{
+    printf("RpClump\n");
+
+    RpClump* clump = reinterpret_cast<RpClump*>(rw::Clump::create());
+    check(clump != NULL, "a clump to hang it all off");
+    if (clump == NULL)
+    {
+        return;
+    }
+
+    // RpClumpCreate is not on the 112-function list -- nothing in the game
+    // creates a clump except by reading one -- so the clump comes from librw
+    // and the mirroring is what makes RpClumpSetFrame, a macro over
+    // rwObjectSetParent, reach the right word.
+    RwFrame* root = RwFrameCreate();
+    RpClumpSetFrame(clump, root);
+    check(RpClumpGetFrame(clump) == root, "RpClumpSetFrame lands where RpClumpGetFrame reads");
+    check(RpClumpGetNumAtomics(clump) == 0, "a new clump has no atomics");
+
+    // One geometry shared by all three, so that its reference count can say
+    // afterwards whether RpClumpDestroy really took the atomics with it.
+    RpGeometry* geometry = makeQuad();
+    RpAtomic* a0 = makeClumpAtomic(root, geometry, 1.0f);
+    RpAtomic* a1 = makeClumpAtomic(root, geometry, 2.0f);
+    RpAtomic* a2 = makeClumpAtomic(root, geometry, 3.0f);
+    check(a0 != NULL && a1 != NULL && a2 != NULL, "three atomics to put in it");
+    if (a0 == NULL || a1 == NULL || a2 == NULL)
+    {
+        return;
+    }
+    check(geometry->refCount == 4, "each atomic took a reference on the shared geometry");
+
+    check(RpClumpAddAtomic(clump, a0) == clump, "RpClumpAddAtomic");
+    RpClumpAddAtomic(clump, a1);
+    RpClumpAddAtomic(clump, a2);
+    check(RpClumpGetNumAtomics(clump) == 3, "RpClumpGetNumAtomics counts them");
+    check(RpAtomicGetClump(a1) == clump, "and each atomic points back at the clump");
+
+    int calls = 0;
+    check(RpClumpForAllAtomics(clump, countAtomicCB, &calls) == clump, "RpClumpForAllAtomics");
+    check(calls == 3, "visits every atomic");
+
+    calls = 0;
+    RpClumpForAllAtomics(clump, stopAtomicCB, &calls);
+    check(calls == 1, "and stops early when a callback returns NULL");
+
+    // The deviation from librw, checked directly: RenderWare's RpClumpAddAtomic
+    // inserts at the HEAD (rwLinkListAddLLLink in src/rwsdk/world/baclump.c),
+    // where librw's Clump::addAtomic appends.
+    RpAtomic* seen[3] = { NULL, NULL, NULL };
+    RpAtomic** cursor = seen;
+    RpClumpForAllAtomics(clump, recordAtomicCB, &cursor);
+    check(seen[0] == a2 && seen[1] == a1 && seen[2] == a0,
+          "RpClumpAddAtomic inserts at the head, as baclump.c does");
+
+    // ...and the reason it has to. This is xJSP.cpp:171-177 exactly: every
+    // atomic of one clump is moved into another, walking the array backwards,
+    // and the merged clump has to end up with them in their original order
+    // because xJSP indexes its baked strip vectors by position in that list.
+    // With an appending add, this check reverses.
+    RpClump* merged = reinterpret_cast<RpClump*>(rw::Clump::create());
+    bool removeAnswered = true;
+    for (int i = 2; i >= 0; i--)
+    {
+        removeAnswered = removeAnswered && RpClumpRemoveAtomic(clump, seen[i]) == clump;
+        RpClumpAddAtomic(merged, seen[i]);
+    }
+    check(removeAnswered, "RpClumpRemoveAtomic answers with the clump");
+    check(RpClumpGetNumAtomics(clump) == 0, "and the clump they came off ends up empty");
+    check(RpAtomicGetClump(a1) == merged, "while the moved atomics point at the new one");
+
+    RpAtomic* seenAgain[3] = { NULL, NULL, NULL };
+    cursor = seenAgain;
+    RpClumpForAllAtomics(merged, recordAtomicCB, &cursor);
+    check(seenAgain[0] == seen[0] && seenAgain[1] == seen[1] && seenAgain[2] == seen[2],
+          "moving every atomic into another clump preserves their order, as xJSP.cpp needs");
+
+    // Move them back. The emptied clump is freed through librw rather than
+    // RpClumpDestroy, which would want a frame hierarchy this one never had.
+    for (int i = 2; i >= 0; i--)
+    {
+        RpClumpRemoveAtomic(merged, seen[i]);
+        RpClumpAddAtomic(clump, seen[i]);
+    }
+    check(RpAtomicGetClump(a1) == clump, "and moving them back clears it again");
+    reinterpret_cast<rw::Clump*>(merged)->destroy();
+
+    RpClumpRemoveAtomic(clump, a1);
+    check(RpClumpGetNumAtomics(clump) == 2, "RpClumpRemoveAtomic drops the count");
+    check(RpAtomicGetClump(a1) == NULL, "and clears the atomic's clump pointer");
+    RpClumpAddAtomic(clump, a1);
+
+    check(RpClumpGetNumAtomics(NULL) == 0, "RpClumpGetNumAtomics(NULL) is refused");
+    check(RpClumpForAllAtomics(NULL, countAtomicCB, &calls) == NULL,
+          "RpClumpForAllAtomics(NULL, ...) is refused");
+    check(RpClumpStreamRead(NULL) == NULL, "RpClumpStreamRead(NULL) is refused");
+    check(RpClumpDestroy(NULL) == FALSE, "RpClumpDestroy(NULL) is refused");
+
+    // --- the stream round trip --------------------------------------------
+    //
+    // **A clump that goes out and comes back has its atomics REVERSED, and that
+    // is retail's behaviour, not a bug.**
+    //
+    // Both libraries write the atomics by walking the list, so the file is in
+    // list order either way. They differ on the read. librw appends
+    // (clump.cpp:103), giving file order. RenderWare adds each one with
+    // RpClumpAddAtomic, which prepends -- baclump.c:150 uses
+    // rwLinkListAddLLLink, and rwplcore.h:329 shows it inserting at the head --
+    // giving reverse file order. So a round trip through RenderWare reverses
+    // the list, and RpClumpStreamRead reverses librw's to match.
+    //
+    // This is worth a check rather than a comment because the game reads the
+    // list by INDEX. xCutscene.cpp:841 picks a cutscene's morph data by an
+    // atomic's position in it and writes that morph target's vertices into
+    // whichever atomic it landed on; with the order wrong, a run list belonging
+    // to a 1625-vertex atomic was applied to a 127-vertex one and wrote 130
+    // vertices past the end of it.
+    //
+    // The atomics are told apart by where their frames sit, which is the only
+    // thing about them that survives the trip.
+    RpAtomic* before[3] = { NULL, NULL, NULL };
+    cursor = before;
+    RpClumpForAllAtomics(clump, recordAtomicCB, &cursor);
+
+    RwMemory mem = { NULL, 0 };
+    RwStream* out = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMWRITE, &mem);
+    check(out != NULL, "a memory stream to write the clump into");
+    if (out == NULL)
+    {
+        return;
+    }
+    bool wrote = reinterpret_cast<rw::Clump*>(clump)->streamWrite(out) != 0;
+    RwStreamClose(out, &mem);
+    check(wrote && mem.start != NULL, "librw wrote the clump out");
+
+    if (wrote)
+    {
+        // Exactly the shape of iModel.cpp:143 and xJSP.cpp:154: find the chunk
+        // first, then read. RpClumpStreamRead picks up inside the header.
+        RwStream* in = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+        check(RwStreamFindChunk(in, rwID_CLUMP, NULL, NULL) != FALSE,
+              "RwStreamFindChunk finds the clump chunk");
+
+        RpClump* readBack = RpClumpStreamRead(in);
+        RwStreamClose(in, NULL);
+        check(readBack != NULL, "RpClumpStreamRead");
+
+        if (readBack != NULL)
+        {
+            check(RpClumpGetNumAtomics(readBack) == 3, "with all three atomics");
+            check(RpClumpGetFrame(readBack) != NULL, "and a root frame");
+
+            RpAtomic* got[3] = { NULL, NULL, NULL };
+            cursor = got;
+            RpClumpForAllAtomics(readBack, recordAtomicCB, &cursor);
+            check(got[0] != NULL && got[1] != NULL && got[2] != NULL,
+                  "the read-back atomics enumerate");
+            if (got[2] != NULL)
+            {
+                // The atomics come back as new objects, so they are matched up
+                // by where their frames sit -- which is why each one was parked
+                // at a different x.
+                check(near(RpAtomicGetFrame(got[0])->modelling.pos.x,
+                           RpAtomicGetFrame(before[2])->modelling.pos.x) &&
+                          near(RpAtomicGetFrame(got[1])->modelling.pos.x,
+                               RpAtomicGetFrame(before[1])->modelling.pos.x) &&
+                          near(RpAtomicGetFrame(got[2])->modelling.pos.x,
+                               RpAtomicGetFrame(before[0])->modelling.pos.x),
+                      "reversed, the way RenderWare's prepending reader leaves them");
+                check(RpAtomicGetGeometry(got[0]) != geometry,
+                      "each with a geometry of its own, read from the stream");
+            }
+
+            check(RpClumpDestroy(readBack) != FALSE, "RpClumpDestroy on the read-back clump");
+        }
+    }
+
+    RwFree(mem.start);
+
+    // RpClumpDestroy takes the atomics, and the atomics drop their references
+    // on the shared geometry. Reading refCount afterwards is safe precisely
+    // because the count is not expected to reach zero.
+    check(RpClumpDestroy(clump) != FALSE, "RpClumpDestroy");
+    check(geometry->refCount == 1, "it destroyed the atomics, which released the geometry");
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+
+    // The frames went with it: root was the clump's frame, and RpClumpDestroy
+    // destroys the whole hierarchy. Nothing here can prove a freed frame is
+    // gone without reading it, so what is checked is that librw's allocator
+    // saw the frees -- four frames, three atomics and the clump.
+    check(sNumFree > 0, "and the frame hierarchy under it");
+}
+
+// --- Rt --------------------------------------------------------------------
+//
+// The intersection pair is exercised directly here as well as through
+// RpAtomicForAllIntersections in test_atomics, because xClumpColl.cpp calls
+// them by name against a collision tree and never goes through an atomic.
+
+static void test_intersections()
+{
+    printf("Rt intersection\n");
+
+    // The same quad's first triangle, in the xz plane. cross(v1-v0, v2-v0)
+    // points down, which is the winding xClumpColl.cpp would hand over for a
+    // ceiling.
+    RwV3d v0 = { -1.0f, 0.0f, -1.0f };
+    RwV3d v1 = { 1.0f, 0.0f, -1.0f };
+    RwV3d v2 = { 1.0f, 0.0f, 1.0f };
+
+    RwSphere sphere = { { 0.0f, 0.5f, 0.0f }, 1.0f };
+    RwV3d normal;
+    RwReal distance = -1.0f;
+
+    check(RtIntersectionSphereTriangle(&sphere, &v0, &v1, &v2, &normal, &distance) != FALSE,
+          "RtIntersectionSphereTriangle, over the face");
+    check(near(distance, 0.5f), "reports the distance from the centre to the triangle");
+    check(near(normal.x, 0.0f) && near(normal.y, -1.0f) && near(normal.z, 0.0f),
+          "and the unit normal of the winding it was given");
+
+    // Just out of reach above the face: the radius is what decides, and the
+    // distance still comes back.
+    sphere.center.y = 2.0f;
+    check(RtIntersectionSphereTriangle(&sphere, &v0, &v1, &v2, &normal, &distance) == FALSE,
+          "a sphere above the face by more than its radius misses");
+    check(near(distance, 2.0f), "and still reports how far away it was");
+
+    // Beyond the edge, in the plane. This is the case a plane-distance test
+    // would get wrong: the sphere is zero units from the triangle's PLANE and
+    // four units from the triangle.
+    sphere.center.x = 5.0f;
+    sphere.center.y = 0.0f;
+    sphere.center.z = 0.0f;
+    check(RtIntersectionSphereTriangle(&sphere, &v0, &v1, &v2, &normal, &distance) == FALSE,
+          "a sphere in the plane but off the edge misses");
+    check(near(distance, 4.0f), "at the distance to the nearest edge, not to the plane");
+
+    // Touching a vertex exactly, which is where the Voronoi-region form earns
+    // its keep.
+    sphere.center.x = -1.5f;
+    sphere.center.y = 0.0f;
+    sphere.center.z = -1.0f;
+    sphere.radius = 0.5f;
+    check(RtIntersectionSphereTriangle(&sphere, &v0, &v1, &v2, &normal, &distance) != FALSE,
+          "a sphere just reaching a vertex hits");
+    check(near(distance, 0.5f), "at exactly its radius");
+
+    check(RtIntersectionSphereTriangle(NULL, &v0, &v1, &v2, &normal, &distance) == FALSE,
+          "RtIntersectionSphereTriangle(NULL, ...) is refused");
+
+    // --- the box ----------------------------------------------------------
+
+    RwBBox bbox;
+    bbox.inf.x = -2.0f;
+    bbox.inf.y = -1.0f;
+    bbox.inf.z = -2.0f;
+    bbox.sup.x = 2.0f;
+    bbox.sup.y = 1.0f;
+    bbox.sup.z = 2.0f;
+    check(RtIntersectionBBoxTriangle(&bbox, &v0, &v1, &v2) != FALSE,
+          "RtIntersectionBBoxTriangle, box around the triangle");
+
+    // Beside it: the box's own face normals separate.
+    bbox.inf.x = 5.0f;
+    bbox.sup.x = 6.0f;
+    check(RtIntersectionBBoxTriangle(&bbox, &v0, &v1, &v2) == FALSE, "a box beside it misses");
+
+    // Above it: separated on y alone.
+    bbox.inf.x = -2.0f;
+    bbox.sup.x = 2.0f;
+    bbox.inf.y = 1.0f;
+    bbox.sup.y = 2.0f;
+    check(RtIntersectionBBoxTriangle(&bbox, &v0, &v1, &v2) == FALSE, "a box above it misses");
+
+    // The case that separates a real triangle test from a bounding-box test:
+    // this box is inside the triangle's AABB and outside the triangle, on the
+    // diagonal edge. Only an edge-cross-edge axis rejects it.
+    bbox.inf.x = -0.95f;
+    bbox.inf.y = -0.1f;
+    bbox.inf.z = 0.5f;
+    bbox.sup.x = -0.55f;
+    bbox.sup.y = 0.1f;
+    bbox.sup.z = 0.9f;
+    check(RtIntersectionBBoxTriangle(&bbox, &v0, &v1, &v2) == FALSE,
+          "a box inside the triangle's bounds but past its diagonal misses");
+
+    check(RtIntersectionBBoxTriangle(NULL, &v0, &v1, &v2) == FALSE,
+          "RtIntersectionBBoxTriangle(NULL, ...) is refused");
+}
+
+static void test_slerp()
+{
+    printf("RtQuat\n");
+
+    const float root2 = 0.70710678f;
+
+    // Identity, and a quarter turn about y. A quaternion's angle is half the
+    // rotation's, so these two are pi/4 apart.
+    RtQuat from = { { 0.0f, 0.0f, 0.0f }, 1.0f };
+    RtQuat to = { { 0.0f, root2, 0.0f }, root2 };
+
+    RtQuatSlerpCache cache;
+    memset(&cache, 0xCD, sizeof(cache));
+    RtQuatSetupSlerpCache(&from, &to, &cache);
+    check(cache.nearlyZeroOm == FALSE, "RtQuatSetupSlerpCache takes the slerp path");
+    check(near(cache.omega, 0.78539816f), "and caches the half-angle between them");
+
+    // The cached quaternions are the originals divided by sin(omega), which is
+    // the division RtQuatSlerpMacro does not do.
+    check(near(cache.raFrom.real, 1.0f / 0.70710678f),
+          "raFrom is the initial quaternion scaled by 1/sin(omega)");
+
+    RtQuat result;
+    RtQuatSlerp(&result, &from, &to, 0.5f, &cache);
+    check(near(result.imag.y, 0.38268343f) && near(result.real, 0.92387953f),
+          "the halfway slerp is an eighth turn");
+    check(near(result.imag.x, 0.0f) && near(result.imag.z, 0.0f), "about the axis it was given");
+    check(near(result.imag.y * result.imag.y + result.real * result.real, 1.0f),
+          "and comes out unit length");
+
+    RtQuatSlerp(&result, &from, &to, 0.0f, &cache);
+    check(result.real == from.real, "t <= 0 is the start quaternion exactly");
+    RtQuatSlerp(&result, &from, &to, 1.0f, &cache);
+    check(result.real == to.real, "t >= 1 is the end quaternion exactly");
+
+    // The shortest arc. -q is the same rotation as q, so this pair describes
+    // the same eighth turn -- but a slerp that did not flip the sign would take
+    // the long way round and iAnimSKB.cpp would spin the bone.
+    RtQuat negated = { { 0.0f, -root2, 0.0f }, -root2 };
+    RtQuatSetupSlerpCache(&from, &negated, &cache);
+    check(cache.nearlyZeroOm == FALSE, "a negated destination still slerps");
+    check(near(cache.omega, 0.78539816f), "over the same angle, not the reflex one");
+    RtQuatSlerp(&result, &from, &negated, 0.5f, &cache);
+    check(near(result.imag.y, 0.38268343f) && near(result.real, 0.92387953f),
+          "and lands on the short way round");
+
+    // Nearly parallel: 1/sin(omega) is where a slerp blows up, so the cache
+    // says lerp instead.
+    RtQuat almost = { { 0.0f, 0.00001f, 0.0f }, 1.0f };
+    RtQuatSetupSlerpCache(&from, &almost, &cache);
+    check(cache.nearlyZeroOm != FALSE, "two nearly equal quaternions fall back to a lerp");
+    check(cache.raFrom.real == 1.0f, "with the quaternions cached unscaled");
+    RtQuatSlerp(&result, &from, &almost, 0.5f, &cache);
+    check(near(result.imag.y, 0.000005f) && near(result.real, 1.0f), "which is the midpoint");
+
+    // Identical quaternions: omega is exactly zero and 1/sin(0) would be an
+    // infinity that reached every bone in the skeleton.
+    RtQuatSetupSlerpCache(&from, &from, &cache);
+    check(cache.nearlyZeroOm != FALSE, "and so do two identical ones");
+    RtQuatSlerp(&result, &from, &from, 0.5f, &cache);
+    check(near(result.real, 1.0f) && near(result.imag.y, 0.0f), "with no NaN in sight");
+}
+
+static void test_object_frames()
+{
+    printf("_rwObjectHasFrameSetFrame\n");
+
+    // Not on the 112-function list, and the reason is a bug in how that list
+    // was generated rather than anything about the function. RwCameraSetFrame
+    // and RpLightSetFrame are macros for it.
+    RwCamera* camera = RwCameraCreate();
+    RwFrame* frame = RwFrameCreate();
+    check(camera != NULL && frame != NULL, "a camera and a frame");
+    if (camera == NULL || frame == NULL)
+    {
+        return;
+    }
+
+    check(RwCameraGetFrame(camera) == NULL, "a new camera is on no frame");
+    RwCameraSetFrame(camera, frame);
+    check(RwCameraGetFrame(camera) == frame, "RwCameraSetFrame attaches it");
+
+    // The other half of the attach, and the half a naive implementation would
+    // miss: the frame has to know about the object too, or moving the frame
+    // never syncs the camera.
+    check(frame->objectList.link.next != &frame->objectList.link,
+          "and the frame's object list is no longer empty");
+
+    RwV3d t = { 4.0f, 5.0f, 6.0f };
+    RwFrameTranslate(frame, &t, rwCOMBINEREPLACE);
+    check(near(RwFrameGetLTM(RwCameraGetFrame(camera))->pos.x, 4.0f),
+          "so the camera reads its frame's LTM");
+
+    // Reattaching has to unhook from the old frame first, or the old frame's
+    // list keeps a link into a camera that is no longer in it.
+    RwFrame* other = RwFrameCreate();
+    RwCameraSetFrame(camera, other);
+    check(RwCameraGetFrame(camera) == other, "reattaching moves it");
+    check(frame->objectList.link.next == &frame->objectList.link,
+          "and empties the frame it came off");
+
+    // The detach. xShadow.cpp:693 and zNPCTypePrawn.cpp:622 both do this
+    // immediately before destroying the frame underneath.
+    _rwObjectHasFrameSetFrame(camera, NULL);
+    check(RwCameraGetFrame(camera) == NULL, "_rwObjectHasFrameSetFrame(obj, NULL) detaches");
+    check(other->objectList.link.next == &other->objectList.link, "leaving the frame empty");
+
+    // A light, because the void* is meant to take any of them and the offset
+    // it relies on is a different struct's.
+    RpLight* light = RpLightCreate(rpLIGHTDIRECTIONAL);
+    if (light != NULL)
+    {
+        RpLightSetFrame(light, frame);
+        check(RpLightGetFrame(light) == frame, "RpLightSetFrame reaches the same code");
+        _rwObjectHasFrameSetFrame(light, NULL);
+        RpLightDestroy(light);
+    }
+
+    // xFX.cpp's LightResetFrame, reproduced: attach a light to a frame and then
+    // ROTATE the frame. The port booted as far as this and faulted, and nothing
+    // above caught it -- the checks above move a frame that has a CAMERA on it,
+    // and detach the light before touching the frame again, so the
+    // light-on-a-moving-frame path had never run.
+    RpLight* rotLight = RpLightCreate(rpLIGHTDIRECTIONAL);
+    RwFrame* rotFrame = RwFrameCreate();
+    check(rotLight != NULL && rotFrame != NULL, "a light and a frame to rotate");
+    if (rotLight != NULL && rotFrame != NULL)
+    {
+        RpLightSetFrame(rotLight, rotFrame);
+
+        RwV3d xAxis = { 1.0f, 0.0f, 0.0f };
+        RwV3d yAxis = { 0.0f, 1.0f, 0.0f };
+        RwFrameRotate(rotFrame, &xAxis, 45.0f, rwCOMBINEREPLACE);
+        RwFrameRotate(rotFrame, &yAxis, 45.0f, rwCOMBINEPOSTCONCAT);
+        check(true, "rotating a frame with a light on it does not fault");
+
+        // And the flush, which is what actually runs the light's sync callback.
+        _rwFrameSyncDirty();
+        check(true, "and flushing the dirty list afterwards does not either");
+
+        _rwObjectHasFrameSetFrame(rotLight, NULL);
+        RpLightDestroy(rotLight);
+        RwFrameDestroy(rotFrame);
+    }
+
+    _rwObjectHasFrameSetFrame(NULL, frame); // must not fault
+
+    RwFrameDestroy(other);
+    RwFrameDestroy(frame);
+    RwCameraDestroy(camera);
+}
+
+// Count the meshes a walk visits, and record where they were.
+struct MeshWalkLog
+{
+    int calls;
+    RwUInt32 totalIndices;
+    RpMesh* first;
+    RpMesh* last;
+    RpMeshHeader* headerSeen;
+};
+
+static RpMesh* countMeshesCB(RpMesh* mesh, RpMeshHeader* meshHeader, void* pData)
+{
+    MeshWalkLog* log = (MeshWalkLog*)pData;
+    if (log->calls == 0)
+    {
+        log->first = mesh;
+    }
+    log->last = mesh;
+    log->headerSeen = meshHeader;
+    log->calls++;
+    log->totalIndices += mesh->numIndices;
+    return mesh;
+}
+
+static RpMesh* stopAfterFirstMeshCB(RpMesh* mesh, RpMeshHeader* meshHeader, void* pData)
+{
+    countMeshesCB(mesh, meshHeader, pData);
+    return NULL;
+}
+
+// iModelRender writes an atomic's LTM straight from the game's own matrix
+// instead of moving the frame, so anything that recomputes that LTM afterwards
+// replaces the pose the game asked for with the one baked into the DFF. Two
+// atomics of one clump drawn in different passes show it plainly: bc04's scale
+// dome loses the hanging glass when a shadow ray transforms the beam's frame
+// between the opaque pass and the alpha pass.
+static void test_ltm_writeback()
+{
+    printf("writing an LTM against a dirty hierarchy\n");
+
+    RwFrame* root = RwFrameCreate();
+    RwFrame* glass = RwFrameCreate();
+    RwFrame* beam = RwFrameCreate();
+    check(root != NULL && glass != NULL && beam != NULL, "a clump root and two atomic frames");
+    if (root == NULL || glass == NULL || beam == NULL)
+    {
+        return;
+    }
+
+    // addChild prepends, so adding the glass first puts the beam ahead of it in
+    // the walk -- the order the dome's own frame list has, and the order that
+    // makes the beam's dirty bit reach the glass.
+    reinterpret_cast<rw::Frame*>(root)->addChild(reinterpret_cast<rw::Frame*>(glass));
+    reinterpret_cast<rw::Frame*>(root)->addChild(reinterpret_cast<rw::Frame*>(beam));
+
+    // The clump's authored pose: an offset on the root that the children
+    // inherit, and that a resync puts back.
+    RwV3d authored = { 2.0f, 3.0f, -2.0f };
+    RwFrameTranslate(root, &authored, rwCOMBINEREPLACE);
+    check(near(RwFrameGetLTM(glass)->pos.x, 2.0f), "a child inherits the root's offset");
+
+    // The matrix the game hands a draw, nowhere near the authored pose.
+    RwMatrix want;
+    want.right.x = 1.0f;
+    want.right.y = 0.0f;
+    want.right.z = 0.0f;
+    want.up.x = 0.0f;
+    want.up.y = 1.0f;
+    want.up.z = 0.0f;
+    want.at.x = 0.0f;
+    want.at.y = 0.0f;
+    want.at.z = 1.0f;
+    want.pos.x = 40.0f;
+    want.pos.y = 0.0f;
+    want.pos.z = 0.0f;
+    want.flags = 0;
+
+    glass->ltm = want;
+    check(near(RwFrameGetLTM(glass)->pos.x, 40.0f),
+          "a written LTM reads back while the clump is clean");
+
+    // xShadowSimple.cpp's shadowRayEntCB moves the first atomic's frame of
+    // every entity under the player's shadow, which marks the whole clump.
+    glass->ltm = want;
+    RwV3d elsewhere = { 7.0f, 0.0f, 0.0f };
+    RwFrameTranslate(beam, &elsewhere, rwCOMBINEREPLACE);
+    check(!near(RwFrameGetLTM(glass)->pos.x, 40.0f),
+          "moving a sibling frame throws that write away");
+
+    // So iModelRender reads before it writes. One read settles the hierarchy
+    // and clears the flag, and the write is then what the render pipeline gets.
+    RwFrameTranslate(beam, &elsewhere, rwCOMBINEREPLACE);
+    RwFrameGetLTM(glass);
+    glass->ltm = want;
+    check(near(RwFrameGetLTM(glass)->pos.x, 40.0f), "reading first makes the write stick");
+
+    reinterpret_cast<rw::Frame*>(beam)->removeChild();
+    reinterpret_cast<rw::Frame*>(glass)->removeChild();
+    RwFrameDestroy(beam);
+    RwFrameDestroy(glass);
+    RwFrameDestroy(root);
+}
+
+// The three functions the old regeneration command hid, and the reason they
+// are tested together is that they have nothing else in common: a `sed
+// 's/^_*//'` in front of a `^(Rw|Rp|Rt|Rx)` anchor dropped every RenderWare
+// symbol spelled with a leading underscore, so these went missing as a group
+// rather than for any reason to do with what they do. See TODO.md.
+//
+// _rwObjectHasFrameSetFrame was the fourth and has its own section above.
+static void test_underscored()
+{
+    printf("_rwFrameSyncDirty / _rwInvSqrt / _rpMeshHeaderForAllMeshes\n");
+
+    // --- _rwFrameSyncDirty ---------------------------------------------
+    //
+    // The whole point of the function is that moving a frame does NOT
+    // recompute its LTM. If it did, all seven call sites would be dead code
+    // and this test would pass while proving nothing -- so the staleness is
+    // checked first, deliberately, by reading ->ltm out of the struct rather
+    // than through RwFrameGetLTM (which syncs on the way past).
+    RwFrame* frame = RwFrameCreate();
+    check(frame != NULL, "a frame to move");
+    if (frame == NULL)
+    {
+        return;
+    }
+
+    RwV3d t = { 7.0f, 8.0f, 9.0f };
+    RwFrameTranslate(frame, &t, rwCOMBINEREPLACE);
+    check(near(frame->modelling.pos.x, 7.0f), "the modelling matrix moved");
+    check(near(frame->ltm.pos.x, 0.0f), "but the LTM is deferred, not recomputed");
+
+    _rwFrameSyncDirty();
+    check(near(frame->ltm.pos.x, 7.0f) && near(frame->ltm.pos.y, 8.0f) &&
+              near(frame->ltm.pos.z, 9.0f),
+          "_rwFrameSyncDirty brings it up to date");
+
+    // The list has to be emptied too, or the next flush walks frames that may
+    // since have been destroyed. Nothing can read the list from this side, so
+    // this checks the consequence: a second flush with nothing dirty is a
+    // no-op rather than a fault.
+    _rwFrameSyncDirty();
+    check(near(frame->ltm.pos.x, 7.0f), "and flushing again with nothing dirty is harmless");
+
+    // A hierarchy, built through librw because the port has no RwFrameAddChild
+    // -- nothing in src/SB calls one, so the C API does not carry it. What is
+    // being checked is librw's subtree recursion, which is the part of
+    // RenderWare's _rwFrameSyncDirty that a one-frame test cannot reach.
+    RwFrame* child = RwFrameCreate();
+    if (child != NULL)
+    {
+        reinterpret_cast<rw::Frame*>(frame)->addChild(reinterpret_cast<rw::Frame*>(child));
+
+        RwV3d ct = { 1.0f, 0.0f, 0.0f };
+        RwFrameTranslate(child, &ct, rwCOMBINEREPLACE);
+        check(near(child->ltm.pos.x, 0.0f), "a child's LTM is deferred too");
+
+        _rwFrameSyncDirty();
+        check(near(child->ltm.pos.x, 8.0f), "and the flush walks the whole subtree");
+
+        reinterpret_cast<rw::Frame*>(child)->removeChild();
+        RwFrameDestroy(child);
+    }
+
+    RwFrameDestroy(frame);
+
+    // --- _rwInvSqrt ----------------------------------------------------
+    check(near(_rwInvSqrt(4.0f), 0.5f), "_rwInvSqrt(4) is 1/2");
+    check(near(_rwInvSqrt(1.0f), 1.0f), "_rwInvSqrt(1) is 1");
+    check(near(_rwInvSqrt(0.25f), 2.0f), "_rwInvSqrt(1/4) is 2");
+
+    // The case the game reads, and the reason this function must not guard
+    // its division. xCollide.cpp:1413 scales a degenerate triangle's zero
+    // normal by this and rejects the triangle when the result is NaN; that
+    // only happens if a zero input gives infinity. A "safe" version returning
+    // 0 here would turn every degenerate triangle into a silent hit with no
+    // surface direction.
+    RwReal recip = _rwInvSqrt(0.0f);
+    check(recip > 3.0e38f, "_rwInvSqrt(0) is +infinity, not a guarded zero");
+
+    RwV3d degenerate = { 0.0f, 0.0f, 0.0f };
+    RwV3dScaleMacro(&degenerate, &degenerate, recip);
+    check(degenerate.x != degenerate.x, "so scaling a zero-area normal by it gives NaN");
+
+    // --- _rpMeshHeaderForAllMeshes -------------------------------------
+    RpGeometry* geometry = makeQuad();
+    check(geometry != NULL, "a geometry to build meshes on");
+    if (geometry == NULL)
+    {
+        return;
+    }
+
+    RpMaterial* m0 = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    RpMaterial* m1 = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[0], m0);
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[1], m1);
+    RpGeometryUnlock(geometry);
+
+    RpMeshHeader* header = geometry->mesh;
+    check(header != NULL && header->numMeshes == 2, "two materials, two meshes");
+    if (header == NULL)
+    {
+        return;
+    }
+
+    // firstMeshOffset is stamped with a value that would walk off the end if
+    // it were added. RenderWare's own implementation DOES add it -- its meshes
+    // start that many bytes past the header -- and librw's start immediately
+    // after the header with the field left as padding, so this is the one
+    // place the two implementations must differ. Anything that "restores"
+    // RenderWare's arithmetic here fails this check rather than corrupting a
+    // level's vertices at xJSP.cpp:35.
+    header->firstMeshOffset = 0x4000;
+
+    MeshWalkLog log = { 0, 0, NULL, NULL, NULL };
+    check(_rpMeshHeaderForAllMeshes(header, countMeshesCB, &log) == header,
+          "_rpMeshHeaderForAllMeshes returns its header");
+    check(log.calls == 2, "it visited both meshes");
+    check(log.headerSeen == header, "and handed the callback the header it was given");
+    check(log.first == (RpMesh*)(header + 1), "the first mesh follows the header immediately");
+    check(log.last == (RpMesh*)(header + 1) + 1, "and they are contiguous");
+    check(log.totalIndices == header->totalIndicesInMesh,
+          "the indices it walked add up to totalIndicesInMesh");
+
+    // xJSP.cpp reads mesh->indices[i] against morphTarget->verts, so an index
+    // out of range would build the level out of whatever follows the vertex
+    // array. Six indices over four vertices.
+    check(log.totalIndices == 6, "six indices for two triangles");
+
+    MeshWalkLog stopped = { 0, 0, NULL, NULL, NULL };
+    _rpMeshHeaderForAllMeshes(header, stopAfterFirstMeshCB, &stopped);
+    check(stopped.calls == 1, "a callback returning NULL stops the walk early");
+
+    check(_rpMeshHeaderForAllMeshes(NULL, countMeshesCB, &log) == NULL,
+          "a NULL header is refused rather than walked");
+
+    reinterpret_cast<rw::Material*>(m1)->destroy();
+    reinterpret_cast<rw::Material*>(m0)->destroy();
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+}
+
+// RpAtomicDestroy and the standalone atomic stream pair, which were missing
+// from the 112-function list rather than deliberately left out -- see the
+// comment above them in atomic.cpp. All three exist for FullAtomicDupe
+// (xModelBucket.cpp:125), and this test is that function's sequence.
+// The RenderWare user data plugin, which iMorph.cpp is the only caller of --
+// it keeps its DirtyMorph cache in a "MORPHSTATE" integer array on the
+// geometry and reads it back on every morph render. An array that comes back
+// with the wrong element count or the wrong type would corrupt that cache
+// silently, so the round trip is what is checked here rather than the calls
+// merely returning something.
+// RpHAnim, the skeleton behind every animated model. iModel.cpp builds one per
+// model as it loads and xAnim drives it every frame, writing bone matrices
+// through pMatrixArray -- so a wrong offset here animates a model out of the
+// wrong memory rather than failing, which is why the round trip is checked and
+// not just the return values.
+static void test_hanim()
+{
+    printf("RpHAnim\n");
+
+    RwInt32 nodeIDs[3] = { 0, 1, 2 };
+    RwUInt32 nodeFlags[3] = { 0, 0, 0 };
+
+    RpHAnimHierarchy* hierarchy =
+        RpHAnimHierarchyCreate(3, nodeFlags, nodeIDs, rpHANIMHIERARCHYUPDATELTMS, 36);
+    check(hierarchy != NULL, "RpHAnimHierarchyCreate");
+    if (hierarchy == NULL)
+    {
+        return;
+    }
+
+    // Read back through RenderWare's OWN names -- the mirroring doing its job.
+    check(hierarchy->numNodes == 3, "the hierarchy has the node count it was asked for");
+    check(hierarchy->pMatrixArray != NULL, "and a matrix array behind pMatrixArray");
+    check(hierarchy->pNodeInfo != NULL, "and node info");
+    check((hierarchy->flags & rpHANIMHIERARCHYUPDATELTMS) != 0, "and the flags it was given");
+
+    // The node ids have to survive, because iModel matches bones to frames by
+    // id and getting it wrong attaches the skeleton to the wrong joints.
+    check(hierarchy->pNodeInfo[0].nodeID == 0 && hierarchy->pNodeInfo[2].nodeID == 2,
+          "the node ids round-trip through RpHAnimNodeInfo");
+
+    // Writing a bone matrix and reading it back is what xAnim does every frame.
+    hierarchy->pMatrixArray[1].pos.x = 12.0f;
+    check(near(hierarchy->pMatrixArray[1].pos.x, 12.0f),
+          "a bone matrix written through pMatrixArray reads back");
+
+    // The frame association, which is how a model finds its skeleton again.
+    RwFrame* root = RwFrameCreate();
+    check(root != NULL, "a frame to attach it to");
+    if (root != NULL)
+    {
+        check(RpHAnimFrameGetHierarchy(root) == NULL, "a fresh frame has no hierarchy");
+        check(RpHAnimFrameSetHierarchy(root, hierarchy) != FALSE, "RpHAnimFrameSetHierarchy");
+        check(RpHAnimFrameGetHierarchy(root) == hierarchy, "RpHAnimFrameGetHierarchy finds it");
+
+        // The frame hierarchy walk iModel uses to find bones.
+        check(RwFrameGetRoot(root) == root, "a lone frame is its own root");
+
+        RpAtomic* skinned = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+        if (skinned != NULL)
+        {
+            check(RpSkinAtomicSetHAnimHierarchy(skinned, hierarchy) == skinned,
+                  "RpSkinAtomicSetHAnimHierarchy");
+            check(rw::Skin::getHierarchy(reinterpret_cast<rw::Atomic*>(skinned)) ==
+                      reinterpret_cast<rw::HAnimHierarchy*>(hierarchy),
+                  "and the atomic's skin plugin holds it");
+            reinterpret_cast<rw::Atomic*>(skinned)->destroy();
+        }
+
+        RpHAnimFrameSetHierarchy(root, NULL);
+        RwFrameDestroy(root);
+    }
+
+    check(RpHAnimFrameGetHierarchy(NULL) == NULL, "RpHAnimFrameGetHierarchy(NULL) is refused");
+    check(RpHAnimFrameSetHierarchy(NULL, hierarchy) == FALSE, "and so is setting one on NULL");
+    check(RwFrameGetRoot(NULL) == NULL, "RwFrameGetRoot(NULL) is refused");
+    check(RwFrameDestroyHierarchy(NULL) == FALSE, "RwFrameDestroyHierarchy(NULL) is refused");
+
+    reinterpret_cast<rw::HAnimHierarchy*>(hierarchy)->destroy();
+}
+
+static void test_userdata()
+{
+    printf("RpUserData\n");
+
+    RpGeometry* geometry = makeQuad();
+    check(geometry != NULL, "a geometry to hang user data on");
+    if (geometry == NULL)
+    {
+        return;
+    }
+
+    check(RpGeometryGetUserDataArrayCount(geometry) == 0, "a new geometry has no user data");
+
+    RwInt32 index = RpGeometryAddUserDataArray(geometry, "MORPHSTATE", rpINTUSERDATA, 8);
+    check(index >= 0, "RpGeometryAddUserDataArray");
+    check(RpGeometryGetUserDataArrayCount(geometry) == 1, "and the count went up");
+
+    RpUserDataArray* usr = RpGeometryGetUserDataArray(geometry, index);
+    check(usr != NULL, "RpGeometryGetUserDataArray");
+    if (usr != NULL)
+    {
+        // Read through RenderWare's OWN field names. This is the mirroring
+        // doing its job -- iMorph.cpp reads usr->data and usr->numElements
+        // directly, so the names have to land on librw's bytes.
+        check(usr->numElements == 8, "the array has the element count it was asked for");
+        check(usr->format == rpINTUSERDATA, "and the format it was asked for");
+        check(usr->data != NULL, "and storage behind it");
+        check(usr->name != NULL && strcmp(usr->name, "MORPHSTATE") == 0, "and its name");
+
+        if (usr->data != NULL)
+        {
+            RwInt32* values = (RwInt32*)usr->data;
+            values[0] = 0x1234;
+            values[7] = 0x5678;
+
+            RpUserDataArray* again = RpGeometryGetUserDataArray(geometry, index);
+            check(again == usr, "asking for it twice gives the same array");
+            check(((RwInt32*)again->data)[0] == 0x1234 && ((RwInt32*)again->data)[7] == 0x5678,
+                  "and what was written to it is still there");
+        }
+    }
+
+    check(RpGeometryGetUserDataArray(geometry, 99) == NULL,
+          "an out-of-range index is refused rather than indexed");
+    check(RpGeometryGetUserDataArray(NULL, 0) == NULL, "and so is a NULL geometry");
+    check(RpGeometryGetUserDataArrayCount(NULL) == 0, "counting NULL is zero, not a fault");
+
+    check(RpUserDataGetFormatSize(rpINTUSERDATA) == 4, "RpUserDataGetFormatSize(int)");
+    check(RpUserDataGetFormatSize(rpREALUSERDATA) == 4, "RpUserDataGetFormatSize(real)");
+
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+}
+
+static void test_atomic_stream()
+{
+    printf("RpAtomicDestroy / RpAtomicStreamWrite / RpAtomicStreamRead\n");
+
+    RpAtomic* atomic = reinterpret_cast<RpAtomic*>(rw::Atomic::create());
+    RpGeometry* geometry = makeQuad();
+    check(atomic != NULL && geometry != NULL, "an atomic and a geometry to duplicate");
+    if (atomic == NULL || geometry == NULL)
+    {
+        return;
+    }
+
+    RpMaterial* material = reinterpret_cast<RpMaterial*>(rw::Material::create());
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[0], material);
+    RpGeometryTriangleSetMaterial(geometry, &geometry->triangles[1], material);
+    RpGeometryUnlock(geometry);
+
+    RpAtomicSetGeometry(atomic, geometry, 0);
+    RpAtomicSetFrame(atomic, RwFrameCreate());
+    atomic->object.object.flags = rpATOMICCOLLISIONTEST | rpATOMICRENDER;
+
+    // Write, exactly as FullAtomicDupe does: onto an empty RwMemory, so the
+    // stream has to grow.
+    RwMemory mem = { NULL, 0 };
+    RwStream* stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMWRITE, &mem);
+    check(stream != NULL, "a memory stream to write it to");
+    if (stream == NULL)
+    {
+        return;
+    }
+
+    check(RpAtomicStreamWrite(atomic, stream) == atomic, "RpAtomicStreamWrite");
+    RwStreamClose(stream, &mem);
+    check(mem.start != NULL && mem.length > 12, "it wrote something");
+
+    // The length in the chunk header has to be the length actually written.
+    // Getting that wrong is invisible here -- the reader never consults it --
+    // and fatal the moment an atomic is written into a stream that holds
+    // anything after it, because RwStreamFindChunk skips by this number.
+    stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+    RwUInt32 chunkLength = 0;
+    check(RwStreamFindChunk(stream, rwID_ATOMIC, &chunkLength, NULL) != FALSE,
+          "RwStreamFindChunk finds the rwID_ATOMIC chunk");
+    check(chunkLength == mem.length - 12, "and the size it declared is the size it wrote");
+
+    RpAtomic* dupe = RpAtomicStreamRead(stream);
+    RwStreamClose(stream, NULL);
+    check(dupe != NULL, "RpAtomicStreamRead");
+    if (dupe == NULL)
+    {
+        return;
+    }
+
+    check(dupe != atomic, "the duplicate is a different atomic");
+
+    // A COPY of the geometry, not another reference to the same one. This is
+    // the whole point of the round trip: xModelBucket needs N atomics it can
+    // instance separately, and sharing one geometry would defeat it.
+    check(dupe->geometry != NULL && dupe->geometry != geometry, "with a geometry of its own");
+    check(geometry->refCount == 2, "and the original's reference count is untouched");
+
+    check(dupe->geometry->numVertices == 4 && dupe->geometry->numTriangles == 2,
+          "the geometry round-tripped its counts");
+    check(near(dupe->geometry->morphTarget[0].verts[2].x, 1.0f) &&
+              near(dupe->geometry->morphTarget[0].verts[2].z, 1.0f),
+          "and its vertices");
+    check(dupe->geometry->matList.numMaterials == 1, "and its material list");
+
+    check(dupe->object.object.flags == (rpATOMICCOLLISIONTEST | rpATOMICRENDER),
+          "the atomic's flags round-tripped");
+
+    // No frame: a standalone atomic chunk names its frame by an index into a
+    // clump's frame list, and there is no clump here. FullAtomicDupe gives the
+    // atomic a fresh frame on the next line, so this is the state it expects.
+    check(RpAtomicGetFrame(dupe) == NULL, "and it comes back on no frame");
+
+    // Reading twice out of one written block, which is the loop FullAtomicDupe
+    // actually runs -- it reopens the same RwMemory once per duplicate.
+    stream = RwStreamOpen(rwSTREAMMEMORY, rwSTREAMREAD, &mem);
+    RwStreamFindChunk(stream, rwID_ATOMIC, NULL, NULL);
+    RpAtomic* second = RpAtomicStreamRead(stream);
+    RwStreamClose(stream, NULL);
+    check(second != NULL && second != dupe, "the same block reads a second, distinct duplicate");
+
+    // --- RpAtomicDestroy -----------------------------------------------
+    check(RpAtomicDestroy(second) != FALSE, "RpAtomicDestroy");
+    check(RpAtomicDestroy(dupe) != FALSE, "on both duplicates");
+    check(RpAtomicDestroy(NULL) == FALSE, "RpAtomicDestroy(NULL) is refused");
+
+    // The frame survives its atomic: RenderWare releases the frame rather than
+    // destroying it, and FullAtomicDupe destroys it by hand one line earlier.
+    // An implementation that took the frame with it would double-free there.
+    RwFrame* frame = RpAtomicGetFrame(atomic);
+    check(frame != NULL, "the original still has its frame");
+    RpAtomicDestroy(atomic);
+    check(frame->objectList.link.next == &frame->objectList.link,
+          "the destroy detached the atomic from it");
+
+    // Still live memory afterwards, not freed underneath the caller: moving it
+    // and reading the value back is the cheapest way to say so.
+    RwV3d after = { 3.0f, 0.0f, 0.0f };
+    RwFrameTranslate(frame, &after, rwCOMBINEREPLACE);
+    check(near(frame->modelling.pos.x, 3.0f), "and the frame outlives the atomic");
+    RwFrameDestroy(frame);
+
+    // Destroying the atomic gave up its reference on the geometry, so the one
+    // taken by makeQuad's caller is all that is left.
+    check(geometry->refCount == 1, "destroying the atomic released the geometry");
+
+    reinterpret_cast<rw::Material*>(material)->destroy();
+    reinterpret_cast<rw::Geometry*>(geometry)->destroy();
+
+    RwFree(mem.start);
+}
+
+static void test_engine_shutdown()
+{
+    printf("RwEngine teardown\n");
+
+    check(RwEngineStop() != FALSE, "RwEngineStop");
+    check(RwEngineInstance->engineStatus == rwENGINESTATUSOPENED, "engineStatus is OPENED again");
+
+    check(RwEngineClose() != FALSE, "RwEngineClose");
+    check(RwEngineInstance->engineStatus == rwENGINESTATUSINITED, "engineStatus is INITED again");
+
+    check(RwEngineTerm() != FALSE, "RwEngineTerm");
+
+    // Nulled rather than left pointing at a plausible-looking struct, so that
+    // anything still reading it faults where the bug is.
+    check(RwEngineInstance == NULL, "RwEngineInstance is null after term");
+    check(RwEngineTerm() == FALSE, "RwEngineTerm on a dead engine is refused");
+
+    // Term frees every plugin, which takes RpWorld's tail with it. A world made
+    // now would have no memory behind ->matList or ->boundingBox, so the shim
+    // refuses instead of handing one out. This is the same check that catches a
+    // port whose startup forgot RpWorldPluginAttach, which is otherwise silent.
+    RwBBox anyBox = { { 1.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 0.0f } };
+    check(RpWorldCreate(&anyBox) == NULL, "RpWorldCreate without the world plugin is refused");
+
+    check(sNumFree > 0, "librw freed through the memory functions it was given");
+
+#ifndef RW_NULL
+    iWindowClose();
+#endif
+}
+
+// Which backend to run against, from the command line.
+//
+// The executable can carry several, and everything below is written against
+// whichever one opened -- so the same binary is the test for all of them and
+// this is what picks. No argument takes the build's own default, which is what
+// the game does with video.backend = auto.
+static void SelectBackend(int argc, char** argv)
+{
+    if (argc < 2)
+    {
+        return;
+    }
+
+    const struct
+    {
+        const char* name;
+        iScreenBackend backend;
+    } kNames[] = { { "d3d9", iSCREENBACKEND_D3D9 },
+                   { "d3d11", iSCREENBACKEND_D3D11 },
+                   { "gl3", iSCREENBACKEND_GL3 } };
+
+    for (size_t i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
+    {
+        if (strcmp(argv[1], kNames[i].name) == 0)
+        {
+            iScreenSetBackend(kNames[i].backend);
+            printf("(asked for the %s backend)\n", argv[1]);
+            return;
+        }
+    }
+
+    printf("usage: %s [d3d9|d3d11|gl3]\n", argv[0]);
+    exit(2);
+}
+
+int main(int argc, char** argv)
+{
+    // Unbuffered, so that a crash leaves the last completed check on screen
+    // instead of a half-flushed line. With a real render backend this test
+    // reaches driver code that can fault, and "which check was it" is the whole
+    // diagnosis.
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    makeFailuresHeadless();
+    startWatchdog();
+
+    SelectBackend(argc, argv);
+
+    test_engine_startup();
+
+    if (sEngineUnusable)
+    {
+        printf("\nthe render backend could not be opened -- see above; %d failure%s\n", failures,
+               failures == 1 ? "" : "s");
+        return 1;
+    }
+
+    test_frames();
+    test_values();
+    test_streams();
+    test_textures();
+    test_images();
+    test_alpha_kind();
+    test_cameras();
+    test_lights();
+    test_worlds();
+    test_renderstate();
+    test_renderstate_roundtrip();
+    test_perpixel_lighting();
+    test_snapshot();
+    test_immediate();
+    test_geometry();
+    test_atomics();
+    test_skin();
+    test_matfx();
+    test_skin_matfx();
+    test_toon();
+    test_uvxform();
+    test_ptank();
+    test_clumps();
+    test_intersections();
+    test_slerp();
+    test_object_frames();
+    test_ltm_writeback();
+    test_underscored();
+    test_hanim();
+    test_userdata();
+    test_atomic_stream();
+    test_engine_shutdown();
+
+    printf("\n%d failure%s\n", failures, failures == 1 ? "" : "s");
+    return failures != 0;
+}

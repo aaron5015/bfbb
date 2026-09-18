@@ -1,0 +1,375 @@
+#ifndef ZTALKBOX_H
+#define ZTALKBOX_H
+
+#include "zTextBox.h"
+#include "zNPCTypeCommon.h"
+#include "xIni.h"
+#include "containers.h"
+#include "xScene.h"
+#include "xCamera.h"
+#include "zCutsceneMgr.h"
+#include "xSnd.h"
+#include "xTextAsset.h"
+
+struct ztalkbox : xBase
+{
+    struct asset_type : xDynAsset
+    {
+        U32 dialog_box;
+        U32 prompt_box;
+        U32 quit_box;
+        bool trap : 8;
+        bool pause : 8;
+        bool allow_quit : 8;
+#ifdef PLATFORM_PC
+        // This one is not a boolean, whatever the declaration says. The packer
+        // writes one of three values into it -- TP_NEVER 0, TP_TRAPPED 1,
+        // TP_ACTIVE 2 -- and `ztalkbox::update_all` compares the field against
+        // the last two. Counted over every talk box in the retail assets: 114
+        // carry 0, 199 carry 1 and 217 carry 2. Every other byte in this block
+        // really is only ever 0 or 1.
+        //
+        // CodeWarrior reads an eight-bit `bool` bitfield as a whole byte.
+        // Retail's update_all is `lbz r4, 0x1f(r3)` and then `cmpwi r4, 0x2`,
+        // with no masking anywhere in between. A host compiler is entitled to
+        // assume a bool holds 0 or 1 and clang takes it: it emits
+        // `movb 0x1f(%eax), %al; andb $0x1, %al`, so a stored 2 arrives as 0
+        // and the `tp == TP_ACTIVE` arm is unreachable code.
+        //
+        // What that cost: pad handling switched off for all 217 TP_ACTIVE talk
+        // boxes -- every "press R" prompt the player reads while still holding
+        // control, which is every door in the game, including the four out of
+        // SpongeBob's house. TP_TRAPPED survived the truncation by happening to
+        // be 1, so talking to a villager -- which takes control away first --
+        // went on working, and that is why this looked like a UI bug rather
+        // than a talk-box one.
+        //
+        // A U8 here and the retail declaration below: the same byte at the same
+        // offset, read whole. Nothing assigns to this field, so widening what
+        // it can hold cannot change anything else.
+        U8 trigger_pads;
+#else
+        bool trigger_pads : 8;
+#endif
+        bool page : 8;
+        bool show : 8;
+        bool hide : 8;
+        bool audio_effect : 8;
+        U32 teleport;
+        struct
+        {
+            struct
+            {
+                bool time : 8;
+                bool prompt : 8;
+                bool sound : 8;
+                bool event : 8;
+            } type;
+            F32 delay; //Offset 8d3c
+            S32 which_event; //Offset 0x8d40
+        } auto_wait;
+        struct
+        {
+            U32 skip;
+            U32 noskip;
+            U32 quit;
+            U32 noquit;
+            U32 yesno;
+        } prompt;
+    };
+
+    enum answer_enum
+    {
+        ANSWER_CONTINUE,
+        ANSWER_YES,
+        ANSWER_NO,
+        ANSWER_3,
+        ANSWER_4,
+        ANSWER_5,
+    };
+
+    struct callback
+    {
+        callback()
+        {
+        }
+
+        virtual void on_signal(U32)
+        {
+        }
+
+        virtual void on_start()
+        {
+        }
+
+        virtual void on_stop()
+        {
+        }
+
+        virtual void on_answer(answer_enum answer)
+        {
+        }
+    };
+
+    struct
+    {
+        bool visible : 1;
+    } flag;
+    const asset_type* asset;
+    ztextbox* dialog_box; //Offset 0x18
+    ztextbox* prompt_box; //Offset 0x1c
+    ztextbox* quit_box; //Offset 0x20
+    struct
+    {
+        const char* skip;
+        const char* noskip;
+        const char* quit;
+        const char* noquit;
+        const char* yesno;
+    } prompt;
+    zNPCCommon* npc;
+
+    static void init();
+    static void load(xBase& data, xDynAsset& asset, size_t);
+    static void load_settings(xIniFile& ini);
+    static void update_all(xScene& s, F32 dt);
+    static void render_all();
+    static void reset_all();
+    static void clear_layout();
+    static void permit(U32 add_flags, U32 remove_flags);
+    static ztalkbox* get_active();
+
+    void start_talk(U32 textID, callback*, zNPCCommon*); // FIXME: params not verified
+    void start_talk(const char* text, callback* cb, zNPCCommon* npc);
+
+    void MasterTellSlaves(int event);
+    void MasterLoveSlave(xBase*, int);
+
+    void load(const asset_type& tasset);
+    void reset();
+    void set_text(const char* text);
+    void set_text(U32 textID);
+    void add_text(U32 textID);
+    void add_text(const char* text);
+    void clear_text();
+    void stop_talk();
+    void stop_wait(U32 x);
+    void show();
+    void hide();
+};
+
+namespace
+{
+    enum trigger_pads_enum
+    {
+        TP_NEVER,
+        TP_TRAPPED,
+        TP_ACTIVE,
+    };
+    enum state_enum
+    {
+        STATE_INVALID = -1,
+        BEGIN_STATE = 0,
+        STATE_START = 1,
+        STATE_NEXT = 2,
+        STATE_WAIT = 3,
+        STATE_STOP = 4,
+        END_STATE = 5,
+        MAX_STATE = 5,
+    };
+
+    enum query_enum
+    {
+        Q_SKIP,
+        Q_YESNO
+    };
+
+    // The text-box types themselves, not copies of them. zTextBox.h already
+    // pulls in xFont.h, and a second declaration of a struct is checked against
+    // nothing: zTalkBox's copy of layout counted with U32 where xtextbox counts
+    // with size_t, which made it 2 KB short at 64 bits and let refresh() write
+    // past the end of shared.
+    typedef xtextbox::callback callback;
+    typedef xtextbox::split_tag split_tag;
+    typedef xtextbox::tag_type tag_type;
+    typedef xtextbox::jot jot;
+    typedef xtextbox::jot_line jot_line;
+    typedef xtextbox::layout layout;
+    typedef xtextbox::tag_entry tag_entry;
+    typedef xtextbox::tag_entry_list tag_entry_list;
+    typedef ::xTextAsset xTextAsset;
+
+    struct state_type
+    {
+        state_enum type;
+
+        state_type(state_enum t);
+        virtual void start();
+        virtual void stop();
+        virtual state_enum update(xScene& scn, F32 dt) = 0;
+    };
+
+    struct start_state_type : state_type
+    {
+        start_state_type();
+        virtual void start();
+        virtual void stop();
+        virtual state_enum update(xScene& scn, F32 dt);
+    };
+
+    struct next_state_type : state_type
+    {
+        S32 prev_wait_jot; // offset 0x8, size 0x4
+
+        next_state_type();
+        virtual void start();
+        virtual void stop();
+        virtual state_enum update(xScene& scn, F32 dt);
+    };
+
+    struct wait_state_type : state_type
+    {
+        U8 answer_yes; // offset 0x8, size 0x1
+
+        wait_state_type();
+        virtual void start();
+        virtual void stop();
+        virtual state_enum update(xScene& scn, F32 dt);
+    };
+    struct stop_state_type : state_type
+    {
+        stop_state_type();
+        virtual void start();
+        virtual void stop();
+        virtual state_enum update(xScene& scn, F32 dt);
+    };
+    struct wait_context
+    {
+        struct
+        {
+            U8 time : 1; // bitfield size: 0x8
+            U8 prompt : 1; // bitfield size: 0x8
+            U8 sound : 1; // bitfield size: 0x8
+            U8 event : 1; // bitfield size: 0x8
+            U16 pad : 12; // bitfield size: 0x10
+        } type; //offset 0x0, size 0x4
+        U8 need; //Offset 08d3a
+        F32 delay; //Offset 08d3c
+        U32 event_mask; //Offset 08d40
+        query_enum query; //Offset 08d44
+        void reset_type(); //Offset 08d48
+        wait_context& operator=(const wait_context& rhs); //Offset 08d4c
+    };
+
+    struct trigger_pair
+    {
+        ztalkbox* origin;
+        U32 event;
+    };
+
+    struct shared_type
+    {
+        S32 flags;
+        U32 permit;
+        ztalkbox* active; // 0x8
+        state_type* state; // 0xC
+        state_type* states[5]; // 0x10, size 0x14
+        layout lt; // 0x24
+        S32 begin_jot; // 0x851C
+        S32 end_jot; // 0x8520
+        S32 page_end_jot; // 0x8524
+        wait_context wait; // 0x8528
+        wait_context auto_wait; // 0x8538
+        U32 wait_event_mask; // 0x8548
+        F32 prompt_delay; // 0x854C
+        F32 quit_delay; // 0x8550
+        U8 prompt_ready; // 0x8554, size 0x1
+        U8 quit_ready; // 0x8555, size 0x1
+        U8 stream_locked[2]; // 0x8556
+        S32 next_stream; // 0x8558
+        sound_queue<4> sounds; // 0x855C
+        U8 allow_quit; // 0x8578
+        U8 quitting; // 0x8579
+        U8 delay_events; // 0x857A
+        ztalkbox::callback* cb; // 0x857C
+        fixed_queue<trigger_pair, 32> triggered; // 0x8580
+        F32 volume; // 0x8690
+        zNPCCommon* speak_npc; // 0x8694
+        U32 speak_player; // 0x8698
+    };
+
+    struct sound_context
+    {
+        // total size: 0x18
+        U32 id; // offset 0x0, size 0x4
+        enum
+        {
+            ACTION_SET,
+            ACTION_PUSH,
+            ACTION_POP,
+        } action : 8; // offset 0x4, size 0x4
+        enum
+        {
+            TYPE_INVALID,
+            TYPE_VOLUME,
+            TYPE_TARGET,
+            TYPE_ORIGIN,
+        } type : 8; // offset 0x4, size 0x4
+        enum
+        {
+            SOURCE_MEMORY,
+            SOURCE_STREAM,
+        } source : 8; // offset 0x4, size 0x4
+        U8 anim; // offset 0x7, size 0x1
+        union
+        { // inferred
+            struct
+            {
+                // total size: 0x8
+                float left; // offset 0x0, size 0x4
+                float right; // offset 0x4, size 0x4
+            } volume; // offset 0x8, size 0x8
+            U32 target; // offset 0x8, size 0x4
+            xVec3 origin; // offset 0x8, size 0xC
+        };
+        U32 speaker; // offset 0x14, size 0x4
+    };
+
+    struct teleport_context
+    {
+        // total size: 0x14
+        U8 use_loc; // offset 0x0, size 0x1
+        U8 use_yaw; // offset 0x1, size 0x1
+        xVec3 loc; // offset 0x4, size 0xC
+        float yaw; // offset 0x10, size 0x4
+    };
+    struct signal_context
+    {
+        // total size: 0x4
+        U32 flags; // offset 0x0, size 0x4
+    };
+
+} // namespace
+struct location_asset : xDynAsset
+{
+    xVec3 loc; // offset 0x10, size 0xC
+
+    static const char* type_name()
+    {
+        return "location";
+    }
+};
+struct pointer_asset : xDynAsset
+{
+    xVec3 loc; // offset 0x10, size 0xC
+    float yaw; // offset 0x1C, size 0x4
+    float pitch; // offset 0x20, size 0x4
+    float roll; // offset 0x24, size 0x4
+
+    static const char* type_name()
+    {
+        return "pointer";
+    }
+};
+
+#endif

@@ -1,0 +1,1816 @@
+#include "zCamera.h"
+#include "zCombo.h"
+#include "zCutsceneMgr.h"
+#include "zEntPlayer.h"
+#include "zEntPlayerOOBState.h"
+#include "zFX.h"
+#include "zGame.h"
+#include "zGameExtras.h"
+#include "zGameState.h"
+#include "zGlobals.h"
+#include "zHud.h"
+#include "zLOD.h"
+#include "zMenu.h"
+#include "zMusic.h"
+#include "zParPTank.h"
+#include "zSaveLoad.h"
+#include "zVolume.h"
+
+#ifdef PLATFORM_PC
+#include <stdlib.h>
+
+// zGameTakeSnapShot is an empty function on the console with a live call site.
+// This is what fills it in. See iSnapshot.h.
+#include "iSnapshot.h"
+
+// video.load_time, whose clock starts when the loading screen goes up. See
+// iLoadScreen.h.
+#include "iLoadScreen.h"
+// video.load_transition, which holds the loading screen up long enough for the
+// bubbles and then wipes the still off the loaded level. See iLoadTransition.h.
+#include "iLoadTransition.h"
+#endif
+
+#include "iDraw.h"
+#include "iSystem.h"
+#include "iTRC.h"
+
+#include "xDebug.h"
+#include "xFont.h"
+#include "xMarkerAsset.h"
+#include "xMath.h"
+#include "xMemMgr.h"
+#include "xModel.h"
+#include "xScreen.h"
+#include "xScrFx.h"
+#include "xSkyDome.h"
+#include "xTRC.h"
+#include "xutil.h"
+
+#include <types.h>
+
+#include <stdio.h>
+
+const static basic_rect<F32> screen_bounds =
+{
+    0.0f, 0.0f, 1.0f, 1.0f
+};
+
+// Retail puts this at the head of zGame.cpp's .sbss (0x803CB7A0), not in
+// zMain.o, which is where our source had it.
+S32 gGameSfxReport;
+static U32 sPlayerMarkerStartID;
+static U32 sPlayerMarkerStartCamID;
+static F32 sPlayerStartAngle;
+static S32 sPortalling;
+extern eGameMode gGameMode;
+static F32 sGameOverTimer;
+F32 sTimeElapsed;
+iTime sTimeLast;
+iTime sTimeCurrent;
+// gLevelChanged, g_hiphopReloadHIP and g_hiphopForcePortal live in zGame.o's
+// .sbss in the target (offsets 0x30/0x34/0x38, straight after sTimeCurrent);
+// they were declared extern here and defined nowhere in the tree.
+U32 gLevelChanged;
+S32 g_hiphopReloadHIP;
+S32 g_hiphopForcePortal;
+extern _tagTRCPadInfo gTrcPad[4];
+// Defined below, after bgv1: gGameWhereAmI is the last object in the target's
+// .sbss, so its definition sits near the bottom of the original file even
+// though the first function already writes it.
+extern eGameWhereAmI gGameWhereAmI;
+xPortalAsset dummyPortalAsset;
+_zPortal dummyPortal;
+U32 gSoak;
+static U32 loadMeter;
+
+void xMemDebug_SoakLog(const char*);
+void zCutsceneMgrFinishExit(xBase* to);
+void zGameCheats(F32 dt);
+void xCameraFXBegin(xCamera* cam);
+void xCameraFXUpdate(xCamera* cam, F32 dt);
+void xCameraFXEnd(xCamera* cam);
+
+extern "C"
+{
+    void RwGameCubeSetMinRetraceCount(RwUInt8 count);
+}
+
+// The target's .sdata opens gPendingPlayer, startPressed, black, clear,
+// soaklevels, soaktime - so all four of these are declared ahead of
+// soaklevels, and black ahead of clear. gPendingPlayer and startPressed had
+// no definition anywhere in the tree; their initialisers are the target's
+// .sdata bytes (3 == eCurrentPlayerCount, and -1).
+_CurrentPlayer gPendingPlayer = eCurrentPlayerCount;
+U32 startPressed = -1;
+iColor_tag black = { 0x00, 0x00, 0x00, 0xFF };
+iColor_tag clear = { 0x00, 0x00, 0x00, 0x00 };
+
+char* soaklevels_gameorder[] =
+{
+	"HB02",
+    "HB01",
+    "HB03",
+    "HB04",
+    "JF01",
+    "JF02",
+    "JF03",
+    "JF04",
+    "JF01",
+    "BB01",
+    "BB02",
+    "BB03",
+    "BB04",
+    "GL01",
+    "GL02",
+    "GL03",
+    "B101",
+    "HB01",
+    "HB05",
+    "HB06",
+    "HB09",
+    "BC01",
+    "BC02",
+    "BC03",
+    "BC04",
+    "BC05",
+    "HB09",
+    "RB01",
+    "RB02",
+    "RB03",
+    "HB09",
+    "SM01",
+    "SM02",
+    "SM03",
+    "SM04",
+    "B201",
+    "HB01",
+    "DB01",
+    "DB02",
+    "DB03",
+    "DB04",
+    "DB06",
+    "KF01",
+    "KF02",
+    "KF04",
+    "KF05",
+    "GY01",
+    "GY02",
+    "GY03",
+    "GY04",
+    "HB07",
+    "HB08",
+    "B302",
+    "B303",
+    "HB10",
+    "PG12",
+	NULL
+};
+
+char** soaklevels = soaklevels_gameorder;
+
+F32 soaktime = 4.0f;
+
+// Taken from zGame.s
+// Defining these here makes the stringBase0 offsets match in the later functions.
+static char* str52 = "techbutton6_click";
+static char* str53 = "SAVING GAME ICON UI";
+static char* str54 = "MNU4 AUTO SAVE FAILED";
+static char* str55 = "MNU4 SAVE COMPLETED";
+static char* str56 = "{font=0}{i:MNU4 AUTO SAVE TXT}";
+static char* str57 = "fx_boomball_smoke.RW3";
+static char* str58 = "ui_savinggame";
+static char* str59 = "ui_savinggame.RW3";
+static char* str60 = "GAME OVER (%f secs)\n";
+static char* str61 = "Loading... %3.2f\n";
+static char* str62 = "   ";
+static char* str63 = ".  ";
+static char* str64 = ".. ";
+static char* str65 = "...";
+static char* str66 = "loading screen bg";
+static char* str67 = "eGameWhere_NA";
+static char* str68 = "eGameWhere_InitStart";
+static char* str69 = "eGameWhere_InitScene";
+static char* str70 = "eGameWhere_InitCamera";
+static char* str71 = "eGameWhere_InitMusic";
+static char* str72 = "eGameWhere_InitOther";
+static char* str73 = "eGameWhere_InitEnd";
+static char* str74 = "eGameWhere_ExitStart";
+static char* str75 = "eGameWhere_ExitRumble";
+static char* str76 = "eGameWhere_ExitHUD";
+static char* str77 = "eGameWhere_ExitSound";
+static char* str78 = "eGameWhere_ExitCamera";
+static char* str79 = "eGameWhere_ExitScene";
+static char* str80 = "eGameWhere_ExitEnd";
+static char* str81 = "eGameWhere_SetupScene";
+static char* str82 = "eGameWhere_SetupZFX";
+static char* str83 = "eGameWhere_SetupPlayer";
+static char* str84 = "eGameWhere_SetupCamera";
+static char* str85 = "eGameWhere_SetupScrFX";
+static char* str86 = "eGameWhere_SetupSceneLoad";
+static char* str87 = "eGameWhere_SetupMusicNotify";
+static char* str88 = "eGameWhere_SetupHudSetup";
+static char* str89 = "eGameWhere_SetupSkydome";
+static char* str90 = "eGameWhere_SetupSceneEvents";
+static char* str91 = "eGameWhere_SetupUpdateCull";
+static char* str92 = "eGameWhere_SetupLOD";
+static char* str93 = "eGameWhere_SetupExtras";
+static char* str94 = "eGameWhere_SetupEnd";
+static char* str95 = "eGameWhere_LoopStart";
+static char* str96 = "eGameWhere_CutsceneFinish";
+static char* str97 = "eGameWhere_LoopDo";
+static char* str98 = "eGameWhere_LoopCalcTime";
+static char* str99 = "eGameWhere_LoopPadUpdate";
+static char* str100 = "eGameWhere_LoopTRCCheck";
+static char* str101 = "eGameWhere_LoopCheats";
+static char* str102 = "eGameWhere_LoopSceneUpdate";
+static char* str103 = "eGameWhere_LoopPlayerUpdate";
+static char* str104 = "eGameWhere_LoopSoundUpdate";
+static char* str105 = "eGameWhere_LoopSFXWidgets";
+static char* str106 = "eGameWhere_LoopHUDUpdate";
+static char* str107 = "eGameWhere_LoopCameraUpdate";
+static char* str108 = "eGameWhere_LoopCameraFXUpdate";
+static char* str109 = "eGameWhere_LoopFlyToInterface";
+static char* str110 = "eGameWhere_LoopCameraBegin";
+static char* str111 = "eGameWhere_LoopSceneRender";
+static char* str112 = "eGameWhere_LoopCameraEnd";
+static char* str113 = "eGameWhere_LoopCameraShowRaster";
+static char* str114 = "eGameWhere_LoopCameraFXEnd";
+static char* str115 = "eGameWhere_LoopMusicUpdate";
+static char* str116 = "eGameWhere_LoopUpdateMode";
+static char* str117 = "eGameWhere_LoopContinue";
+static char* str118 = "eGameWhere_LoopEndGameLoop";
+static char* str119 = "eGameWhere_SaveLoop";
+static char* str120 = "eGameWhere_ModeSceneSwitch";
+static char* str121 = "eGameWhere_ModeCutsceneFinish";
+static char* str122 = "eGameWhere_ModeGameExit";
+static char* str123 = "eGameWhere_ModeGameInit";
+static char* str124 = "eGameWhere_ModeGameSetup";
+static char* str125 = "eGameWhere_ModeSwitchAutoSave";
+static char* str126 = "eGameWhere_ModeSwitchCutsceneFinish";
+static char* str127 = "eGameWhere_ModeStoreCheckpoint";
+static char* str128 = "eGameWhere_LoseChanceReset";
+static char* str129 = "eGameWhere_LoseChanceResetDone";
+static char* str130 = "eGameWhere_TransitionBubbles";
+static char* str131 = "eGameWhere_TransitionBegin";
+static char* str132 = "eGameWhere_TransitionSnapShot";
+static char* str133 = "eGameWhere_TransitionUpdate";
+static char* str134 = "eGameWhere_TransitionPadUpdate";
+static char* str135 = "eGameWhere_TransitionTRCCheck";
+static char* str136 = "eGameWhere_TransitionCameraClear";
+static char* str137 = "eGameWhere_TransitionCameraBegin";
+static char* str138 = "eGameWhere_TransitionRenderBackground";
+static char* str139 = "eGameWhere_TransitionSpawnBubbles";
+static char* str140 = "eGameWhere_TransitionDrawEnd";
+static char* str141 = "eGameWhere_TransitionUpdateBubbles";
+static char* str142 = "eGameWhere_TransitionCameraEnd";
+static char* str143 = "eGameWhere_TransitionCameraShowRaster";
+static char* str144 = "eGameWhere_TransitionUpdateEnd";
+static char* str145 = "eGameWhere_TransitionUIRender";
+static char* str146 = "eGameWhere_TransitionUIRenderEnd";
+static char* str147 = "eGameWhere_TransitionEnd";
+static char* str148 = "eGameWhere_TransitionEnded";
+static char* str149 = "eGameWhere_SetupPlayerInit";
+static char* str150 = "eGameWhere_SetupPlayerCamera";
+static char* str151 = "eGameWhere_SetupPlayerEnd";
+
+static U32 PickNextSoak()
+{
+    U32 nextsoak;
+    U32 tag;
+
+    static S32 soakidx = 0;
+    static S32 soakcnt = 0;
+
+    static enum en_SOAK_DIR
+    {
+        SOAK_FOR,
+        SOAK_BACK,
+        SOAK_RAND,
+        SOAK_NOMORE,
+        SOAK_FORCE = 2147483647,
+    } soakdir = SOAK_FOR;
+
+    static S32 justwrap = 0;
+    char* name = NULL;
+
+    if (soakcnt <= 0)
+    {
+        while (soaklevels[soakcnt] != NULL)
+        {
+            soakcnt++;
+        }
+    }
+
+    if (soakcnt == 0)
+    {
+        return 0;
+    }
+
+    switch (soakdir)
+    {
+        case SOAK_FOR:
+            name = soaklevels[soakidx];
+            soakidx++;
+            if (*(volatile S32*)(&soakidx) < soakcnt)
+            {
+                break;
+            }
+            if (justwrap != 0)
+            {
+                soakidx = 0;
+            }
+            else
+            {
+                soakidx = soakcnt - 2;
+                soakdir = SOAK_BACK;
+            }
+            break;
+        case SOAK_BACK:
+            name = soaklevels[soakidx];
+            soakidx--;
+            if (*(volatile S32*)(&soakidx) >= 0)
+            {
+                break;
+            }
+            if (justwrap != 0)
+            {
+                soakidx = soakcnt - 1;
+            }
+            else
+            {
+                soakidx = 0;
+                soakdir = SOAK_RAND;
+            }
+            break;
+        // SOAK_RAND shares the default block.  That is what produces the target's
+        // duplicated `b default` in the dispatch: CW builds the {0,1,2} search
+        // tree, finds the >=2 subtree is just `b default`, retargets the `bge`
+        // straight at default and leaves the orphaned `b` behind.  Without this
+        // label the phantom branch cannot be reproduced (99.363% -> 100%).
+        case SOAK_RAND:
+        default:
+            if (globals.sceneCur != NULL)
+            {
+                tag = globals.sceneCur->sceneID;
+            }
+            else
+            {
+                tag = 0;
+            }
+
+            S32 scoobydoobydoo = tag;
+
+            while (scoobydoobydoo == globals.sceneCur->sceneID)
+            {
+                name = (char *)xUtil_select(soaklevels, soakcnt, 0);
+                scoobydoobydoo = name[0] << 24 | name[1] << 16 | name[2] << 8 | name[3];
+            }
+
+            break;
+    }
+
+    char useme[5] = {};
+    if (useme[0] != '\0')
+    {
+        name = &useme[0];
+    }
+
+    nextsoak = (name[0] << 24) | (name[1] << 16) | (name[2] << 8) | name[3];
+
+    static S32 sumtotal = 0;
+    sumtotal++;
+
+    return nextsoak;
+}
+
+// Scheduling, I guess
+void zGameInit(U32 theSceneID)
+{
+    gGameWhereAmI = eGameWhere_InitStart;
+    xtextbox::clear_layout_cache();
+    xsrand(iTimeGet());
+    iTimeGet();
+    xrand();
+    gGameWhereAmI = eGameWhere_InitScene;
+    if (g_hiphopReloadHIP != 0)
+    {
+        zSceneInit(theSceneID, 1);
+    }
+    else
+    {
+        zSceneInit(theSceneID, 0);
+    }
+    g_hiphopReloadHIP = 0;
+    g_hiphopForcePortal = 0;
+    gGameWhereAmI = eGameWhere_InitCamera;
+    xCameraInit(&globals.camera, xScreenWidth(), xScreenHeight());
+    zCameraReset(&globals.camera);
+    xCameraSetScene(&globals.camera, globals.sceneCur);
+    gGameWhereAmI = eGameWhere_InitMusic;
+    zMusicInit();
+    gGameWhereAmI = eGameWhere_InitOther;
+    zGameStats_Init();
+    zhud::init();
+    gGameWhereAmI = eGameWhere_InitEnd;
+}
+
+// Scheduling, I guess
+void zGameExit()
+{
+    gGameWhereAmI = eGameWhere_ExitStart;
+    zGameExtras_SceneExit();
+    gGameWhereAmI = eGameWhere_ExitRumble;
+    xPadDestroyRumbleChain(globals.currentActivePad);
+    gGameWhereAmI = eGameWhere_ExitHUD;
+    zhud::destroy();
+    gGameWhereAmI = eGameWhere_ExitSound;
+    zMusicKill();
+    xSndStopAll(0xfffffffb);
+    xSndUpdate();
+    gGameWhereAmI = eGameWhere_ExitCamera;
+    xCameraExit(&globals.camera);
+    gGameWhereAmI = eGameWhere_ExitScene;
+    if (g_hiphopReloadHIP != 0)
+    {
+        zSceneExit(1);
+    }
+    else
+    {
+        zSceneExit(0);
+    }
+    gGameWhereAmI = eGameWhere_ExitEnd;
+}
+
+void zGameSetup()
+{
+    gGameWhereAmI = eGameWhere_SetupScene;
+    zSceneSetup();
+    gGameWhereAmI = eGameWhere_SetupZFX;
+	RpWorld* world = globals.sceneCur->env->geom->world;
+    xModel_SceneEnter(world);
+    zFX_SceneEnter(world);
+    gGameWhereAmI = eGameWhere_SetupPlayer;
+    zGameSetupPlayer();
+    gGameWhereAmI = eGameWhere_SetupCamera;
+    zEnvStartingCamera(gCurEnv);
+    gGameWhereAmI = eGameWhere_SetupScrFX;
+    xScrFxReset();
+    gGameWhereAmI = eGameWhere_SetupSceneLoad;
+    zSceneLoad(globals.sceneCur, NULL);
+    gGameWhereAmI = eGameWhere_SetupMusicNotify;
+    zMusicNotify(0);
+    gGameWhereAmI = eGameWhere_SetupHudSetup;
+    zhud::setup();
+    zCombo_Setup();
+    gGameWhereAmI = eGameWhere_SetupSkydome;
+    xSkyDome_Setup();
+    gGameWhereAmI = eGameWhere_SetupSceneEvents;
+    zEntEventAll(0, 0, 0x57, 0);
+    zEntEventAll(0, 0, 0x59, 0);
+    zEntEventAll(0, 0, 0x1dd, 0);
+    if (gLevelChanged != 0)
+    {
+        zEntEventAll(0, 0, 0x1db, 0);
+    }
+    gGameWhereAmI = eGameWhere_SetupUpdateCull;
+    if (globals.updateMgr != NULL)
+    {
+        xUpdateCull_Update(globals.updateMgr, 100);
+    }
+    gGameWhereAmI = eGameWhere_SetupLOD;
+    zLOD_Update(100);
+    gGameWhereAmI = eGameWhere_SetupExtras;
+    zGameExtras_SceneInit();
+    gGameWhereAmI = eGameWhere_SetupEnd;
+}
+
+static iTime t0;
+static iTime t1;
+static iTime w0;
+static iTime w1;
+static iTime gloop_time;
+static iTime gwait_time;
+static S32 gloop_ct;
+static F32 gloop_time_secs;
+static F32 gwait_time_secs;
+static F32 gloop_net_time_secs;
+U8 sHackSmoothedUpdate;
+
+static S32 zGameLoopContinue();
+static void zGameUpdateMode();
+
+// 92.994%.  Two independent blockers, neither source-reachable: (1) the
+// reload-after-aliasing-store defect at four sites - sTimeCurrent/sTimeLast,
+// t0/t1/gloop_time, w0/w1/gwait_time - where the target reloads each 64-bit
+// static straight after storing it and we forward the register; (2) a whole-
+// function callee-saved GPR permutation (target r19-r21 hold globals+0x44,
+// +0x14, +0x6e0 and r31 holds ostrich_delay; ours has those three highest and
+// ostrich_delay at r28).  Same instruction multiset throughout.
+void zGameLoop()
+{
+    // Grace before the scene counts as entered and the pad-removed dialog may
+    // appear. Ten frames is a sixth of a second on the console; held as a
+    // count it would be three milliseconds at a few thousand frames a second,
+    // which is short enough to raise the dialog before a pad is enumerated.
+#ifdef PLATFORM_PC
+    F32 ostrich_delay = 10.0f / 60.0f;
+#else
+    S32 ostrich_delay = 10;
+#endif
+    S32 cheats;
+
+    gGameWhereAmI = eGameWhere_LoopStart;
+    zGameStateSwitch(eGameState_Play);
+
+    iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / 60.0f);
+    sTimeLast = iTimeGet() - bus;
+
+    gGameWhereAmI = eGameWhere_CutsceneFinish;
+    if (globals.cmgr != NULL)
+    {
+        zCutsceneMgrFinishLoad(globals.cmgr);
+    }
+
+    // Retail never stores eGameWhere_LoopDo; the loop body opens straight on
+    // eGameWhere_LoopCalcTime. If the original set it here it was a dead store
+    // and the compiler dropped it, so it is left out rather than guessed at.
+    do
+    {
+        gGameWhereAmI = eGameWhere_LoopCalcTime;
+
+        sTimeCurrent = iTimeGet();
+        sTimeElapsed = iTimeDiffSec(sTimeLast, sTimeCurrent);
+
+        if (sHackSmoothedUpdate)
+        {
+            if (sTimeElapsed > 0.1f)
+            {
+                sTimeElapsed = 1.0f / 60.0f;
+            }
+
+#ifdef PLATFORM_PC
+            // A boxcar over the last two FRAMES. That is a thirtieth of a
+            // second of smoothing on console and an eighth of that at 240 fps,
+            // so the one filter standing between an uneven frame and every
+            // system's dt stops filtering exactly where jitter starts to matter
+            // most: a one-millisecond hitch is a sixteenth of a console frame
+            // and a quarter of a 240 fps one.
+            //
+            // Average over the newest samples that cover the same thirtieth of
+            // a second instead. At 60 fps that is the two the boxcar took, and
+            // the same two in the same order, so the sequence handed to the
+            // game is unchanged. The ring is sized to reach a thirtieth of a
+            // second at 3840 fps; past that it averages everything it holds,
+            // which is still a longer window than two frames.
+            static const S32 kFrames = 128;
+            static F32 sPreviousFrames[kFrames];
+            static S32 sCurrentFrame = 0;
+            static bool sFramesSeeded = false;
+
+            // Every slot, not just the first: the walk below stops on elapsed
+            // time, so a ring of zeros would make the opening frames average
+            // over the whole 128. Retail only seeds [0] and gets half a frame
+            // on its first pass; two samples of a console frame is what it
+            // settles to and what it should have started at.
+            if (!sFramesSeeded)
+            {
+                for (S32 n = 0; n < kFrames; n++)
+                {
+                    sPreviousFrames[n] = 1.0f / 60.0f;
+                }
+
+                sFramesSeeded = true;
+            }
+
+            sPreviousFrames[sCurrentFrame] = sTimeElapsed;
+
+            F32 total = 0.0f;
+            S32 taken = 0;
+
+            for (S32 n = 0; n < kFrames; n++)
+            {
+                S32 i = sCurrentFrame - n;
+
+                if (i < 0)
+                {
+                    i += kFrames;
+                }
+
+                total += sPreviousFrames[i];
+                taken++;
+
+                if (taken >= 2 && total >= 2.0f / 60.0f)
+                {
+                    break;
+                }
+            }
+
+            sCurrentFrame = (sCurrentFrame + 1) % kFrames;
+
+            sTimeElapsed = total / taken;
+#else
+            static F32 sPreviousFrames[2] = { 1.0f / 60.0f };
+            static U32 sCurrentFrame = 0;
+
+            sPreviousFrames[sCurrentFrame] = sTimeElapsed;
+            sCurrentFrame = (sCurrentFrame + 1) % 2;
+
+            static U32 sAverageRange = 2;
+
+            F32 total = 0.0f;
+
+            S32 i = sCurrentFrame - sAverageRange + 1;
+            if (i < 0)
+            {
+                i += 2;
+            }
+
+            while (i != sCurrentFrame)
+            {
+                total += sPreviousFrames[i];
+                i = (i + 1) % 2;
+            }
+            total += sPreviousFrames[i];
+
+            sTimeElapsed = total / sAverageRange;
+#endif
+        }
+
+        if (globals.QuarterSpeed)
+        {
+            sTimeElapsed *= 0.35f;
+        }
+
+        if (sTimeElapsed < 1e-5f)
+        {
+            sTimeElapsed = 1.0f / 60.0f;
+        }
+        else if (sTimeElapsed > 0.1f)
+        {
+            sTimeElapsed = 0.1f;
+        }
+
+        sTimeLast = sTimeCurrent;
+
+        t0 = t1;
+        t1 = iTimeGet();
+        gloop_time += t1 - t0;
+        gloop_ct++;
+        gloop_time_secs = iTimeDiffSec(gloop_time) / gloop_ct;
+        gloop_net_time_secs = iTimeDiffSec(gloop_time - gwait_time) / gloop_ct;
+
+        gGameWhereAmI = eGameWhere_LoopPadUpdate;
+        xPadUpdate(globals.currentActivePad, sTimeElapsed);
+
+        cheats = zGameExtras_CheatFlags();
+
+        // 0x1000 is sCheatSwapCCLR and 0x2000 is sCheatSwapCCUD; see the cheat
+        // table in zGameExtras.cpp. There is no enum for these anywhere.
+        if (cheats & 0x1000)
+        {
+            if (globals.pad0->analog2.x <= -globals.player.g.AnalogMax)
+            {
+                globals.pad0->analog2.x = globals.player.g.AnalogMax;
+            }
+            else
+            {
+                globals.pad0->analog2.x = -globals.pad0->analog2.x;
+            }
+        }
+
+        if (cheats & 0x2000)
+        {
+            if (globals.pad0->analog2.y <= -globals.player.g.AnalogMax)
+            {
+                globals.pad0->analog2.y = globals.player.g.AnalogMax;
+            }
+            else
+            {
+                globals.pad0->analog2.y = -globals.pad0->analog2.y;
+            }
+        }
+
+        if (!globals.player.g.CheatPlayerSwitch)
+        {
+            if (globals.pad0->on & XPAD_BUTTON_LEFT)
+            {
+                globals.pad0->analog1.x = -globals.player.g.AnalogMax;
+            }
+            else if (globals.pad0->on & XPAD_BUTTON_RIGHT)
+            {
+                globals.pad0->analog1.x = globals.player.g.AnalogMax;
+            }
+
+            if (globals.pad0->on & XPAD_BUTTON_UP)
+            {
+                globals.pad0->analog1.y = -globals.player.g.AnalogMax;
+            }
+            else if (globals.pad0->on & XPAD_BUTTON_DOWN)
+            {
+                globals.pad0->analog1.y = globals.player.g.AnalogMax;
+            }
+        }
+
+        xPadNormalizeAnalog(*globals.pad0, globals.player.g.AnalogMin, globals.player.g.AnalogMax);
+
+        gGameWhereAmI = eGameWhere_LoopTRCCheck;
+        if (iTRCDisk::CheckDVDAndResetState())
+        {
+            zMusicNotify(7);
+        }
+
+        globals.update_dt = sTimeElapsed;
+
+        gGameWhereAmI = eGameWhere_LoopCheats;
+        zGameCheats(sTimeElapsed);
+        zGameExtras_SceneUpdate(sTimeElapsed);
+        iFileAsyncService();
+
+        S32 paused = zGameIsPaused();
+
+        gGameWhereAmI = eGameWhere_LoopSceneUpdate;
+        zSceneUpdate(sTimeElapsed);
+
+        gGameWhereAmI = eGameWhere_LoopPlayerUpdate;
+        if (!paused)
+        {
+            globals.player.ent.update(&globals.player.ent, globals.sceneCur, sTimeElapsed);
+        }
+
+        gGameWhereAmI = eGameWhere_LoopSoundUpdate;
+        xMat4x3 playerMat = *xEntGetFrame(&globals.player.ent);
+        playerMat.pos.y += 0.6f;
+        xSndSetListenerData(SND_LISTENER_CAMERA, &globals.camera.mat);
+        xSndSetListenerData(SND_LISTENER_PLAYER, &playerMat);
+        xSndUpdate();
+
+        gGameWhereAmI = eGameWhere_LoopSFXWidgets;
+        zSceneUpdateSFXWidgets();
+
+        gGameWhereAmI = eGameWhere_LoopHUDUpdate;
+        zhud::update(sTimeElapsed);
+
+        gGameWhereAmI = eGameWhere_LoopCameraUpdate;
+        if (!paused)
+        {
+            zCameraUpdate(&globals.camera, sTimeElapsed);
+        }
+
+        gGameWhereAmI = eGameWhere_LoopCameraFXUpdate;
+        xCameraFXBegin(&globals.camera);
+        xCameraFXUpdate(&globals.camera, sTimeElapsed);
+
+        gGameWhereAmI = eGameWhere_LoopFlyToInterface;
+        zScene_UpdateFlyToInterface(sTimeElapsed);
+
+        gGameWhereAmI = eGameWhere_LoopCameraBegin;
+        w0 = iTimeGet();
+        xCameraBegin(&globals.camera, 1);
+        w1 = iTimeGet();
+        gwait_time += w1 - w0;
+        gwait_time_secs = iTimeDiffSec(gwait_time) / gloop_ct;
+
+        zVolume_OccludePrecalc(&globals.camera.mat.pos);
+
+#ifdef PLATFORM_PC
+        // video.load_transition = fancy: the bubbles belong over the still,
+        // not under it, so they come out of the scene's own pass while the
+        // wipe is up and are drawn below instead. Sampled once for the frame
+        // so that the wipe ending mid-frame cannot drop them from both passes.
+        S32 wiping = iLoadTransitionWiping();
+        zParPTankDeferBubbles(wiping);
+
+        // Every frame, not only while the wipe is drawing: its bubbles live
+        // 1.75 seconds and the wipe is over in half of one, so carrying them
+        // only while it draws lets them drift off for the rest. It costs
+        // nothing once they are gone -- it counts them and returns.
+        //
+        // Before the scene renders them, and after zCameraUpdate has moved the
+        // camera this frame.
+        zParPTankBubblesFollowCamera();
+#endif
+
+        gGameWhereAmI = eGameWhere_LoopSceneRender;
+        zSceneRender();
+
+#ifdef PLATFORM_PC
+        if (wiping)
+        {
+            // The still wiping off the level, then the bubbles over it. After
+            // the scene so the still is over everything including the HUD, and
+            // before xCameraEnd because Im2D needs the camera still updating.
+            if (iLoadTransitionWipeFrame(sTimeElapsed))
+            {
+                zFX_SpawnBubbleWipe(iLoadTransitionBubbleUp());
+            }
+
+            zParPTankRenderBubbles();
+        }
+#endif
+
+        xDebugUpdate();
+
+        gGameWhereAmI = eGameWhere_LoopCameraEnd;
+        xCameraEnd(&globals.camera, sTimeElapsed, 1);
+        iEnvEndRenderFX(NULL);
+        RwGameCubeSetMinRetraceCount(globals.minVSyncCnt);
+
+        gGameWhereAmI = eGameWhere_LoopCameraShowRaster;
+        xCameraShowRaster(&globals.camera);
+
+        gGameWhereAmI = eGameWhere_LoopCameraFXEnd;
+        xCameraFXEnd(&globals.camera);
+
+        gGameWhereAmI = eGameWhere_LoopMusicUpdate;
+        zMusicUpdate(sTimeElapsed);
+
+        gGameWhereAmI = eGameWhere_LoopUpdateMode;
+        zGameUpdateMode();
+
+        gFrameCount++;
+
+#ifdef PLATFORM_PC
+        // The same tick, in seconds. See xDebug.h.
+        gGameSeconds += sTimeElapsed;
+#endif
+
+        if (ostrich_delay > 0)
+        {
+#ifdef PLATFORM_PC
+            ostrich_delay -= sTimeElapsed;
+#else
+            ostrich_delay--;
+#endif
+        }
+        else
+        {
+            zGameSetOstrich(eGameOstrich_InScene);
+
+            if ((gTrcPad[0].state != TRC_PadInserted) && (gBusStopIsRunning == 0) &&
+                (oob_state::IsPlayerInControl() ||
+                 (globals.player.ControlOff &
+                  (CONTROL_OWNER_OOB | CONTROL_OWNER_TALK_BOX | CONTROL_OWNER_TAXI |
+                   CONTROL_OWNER_TELEPORT_BOX))) &&
+                (globals.dontShowPadMessageDuringLoadingOrCutScene == 0))
+            {
+                globals.dontShowPadMessageDuringLoadingOrCutScene = 1;
+                xTRCPad(gTrcPad[0].id, TRC_PadMissing);
+            }
+
+            zSaveLoadAutoSaveUpdate();
+        }
+
+        gGameWhereAmI = eGameWhere_LoopContinue;
+    } while (zGameLoopContinue());
+
+    gGameWhereAmI = eGameWhere_LoopEndGameLoop;
+}
+
+S32 zGameIsPaused()
+{
+    if (gGameMode == 8)
+    {
+        return 1;
+    }
+    if (gGameMode == 7)
+    {
+        return 1;
+    }
+    if (gGameMode == 6)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+static S32 zGameLoopContinue()
+{
+    if (gGameMode == eGameMode_Game)
+    {
+        return gGameState == eGameState_Play || gGameState == eGameState_GameOver || gGameState == eGameState_GameStats;
+    }
+    else
+    {
+        if (gGameMode == eGameMode_Save)
+        {
+            gGameWhereAmI = eGameWhere_SaveLoop;
+            zSaveLoad_SaveLoop();
+            sTimeLast = iTimeGet();
+            t1 = iTimeGet();
+        }
+    }
+    return 1;
+}
+
+static S32 zGameOkToPause()
+{
+    S32 uVar1 = 0;
+
+    if (globals.cmgr)
+    {
+        return 0;
+    }
+    if (zGameIsPaused())
+    {
+        return 0;
+    }
+    if ((globals.sceneCur)->sceneID == 'PG12')
+    {
+        return 0;
+    }
+    if ((globals.player.ControlOff & 0xffff92ff))
+    {
+        return 0;
+    }
+    else
+    {
+        uVar1 = 1;
+        if (gTrcPad[0].state == 1)
+        {
+            uVar1 = 2;
+        }
+    }
+    return uVar1;
+}
+
+void zGamePause()
+{
+    if (!zGameIsPaused())
+    {
+        if ((globals.sceneCur)->sceneID == 'PG12')
+        {
+            zGameStall();
+        }
+        else
+        {
+            zEntEvent("techbutton6_click", 24);
+            zEntEvent("SAVING GAME ICON UI", 4);
+            zEntEvent("MNU4 AUTO SAVE FAILED", 4);
+            zEntEvent("MNU4 SAVE COMPLETED", 4);
+            iPadStopRumble(globals.pad0);
+            zGameModeSwitch(eGameMode_Pause);
+            zGameStateSwitch(0);
+        }
+    }
+}
+
+void zGameStall()
+{
+    if (!zGameIsPaused())
+    {
+        zGameModeSwitch(eGameMode_Stall);
+        xSndPauseAll(1, 1);
+        iPadStopRumble(globals.pad0);
+        zEntEvent("techbutton6_click", eEventPlay);
+    }
+}
+
+// 95.165%, pure scheduling: the target writes the quad's fields in strictly
+// ascending offset order, our compiler fills the load-use gap after each
+// `lfs` of a pool literal with the next vertex's `.x` store.  Same instruction
+// multiset.  Writing the u/v pairs as a chained assignment was measured and is
+// worse (95.154%) - it reverses the u/v store order.
+static void zGame_HackDrawCard(F32 x, F32 y, F32 w, F32 h, RwRaster* rast)
+{
+    RwIm2DVertex quad[4];
+    F32 screenZ = RwIm2DGetNearScreenZ();
+
+    quad[0].x = x;
+    quad[0].y = y;
+    quad[0].z = screenZ;
+    quad[0].emissiveColor.red = 255;
+    quad[0].emissiveColor.green = 255;
+    quad[0].emissiveColor.blue = 255;
+    quad[0].emissiveColor.alpha = 255;
+    quad[0].u = 0.0f;
+    quad[0].v = 0.0f;
+
+    quad[1].x = x;
+    quad[1].y = y + h;
+    quad[1].z = screenZ;
+    quad[1].emissiveColor.red = 255;
+    quad[1].emissiveColor.green = 255;
+    quad[1].emissiveColor.blue = 255;
+    quad[1].emissiveColor.alpha = 255;
+    quad[1].u = 0.0f;
+    quad[1].v = 1.0f;
+
+    quad[2].x = x + w;
+    quad[2].y = y;
+    quad[2].z = screenZ;
+    quad[2].emissiveColor.red = 255;
+    quad[2].emissiveColor.green = 255;
+    quad[2].emissiveColor.blue = 255;
+    quad[2].emissiveColor.alpha = 255;
+    quad[2].u = 1.0f;
+    quad[2].v = 0.0f;
+
+    quad[3].x = x + w;
+    quad[3].y = y + h;
+    quad[3].z = screenZ;
+    quad[3].emissiveColor.red = 255;
+    quad[3].emissiveColor.green = 255;
+    quad[3].emissiveColor.blue = 255;
+    quad[3].emissiveColor.alpha = 255;
+    quad[3].u = 1.0f;
+    quad[3].v = 1.0f;
+
+    RwRenderStateSet(rwRENDERSTATESHADEMODE, (void*)rwSHADEMODEFLAT);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, rast);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+
+    RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, quad, 4);
+}
+
+// Equivalent; scheduling.
+static void zGame_HackPostPortalAutoSaveDraw()
+{
+    U32 i;
+    RwCamera* ccam;
+	RwCamera* cam;
+    RwRaster* rast;
+    char str[2048];
+    RwTexture* tex; 
+    RwRGBA bg = {};
+	
+    cam = (RwCamera*)RwEngineInstance->curCamera;
+    if (cam != NULL)
+    {
+        RwCameraEndUpdate(cam);
+    }
+	
+    sprintf(str, "{font=0}{i:MNU4 AUTO SAVE TXT}");
+	
+    ccam = (RwCamera *)iCameraCreate(xScreenWidth(), xScreenHeight(), 0);
+	
+    xtextbox tb = xtextbox::create
+	(
+	    xfont::create
+		(
+		    1, NSCREENX(19.0f), NSCREENY(22.0f), 0.0f,
+			xColorFromRGBA(0xFF, 0xE6, 0x00, 0xFF), 
+			screen_bounds
+		),
+		screen_bounds, 0, 0.0f, 0.0f, 0.0f, 0.0f
+	);
+	
+    tb.flags |= 2;
+    tb.bounds.assign(0.0f, 0.4125f, 1.0f, 0.25f);
+    tb.bounds.contract(0.025f);
+    tb.set_text(str);
+    tb.bounds.h  = tb.yextent(true);
+    tb.bounds.y = -((tb.bounds.h * 0.5f) - 0.5f);
+	tb.font.clip = tb.bounds;
+    tb.font.clip.expand(0.025f);
+    F32 yextent = tb.yextent(true);
+	
+    for (i = 0; i < 2; i++)
+    {
+        RwCameraClear(ccam, &bg, rwCAMERACLEARZ | rwCAMERACLEARIMAGE);
+        RwCameraBeginUpdate(ccam);
+        tex = (RwTexture*)xSTFindAsset(xStrHash("fx_boomball_smoke.RW3"), NULL);
+        if (tex != NULL)
+        {
+            rast = tex->raster;
+        }
+        else
+        {
+            rast = NULL;
+        }
+		
+        // Four quarters of the screen, so the smoke tiles it whatever size it
+        // is. Written as halves of the render size rather than as 320 and 240,
+        // which are what those halves come to on a 640x480 framebuffer.
+        F32 hw = 0.5f * xScreenWidthF();
+        F32 hh = 0.5f * xScreenHeightF();
+
+        zGame_HackDrawCard(0.0f, 0.0f, hw,   hh,   rast);
+        zGame_HackDrawCard(hw,   0.0f, hw,   hh,   rast);
+        zGame_HackDrawCard(0.0f, hh,   hw,   hh,   rast);
+        zGame_HackDrawCard(hw,   hh,   hw,   hh,   rast);
+		
+        tex = (RwTexture*)xSTFindAsset(xStrHash("ui_savinggame"), NULL);
+        if (tex == NULL)
+        {
+            tex = (RwTexture*)xSTFindAsset(xStrHash("ui_savinggame.RW3"), NULL);
+        }
+        if (tex != NULL)
+        {
+            rast = tex->raster;
+        }
+        else
+        {
+            rast = NULL;
+        }
+
+        // The icon is placed and sized in 640x480 pixels, so it is measured in
+        // the same fractions of the UI box -- interface art, so it belongs
+        // where the rest of the interface is rather than spread to the screen.
+        // The smoke behind it is not: that is a background and fills whatever
+        // the screen is.
+        F32 sx = xScreenUIWidthF() / 640.0f;
+        F32 sy = xScreenUIHeightF() / 480.0f;
+
+        zGame_HackDrawCard(xScreenUIOriginXF() + 275.0f * sx,
+                           xScreenUIOriginYF() + 350.0f * sy, 90.0f * sx, 90.0f * sy, rast);
+
+        if (yextent > 0.0f)
+        {
+            render_fill_rect(tb.font.clip, xColorFromRGBA(0x00, 0x00, 0x00, 0xFF));
+            tb.render(true);
+        }
+		
+        RwCameraEndUpdate(ccam);
+        RwCameraShowRaster(ccam, NULL, 1);
+    }
+
+    iCameraDestroy(ccam);
+
+    if (cam != NULL)
+    {
+        RwCameraBeginUpdate(cam);
+    }
+}
+
+static void zGameUpdateMode()
+{
+    U32 b;
+    U32 d;
+    U32 a;
+    U32 c;
+    zScene* scene;
+    xPortalAsset* passet;
+    char* id;
+    U32 nextSceneID;
+    xBase* sendTo;
+    xMarkerAsset* m;
+    U32 size;
+
+    if (gGameMode != 0x0C)
+    {
+        return;
+    }
+
+    if ((gSoak != 0) && (gGameState == eGameState_Play) && (globals.cmgr == NULL))
+    {
+        soaktime -= (1.0f / 30.0f);
+        if (soaktime < 0.0f)
+        {
+            id = xUtil_idtag2string(globals.sceneCur->sceneID, 0);
+            xMemDebug_SoakLog(id);
+            gGameState = eGameState_SceneSwitch;
+            dummyPortalAsset.assetCameraID = 0;
+            dummyPortalAsset.assetMarkerID = 0;
+            dummyPortalAsset.ang = 0.0f;
+            dummyPortalAsset.sceneID = PickNextSoak();
+            dummyPortal.passet = &dummyPortalAsset;
+            globals.sceneCur->pendingPortal = &dummyPortal;
+            soaktime = (xurand() * 4.0f) + 0.2f;
+        }
+    }
+
+    if (gGameState == eGameState_Play)
+    {
+        iTimeGameAdvance(sTimeElapsed);
+        if (globals.pad0->pressed & 1)
+        {
+            switch (zGameOkToPause())
+            {
+                case 0:
+                    xTRCReset();
+                    startPressed = 1;
+                    break;
+                case 1:
+                    zGamePause();
+                    break;
+                case 2:
+                    zGameStall();
+                    break;
+            }
+        }
+        else
+        {
+            startPressed = 0;
+        }
+    }
+    else if (gGameState == eGameState_GameStats)
+    {
+        return;
+    }
+    else if (gGameState == eGameState_SceneSwitch)
+    {
+        gGameWhereAmI = eGameWhere_ModeSceneSwitch;
+
+        scene = globals.sceneCur;
+        passet = scene->pendingPortal->passet;
+
+        // c/d used to be crossed over in the two expressions below, which made
+        // nextSceneID come out as [+3][+1][+2][+0] - neither the sceneID nor its
+        // byteswap.  The target's `or r31, r5, r3` / `or r3, r7, r0` pin it:
+        // nextSceneID is the plain big-endian sceneID ([+0][+1][+2][+3]) and the
+        // value compared against globals.sceneCur->sceneID is the full byteswap.
+        d = *(char *)((UPtr)&passet->sceneID + 3);
+        c = *(char *)((UPtr)&passet->sceneID + 0);
+        b = *(char *)((UPtr)&passet->sceneID + 2);
+        a = *(char *)((UPtr)&passet->sceneID + 1);
+
+        U32 x = (((b << 8) & 0xff00) | (((c << 24) & 0xff000000) | ((a << 16) & 0x00ffffff)) & 0xffff00ff);
+        U32 y = (((a << 8) & 0xff00) | (((d << 24) & 0xff000000) | ((b << 16) & 0x00ffffff)) & 0xffff00ff);
+
+        nextSceneID = d | x;
+        x = c | y;
+
+        if ((g_hiphopReloadHIP != 0) || ((g_hiphopForcePortal != 0) || (x != scene->sceneID)))
+        {
+            sPlayerMarkerStartID = passet->assetMarkerID;
+            sPlayerMarkerStartCamID = passet->assetCameraID;
+            sPlayerStartAngle = passet->ang;
+            sPortalling = 1;
+
+            gGameWhereAmI = eGameWhere_ModeCutsceneFinish;
+            if (globals.cmgr != NULL)
+            {
+                zCutsceneMgrFinishExit(globals.cmgr);
+            }
+
+            gGameWhereAmI = eGameWhere_ModeGameExit;
+            zGameExit();
+
+            gGameWhereAmI = eGameWhere_ModeGameInit;
+            zGameInit(nextSceneID);
+
+            gGameWhereAmI = eGameWhere_ModeGameSetup;
+            zGameSetup();
+
+            gGameWhereAmI = eGameWhere_ModeSwitchAutoSave;
+            if (gWaitingToAutoSave != 0)
+            {
+                zGame_HackPostPortalAutoSaveDraw();
+				
+                zSaveLoadPreAutoSave(1);
+                if (zSaveLoad_DoAutoSave() < 0)
+                {
+                    sendTo = (xBase *)zSceneFindObject(xStrHash("MNU4 AUTO SAVE FAILED"));
+                    if (sendTo != NULL)
+                    {
+                        zEntEvent(sendTo, eEventVisible);
+                    }
+                }
+				
+                sendTo = (xBase *)zSceneFindObject(xStrHash("SAVING GAME ICON UI"));
+                if (sendTo != NULL)
+                {
+                    zEntEvent(sendTo, eEventInvisible);
+                }
+				
+                zSaveLoadPreAutoSave(0);
+                gWaitingToAutoSave = 0;
+            }
+            gGameWhereAmI = eGameWhere_ModeSwitchCutsceneFinish;
+            if (globals.cmgr != NULL)
+            {
+                zCutsceneMgrFinishLoad(globals.cmgr);
+            }
+        }
+        else
+        {
+            if (sPlayerMarkerStartID != 0)
+            {
+                m = (xMarkerAsset*)xSTFindAsset(sPlayerMarkerStartID, &size);
+                if (m != NULL)
+                {
+                    xVec3Copy(&globals.player.ent.frame->mat.pos, &m->pos);
+                }
+                sPlayerMarkerStartID = 0;
+            }
+        }
+		
+        if (gSoak != 0)
+        {
+            sendTo = (xBase *)zSceneGetObject(eBaseTypeCamera, 0);
+            sPlayerMarkerStartCamID = sendTo->id;
+        }
+        else
+        {
+            sendTo = (xBase *)zSceneFindObject(sPlayerMarkerStartCamID);
+            if (sendTo == NULL)
+            {
+                xSTAssetName(sPlayerMarkerStartCamID);
+                sendTo = (xBase *)zSceneGetObject(eBaseTypeCamera, 0);
+                sPlayerMarkerStartCamID = sendTo->id;
+                xSTAssetName(sendTo->id);
+            }
+        }
+		
+        gGameWhereAmI = eGameWhere_ModeStoreCheckpoint;
+        if (sendTo != NULL)
+        {
+            zEntPlayer_StoreCheckPoint(&globals.player.ent.frame->mat.pos, globals.player.ent.frame->rot.angle, sPlayerMarkerStartCamID);
+        }
+		
+        sPlayerMarkerStartCamID = 0;
+		
+        if (gPendingPlayer != eCurrentPlayerCount)
+        {
+            gCurrentPlayer = gPendingPlayer;
+            gPendingPlayer = eCurrentPlayerCount;
+        }
+
+        iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / 60.0f);
+        sTimeLast = iTimeGet() - bus;
+
+        zGameStateSwitch(eGameState_Play);
+    }
+    else if (gGameState == eGameState_LoseChance)
+    {
+        gGameWhereAmI = eGameWhere_LoseChanceReset;
+        zSceneReset();
+        gGameWhereAmI = eGameWhere_LoseChanceResetDone;
+        zGameStateSwitch(eGameState_Play);
+    }
+    else if (gGameState == eGameState_GameOver)
+    {
+        if (sGameOverTimer == 0.0f)
+        {
+            // The store comes first: retail's .sdata2 interns the 5.0f (@1393)
+            // before the 4.5f (@1394), and the target stores sGameOverTimer
+            // ahead of the call rather than after it.
+            sGameOverTimer = 5.0f;
+            xScrFxFade(&clear, &black, 4.5f, NULL, 1);
+        }
+        else
+        {
+            sGameOverTimer = sGameOverTimer - sTimeElapsed;
+            xprintf("GAME OVER (%f secs)\n", *(volatile F32*)(&sGameOverTimer));
+            if (sGameOverTimer <= 0.0f)
+            {
+                sGameOverTimer = 0.0f;
+                zGameStateSwitch(eGameState_Exit);
+            }
+        }
+    }
+    else if (gGameState == eGameState_Exit)
+    {
+        sGameOverTimer = 0.0f;
+    }
+}
+
+// Empty in the shipped GameCube code, and called anyway -- from
+// zGameScreenTransitionBegin, under an eGameWhereAmI marker of its own. The
+// Xbox release drew its loading screen over a still of the level being left
+// behind and this is where it took it; the console builds draw a texture asset
+// there instead, so the function had nothing left to do.
+//
+// The port can do what the Xbox did, so on PC it does. Latching is the whole of
+// the work: the frame has already been captured, at the last present before
+// zGameExit took the level down, and all that is needed now is to stop the
+// loading screen's own frames overwriting it. zGameScreenTransitionEnd lets it
+// go again.
+void zGameTakeSnapShot(RwCamera*)
+{
+#ifdef PLATFORM_PC
+    iSnapshotLatch();
+#endif
+}
+
+#ifdef PLATFORM_PC
+// video.load_transition. A load has begun, which is where a wipe still running
+// from the last one has to be abandoned.
+static void zGameLoadTransitionBegin()
+{
+    iLoadTransitionBegin();
+}
+#endif
+
+// The arms used to be the other way round, which fed 0.5s to the particle
+// tank on every normal frame and the real dt only when the frame took longer
+// than half a second.  The target settles it: after `fcmpo f0(sTimeElapsed),
+// f1(0.5f) / ble`, the fall-through arm calls zParPTankUpdate with f1 still
+// holding the 0.5f literal and only the `ble` arm does `fmr f1, f0`.  It is a
+// clamp.  Swapping them costs fuzzy points (76.4% -> 73.5%) purely because the
+// wrong order happened to line the FPRs up with the reload the target does and
+// our compiler forwards; the whole compare/branch/call tail is now exact and
+// the residue is the known reload-after-aliasing-store defect.
+void zGameUpdateTransitionBubbles()
+{
+    gGameWhereAmI = eGameWhere_TransitionBubbles;
+    sTimeCurrent = iTimeGet();
+    sTimeElapsed = iTimeDiffSec(sTimeLast, sTimeCurrent);
+    sTimeLast = sTimeCurrent;
+#ifdef PLATFORM_PC
+    // The clock above is not the bubbles': xPadUpdate reads sTimeElapsed on
+    // the next loading-screen frame. Only the tank is skipped, and there is
+    // nothing in it to age -- nothing spawned any.
+    if (iLoadTransitionFancy())
+    {
+        return;
+    }
+#endif
+    if (sTimeElapsed > 0.5f)
+    {
+        zParPTankUpdate(0.5f);
+    }
+    else
+    {
+        zParPTankUpdate(sTimeElapsed);
+    }
+    zParPTankRender();
+}
+
+// Target .sbss order is sGameScreenTransCam, World, DirectionalLight, and it
+// places all three after zGameLoop's function-scope statics, so this is where
+// the original declared them. They too were extern-with-no-definition here.
+RwCamera* sGameScreenTransCam;
+RpWorld* World;
+RpLight* DirectionalLight;
+
+// 88.333%, and every one of the seven differing rows is the known
+// reload-after-aliasing-store defect: the target stores sGameScreenTransCam /
+// DirectionalLight / World and then loads each straight back before testing or
+// passing it, where our compiler forwards the stored register.  `volatile` on
+// the three reaches 98.167% here but knocks zGameScreenTransitionEnd off 100%
+// (the target loads each of them exactly once there), so it is not the source.
+void zGameScreenTransitionBegin()
+{
+    gGameWhereAmI = eGameWhere_TransitionBegin;
+#ifdef PLATFORM_PC
+    zParPTankSpawnWithoutPlayer(TRUE);
+    // video.load_time. Not on the first boot: zGameScreenTransitionUpdate
+    // returns without drawing or presenting anything while zMenuIsFirstBoot,
+    // so a floor held over that would be a frozen window rather than a bubble
+    // wall.
+    if (!zMenuIsFirstBoot())
+    {
+        iLoadScreenBegin();
+    }
+    zGameLoadTransitionBegin();
+#endif
+    zGameSetOstrich(eGameOstrich_Loading);
+    globals.dontShowPadMessageDuringLoadingOrCutScene = '\0';
+    sGameScreenTransCam = iCameraCreate(xScreenWidth(), xScreenHeight(), 0);
+    if (sGameScreenTransCam != NULL)
+    {
+        DirectionalLight = RpLightCreate(1);
+        if (DirectionalLight != NULL)
+        {
+            RwRGBAReal col;
+			col.red = col.green = col.blue = 1.0f;
+			col.alpha = 0.0f;
+            RpLightSetColor(DirectionalLight, &col);
+            RwFrame* frame = RwFrameCreate();
+            _rwObjectHasFrameSetFrame(DirectionalLight, frame);
+            RwBBox box;
+			box.sup.z = box.sup.y = box.sup.x =  10000.0f;
+			box.inf.z = box.inf.y = box.inf.x = -10000.0f;
+            World = RpWorldCreate(&box);
+            RpWorldAddCamera(World, sGameScreenTransCam);
+            gGameWhereAmI = eGameWhere_TransitionSnapShot;
+            zGameTakeSnapShot(sGameScreenTransCam);
+        }
+    }
+}
+
+void zGameScreenTransitionUpdate(F32 percentComplete, char* msg)
+{
+    if (!zMenuIsFirstBoot())
+    {
+        zGameScreenTransitionUpdate(percentComplete, msg, 0);
+    }
+}
+
+U32 bgID = 0x1d33b0bb;
+F32 bgu2 = 1.333f;
+F32 bgv2 = 1.0f;
+U8 bgr = 0x60;
+U8 bgg = 0x60;
+U8 bgb = 0x60;
+U8 bga = 0x80;
+F32 bgu1;
+F32 bgv1;
+eGameWhereAmI gGameWhereAmI;
+
+#ifdef PLATFORM_PC
+// What bgu2 has to be for each of the two backgrounds the port can draw.
+//
+// The console's asset is sampled from 0 to 1.333 across, which is the value
+// bgu2 is defined with above; nothing here changes that or claims to know why
+// the asset wants it. A captured frame is a texture of exactly the quad's
+// shape, so it wants the whole of it.
+//
+// Both are needed rather than just the second, because the two alternate within
+// a single run: a load with no frame behind it -- the first one, or any load
+// after a device reset emptied the surface -- still draws the asset.
+static const F32 kBgu2Asset = 1.333f;
+static const F32 kBgu2Snapshot = 1.0f;
+
+// And what the quad's vertex colour has to be for each.
+//
+// The colour modulates the texture, so the 0x60 the console uses darkens the
+// background asset to 37.5%. That is right for the asset -- it is a backdrop,
+// authored to be sat behind something -- and wrong for a still, which IS the
+// picture. The Xbox drew its undimmed, so the snapshot goes up at full
+// brightness and the asset keeps the tint it was authored for.
+//
+// The alpha comes along for consistency and changes nothing on its own: this
+// quad is drawn SRC ONE / DEST ZERO, a straight overwrite.
+static const U8 kBgTintAsset = 0x60;
+static const U8 kBgAlphaAsset = 0x80;
+static const U8 kBgTintSnapshot = 0xff;
+static const U8 kBgAlphaSnapshot = 0xff;
+#endif
+
+// 93.654%.  Everything outside the background-quad fill matches; inside it the
+// target stores vx[0..3] in strictly ascending offset order and never fills a
+// load-use gap, while our compiler interleaves the next vertex's stores between
+// each `lbz`/`stb` and `lfs`/`stfs` pair.  Same instruction multiset - SCHED,
+// same family as zGame_HackDrawCard.
+void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
+{
+    RwTexture* tex;
+    RwRaster* ras;
+    rwGameCube2DVertex vx[4];
+
+    gGameWhereAmI = eGameWhere_TransitionUpdate;
+
+    if (zMenuIsFirstBoot())
+    {
+        return;
+    }
+
+    // Target .sdata2 template for this local is 00 00 00 FF (opaque black), not
+    // FF 00 00 00. objdiff compares relocation offsets, not values, so the wrong
+    // order sat here unnoticed.
+    RwRGBA back_col = { 0x00, 0x00, 0x00, 0xFF };
+    if (rgba != NULL)
+    {
+        back_col.red   = rgba[0];
+        back_col.green = rgba[1];
+        back_col.blue  = rgba[2];
+        back_col.alpha = rgba[3];
+    }
+
+    gGameWhereAmI = eGameWhere_TransitionPadUpdate;
+    xPadUpdate(globals.currentActivePad, sTimeElapsed);
+    xDrawBegin();
+
+    if (sGameScreenTransCam != NULL)
+    {
+        gGameWhereAmI = eGameWhere_TransitionTRCCheck;
+        iTRCDisk::CheckDVDAndResetState();
+
+        gGameWhereAmI = eGameWhere_TransitionCameraClear;
+        RwCameraClear(sGameScreenTransCam, &back_col, 3);
+
+        gGameWhereAmI = eGameWhere_TransitionCameraBegin;
+        RwCameraBeginUpdate(sGameScreenTransCam);
+
+        gGameWhereAmI = eGameWhere_TransitionRenderBackground;
+#ifdef PLATFORM_PC
+        // The level being left behind, if there is a still of it and the port
+        // was asked for one. NULL for every reason there is not: the feature is
+        // off, this is the first load and nothing has been drawn yet, or a
+        // device reset emptied the surface -- and then the asset below is drawn,
+        // exactly as the console draws it.
+        //
+        // Written so that the GameCube build preprocesses to the two lines it
+        // has always had: everything the port adds is inside the guard, and the
+        // asset lookup is left as the else of a test that is not compiled there.
+        tex = iSnapshotBackgroundTexture();
+        bgu2 = (tex != NULL) ? kBgu2Snapshot : kBgu2Asset;
+        bgr = bgg = bgb = (tex != NULL) ? kBgTintSnapshot : kBgTintAsset;
+        bga = (tex != NULL) ? kBgAlphaSnapshot : kBgAlphaAsset;
+
+        // Half a pixel left and up for the still, and nothing for the asset.
+        // See iSnapshotHalfPixel: the still is a texture of exactly the quad's
+        // size and has to land on it one texel to one pixel, where the asset is
+        // a backdrop being stretched over the screen and does not care.
+        const F32 bgOff = (tex != NULL) ? iSnapshotHalfPixel() : 0.0f;
+
+        if (tex == NULL)
+#endif
+        tex = (RwTexture*)xSTFindAsset(bgID, NULL);
+        if ((tex != NULL) && (ras = (RwRaster*)tex->raster, ras != NULL))
+        {
+            RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)0);
+            RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)2);
+            RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)1);
+            RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)0);
+            RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void*)2);
+            RwRenderStateSet(rwRENDERSTATETEXTURERASTER, ras);
+
+            F32 z = RwIm2DGetFarScreenZ();
+
+            vx[0].x = 0.0f;
+            vx[0].y = 0.0f;
+            vx[0].z = z;
+            vx[0].emissiveColor.red   = bgr;
+            vx[0].emissiveColor.green = bgb;
+            vx[0].emissiveColor.blue  = bgg;
+            vx[0].emissiveColor.alpha = bga;
+            vx[0].u = bgu1;
+            vx[0].v = bgv1;
+
+            vx[1].x = 0.0f;
+            vx[1].y = xScreenHeightF();
+            vx[1].z = z;
+            vx[1].emissiveColor.red   = bgr;
+            vx[1].emissiveColor.green = bgb;
+            vx[1].emissiveColor.blue  = bgg;
+            vx[1].emissiveColor.alpha = bga;
+            vx[1].u = bgu1;
+            vx[1].v = bgv2;
+
+            vx[2].x = xScreenWidthF();
+            vx[2].y = 0.0f;
+            vx[2].z = z;
+            vx[2].emissiveColor.red   = bgr;
+            vx[2].emissiveColor.green = bgb;
+            vx[2].emissiveColor.blue  = bgg;
+            vx[2].emissiveColor.alpha = bga;
+            vx[2].u = bgu2;
+            vx[2].v = bgv1;
+
+            vx[3].x = xScreenWidthF();
+            vx[3].y = xScreenHeightF();
+            vx[3].z = z;
+            vx[3].emissiveColor.red   = bgr;
+            vx[3].emissiveColor.green = bgb;
+            vx[3].emissiveColor.blue  = bgg;
+            vx[3].emissiveColor.alpha = bga;
+            vx[3].u = bgu2;
+            vx[3].v = bgv2;
+
+#ifdef PLATFORM_PC
+            for (S32 i = 0; i < 4; i++)
+            {
+                vx[i].x += bgOff;
+                vx[i].y += bgOff;
+            }
+#endif
+
+            RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, &vx[0], 4);
+            RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)1);
+            RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)5);
+            RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)6);
+        }
+    }
+
+    xprintf("Loading... %3.2f\n", percentComplete);
+
+    if (msg != NULL)
+    {
+        xprintf(msg);
+    }
+
+    char meter[256] = "...";
+
+    switch ((loadMeter / 0x19) % 5)
+    {
+        case 0:
+            strcpy(meter, "   ");
+            break;
+        case 1:
+            strcpy(meter, ".  ");
+            break;
+        case 2:
+            strcpy(meter, ".. ");
+            break;
+        case 3:
+            strcpy(meter, "...");
+            break;
+        case 4:
+            loadMeter = 0;
+            break;
+    }
+
+    loadMeter++;
+
+    xDebugUpdate();
+
+    gGameWhereAmI = eGameWhere_TransitionSpawnBubbles;
+#ifdef PLATFORM_PC
+    // video.load_transition = fancy: the loading screen is the still and
+    // nothing else. Its wall would stop dead the moment the wipe took over --
+    // the two are spawned at different cameras and cannot be one animation --
+    // so there is only the wipe's.
+    if (!iLoadTransitionFancy())
+#endif
+    zFX_SpawnBubbleWall();
+
+    gGameWhereAmI = eGameWhere_TransitionDrawEnd;
+    xDrawEnd();
+
+    if (sGameScreenTransCam != NULL)
+    {
+        gGameWhereAmI = eGameWhere_TransitionUpdateBubbles;
+        zGameUpdateTransitionBubbles();
+        gGameWhereAmI = eGameWhere_TransitionCameraEnd;
+        RwCameraEndUpdate(sGameScreenTransCam);
+        gGameWhereAmI = eGameWhere_TransitionCameraShowRaster;
+        RwCameraShowRaster(sGameScreenTransCam, NULL, 1);
+    }
+
+    gGameWhereAmI = eGameWhere_TransitionUpdateEnd;
+}
+
+void zGameScreenTransitionEnd()
+{
+    RwFrame* frame;
+    gGameWhereAmI = eGameWhere_TransitionEnd;
+#ifdef PLATFORM_PC
+    zParPTankSpawnWithoutPlayer(FALSE);
+    // The other half of zGameTakeSnapShot's latch. The loading screen is done
+    // with the still, so let the next presented frames replace it -- the first
+    // of which is the level that has just finished loading.
+    //
+    // Unless video.load_transition is fancy, in which case the still is not
+    // done: iLoadTransitionWipeFrame wipes it off the level over the first
+    // second of the game loop, and releases the latch when it has.
+    if (!iLoadTransitionStartWipe())
+    {
+        iSnapshotRelease();
+    }
+#endif
+    _rwFrameSyncDirty();
+    if (DirectionalLight != NULL)
+    {
+        frame = (RwFrame*)(DirectionalLight->object).object.parent;
+        if (frame != NULL)
+        {
+            RwFrameDestroy(frame);
+        }
+        RpLightDestroy(DirectionalLight);
+        DirectionalLight = 0;
+    }
+    if (World != NULL)
+    {
+        if (sGameScreenTransCam != NULL)
+        {
+            RpWorldRemoveCamera(World, sGameScreenTransCam);
+            iCameraDestroy(sGameScreenTransCam);
+            sGameScreenTransCam = 0;
+        }
+        RpWorldDestroy(World);
+        World = 0;
+    }
+    gGameWhereAmI = eGameWhere_TransitionEnded;
+}
+
+void zGameSetupPlayer()
+{
+    xEntAsset* asset = (xEntAsset*)xSTFindAssetByType('PLYR', xSTAssetCountByType('PLYR') - 1, 0);
+    U32 size;
+    xMarkerAsset* m;
+	
+    asset->baseType = eBaseTypePlayer;
+	
+    if (sPortalling != 0)
+    {
+        if (sPlayerStartAngle > -1e8f)
+        {
+            asset->ang.x = (PI * sPlayerStartAngle) / 180.0f;
+        }
+        sPortalling = 0;
+    }
+	
+    asset->ang.y = 0.0f;
+    asset->ang.z = 0.0f;
+    gGameWhereAmI = eGameWhere_SetupPlayerInit;
+    zEntPlayer_Init(&globals.player.ent, asset);
+	
+    if (sPlayerMarkerStartID != 0)
+    {
+        m = (xMarkerAsset *)xSTFindAsset(sPlayerMarkerStartID, &size);
+        if (m != NULL)
+        {
+            xVec3Copy((xVec3 *)&globals.player.ent.frame->mat.pos,    &m->pos);
+            xVec3Copy((xVec3 *)&globals.player.ent.frame->oldmat.pos, &m->pos);
+            xVec3Copy((xVec3 *)&globals.player.ent.model->Mat->pos,   &m->pos);
+            xCameraSetTargetMatrix(&globals.camera, xEntGetFrame(&globals.player.ent));
+        }
+        sPlayerMarkerStartID = 0;
+    }
+	
+    gGameWhereAmI = eGameWhere_SetupPlayerCamera;
+    zCameraReset(&globals.camera);
+    zEntPlayer_StoreCheckPoint(&globals.player.ent.frame->mat.pos, globals.player.ent.frame->rot.angle, globals.camera.id);
+    gGameWhereAmI = eGameWhere_SetupPlayerEnd;
+	
+}
+
+void zGameStats_Init()
+{
+}
+
+void xDrawEnd()
+{
+    iDrawEnd();
+}
+
+void xDrawBegin()
+{
+    iDrawBegin();
+}

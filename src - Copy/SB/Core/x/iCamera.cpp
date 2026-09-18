@@ -1,0 +1,413 @@
+#include "iCamera.h"
+
+#include "xDrawDist.h"
+#include "xScreen.h"
+#include "xShadow.h"
+
+#include "iScrFX.h"
+#include "iMath.h"
+#include "iSystem.h"
+
+#include "zGlobals.h"
+
+#include <string.h>
+
+RwCamera* globalCamera;
+static RwCamera* sMainGameCamera;
+
+F32 sCameraNearClip = 0.05f;
+F32 sCameraFarClip = 400.0f;
+
+RwCamera* iCameraCreate(S32 width, S32 height, S32 mainGameCamera)
+{
+    RwV2d vw;
+    RwCamera* camera;
+
+    camera = RwCameraCreate();
+
+    RwCameraSetFrame(camera, RwFrameCreate());
+    RwCameraSetRaster(camera, RwRasterCreate(width, height, 0, rwRASTERTYPECAMERA));
+    RwCameraSetZRaster(camera, RwRasterCreate(width, height, 0, rwRASTERTYPEZBUFFER));
+    RwCameraSetFarClipPlane(camera, sCameraFarClip);
+    RwCameraSetNearClipPlane(camera, sCameraNearClip);
+
+    vw.x = 1.0f;
+    vw.y = 1.0f;
+
+    RwCameraSetViewWindow(camera, &vw);
+
+    if (mainGameCamera)
+    {
+        iScrFxCameraCreated(camera);
+        sMainGameCamera = camera;
+    }
+
+    return camera;
+}
+
+void iCameraDestroy(RwCamera* camera)
+{
+    RpWorld* pWorld;
+    RwRaster* raster;
+    RwFrame* frame;
+
+    _rwFrameSyncDirty();
+
+    pWorld = RwCameraGetWorld(camera);
+
+    if (pWorld)
+    {
+        RpWorldRemoveCamera(pWorld, camera);
+    }
+
+    if (camera == sMainGameCamera)
+    {
+        iScrFxCameraDestroyed(camera);
+        sMainGameCamera = NULL;
+    }
+
+    if (camera)
+    {
+        frame = RwCameraGetFrame(camera);
+
+        if (frame)
+        {
+            RwCameraSetFrame(camera, NULL);
+            RwFrameDestroy(frame);
+        }
+
+        raster = RwCameraGetRaster(camera);
+
+        if (raster)
+        {
+            RwRasterDestroy(raster);
+            RwCameraSetRaster(camera, NULL);
+        }
+
+        raster = RwCameraGetZRaster(camera);
+
+        if (raster)
+        {
+            RwRasterDestroy(raster);
+            RwCameraSetZRaster(camera, NULL);
+        }
+
+        RwCameraDestroy(camera);
+    }
+}
+
+void iCameraBegin(RwCamera* cam, S32 clear)
+{
+    if (clear)
+    {
+        if (xglobals->fog.type != rwFOGTYPENAFOGTYPE)
+        {
+            RwCameraClear(cam, &xglobals->fog.bgcolor, rwCAMERACLEARIMAGE | rwCAMERACLEARZ);
+        }
+        else
+        {
+            RwCameraClear(cam, NULL, rwCAMERACLEARZ);
+        }
+    }
+
+    RwCameraSetNearClipPlane(cam, sCameraNearClip);
+    RwCameraBeginUpdate(cam);
+}
+
+void iCameraEnd(RwCamera* cam)
+{
+    iScrFxCameraEndScene(cam);
+    RwCameraEndUpdate(cam);
+    iScrFxPostCameraEnd(cam);
+}
+
+void iCameraShowRaster(RwCamera* cam)
+{
+    RwCameraShowRaster(cam, NULL, 0);
+}
+
+void iCameraFrustumPlanes(RwCamera* cam, xVec4* frustplane)
+{
+    RwFrustumPlane* rwPlane;
+
+    rwPlane = &cam->frustumPlanes[2];
+    frustplane[0].x = rwPlane->plane.normal.x;
+    frustplane[1].x = rwPlane->plane.normal.y;
+    frustplane[2].x = rwPlane->plane.normal.z;
+    frustplane[3].x = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[4];
+    frustplane[0].y = rwPlane->plane.normal.x;
+    frustplane[1].y = rwPlane->plane.normal.y;
+    frustplane[2].y = rwPlane->plane.normal.z;
+    frustplane[3].y = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[5];
+    frustplane[0].z = rwPlane->plane.normal.x;
+    frustplane[1].z = rwPlane->plane.normal.y;
+    frustplane[2].z = rwPlane->plane.normal.z;
+    frustplane[3].z = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[3];
+    frustplane[0].w = rwPlane->plane.normal.x;
+    frustplane[1].w = rwPlane->plane.normal.y;
+    frustplane[2].w = rwPlane->plane.normal.z;
+    frustplane[3].w = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[1];
+    frustplane[4].x = rwPlane->plane.normal.x;
+    frustplane[5].x = rwPlane->plane.normal.y;
+    frustplane[6].x = rwPlane->plane.normal.z;
+    frustplane[7].x = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[0];
+    frustplane[4].y = rwPlane->plane.normal.x;
+    frustplane[5].y = rwPlane->plane.normal.y;
+    frustplane[6].y = rwPlane->plane.normal.z;
+    frustplane[7].y = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[2];
+    frustplane[4].z = rwPlane->plane.normal.x;
+    frustplane[5].z = rwPlane->plane.normal.y;
+    frustplane[6].z = rwPlane->plane.normal.z;
+    frustplane[7].z = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[4];
+    frustplane[4].w = rwPlane->plane.normal.x;
+    frustplane[5].w = rwPlane->plane.normal.y;
+    frustplane[6].w = rwPlane->plane.normal.z;
+    frustplane[7].w = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[2];
+    frustplane[8].x = rwPlane->plane.normal.x;
+    frustplane[9].x = rwPlane->plane.normal.y;
+    frustplane[10].x = rwPlane->plane.normal.z;
+    frustplane[11].x = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[4];
+    frustplane[8].y = rwPlane->plane.normal.x;
+    frustplane[9].y = rwPlane->plane.normal.y;
+    frustplane[10].y = rwPlane->plane.normal.z;
+    frustplane[11].y = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[5];
+    frustplane[8].z = rwPlane->plane.normal.x;
+    frustplane[9].z = rwPlane->plane.normal.y;
+    frustplane[10].z = rwPlane->plane.normal.z;
+    frustplane[11].z = rwPlane->plane.distance;
+
+    rwPlane = &cam->frustumPlanes[3];
+    frustplane[8].w = rwPlane->plane.normal.x;
+    frustplane[9].w = rwPlane->plane.normal.y;
+    frustplane[10].w = rwPlane->plane.normal.z;
+    frustplane[11].w = rwPlane->plane.distance;
+}
+
+void iCameraUpdatePos(RwCamera* cam, xMat4x3* pos)
+{
+    RwFrame* f;
+    RwMatrix* m;
+
+    f = RwCameraGetFrame(cam);
+    m = RwFrameGetMatrix(f);
+
+    xMat4x3Copy((xMat4x3*)m, pos);
+
+    m = RwFrameGetLTM(f);
+
+    xMat4x3Copy((xMat4x3*)m, pos);
+
+    RwFrameOrthoNormalize(f);
+    RwFrameUpdateObjects(f);
+}
+
+void iCameraSetFOV(RwCamera* cam, F32 fov)
+{
+    RwV2d vw;
+
+#ifdef PLATFORM_PC
+    // config.ini's video.fov, as a difference from the 75 the game is built
+    // around, so that the zooms and the cutscene cameras keep their relative
+    // angles. Here rather than at the callers because this is the one place a
+    // frustum is built: xCameraGetFOV reads back what the game asked for, and
+    // the camera logic that measures against it is untouched.
+    fov += iScreenFOVOffset();
+#endif
+
+    vw.y = 0.75f * (vw.x = itan(PI * (0.5f * fov) / 180.0f));
+
+#ifdef PLATFORM_PC
+    // Widescreen, and the only aspect-ratio assumption in the game.
+    //
+    // `fov` is the HORIZONTAL field of view -- vw.x is the frustum's half-width
+    // at unit distance -- and 0.75 is 480/640, so vw.y above is the vertical
+    // half-angle a 4:3 screen gives. That is the one to keep: the levels and
+    // the camera were designed around how much is visible ABOVE and below, so a
+    // wider screen should show more of the world to the left and right rather
+    // than crop the top and bottom off what the console showed.
+    //
+    // So vw.y stands and vw.x is rebuilt from the real aspect. At 4:3 this is
+    // vw.y / 0.75, which is the vw.x it already had, and the fov it was called
+    // with still means what it meant.
+    vw.x = vw.y / xScreenAspectF();
+#endif
+
+    RwCameraSetViewWindow(cam, &vw);
+}
+
+void iCameraAssignEnv(RwCamera* camera, iEnv* env_geom)
+{
+    globalCamera = camera;
+
+    RpWorldAddCamera(env_geom->world, camera);
+    xShadowSetWorld(env_geom->world);
+}
+
+void iCamGetViewMatrix(RwCamera* camera, xMat4x3* view_matrix)
+{
+    RwMatrix* rw_view;
+
+    memset(view_matrix, 0, sizeof(xMat4x3));
+
+    rw_view = RwCameraGetViewMatrix(camera);
+
+    view_matrix->right.x = rw_view->right.x;
+    view_matrix->right.y = rw_view->right.y;
+    view_matrix->right.z = rw_view->right.z;
+    view_matrix->up.x = rw_view->up.x;
+    view_matrix->up.y = rw_view->up.y;
+    view_matrix->up.z = rw_view->up.z;
+    view_matrix->at.x = rw_view->at.x;
+    view_matrix->at.y = rw_view->at.y;
+    view_matrix->at.z = rw_view->at.z;
+    view_matrix->pos.x = rw_view->pos.x;
+    view_matrix->pos.y = rw_view->pos.y;
+    view_matrix->pos.z = rw_view->pos.z;
+}
+
+void iCameraSetNearFarClip(F32 nearPlane, F32 farPlane)
+{
+    if (nearPlane <= 0.0f)
+    {
+        nearPlane = 0.05f;
+    }
+
+    sCameraNearClip = nearPlane;
+
+    // A zero far plane means "put it back where it was", which is how
+    // zCutsceneMgr ends a cutscene. On the PC that is the configured draw
+    // distance, not retail's 400 -- restoring the literal would quietly undo
+    // the setting for the rest of the run, one cutscene in.
+    if (farPlane <= 0.0f)
+    {
+        farPlane = xDrawDistFarClip();
+    }
+
+    sCameraFarClip = farPlane;
+}
+
+void iCameraSetFogParams(iFogParams* fp, F32 time)
+{
+    if (!fp || fp->type == rwFOGTYPENAFOGTYPE)
+    {
+        xglobals->fog.type = rwFOGTYPENAFOGTYPE;
+        xglobals->fogA.type = rwFOGTYPENAFOGTYPE;
+    }
+    else if (0.0f == time || fp->type != xglobals->fogA.type)
+    {
+        xglobals->fog = *fp;
+        xglobals->fogA = *fp;
+        xglobals->fog_t0 = 0;
+    }
+    else
+    {
+        xglobals->fogA = xglobals->fog;
+        xglobals->fogB = *fp;
+
+        xglobals->fog_t0 = iTimeGet();
+        xglobals->fog_t1 = xglobals->fog_t0 + (iTime)(time * (GET_BUS_FREQUENCY() / 4));
+    }
+}
+
+void iCameraUpdateFog(RwCamera* cam, iTime t)
+{
+    RwRGBA a;
+    RwRGBA b;
+    RwRGBA c;
+    F32 dt;
+    xGlobals* g = xglobals;
+
+    if (g->fog.type == rwFOGTYPENAFOGTYPE)
+    {
+        return;
+    }
+
+    if (g->fog_t0 == 0)
+    {
+        return;
+    }
+
+    iTime now = iTimeGet();
+
+    dt = iTimeDiffSec(xglobals->fog_t0, now) / iTimeDiffSec(xglobals->fog_t0, xglobals->fog_t1);
+    dt = CLAMP(dt, 0.0f, 1.0f);
+
+    g->fog.type = xglobals->fogB.type;
+    g->fog.table = xglobals->fogB.table;
+
+    g->fog.start = g->fogA.start + dt * (g->fogB.start - g->fogA.start);
+    g->fog.stop = g->fogA.stop + dt * (g->fogB.stop - g->fogA.stop);
+    g->fog.density = g->fogA.density + dt * (g->fogB.density - g->fogA.density);
+
+    a = g->fogA.fogcolor;
+    b = g->fogB.fogcolor;
+    c.red = a.red + dt * (b.red - a.red);
+    c.green = a.green + dt * (b.green - a.green);
+    c.blue = a.blue + dt * (b.blue - a.blue);
+    c.alpha = a.alpha + dt * (b.alpha - a.alpha);
+    g->fog.fogcolor = c;
+
+    a = g->fogA.bgcolor;
+    b = g->fogB.bgcolor;
+    c.red = a.red + dt * (b.red - a.red);
+    c.green = a.green + dt * (b.green - a.green);
+    c.blue = a.blue + dt * (b.blue - a.blue);
+    c.alpha = a.alpha + dt * (b.alpha - a.alpha);
+    g->fog.bgcolor = c;
+
+    if (1.0f == dt)
+    {
+        xglobals->fog_t0 = 0;
+        xglobals->fogA = xglobals->fogB;
+    }
+}
+
+void iCameraSetFogRenderStates()
+{
+    RwCamera* pCamera;
+    iFogParams* pFogParams;
+    U32 bite_me;
+
+    pCamera = RwCameraGetCurrentCamera();
+    pFogParams = &xglobals->fog;
+
+    if (pFogParams->type == rwFOGTYPENAFOGTYPE)
+    {
+        RwRenderStateSet(rwRENDERSTATEFOGENABLE, (void*)FALSE);
+
+        RwCameraSetFarClipPlane(pCamera, sCameraFarClip);
+    }
+    else
+    {
+        bite_me = (pFogParams->fogcolor.alpha << 24) | (pFogParams->fogcolor.red << 16) |
+                  (pFogParams->fogcolor.green << 8) | pFogParams->fogcolor.blue;
+
+        RwRenderStateSet(rwRENDERSTATEFOGENABLE, (void*)TRUE);
+        RwRenderStateSet(rwRENDERSTATEFOGTYPE, (void*)pFogParams->type);
+        RwRenderStateSet(rwRENDERSTATEFOGCOLOR, (void*)(UPtr)bite_me);
+        RwRenderStateSet(rwRENDERSTATEFOGDENSITY, (void*)&pFogParams->density);
+
+        RwCameraSetFogDistance(pCamera, pFogParams->start);
+        RwCameraSetFarClipPlane(pCamera, pFogParams->stop);
+    }
+}

@@ -1,0 +1,300 @@
+#include "zCombo.h"
+
+#include <types.h>
+
+#include "xBase.h"
+#include "xHudText.h"
+#include "xstransvc.h"
+#include "xTextAsset.h"
+#include "zGlobals.h"
+#include "zTextBox.h"
+#include "zUIFont.h"
+
+struct zComboReward
+{
+    S32 reward;
+    char* textName;
+    U32 rewardList[10];
+    U32 rewardNum;
+    xTextAsset* textAsset;
+};
+
+// TODO: Something is wrong with this struct. It looks like the debug symbols
+// for the xhud header files may be somewhat wrong in some places.
+struct widget_chunk : xBase
+{
+    xhud::text_widget w;
+};
+
+/* .bss */
+static xVec3 sUnderCamPos;
+static ztextbox* sHideText[5];
+
+/* .sbss */
+// TODO: comboHUD should be externed in the header, but that does not show up in objdiff
+widget_chunk* comboHUD;
+static zUIFont* sHideUIF;
+static S32 comboPending;
+static S32 comboLastCounter;
+static S32 comboCounter;
+static F32 comboTimer;
+
+/* .sdata */
+static F32 comboMaxTime = 1.0f;
+static F32 comboDisplayTime = 2.0f;
+
+static zComboReward comboReward[16] = {
+    { 0, "INTENTIONALLY BLANK TXT", {}, 0, NULL },
+    { 0, "INTENTIONALLY BLANK TXT", {}, 0, NULL },
+    { 2, "COMBO_01_TXT", {}, 0, NULL },
+    { 3, "COMBO_02_TXT", {}, 0, NULL },
+    { 3, "COMBO_02_TXT", {}, 0, NULL },
+    { 5, "COMBO_03_TXT", {}, 0, NULL },
+    { 10, "COMBO_04_TXT", {}, 0, NULL },
+    { 15, "COMBO_05_TXT", {}, 0, NULL },
+    { 20, "COMBO_06_TXT", {}, 0, NULL },
+    { 25, "COMBO_07_TXT", {}, 0, NULL },
+    { 30, "COMBO_08_TXT", {}, 0, NULL },
+    { 40, "COMBO_09_TXT", {}, 0, NULL },
+    { 50, "COMBO_10_TXT", {}, 0, NULL },
+    { 60, "COMBO_11_TXT", {}, 0, NULL },
+    { 75, "COMBO_12_TXT", {}, 0, NULL },
+    { 100, "COMBO_13_TXT", {}, 0, NULL },
+};
+
+static void fillCombo(zComboReward* r)
+{
+    S32 rewardLeft = r->reward;
+    S32 j = 0;
+
+    while (rewardLeft > 0)
+    {
+        if (rewardLeft >= globals.player.g.ShinyValuePurple)
+        {
+            r->rewardList[j++] = 0;
+            rewardLeft -= globals.player.g.ShinyValuePurple;
+        }
+        else if (rewardLeft >= globals.player.g.ShinyValueBlue)
+        {
+            r->rewardList[j++] = 1;
+            rewardLeft -= globals.player.g.ShinyValueBlue;
+        }
+        else if (rewardLeft >= globals.player.g.ShinyValueGreen)
+        {
+            r->rewardList[j++] = 2;
+            rewardLeft -= globals.player.g.ShinyValueGreen;
+        }
+        else if (rewardLeft >= globals.player.g.ShinyValueYellow)
+        {
+            r->rewardList[j++] = 3;
+            rewardLeft -= globals.player.g.ShinyValueYellow;
+        }
+        else
+        {
+            r->rewardList[j++] = 4;
+            rewardLeft -= globals.player.g.ShinyValueRed;
+        }
+    }
+
+    r->rewardNum = j;
+}
+
+void zCombo_Setup()
+{
+    comboCounter = 0;
+    comboLastCounter = 0;
+    comboPending = 0;
+    comboTimer = -1.0f;
+
+    comboHUD = (widget_chunk*)zSceneFindObject(xStrHash("HUD_TEXT_COMBOMESSAGE"));
+
+    widget_chunk* hud = comboHUD;
+
+    if (hud != NULL)
+    {
+        hud->w.enable();
+        comboHUD->w.hide();
+    }
+
+    for (int i = 0; i < 16; ++i)
+    {
+        comboReward[i].textAsset = (xTextAsset*)xSTFindAsset(xStrHash(comboReward[i].textName), 0);
+    }
+
+    comboReward[0].reward = globals.player.g.ShinyValueCombo0;
+    comboReward[1].reward = globals.player.g.ShinyValueCombo1;
+    comboReward[2].reward = globals.player.g.ShinyValueCombo2;
+    comboReward[3].reward = globals.player.g.ShinyValueCombo3;
+    comboReward[4].reward = globals.player.g.ShinyValueCombo4;
+    comboReward[5].reward = globals.player.g.ShinyValueCombo5;
+    comboReward[6].reward = globals.player.g.ShinyValueCombo6;
+    comboReward[7].reward = globals.player.g.ShinyValueCombo7;
+    comboReward[8].reward = globals.player.g.ShinyValueCombo8;
+    comboReward[9].reward = globals.player.g.ShinyValueCombo9;
+    comboReward[10].reward = globals.player.g.ShinyValueCombo10;
+    comboReward[11].reward = globals.player.g.ShinyValueCombo11;
+    comboReward[12].reward = globals.player.g.ShinyValueCombo12;
+    comboReward[13].reward = globals.player.g.ShinyValueCombo13;
+    comboReward[14].reward = globals.player.g.ShinyValueCombo14;
+    comboReward[15].reward = globals.player.g.ShinyValueCombo15;
+
+    comboMaxTime = globals.player.g.ComboTimer;
+
+    for (int i = 0; i < 16; ++i)
+    {
+        fillCombo(&comboReward[i]);
+    }
+
+    sHideText[0] = (ztextbox*)zSceneFindObject(xStrHash("TEXTBOX_BUNGEE_HELP"));
+    sHideText[1] = (ztextbox*)zSceneFindObject(xStrHash("DIALOG_TEXTBOX"));
+    sHideText[2] = (ztextbox*)zSceneFindObject(xStrHash("MESSAGE_02_TEXTBOX"));
+    sHideText[3] = (ztextbox*)zSceneFindObject(xStrHash("PROMPT_TEXTBOX"));
+    sHideText[4] = (ztextbox*)zSceneFindObject(xStrHash("QUIT_TEXTBOX"));
+    sHideUIF = (zUIFont*)zSceneFindObject(xStrHash("MNU4 NPCTALK"));
+}
+
+void zCombo_Add(S32 points)
+{
+    if (comboTimer < 0.0f)
+    {
+        comboTimer = comboMaxTime;
+        comboPending = points - 1;
+    }
+    else
+    {
+        comboTimer = comboMaxTime;
+        comboCounter += points;
+
+        S32 pending = comboPending;
+
+        if (pending != 0)
+        {
+            comboCounter += pending;
+            comboPending = 0;
+        }
+    }
+}
+
+void zComboHideMessage(xhud::widget& w, xhud::motive& motive)
+{
+    w.hide();
+}
+
+void zCombo_HideImmediately()
+{
+    widget_chunk* hud = comboHUD;
+
+    if (hud != NULL)
+    {
+        hud->w.text[0] = '\0';
+    }
+}
+
+void zCombo_Update(F32 dt)
+{
+    xVec3Copy(&sUnderCamPos, &globals.camera.mat.pos);
+    xVec3AddScaled(&sUnderCamPos, &globals.camera.mat.up, -3.0f);
+
+    S32 counter = comboCounter;
+    S32 toShow = counter;
+    if (counter >= 16)
+    {
+        toShow = 15;
+    }
+
+    zComboReward* c = &comboReward[toShow];
+
+    if (comboLastCounter != counter && c->reward != 0)
+    {
+        widget_chunk* hud = comboHUD;
+
+        if (hud != NULL)
+        {
+            strcpy(hud->w.text, xTextAssetGetText(c->textAsset));
+            comboHUD->w.show();
+        }
+        comboLastCounter = comboCounter;
+    }
+
+    for (S32 i = 0; i < 5; i++)
+    {
+        if (sHideText[i] != NULL && sHideText[i]->visible())
+        {
+            comboHUD->w.text[0] = '\0';
+            break;
+        }
+    }
+
+    if (sHideUIF != NULL && xEntIsVisible(sHideUIF))
+    {
+        comboHUD->w.text[0] = '\0';
+    }
+
+    F32 timer = comboTimer;
+
+    if (timer >= 0.0f)
+    {
+        comboTimer = timer - dt;
+
+        if (comboTimer < 0.0f)
+        {
+            if (c->reward > 0)
+            {
+                zEntPickup_SpawnNRewards(c->rewardList, c->rewardNum, &sUnderCamPos);
+
+                switch (toShow)
+                {
+                case 5:
+                    zEntPlayer_SNDPlayStreamRandom(0, 1, ePlayerStreamSnd_Combo1,
+                                                   ePlayerStreamSnd_Combo2, 0.1f);
+                    break;
+                case 6:
+                case 7:
+                    zEntPlayer_SNDPlayStreamRandom(0, 2, ePlayerStreamSnd_Combo1,
+                                                   ePlayerStreamSnd_Combo2, 0.1f);
+                    break;
+                case 8:
+                case 9:
+                    zEntPlayer_SNDPlayStreamRandom(0, 3, ePlayerStreamSnd_Combo1,
+                                                   ePlayerStreamSnd_Combo2, 0.1f);
+                    break;
+                case 10:
+                    zEntPlayer_SNDPlayStreamRandom(0, 4, ePlayerStreamSnd_Combo1,
+                                                   ePlayerStreamSnd_Combo2, 0.1f);
+                    break;
+                case 11:
+                case 12:
+                    zEntPlayer_SNDPlayStreamRandom(0, 5, ePlayerStreamSnd_Combo1,
+                                                   ePlayerStreamSnd_Combo2, 0.1f);
+                    zEntPlayer_SNDPlayStreamRandom(6, 50, ePlayerStreamSnd_Combo1,
+                                                   ePlayerStreamSnd_Combo5, 0.1f);
+                    break;
+                case 13:
+                    zEntPlayer_SNDPlayStreamRandom(0, 10, ePlayerStreamSnd_BigCombo1,
+                                                   ePlayerStreamSnd_BigCombo2, 0.1f);
+                    zEntPlayer_SNDPlayStream(11, 100, ePlayerStreamSnd_BigCombo1, 0x0);
+                    break;
+                case 14:
+                    zEntPlayer_SNDPlayStreamRandom(0, 10, ePlayerStreamSnd_BigCombo1,
+                                                   ePlayerStreamSnd_BigCombo2, 0.1f);
+                    zEntPlayer_SNDPlayStream(21, 100, ePlayerStreamSnd_BigCombo1, 0x0);
+                    break;
+                case 15:
+                    zEntPlayer_SNDPlayStream(0, 100, ePlayerStreamSnd_BigCombo2, 0x0);
+                    break;
+                }
+
+                if (comboHUD != NULL)
+                {
+                    comboHUD->w.add_motive(xhud::motive(NULL, 0.0f, comboDisplayTime, 0.0f,
+                                                        xhud::delay_motive_update,
+                                                        (void*)zComboHideMessage));
+                }
+            }
+
+            comboTimer = -1.0f;
+            comboCounter = 0;
+            comboLastCounter = 0;
+        }
+    }
+}

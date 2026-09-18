@@ -1,0 +1,68 @@
+#ifndef XSHADOWSIMPLE_H
+#define XSHADOWSIMPLE_H
+
+#include "types.h"
+#include "xEnt.h"
+
+struct xShadowSimpleQueue
+{
+    // total size: 0x14
+    xShadowSimpleCache* cache; // offset 0x0, size 0x4
+    u32 priority; // offset 0x4, size 0x4
+    xEnt* ent; // offset 0x8, size 0x4
+    F32 radius; // offset 0xC, size 0x4
+    F32 ecc; // offset 0x10, size 0x4
+};
+
+struct xShadowSimplePoly
+{
+    xVec3 vert[3];
+    xVec3 norm;
+};
+
+// Size: 0x98
+struct xShadowSimpleCache
+{
+    U16 flags;
+    U8 alpha;
+    U8 pad;
+
+    // Offset: 0x4
+    U32 collPriority;
+    xVec3 pos;
+    xVec3 at;
+
+    // Offset: 0x20
+    xEnt* castOnEnt;
+    xShadowSimplePoly poly;
+    F32 envHeight;
+    F32 shadowHeight;
+    // The raster the shadow is drawn with. Retail declares it U32 and casts on
+    // the way in and out, which stops being the same thing once a pointer is
+    // wider than the field.
+    RwRaster* raster;
+
+    // Offset: 0x60
+    F32 dydx;
+    F32 dydz;
+    xVec3 corner[4];
+};
+
+struct zSimpleShadowTableHeader {
+    // total size: 0x4
+    U32 num;
+};
+
+// `num` of these follow the header directly.
+struct zSimpleShadowTableEntry {
+    U32 modelID;
+    U32 assetID;
+    U32 flags;
+};
+
+void xShadowSimple_Render();
+void xShadowSimple_Add(xShadowSimpleCache* cache, xEnt* ent, F32 radius, F32 ecc);
+void xShadowSimple_CacheInit(xShadowSimpleCache* cache, xEnt* ent, U8 alpha);
+void xShadowSimple_Init();
+
+#endif

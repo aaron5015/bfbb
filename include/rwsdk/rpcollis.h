@@ -1,0 +1,81 @@
+#ifndef RPCOLLIS_H
+#define RPCOLLIS_H
+
+#include <rwsdk/rwcore.h>
+#include <rwsdk/rpworld.h>
+
+/* C compatibility: these headers use bare tag names as types. */
+typedef union RpIntersectData RpIntersectData;
+typedef struct RpIntersection RpIntersection;
+typedef struct RpCollisionTriangle RpCollisionTriangle;
+
+
+/* RpCollisionTriangle is typedef'd above */
+union RpIntersectData
+{
+    RwLine line;
+    RwV3d point;
+    RwSphere sphere;
+    RwBBox box;
+    void* object;
+};
+
+enum RpIntersectType
+{
+    rpINTERSECTNONE = 0,
+    rpINTERSECTLINE,
+    rpINTERSECTPOINT,
+    rpINTERSECTSPHERE,
+    rpINTERSECTBOX,
+    rpINTERSECTATOMIC,
+    rpINTERSECTTYPEFORCEENUMSIZEINT = RWFORCEENUMSIZEINT
+};
+typedef enum RpIntersectType RpIntersectType;
+
+struct RpIntersection
+{
+    RpIntersectData t;
+    RpIntersectType type;
+};
+
+struct RpCollisionTriangle
+{
+    RwV3d normal;
+    RwV3d point;
+    /* An index into the sector's polygons on the world path, and a pointer to
+       the triangle's xClumpCollBSPTriangle record on the JSP path -- see the
+       JSPTri macro in iCollide.cpp. RwIntPtr so the pointer survives. */
+    RwIntPtr index;
+    RwV3d* vertices[3];
+};
+
+typedef RpCollisionTriangle* (*RpIntersectionCallBackGeometryTriangle)(
+    RpIntersection* intersection, RpCollisionTriangle* collTriangle, RwReal distance, void* data);
+
+typedef RpCollisionTriangle* (*RpIntersectionCallBackWorldTriangle)(
+    RpIntersection* intersection, RpWorldSector* sector, RpCollisionTriangle* collTriangle,
+    RwReal distance, void* data);
+
+typedef RpAtomic* (*RpIntersectionCallBackAtomic)
+    (RpIntersection* intersection, RpWorldSector* sector, RpAtomic* atomic, RwReal distance, void* data);
+
+typedef RpWorldSector* (*RpIntersectionCallBackWorldSector)
+    (RpIntersection* intersection, RpWorldSector* worldSector, void* data);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern RpAtomic* RpAtomicForAllIntersections(RpAtomic* atomic, RpIntersection* intersection,
+                                             RpIntersectionCallBackGeometryTriangle callBack,
+                                             void* data);
+extern RpWorld* RpCollisionWorldForAllIntersections(RpWorld* world, RpIntersection* intersection,
+                                                    RpIntersectionCallBackWorldTriangle callBack,
+                                                    void* data);
+extern RwBool RpCollisionPluginAttach(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

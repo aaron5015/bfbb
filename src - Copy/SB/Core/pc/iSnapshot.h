@@ -1,0 +1,105 @@
+#ifndef ISNAPSHOT_H
+#define ISNAPSHOT_H
+
+#include <types.h>
+
+// PC-only: the last frame the port presented, kept so the loading screen can
+// stand on it.
+//
+// The Xbox release drew its loading screen over a still of the level you were
+// leaving; the GameCube and PS2 releases drew it over a texture asset instead.
+// Everything else about that screen is the same on all three -- the bubbles
+// rising over it are live particles on every platform, spawned fifty at a time
+// by zFX_SpawnBubbleWall and run by the particle tank between load steps -- so
+// the whole of the difference is which raster fills the background quad.
+//
+// The hook for it is still in the shipped GameCube code. zGameTakeSnapShot
+// (zGame.cpp) is an empty function with a live call site in
+// zGameScreenTransitionBegin, under its own eGameWhere_TransitionSnapShot
+// marker, and the quad's UVs and tint next to it (bgu1..bga) are plain globals
+// rather than constants. This fills that function in.
+//
+// **Why a capture rather than rendering the level live.** By the time the
+// loading screen exists the outgoing level is gone: both scene-change paths
+// (zMain.cpp's loop and the portal arm of zGameUpdateMode) run zGameExit, which
+// takes the scene down and pops its memory, BEFORE zGameInit reaches
+// zSceneInit and zGameScreenTransitionBegin. There is no world left to draw.
+// Keeping one alive to draw would mean two scenes resident at once and a
+// different scene lifetime; copying the last frame costs one blit.
+//
+// **Why no thread.** The loader already yields a frame per step -- zSceneInit
+// calls zGameScreenTransitionUpdate between xSTLoadStep calls -- so the screen
+// animates without one, which is the only thing a loader thread would buy.
+// Against it: the loader is a synchronous state machine driven from the same
+// loop that draws, xMemMgr is a bump allocator with no locking, and the device
+// is created single-threaded.
+
+// On by default, so the loading screen does what the Xbox release does.
+// Nothing outside the implementation asks whether a still exists: every
+// function here answers on its own, and the background texture asset the
+// GameCube and PS2 releases draw is still the fallback whenever there is no
+// frame to show -- which is also what turning it off leaves behind.
+
+// Copy what is about to be presented into the snapshot. Called once a frame
+// from RwCameraShowRaster, which is the only place in the port that knows a
+// frame is finished. Does nothing while latched, so the loading screen cannot
+// photograph itself.
+void iSnapshotCapture();
+
+// The frame about to be presented has the screen fade drawn over it, so it is
+// not a picture of the level; xScrFxUpdateFade says so, iSnapshotCapture reads
+// it and clears it. Set for the frame, not for a span: a frame nobody says
+// anything about is a clean one.
+//
+// Without this the still is whatever happened to be on screen at the scene
+// change, and on the way into a level that is the fade UP FROM BLACK. Warping
+// out again during that second latches a dark frame, and warping repeatedly
+// through the same door latches a darker one each time, because each capture is
+// taken earlier in a fade than the last.
+void iSnapshotSetObscured(S32 obscured);
+
+// Freeze the snapshot and hand it to the loading screen; zGameTakeSnapShot.
+void iSnapshotLatch();
+
+// Thaw, so the next frames refresh it again; zGameScreenTransitionEnd.
+void iSnapshotRelease();
+
+// Forget the frame being held, so the next iSnapshotBackgroundTexture answers
+// NULL and the caller falls back to the background asset. For the one caller
+// that knows the held frame has gone stale: iLoadTransition, when a scene
+// change interrupts a wipe and no frame has been captured since the one the
+// wipe was drawing.
+void iSnapshotDiscard();
+
+// The latched frame as a texture, or NULL when there is not one to give: the
+// feature is off, no frame has been captured yet (the first boot has none), the
+// backend cannot do it, or a device reset has emptied the surface since it was
+// taken. Every caller has to have a fallback for NULL, and the fallback is the
+// background the console draws.
+//
+// A texture rather than a raster because that is what the call site wants:
+// zGameScreenTransitionUpdate's background test is a texture lookup whose
+// result it then takes the raster from, and returning a texture leaves that
+// expression exactly as the GameCube build compiles it.
+struct RwTexture* iSnapshotBackgroundTexture();
+
+// Whether any of the above does anything; config.ini's xbox.snapshot. Pushed
+// down from iSystem.cpp rather than read here, for the reason iGlow.h gives.
+// The default is on.
+void iSnapshotSetEnabled(S32 enabled);
+
+// What to add to a screen-space x and y to make a quad sample the still one for
+// one. Zero on every backend but D3D9, where a vertex at screen x lines up with
+// the CENTRE of pixel x rather than its corner: a quad drawn at 0..w then reads
+// every texel half way between two of its own, and bilinear filtering turns the
+// whole picture into a two-by-two average of itself. The still is the only
+// thing the game draws at exactly its own size, so it is the only thing where
+// that shows -- as a screenshot that looks softer than the frame it was taken
+// from.
+//
+// A call rather than an #ifdef at the call sites, because they are game code
+// and outside the shim; glow.cpp and distort.cpp are inside it and test
+// RWHALFPIXEL directly for the same reason in reverse.
+F32 iSnapshotHalfPixel();
+
+#endif

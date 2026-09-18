@@ -1,0 +1,226 @@
+// RenderWare C API: RpClump.
+//
+// RpClump is mirrored onto rw::Clump (see include/rwsdk/rpworld.h and
+// layout_clump.cpp), so an RpClump* IS an rw::Clump* and most of this is a
+// cast and a call.
+//
+// Two of the six are not, and both times the reason is that RenderWare's own
+// implementation of them is in this repository -- src/rwsdk/world/baclump.c is
+// decompiled, matching code -- and it does something librw does not.
+// RpClumpAddAtomic is the important one: see below.
+
+#include <rwcore.h>
+#include <rpworld.h>
+
+#include "stream.h"
+#include "convert.h"
+
+#include <stdio.h> // brings in librw's rw.h, which must not be included twice
+
+static inline rw::Clump* asClump(RpClump* clump)
+{
+    return reinterpret_cast<rw::Clump*>(clump);
+}
+
+static inline rw::Atomic* asAtomic(RpAtomic* atomic)
+{
+    return reinterpret_cast<rw::Atomic*>(atomic);
+}
+
+RpClump* RpClumpStreamRead(RwStream* stream)
+{
+    if (stream == NULL)
+    {
+        return NULL;
+    }
+
+    // Both sides expect the rwID_CLUMP chunk header to have been eaten already
+    // -- iModel.cpp:143 and xJSP.cpp:154 both call RwStreamFindChunk first --
+    // and pick up at the STRUCT chunk inside it.
+    //
+    rw::Clump* clump = rw::Clump::streamRead(stream);
+
+    if (clump == NULL)
+    {
+        return NULL;
+    }
+
+    // **The atomic list comes out backwards, and the game reads it by INDEX.**
+    //
+    // librw's Clump::streamRead APPENDS each atomic as it reads it
+    // (clump.cpp:103, atomics.append), so its list is in file order.
+    // RenderWare's reader adds each one with RpClumpAddAtomic, and that
+    // PREPENDS -- baclump.c:150 uses rwLinkListAddLLLink, which inserts at the
+    // head, which is why RpClumpAddAtomic below does list surgery rather than
+    // calling librw. So RenderWare's list is in REVERSE file order, and the two
+    // are exact opposites.
+    //
+    // That is not cosmetic. xCutscene.cpp:841 matches a cutscene's morph data
+    // to an atomic by its position in this list -- `morphModelIndex == visIdx`
+    // -- and then writes that morph target's vertices into the atomic it
+    // landed on. With the list reversed, a four-atomic model of 168, 1625, 127
+    // and 168 vertices handed back as 168, 127, 1625, 168 puts the run list
+    // belonging to the 1625-vertex atomic onto the 127-vertex one, which wrote
+    // 130 vertices past the end of it and over the mesh header that follows.
+    // iModel.cpp also returns the FIRST atomic of a multi-atomic model as the
+    // model, so it was picking the wrong one of those too.
+    //
+    // Reversed in place rather than re-added one at a time: swapping next and
+    // prev on every link including the sentinel reverses a circular doubly
+    // linked list, and it does not disturb the atomics themselves.
+    {
+        rw::LLLink* sentinel = &clump->atomics.link;
+        rw::LLLink* link = sentinel;
+
+        do
+        {
+            rw::LLLink* next = link->next;
+            link->next = link->prev;
+            link->prev = next;
+            link = next;
+        } while (link != sentinel);
+    }
+
+    // The assets are Xbox and the renderer is D3D9, which to librw are two
+    // different platforms. Nothing in librw converts a geometry off the one it
+    // was authored for -- the same gap as Raster::convertTexToCurrentPlatform,
+    // and with a louder symptom, since an unconverted skin renders with empty
+    // bone weights. See convert.cpp.
+    rwConvertClumpToCurrentPlatform(clump);
+
+    // **An atomic with no geometry is a trap, and it is worth saying so here.**
+    //
+    // Game code does not expect one: xJSP.cpp:15's CountAtomicCB goes straight
+    // to atomic->geometry->mesh with no check, so a null geometry faults
+    // reading address 8 rather than failing the load. Retail never produced one
+    // -- RenderWare's reader would not have got this far -- so there is no
+    // handling anywhere above to add.
+    //
+    // librw CAN produce one: Atomic::streamReadClump takes its geometry by
+    // INDEX out of the clump's geometry list, and an index the list does not
+    // cover leaves the atomic with nil. Reporting it names the asset that did
+    // it, which is the difference between a fault in xJSP and a fact about a
+    // file.
+    {
+        int missing = 0;
+        rw::LinkList& atomics = clump->atomics;
+        for (rw::LLLink* cur = atomics.link.next; cur != atomics.end(); cur = cur->next)
+        {
+            rw::Atomic* a = rw::Atomic::fromClump(cur);
+            if (a->geometry == NULL || a->geometry->meshHeader == NULL)
+            {
+                missing++;
+            }
+        }
+
+        if (missing != 0)
+        {
+            printf("[pcport] RpClumpStreamRead: %d of %d atomics have no geometry or no mesh\n",
+                   missing, clump->atomics.count());
+            fflush(stdout);
+        }
+    }
+
+    return reinterpret_cast<RpClump*>(clump);
+}
+
+RwBool RpClumpDestroy(RpClump* clump)
+{
+    if (clump == NULL)
+    {
+        return FALSE;
+    }
+
+    // Takes the atomics, lights, cameras and the whole frame hierarchy with
+    // it, exactly as RpClumpDestroy in src/rwsdk/world/baclump.c does. xJSP.cpp
+    // relies on that in both directions: it moves the atomics it wants OUT of
+    // a temporary clump before destroying it, and then lets the destroy take
+    // the frames that clump owned.
+    //
+    // One difference, and it is librw's assert rather than a behaviour:
+    // Clump::destroy asserts the clump is not still in a world, where
+    // RenderWare would free it and leave the world holding a dangling link.
+    // Nothing in the game calls RpWorldAddClump, so neither path is reachable
+    // today.
+    asClump(clump)->destroy();
+    return TRUE;
+}
+
+// RenderWare PREPENDS -- baclump.c uses rwLinkListAddLLLink, which inserts at
+// the head -- where librw's Clump::addAtomic appends. That is not a detail:
+// xJSP.cpp:173 moves atomics from one clump to another by walking them into an
+// array in list order and then adding them back in REVERSE index order, which
+// only preserves their order if each add goes to the front. Appending instead
+// would reverse the atomic list of every merged JSP, and xJSP builds its
+// stripVecList by walking that list, so the vertex data would end up attached
+// to the wrong pieces of the level.
+//
+// So this does the list surgery itself rather than call librw. It is the same
+// two writes librw's addAtomic makes, on the other end of the list.
+RpClump* RpClumpAddAtomic(RpClump* clump, RpAtomic* atomic)
+{
+    if (clump == NULL || atomic == NULL)
+    {
+        return clump;
+    }
+
+    atomic->clump = clump;
+    asClump(clump)->atomics.add(&asAtomic(atomic)->inClump);
+    return clump;
+}
+
+RpClump* RpClumpRemoveAtomic(RpClump* clump, RpAtomic* atomic)
+{
+    if (clump == NULL || atomic == NULL)
+    {
+        return clump;
+    }
+
+    // Unlike addAtomic, librw's removeAtomic is what RenderWare's is, minus an
+    // assert that the atomic really is in THIS clump. Going through librw
+    // keeps that assert, which is worth having: RpClumpRemoveAtomic on the
+    // wrong clump silently corrupts both lists.
+    asClump(clump)->removeAtomic(asAtomic(atomic));
+    return clump;
+}
+
+RpClump* RpClumpForAllAtomics(RpClump* clump, RpAtomicCallBack callback, void* pData)
+{
+    if (clump == NULL || callback == NULL)
+    {
+        return clump;
+    }
+
+    // The `next` link is read before the callback runs, because callers remove
+    // the atomic they were handed: xJSP.cpp's ListAtomicCB does not, but
+    // RpClumpDestroy's equivalent walk does, and RenderWare's own
+    // RpClumpForAllAtomics takes the same precaution.
+    rw::LinkList& atomics = asClump(clump)->atomics;
+    for (rw::LLLink* cur = atomics.link.next; cur != atomics.end();)
+    {
+        rw::Atomic* a = rw::Atomic::fromClump(cur);
+        rw::LLLink* next = cur->next;
+
+        if (callback(reinterpret_cast<RpAtomic*>(a), pData) == NULL)
+        {
+            // RenderWare stops early on a NULL return. iModel.cpp's
+            // NextAtomicCallback does not use that, but xJSP.cpp's CountAtomicCB
+            // would break the array it is filling if it were ignored.
+            return clump;
+        }
+
+        cur = next;
+    }
+
+    return clump;
+}
+
+RwInt32 RpClumpGetNumAtomics(RpClump* clump)
+{
+    if (clump == NULL)
+    {
+        return 0;
+    }
+
+    return asClump(clump)->countAtomics();
+}

@@ -1,0 +1,203 @@
+#ifndef ZPLATFORM_H
+#define ZPLATFORM_H
+
+#include "zEnt.h"
+#include "xEntMotion.h"
+#include "xEntDrive.h"
+
+enum en_ZPLATFORMTYPE
+{
+    ePlatformTypeER,
+    ePlatformTypeOrbit,
+    ePlatformTypeSpline,
+    ePlatformTypeMP,
+    ePlatformTypeMech,
+    ePlatformTypePen,
+    ePlatformTypeConvBelt,
+    ePlatformTypeFalling,
+    ePlatformTypeFR,
+    ePlatformTypeBreakaway,
+    ePlatformTypeSpringboard,
+    ePlatformTypeTeeter,
+    ePlatformTypePaddle,
+    ePlatformTypeFM
+};
+
+struct xPlatformERData
+{
+    S32 nodata;
+};
+
+struct xPlatformOrbitData
+{
+    S32 nodata;
+};
+
+struct xPlatformSplineData
+{
+    S32 nodata;
+};
+
+struct xPlatformMPData
+{
+    S32 nodata;
+};
+
+struct xPlatformMechData
+{
+    S32 nodata;
+};
+
+struct xPlatformPenData
+{
+    S32 nodata;
+};
+
+struct xPlatformConvBeltData
+{
+    F32 speed;
+};
+
+struct xPlatformFallingData
+{
+    F32 speed;
+    U32 bustModelID;
+};
+
+struct xPlatformFRData
+{
+    F32 fspeed;
+    F32 rspeed;
+    F32 ret_delay;
+    F32 post_ret_delay;
+};
+
+struct xPlatformBreakawayData
+{
+    F32 ba_delay;
+    U32 bustModelID;
+    F32 reset_delay;
+    U32 breakflags;
+};
+
+struct xPlatformSpringboardData
+{
+    F32 jmph[3];
+    F32 jmpbounce;
+    U32 animID[3];
+    xVec3 jmpdir;
+    U32 springflags;
+};
+
+struct xPlatformTeeterData
+{
+    F32 itilt;
+    F32 maxtilt;
+    F32 invmass;
+};
+
+struct xPlatformPaddleData
+{
+    S32 startOrient;
+    S32 countOrient;
+    F32 orientLoop;
+    F32 orient[6];
+    U32 paddleFlags;
+    F32 rotateSpeed;
+    F32 accelTime;
+    F32 decelTime;
+    F32 hubRadius;
+};
+
+struct xPlatformFMData
+{
+    S32 nothingyet;
+};
+
+struct xPlatformAsset
+{
+    U8 type;
+    U8 pad;
+    U16 flags;
+    union
+    {
+        xPlatformERData er;
+        xPlatformOrbitData orb;
+        xPlatformSplineData spl;
+        xPlatformMPData mp;
+        xPlatformMechData mech;
+        xPlatformPenData pen;
+        xPlatformConvBeltData cb;
+        xPlatformFallingData fall;
+        xPlatformFRData fr;
+        xPlatformBreakawayData ba;
+        xPlatformSpringboardData sb;
+        xPlatformTeeterData teet;
+        xPlatformPaddleData paddle;
+        xPlatformFMData fm;
+    };
+};
+
+struct zPlatFMRunTime
+{
+    U32 flags;
+    F32 tmrs[12];
+    F32 ttms[12];
+    F32 atms[12];
+    F32 dtms[12];
+    F32 vms[12];
+    F32 dss[12];
+};
+
+struct zPlatform : zEnt
+{
+    xPlatformAsset* passet; // 0xD4
+    xEntMotion motion;
+    U16 state; // 0x144
+    U16 plat_flags; // 0x146
+    F32 tmr; // 0x148
+    S32 ctr; // 0x14C
+    xMovePoint* src; // 0x150
+    xModelInstance* am; // 0x154
+    xModelInstance* bm; // 0x158
+    S32 moving;
+    xEntDrive drv;
+    zPlatFMRunTime* fmrt;
+    F32 pauseMult;
+    F32 pauseDelta;
+};
+
+#define ZPLATFORM_SUBTYPE_PLATFORM 0
+#define ZPLATFORM_SUBTYPE_MECH 4
+#define ZPLATFORM_SUBTYPE_PEN 5
+#define ZPLATFORM_SUBTYPE_CONVBELT 6
+#define ZPLATFORM_SUBTYPE_FALLING 7
+#define ZPLATFORM_SUBTYPE_FR 8
+#define ZPLATFORM_SUBTYPE_BREAKAWAY 9
+#define ZPLATFORM_SUBTYPE_SPRINGBOARD 10
+#define ZPLATFORM_SUBTYPE_TEETER 11
+#define ZPLATFORM_SUBTYPE_PADDLE 12
+#define ZPLATFORM_SUBTYPE_FM 13
+
+#define ZPLATFORM_STATE_INIT 0x0
+#define ZPLATFORM_STATE_UNK1 0x3
+#define ZPLATFORM_STATE_UNK2 0x1
+#define ZPLATFORM_STATE_UNK3 0x2
+#define ZPLATFORM_STATE_UNK4 0x4
+
+void zPlatform_Init(void* plat, void* asset);
+void zPlatform_Init(zPlatform* plat, xEntAsset* asset);
+void zPlatform_Setup(zPlatform* plat, xScene* sc);
+void zPlatform_Save(zPlatform* ent, xSerial* s);
+void zPlatform_Load(zPlatform* ent, xSerial* s);
+void zPlatform_Reset(zPlatform* plat, xScene* sc);
+void zPlatform_PaddleStartRotate(class xEnt* entplat, S32 direction, S32 stutter);
+void zPlatform_Update(xEnt* ent, xScene* sc, float dt);
+void zPlatform_Shake(zPlatform* plat, F32 _unused, F32 ampl, F32 freq);
+U32 zPlatform_PaddleCollide(xCollis* coll, const xVec3* hitsource, const xVec3* hitvel,
+                            U32 worldSpaceNorm);
+S32 zPlatformEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* base3);
+void zPlatform_Mount(zPlatform* plat);
+void zPlatform_Dismount(zPlatform* plat);
+
+#endif

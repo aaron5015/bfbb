@@ -1,0 +1,513 @@
+# The PC port, built once per backend SET.
+#
+# The point is that every backend compiles from every commit. librw's device
+# backends are separate implementations of one interface with nothing shared
+# below it, so a change written against one of them can leave the others broken
+# -- or silently wrong -- and nothing local says so unless you happen to
+# configure that build. -Werror=switch on the librw target only reports a
+# missing render-state case in the configuration that compiles that file, which
+# is why this is a matrix rather than one build.
+#
+# BFBB_RENDER_BACKENDS is a list. The default -- "D3D9;D3D11;GL3" on Windows,
+# "GL3" elsewhere -- puts every backend in ONE executable and video.backend
+# picks between them at startup, so the entry named `default` below is the build
+# people actually download.
+#
+# The single-backend entries are still here because each compiles code the
+# combined build does not. RWD3D_IS9 and RWD3D_IS11 are runtime tests only when
+# both are present; with one backend they are constants, and the arm behind the
+# other one is never compiled at all. NULL is the headless configuration the
+# self-tests want.
+#
+# No paths filter: bfbb.exe links the game code as well as the port, so a
+# change anywhere under src/ can break this and a filter would let it through.
+name: PC port
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    name: build (${{ matrix.backend }}, ${{ matrix.msvc }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The backend is quoted because YAML reads a bare NULL as the null
+        # value, and it would reach cmake as an empty string. `default` is the
+        # empty string on purpose -- it means "do not pass the option", which is
+        # what tests the default set.
+        #
+        # 32-bit is the configuration that gets played, so it is what every
+        # backend is compiled at. NULL is also built at 64 bits because the
+        # self-tests are the only thing in this job that RUNS, and running them
+        # at both word sizes is what catches a 64-bit-only regression -- the
+        # package job proves the 64-bit build LINKS and nothing more.
+        include:
+          - { backend: "default", msvc: x86, bits: "" }
+          - { backend: "NULL",    msvc: x86, bits: "" }
+          - { backend: "D3D9",    msvc: x86, bits: "" }
+          - { backend: "D3D11",   msvc: x86, bits: "" }
+          - { backend: "GL3",     msvc: x86, bits: "" }
+          - { backend: "NULL",    msvc: x64, bits: "-DBFBB_BUILD_32BIT=OFF" }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Named one at a time rather than `submodules: recursive`, which would
+      # also fetch third_party/wxWidgets -- 300 MB of working tree for a
+      # configurator this job does not build. Only the package job needs it.
+      - name: Submodules
+        shell: bash
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
+
+      # librw is the renderer, and SDL reads the controllers and, under GL3,
+      # owns the window. Neither is vendored as source in the tree, and CMake's
+      # own message for a missing one is less obvious than this.
+      - name: Check the submodules came down
+        shell: bash
+        run: |
+          test -f third_party/librw/CMakeLists.txt || { echo "third_party/librw is empty"; exit 1; }
+          test -f third_party/SDL/CMakeLists.txt || { echo "third_party/SDL is empty"; exit 1; }
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # clang is on the image; the MSVC toolchain and Windows SDK it links
+      # against have to be on PATH. Which of them decides the word size as much
+      # as matrix.bits does: -m32 is a request clang can only honour with the
+      # x86 libraries on LIB, and CMakeLists.txt fails its own pointer-size
+      # check rather than build the wrong width.
+      - name: MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc }}
+
+      # BFBB_BUILD_CONFIGURATOR=OFF because this job tests the game. There is no
+      # packaged wxWidgets for a Windows runner, so leaving it on would compile
+      # the submodule once per matrix entry -- minutes each, for a program the
+      # unix job below already compiles and the package job below that ships.
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build-ci -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DBFBB_BUILD_CONFIGURATOR=OFF
+          ${{ matrix.backend != 'default' && format('-DBFBB_RENDER_BACKENDS={0}', matrix.backend) || '' }}
+          ${{ matrix.bits }}
+
+      - name: Build
+        run: cmake --build build-ci
+
+      # **NULL runs the tests, at both word sizes; every other entry is
+      # build-only.**
+      #
+      # The rest need a device the runner does not have: GitHub's Windows
+      # images have no GPU, and no OpenGL past 1.1. Running them would mean
+      # staging a software rasteriser next to the executable, which is a
+      # dependency this does not take on. Everything that does not need a device
+      # runs here, which is what the NULL backend is for -- and the two checks
+      # that do need one, the render-state round trip and the Im2D device
+      # constants, say so themselves and skip.
+      #
+      # FFmpeg and libusb are optional and are not installed, so the movie
+      # decoder and the controller-name lookup build as their stubs. That is a
+      # configuration the port supports; it is not what a player runs.
+      - name: Self-tests
+        if: matrix.backend == 'NULL'
+        run: |
+          build-ci\rw_selftest.exe
+          build-ci\pc_selftest.exe
+
+  # The same backends under MinGW's GCC.
+  #
+  # A second toolchain is not redundancy. clang here targets the MSVC ABI and
+  # Microsoft's STL, so it and MinGW disagree about which headers exist, what
+  # __declspec means, how the linker spells its options and what the C library
+  # provides -- and the port has an OpenGL backend whose whole point is running
+  # off Windows, which is a GCC build with the Win32 parts swapped out. This is
+  # where that stays true.
+  #
+  # NOT GATING. Nothing had ever compiled the game code with GCC when this was
+  # added, so it reports and does not block. Drop continue-on-error once it has
+  # been green for a while.
+  mingw:
+    runs-on: windows-latest
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ["default", "NULL", "D3D9", "D3D11", "GL3"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Named one at a time rather than `submodules: recursive`, which would
+      # also fetch third_party/wxWidgets -- 300 MB of working tree for a
+      # configurator this job does not build. Only the package job needs it.
+      - name: Submodules
+        shell: bash
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # i686, not x86_64: the port is 32-bit and CMakeLists.txt stops the
+      # configure if the compiler disagrees. The x86_64 MinGW takes -m32 and
+      # then has no 32-bit runtime to link against.
+      #
+      # A pinned winlibs zip: a plain 32-bit toolchain in an archive, with no
+      # package manager to install and configure first.
+      - name: MinGW-w64 (i686)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/brechtsanders/winlibs_mingw/releases/download/14.3.0posix-12.0.0-msvcrt-r1/winlibs-i686-posix-dwarf-gcc-14.3.0-mingw-w64msvcrt-12.0.0-r1.zip"
+          curl.exe -L -o mingw32.zip $url
+          tar.exe -xf mingw32.zip -C C:\
+          # The bundle ships its own cmake, ctest and ninja, and GITHUB_PATH
+          # PREPENDS -- so they would shadow the runner's. That cmake cannot
+          # start on this image and the failure is a bare 0xC0000135 from a
+          # step that looks like it should work.
+          Remove-Item C:\mingw32\bin\cmake.exe, C:\mingw32\bin\ctest.exe, `
+                      C:\mingw32\bin\cpack.exe, C:\mingw32\bin\ninja.exe `
+                      -ErrorAction SilentlyContinue
+          "C:\mingw32\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          C:\mingw32\bin\g++.exe --version
+
+      # BFBB_SDL=vendored says out loud what this runner would do anyway: there
+      # is no installed SDL3 on the image, so `auto` would fall back to the
+      # submodule. Naming it means a future image that ships one cannot quietly
+      # change what this job tests.
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build-mingw -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=gcc
+          -DCMAKE_CXX_COMPILER=g++
+          -DBFBB_SDL=vendored
+          -DBFBB_BUILD_CONFIGURATOR=OFF
+          ${{ matrix.backend != 'default' && format('-DBFBB_RENDER_BACKENDS={0}', matrix.backend) || '' }}
+
+      - name: Build
+        run: cmake --build build-mingw
+
+      - name: Self-tests
+        if: matrix.backend == 'NULL'
+        run: |
+          build-mingw\rw_selftest.exe
+          build-mingw\pc_selftest.exe
+
+  # The port off Windows: Linux and macOS, on the two backends that exist there.
+  #
+  # This is where iHostPosix.cpp is COMPILED. It is one half of the iHost seam
+  # and the Windows jobs above never touch it, so before this job existed the
+  # POSIX backend could be edited into anything at all and every check stayed
+  # green -- and it was, for long enough that it still called clock_nanosleep,
+  # which macOS does not have.
+  #
+  # D3D9 and D3D11 are absent from the matrix rather than skipped: CMakeLists.txt
+  # refuses them off Windows, because librw has no such platform there.
+  #
+  # NOT GATING, for the same reason the MinGW job is not: nothing had ever built
+  # the port on either host when this was added. Drop continue-on-error once it
+  # has been green for a while.
+  unix:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple Silicon. macos-15-intel is the x86_64 image,
+        # and it is in the matrix for one reason: compat/intrin.h takes the
+        # square root in __frsqrte with an SSE intrinsic there and with a
+        # `fsqrt` instruction on AArch64, and neither arm compiles the other.
+        # GitHub retires the last x86_64 macOS image in August 2027.
+        os: [ubuntu-latest, macos-latest, macos-15-intel]
+        # No `default` entry: off Windows the default IS GL3, so it would be the
+        # same build twice.
+        backend: ["NULL", "GL3"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Named one at a time rather than `submodules: recursive`, which would
+      # also fetch third_party/wxWidgets -- 300 MB of working tree to build a
+      # wx this job installs a packaged copy of below.
+      - name: Submodules
+        shell: bash
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
+
+      - name: Check the submodules came down
+        shell: bash
+        run: |
+          test -f third_party/librw/CMakeLists.txt || { echo "third_party/librw is empty"; exit 1; }
+          test -f third_party/SDL/CMakeLists.txt || { echo "third_party/SDL is empty"; exit 1; }
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # SDL's video, audio and input backends, and the OpenGL librw links
+      # against. Not optional: SDL's configure FAILS outright when it can find
+      # neither X11 nor Wayland, and it names the missing package one at a time,
+      # so a short list here reads as an unrelated CMake error several minutes
+      # in. macOS needs none of this -- SDL builds against the system frameworks.
+      #
+      # This is the list SDL3 actually asks for on a 24.04 runner, not a guess.
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxrender-dev libxtst-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev
+
+      # The configurator's wx front end. Installed rather than built from
+      # third_party/wxWidgets, which is a long compile for a window this job
+      # only needs to prove compiles -- and installing it is what the
+      # BFBB_WX=auto path does on a real machine, so this exercises that path
+      # rather than the one nobody uses.
+      - name: wxWidgets
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y --no-install-recommends libwxgtk3.2-dev
+          else
+            brew install wxwidgets
+          fi
+
+      # BFBB_BUILD_32BIT is deliberately NOT named here. CMakeLists.txt builds
+      # 64-bit off Windows on its own -- macOS has no 32-bit runtime at all, and
+      # a 32-bit Linux build needs a multilib copy of every library SDL links --
+      # and if that logic ever breaks, this job is what says so.
+      #
+      # GCC on Linux and AppleClang on macOS -- two front ends neither of the
+      # Windows jobs uses, which is half the point of building here at all. GCC
+      # is the stricter of the two: it makes a pointer truncated to U32 an error
+      # rather than a warning -Wno-everything then swallows, which is how the
+      # last two of those were found.
+      - name: Configure
+        run: >
+          cmake -S . -B build-ci -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBFBB_SDL=vendored
+          -DBFBB_RENDER_BACKENDS=${{ matrix.backend }}
+
+      - name: Build
+        run: cmake --build build-ci
+
+      # NULL runs the tests, as on Windows and for the same reason. The dummy
+      # SDL drivers are not about the NULL backend: the self-test links the real
+      # audio backend on every host, and a runner has no sound card, so without
+      # this the mixer section tests what SDL does when it cannot open a device.
+      - name: Self-tests
+        if: matrix.backend == 'NULL'
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: ./build-ci/rw_selftest
+
+      # pc_selftest calls iMemInit, and Apple Silicon has no low 4 GB for the
+      # game arena to live in -- see bfbb_host_link_options in CMakeLists.txt.
+      # So arm64 macOS builds and does not run, here and on a real Mac, until
+      # the game allocator stops addressing memory with a U32. macos-15-intel
+      # runs it and is what keeps macOS honest in the meantime.
+      - name: Self-tests (game allocator)
+        if: matrix.backend == 'NULL' && matrix.os != 'macos-latest'
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: ./build-ci/pc_selftest
+
+  # Release builds, staged into a folder and uploaded.
+  #
+  # Separate from the jobs above rather than an upload step bolted onto them.
+  # Those build Debug, which is unoptimised and too slow to play; this is the
+  # configuration someone would actually run, and it is the only one worth
+  # downloading.
+  #
+  # One artifact per HOST and word size, not one per backend. The Windows build
+  # carries D3D9, D3D11 and GL3 together and video.backend in config.ini picks
+  # between them, so a machine whose Direct3D driver misbehaves has the OpenGL
+  # one in the same download.
+  #
+  # Windows gets both word sizes. 32-bit is the configuration that gets played
+  # and the one to take by default; 64-bit is what an x64 toolchain -- vcpkg,
+  # FFmpeg, drivers -- needs, and it carries a doubled game heap, so an
+  # out-of-memory bug that the real console would hit can hide in it.
+  #
+  # Each artifact is a folder to run the game out of: the executable, the
+  # configurator, the button glyphs, and whatever DLLs the build staged beside
+  # them. It does NOT contain the game's data. config.ini is not
+  # in it either -- the game writes one with the defaults on first run, and
+  # shipping one would freeze today's defaults into every download.
+  #
+  # What these are missing: FFmpeg is not installed on the runners, so the movie
+  # decoder and the soundtrack override are their stubs -- no FMV, no music
+  # replacement. BUILD-INFO.txt in the artifact says so.
+  package:
+    runs-on: ${{ matrix.os }}
+    # Gating on Windows and reporting elsewhere, the same split the jobs above
+    # use: the Windows Release builds are the ones people download. Both word
+    # sizes gate, so that the 64-bit one is not left to rot green.
+    continue-on-error: ${{ matrix.os != 'windows-latest' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # An empty backend means the host default, which is D3D9, D3D11 and
+          # GL3 on Windows and GL3 elsewhere. `msvc` and `bits` are read only on
+          # Windows; off it the word size is the host's and there is no choice.
+          - { os: windows-latest, backend: "", name: windows-x86,    msvc: x86, bits: "" }
+          - { os: windows-latest, backend: "", name: windows-x86_64, msvc: x64, bits: "-DBFBB_BUILD_32BIT=OFF" }
+          - { os: ubuntu-latest,  backend: "", name: linux-x86_64 }
+          # macos-latest is absent on purpose. An arm64 build compiles and then
+          # is SIGKILLed at exec, because the game arena needs a low 4 GB that
+          # Apple Silicon will not give up -- see the unix job. Publishing a
+          # binary that cannot start is worse than publishing none.
+          - { os: macos-15-intel, backend: "", name: macos-x86_64 }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Named one at a time rather than `submodules: recursive`. wxWidgets is
+      # 300 MB of working tree and only a Windows runner needs it: everywhere
+      # else the step below installs a packaged one, which is what a real
+      # machine does.
+      - name: Submodules
+        shell: bash
+        run: |
+          git submodule update --init --recursive third_party/librw third_party/SDL
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            git submodule update --init --recursive third_party/wxWidgets
+          fi
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # The word size is chosen HERE as much as at the configure below: -m32 is
+      # a request, and clang can only honour it with the x86 MSVC libraries on
+      # LIB. Entering the wrong environment makes CMakeLists.txt fail its own
+      # pointer-size check rather than produce a binary of the wrong width.
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc }}
+
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxrender-dev libxtst-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev
+
+      # The configurator is drawn in wxWidgets, so the package needs one. A
+      # package manager has it off Windows and this is the path a real machine
+      # takes; a Windows runner has none, so BFBB_WX=auto falls back to
+      # third_party/wxWidgets and compiles it. That is minutes, and it is why
+      # the jobs above turn the configurator off -- this one ships it, so it
+      # pays.
+      - name: wxWidgets
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y --no-install-recommends libwxgtk3.2-dev
+          else
+            brew install wxwidgets
+          fi
+
+      # CMAKE_RUNTIME_OUTPUT_DIRECTORY is what makes this a package rather than
+      # a file list: the button glyphs and the DLLs are staged beside bfbb by
+      # POST_BUILD rules that follow the executable, so pointing the executable
+      # at dist/ brings them along and a new one added later needs no edit here.
+      # The tools and self-tests land there too and are pruned after the build.
+      #
+      # RELATIVE, so it lands in build-pkg/dist. Written absolute it would be
+      # ${{ github.workspace }}, which on a Windows runner is D:\a\bfbb\bfbb --
+      # and this step is bash, which eats the backslashes and once linked the
+      # executable to D:abfbbbfbb.
+      #
+      # Off Windows the word size is left to CMakeLists.txt, which has no choice
+      # to make: macOS has no 32-bit runtime and a 32-bit Linux build needs a
+      # multilib toolchain. On Windows it is matrix.bits.
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build-pkg -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBFBB_SDL=vendored
+          ${{ matrix.backend != '' && format('-DBFBB_RENDER_BACKENDS={0}', matrix.backend) || '' }}
+          ${{ matrix.bits }}
+          -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=dist
+          ${{ runner.os == 'Windows' && '-DCMAKE_CXX_COMPILER=clang++' || '' }}
+
+      - name: Build
+        run: cmake --build build-pkg --target bfbb
+
+      # A separate target rather than a second name on the line above, so that
+      # a configurator that stops building is reported as itself instead of as
+      # "the package failed". Every host in this matrix has a front end --
+      # Win32 controls on Windows, the wxWidgets installed above everywhere
+      # else -- so this step failing means one of those went away.
+      - name: Build the configurator
+        shell: bash
+        run: cmake --build build-pkg --target bfbb_config
+
+      - name: Stage
+        shell: bash
+        run: |
+          cd build-pkg
+          rm -f dist/*selftest* dist/fontfit*
+          backends=$(sed -n 's/^BFBB_RENDER_BACKENDS:STRING=//p' CMakeCache.txt)
+          case $(sed -n 's/^BFBB_BUILD_32BIT:BOOL=//p' CMakeCache.txt) in
+            ON) words=32-bit ;;
+            *)  words=64-bit ;;
+          esac
+          cat > dist/BUILD-INFO.txt <<EOF
+          Battle for Bikini Bottom, PC port -- ${{ matrix.name }}
+
+          Built from ${{ github.repository }} ${{ github.ref_name }} at ${{ github.sha }}
+          Render backends: ${backends}
+          Configuration: Release ${words}
+
+          This folder is the program, not the game. It needs the data files from
+          a copy of the Xbox release: start it once, then set [assets] path in
+          the config.ini it writes beside itself and start it again. bfbb_config
+          edits that file with controls on it.
+
+          More than one renderer is built in. video.backend in config.ini picks:
+          auto takes the first of the ones listed above, and naming one is worth
+          trying if the picture is wrong or the game will not start.
+
+          FFmpeg was not available on the build machine, so the movie decoder and
+          the soundtrack override are stubs in this build: cutscenes do not play
+          and [audio] soundtrack does nothing. Everything else is here.
+          EOF
+          ls -R dist
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: bfbb-${{ matrix.name }}
+          path: build-pkg/dist/
+          retention-days: 14
+          if-no-files-found: error

@@ -1,0 +1,217 @@
+#ifndef IHOST_H
+#define IHOST_H
+
+#include <types.h>
+
+#include <stddef.h>
+#include <stdio.h>
+
+// PC-only. There is no GameCube counterpart to this file, for the same reason
+// there is none for iPadHost.h: the console has exactly one implementation of
+// each of these and calls it directly, while a host has several and none of
+// them is guaranteed to exist.
+//
+// This is the seam between the platform layer and the operating system. The
+// i* files above it -- iTime, iMemMgr, iFile, iSystem, isavegame -- hold the
+// mapping onto the game's semantics, which is the part worth reading and the
+// part that is the same everywhere. Everything below it is one OS's spelling.
+//
+// The layer was originally written against POSIX directly, with sys/mman.h,
+// CLOCK_MONOTONIC, localtime_r and opendir at 26 call sites across five files.
+// That is what this replaces. The rule that keeps it from growing back: an
+// #ifdef for the host OS belongs in an iHost*.cpp, never above this line.
+
+// ---------------------------------------------------------------------------
+// Time
+
+// A monotonic clock: unaffected by NTP, DST, or the user editing the wall
+// clock. Retail reads the GameCube timebase, which no user action can move,
+// and a wall-clock jump would otherwise surface as one enormous frame delta.
+// The epoch is arbitrary and means nothing except relative to itself.
+U64 iHostMonotonicNs();
+
+// Sleeps until iHostMonotonicNs() reaches targetNs. Returns immediately if
+// that moment has passed. Absolute rather than a duration so that pacing
+// cannot drift by the cost of computing the interval.
+void iHostSleepUntilNs(U64 targetNs);
+
+// Fields carry the same meaning as struct tm, deliberately: mon is 0-11 and
+// year counts from 1900, so the call sites read the same as they did against
+// localtime_r and the retail-behaviour comments around them still apply.
+struct iHostCalendar
+{
+    S32 sec;
+    S32 min;
+    S32 hour;
+    S32 mday;
+    S32 mon;
+    S32 year;
+    S32 wday;
+};
+
+// Local civil time for a Unix timestamp. Thread-safe: the host-specific
+// reentrant call, because localtime() returns a shared buffer.
+void iHostLocalTimeOf(S64 unixSeconds, iHostCalendar* out);
+
+// Local civil time, now.
+void iHostLocalTime(iHostCalendar* out);
+
+// ---------------------------------------------------------------------------
+// Virtual memory
+
+// Reserves `size` bytes of read/write memory, preferring an address that fits
+// in 32 bits. gMemInfo.DRAM.addr is a U32 and xMemInitHeap does pointer
+// arithmetic on it as an integer, so every address the game allocator hands
+// out has to survive the round trip back to a pointer. malloc on a 64-bit host
+// does not guarantee that; this does its best to, and iMemInit refuses to
+// start above 4 GB rather than truncate silently.
+//
+// Returns NULL on failure. Pair with iHostRelease, passing the same size.
+void* iHostReserveLow(U32 size);
+void iHostRelease(void* p, U32 size);
+
+// ---------------------------------------------------------------------------
+// Filesystem
+//
+// Paths are '/'-separated everywhere above this seam, including on Windows,
+// because that is what the game's own asset names use. A backend that needs a
+// different separator converts on the way through.
+
+bool iHostPathExists(const char* path);
+
+struct iHostFileInfo
+{
+    bool is_dir;
+    bool is_file;
+    U64 size;
+
+    // Last modification, as a Unix timestamp, for iHostLocalTimeOf.
+    S64 mtime;
+};
+
+bool iHostStat(const char* path, iHostFileInfo* out);
+
+// Creates one directory. Succeeds if it already exists, so a caller walking a
+// path does not have to distinguish the two.
+bool iHostMakeDir(const char* path);
+
+bool iHostRemoveFile(const char* path);
+
+// Opens `path` for writing and FAILS if anything is already there, rather than
+// truncating it. NULL if the file exists or could not be made.
+//
+// fopen's "wx" mode is the same thing and is not usable here: it is C11, and
+// the msvcrt.dll that a MinGW build links has no such mode -- fopen returns
+// NULL for every path, so the port silently could not write its first
+// config.ini. Creating the file is the exclusivity test, so a caller cannot
+// substitute a check that it exists first: two launches at once would both
+// pass that and the second would erase the first's file.
+FILE* iHostCreateNewFile(const char* path);
+
+// Removes an empty directory.
+bool iHostRemoveDir(const char* path);
+
+// Renames `from` over `to`, replacing `to` if it exists. NOT plain rename():
+// POSIX rename() replaces silently, but the Windows CRT's fails outright when
+// the destination exists, which would break every save after the first --
+// isavegame writes to a temporary and renames it over the real file precisely
+// so that a crash mid-write cannot destroy the previous save.
+bool iHostRenameReplace(const char* from, const char* to);
+
+// Bytes available to this user on the volume holding `path`. False if the host
+// cannot say.
+bool iHostFreeBytes(const char* path, U64* out);
+
+// Directory iteration. iHostDirNext returns NULL at the end; the string it
+// returns is valid until the next call on the same handle. "." and ".." are
+// not reported -- no caller wants them, and every caller would have to filter.
+struct iHostDir;
+
+iHostDir* iHostDirOpen(const char* path);
+const char* iHostDirNext(iHostDir* d);
+void iHostDirClose(iHostDir* d);
+
+// The platform's per-user data directory, with no game-specific suffix --
+// $XDG_DATA_HOME or ~/.local/share on Linux, ~/Library/Application Support on
+// macOS, %APPDATA% on Windows. Where the saves go *within* that is the game's
+// policy and lives in isavegame.cpp.
+// False if the host has no such concept, in which case the caller falls back
+// to a relative path.
+bool iHostUserDataDir(char* out, size_t outsize);
+
+// The system's scratch directory -- $TMPDIR or /tmp on POSIX, GetTempPath on
+// Windows. No trailing separator. Used by the selftest; nothing in the game
+// depends on it.
+bool iHostTempDir(char* out, size_t outsize);
+
+// The directory the running executable is in, with no trailing separator.
+//
+// NOT the working directory, and the difference is the point: the port is run
+// as `build-pc/bfbb.exe` from wherever, so the two are usually not the same
+// place, and a file that ships beside the binary can only be found by asking.
+// config.ini is the caller. False if the host cannot say, in which case the
+// caller falls back to a relative path.
+bool iHostExeDir(char* out, size_t outsize);
+
+// Sets an environment variable for this process, overwriting any existing
+// value; a NULL value removes it. POSIX spells these setenv/unsetenv and
+// Windows spells both _putenv_s.
+bool iHostSetEnv(const char* name, const char* value);
+
+// Sets an environment variable that a process started by iHostRunDetached
+// inherits.
+//
+// Not iHostSetEnv. Windows keeps two environments -- the CRT's, which
+// _putenv_s behind iHostSetEnv writes, and the Win32 block, which is the one a
+// child is given -- and writing the wrong one is silent. POSIX has only the
+// one and both calls do the same thing there.
+bool iHostSetChildEnv(const char* name, const char* value);
+
+// Start `exe` with `workingDir` as its working directory and return without
+// waiting for it. The child outlives this process.
+//
+// False means the child could not be started AT ALL. A child that starts and
+// then fails to run is not reported, because nothing here waits around to hear
+// about it -- the caller checks that `exe` exists first and that is the whole
+// of the check.
+bool iHostRunDetached(const char* exe, const char* workingDir);
+
+// `path` made absolute, without requiring it to exist -- it names a file that
+// is about to be written as often as one that is there. Separators in `out`
+// are '/', as iHostExeDir gives them.
+//
+// A relative path is resolved against the working directory. False leaves
+// `out` alone and means the caller should carry on with what it had.
+bool iHostAbsolutePath(const char* path, char* out, size_t outsize);
+
+// Print the calling stack, symbolised, prefixed with `why`.
+//
+// For DIAGNOSTICS, not for errors: the question it answers is "which game code
+// leads here", which comes up constantly in a port because the platform layer
+// sees a call with no context and the code that made it is 200 files away.
+// The alternative is guessing from the arguments, which is slow and often
+// wrong. A host that cannot symbolise its own stack prints nothing.
+void iHostPrintCallers(const char* why, S32 maxFrames);
+
+// Case-insensitive compare, for the disc filesystem's benefit. POSIX spells it
+// strcasecmp and Windows spells it _stricmp.
+S32 iHostStrCaseCmp(const char* a, const char* b);
+
+// Names the backend that was linked in, for the startup log.
+const char* iHostName();
+
+// A fatal message somewhere the player will actually see it.
+//
+// stdout is not that place any more. The port defaults to fullscreen and is
+// started from a shortcut as often as from a prompt, so a startup failure
+// printed to a console nobody is looking at is a game that appears to do
+// nothing at all. This is for the handful of errors that stop the game before
+// it can draw its own -- and only those, because a dialog box in a frame loop
+// would be worse than useless.
+//
+// Blocks until dismissed. Returns having done nothing on a host with no way to
+// show one, so a caller must still print the same text and must not rely on
+// this to have reached anyone.
+void iHostErrorBox(const char* title, const char* message);
+
+#endif

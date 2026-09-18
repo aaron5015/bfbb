@@ -1,0 +1,1497 @@
+#include "zNPCSupport.h"
+#include "zBuddy.h"
+
+#include <types.h>
+#include <xstransvc.h>
+#include <rtslerp.h>
+
+#include "zGlobals.h"
+#include "zNPCHazard.h"
+#include "zNPCGlyph.h"
+#include "zNPCSupplement.h"
+#include "zNPCMgr.h"
+#include "zNPCTypeRobot.h"
+#include "zNPCFXCinematic.h"
+#include "zRenderState.h"
+
+#include "xMathInlines.h"
+#include "xMath3.h"
+#include "xutil.h"
+#include "xQuickCull.h"
+#include "xCollide.h"
+
+// These structs were used in deadstripped functions.
+// This function is here to force the symbols to be linked.
+//
+// The target opens .rodata with the same eleven unreferenced all-zero
+// templates other units carry -- four of 0x0C and seven of 0x28 -- which
+// offsets every later .rodata relocation.
+void __deadstripped_zNPCSupport_head()
+{
+    const char _405[0x0C] = {};
+    const char _406[0x0C] = {};
+    const char _410[0x0C] = {};
+    const char _441[0x0C] = {};
+
+    const char _597[0x28] = {};
+    const char _598[0x28] = {};
+    const char _599[0x28] = {};
+    const char _600[0x28] = {};
+    const char _601[0x28] = {};
+    const char _602[0x28] = {};
+    const char _603[0x28] = {};
+}
+
+#define MAX_FIREWORK 32
+
+static NPCWidget g_npc_widgets[1];
+static U32 g_hash_uiwidgets[1] = { 0 };
+static char* g_strz_uiwidgets[1] = { "MNU4 NPCTALK" };
+
+static U32 sNPCSndFx[eNPCSnd_Total] = {};
+static U32 sNPCSndID[eNPCSnd_Total] = {};
+static F32 sNPCSndFxVolume[eNPCSnd_Total] = {};
+
+F32 Firework::acc_thrust = 15.0f;
+F32 Firework::acc_gravity = -10.0f;
+
+void NPCSupport_Startup()
+{
+    zNPCHazard_Startup();
+    zNPCGlyph_Startup();
+    NPCWidget_Startup();
+    NPCSupplement_Startup();
+}
+
+void NPCSupport_Shutdown()
+{
+    zNPCHazard_Shutdown();
+    zNPCGlyph_Shutdown();
+    NPCWidget_Shutdown();
+    NPCSupplement_Shutdown();
+}
+
+void NPCSupport_ScenePrepare()
+{
+    zNPCHazard_ScenePrepare();
+    zNPCGlyph_ScenePrepare();
+    NPCWidget_ScenePrepare();
+    NPCSupplement_ScenePrepare();
+    Firework_ScenePrepare();
+    NPCC_ForceTalkOk();
+}
+
+void NPCSupport_SceneFinish()
+{
+    zNPCHazard_SceneFinish();
+    zNPCGlyph_SceneFinish();
+    NPCWidget_SceneFinish();
+    NPCSupplement_SceneFinish();
+    Firework_SceneFinish();
+}
+
+void NPCSupport_ScenePostInit()
+{
+    zNPCHazard_ScenePostInit();
+    zNPCGlyph_ScenePostInit();
+    NPCWidget_ScenePostInit();
+    NPCSupplement_ScenePostInit();
+    zNPC_SNDInit();
+}
+
+void NPCSupport_SceneReset()
+{
+    zNPCHazard_SceneReset();
+    zNPCGlyph_SceneReset();
+    NPCWidget_SceneReset();
+    NPCSupplement_SceneReset();
+    Firework_SceneReset(0);
+}
+
+void NPCSupport_Timestep(F32 dt)
+{
+    zNPCGlyph_Timestep(dt);
+    zNPCHazard_Timestep(dt);
+    NPCSupplement_Timestep(dt);
+    Firework_Timestep(dt);
+}
+
+void NPCWidget_Startup()
+{
+    for (S32 i = 0; i < NPC_WIDGE_NOMORE; i++)
+    {
+        g_hash_uiwidgets[i] = xStrHash(g_strz_uiwidgets[i]);
+    }
+}
+
+void NPCWidget_Shutdown()
+{
+}
+
+void NPCWidget_ScenePrepare()
+{
+}
+
+void NPCWidget_SceneFinish()
+{
+    NPCWidget_SceneReset();
+}
+
+void NPCWidget_SceneReset() // Come back after more data is in
+{
+    g_npc_widgets->Reset();
+}
+
+void NPCWidget::Reset()
+{
+}
+
+S32 NPCWidget::On(const zNPCCommon* npc, S32 theman)
+{
+    if ((!theman && !NPCIsTheLocker(npc)) && (((S32)IsLocked() != 0) || (!Lock(npc))))
+    {
+        return 0;
+    }
+    if (IsVisible())
+    {
+        return 1;
+    }
+    else
+    {
+        zEntEvent(base_widge, 0x5e);
+        zEntEvent(base_widge, 0x03);
+        return 1;
+    }
+
+    return 1;
+}
+
+S32 NPCWidget::Off(const zNPCCommon* npc, S32 theman)
+{
+    if (!theman && !this->NPCIsTheLocker(npc))
+    {
+        return 0;
+    }
+
+    if (npc)
+    {
+        this->Unlock(npc);
+    }
+
+    zEntEvent(this->base_widge, eEventInvisible);
+    zEntEvent(this->base_widge, eEventUIFocusOff_Unselect);
+    return 1;
+}
+
+S32 NPCWidget::Unlock(const zNPCCommon* npc)
+{
+    if (npc_ownerlock == NULL)
+    {
+        return 1;
+    }
+    if (npc != npc_ownerlock)
+    {
+        return 0;
+    }
+    npc_ownerlock = NULL;
+    return 1;
+}
+
+S32 NPCWidget::NPCIsTheLocker(const zNPCCommon* npc_lock)
+{
+    if ((S32)IsLocked() == 0)
+    {
+        return 0;
+    }
+    else
+    {
+        return npc_lock == npc_ownerlock ? 1 : 0;
+    }
+}
+
+S32 NPCWidget::IsVisible()
+{
+    if (base_widge == NULL)
+    {
+        return 0;
+    }
+    else if (base_widge->baseType != 0x21)
+    {
+        return 0;
+    }
+    else
+    {
+        return xEntIsVisible((xEnt*)base_widge);
+    }
+}
+
+S32 NPCWidget::Lock(const zNPCCommon* npc)
+{
+    if ((npc_ownerlock != NULL) && (npc != npc_ownerlock))
+    {
+        return 0;
+    }
+    npc_ownerlock = (zNPCCommon*)npc;
+    return 1;
+}
+
+void NPCWidget_ScenePostInit()
+{
+    g_npc_widgets->Init(NPC_WIDGE_TALK);
+}
+
+NPCWidget* NPCWidget_Find(en_NPC_UI_WIDGETS which)
+{
+    return &g_npc_widgets[(int)which];
+}
+
+void NPCWidget::Init(en_NPC_UI_WIDGETS which)
+{
+    idxID = which;
+    base_widge = zSceneFindObject(g_hash_uiwidgets[idxID]);
+}
+
+void NPCTarget::TargetSet(xEnt* ent, int b)
+{
+    ent_target = ent;
+    if ((ent != NULL) && (b != 0))
+    {
+        typ_target = NPC_TGT_PLYR;
+        return;
+    }
+    if (ent != NULL)
+    {
+        typ_target = NPC_TGT_ENT;
+        return;
+    }
+    typ_target = NPC_TGT_NONE;
+}
+
+void NPCTarget::TargetSetBuddy(const xVec3* pos)
+{
+    buddy_target = pos;
+    typ_target = pos != NULL ? NPC_TGT_BUDDY : NPC_TGT_NONE;
+}
+
+void NPCTarget::TargetClear()
+{
+    ent_target = 0; //0x4?
+    typ_target = NPC_TGT_NONE;
+}
+
+S32 NPCTarget::FindNearest(S32 flg_consider, xBase* skipme, xVec3* from, F32 dst_max)
+{
+    S32 found = 0;
+    st_XORDEREDARRAY* npclist;
+    F32 ds2_best;
+    zNPCCommon *npc, *npc_best;
+    xVec3 vec = {};
+    F32 fv;
+    S32 i, ntyp;
+
+    npc_best = NULL;
+    ds2_best = (dst_max < 0.0f) ? FLOAT_MAX : SQ(dst_max);
+
+    if (flg_consider & 0x1)
+    {
+        this->TargetSet(&globals.player.ent, 1);
+
+        if (from)
+        {
+            xVec3Sub(&vec, xEntGetPos(&globals.player.ent), from);
+            ds2_best = xVec3Length2(&vec);
+        }
+    }
+
+    if (from && (flg_consider & 0x100) && zBuddy_IsAvailable())
+    {
+        const xVec3* buddy_pos = zBuddy_GetPosition();
+        if (buddy_pos != NULL)
+        {
+            xVec3Sub(&vec, buddy_pos, from);
+            if (flg_consider & 0x80)
+            {
+                vec.y = 0.0f;
+            }
+
+            fv = xVec3Length2(&vec);
+            if (fv <= ds2_best)
+            {
+                ds2_best = fv;
+                this->TargetSetBuddy(buddy_pos);
+                found = 1;
+            }
+        }
+    }
+
+    if (from && (flg_consider & 0x1E))
+    {
+        npclist = zNPCMgr_GetNPCList();
+
+        for (i = 0; i < npclist->cnt; i++)
+        {
+            npc = (zNPCCommon*)npclist->list[i];
+            ntyp = npc->SelfType();
+
+            if (npc == skipme)
+                continue;
+
+            if (((ntyp & 0xFFFFFF00) != 'NTT\0' || (flg_consider & 0x4)) &&
+                ((ntyp & 0xFFFFFF00) != 'NTR\0' || (flg_consider & 0x2)) &&
+                ((ntyp & 0xFFFFFF00) != 'NTF\0' || (flg_consider & 0x8)) &&
+                ((ntyp & 0xFFFFFF00) != 'NTA\0' || (flg_consider & 0x10)))
+            {
+                if (npc->IsAlive())
+                {
+                    xVec3Sub(&vec, xEntGetPos(npc), from);
+                    if (flg_consider & 0x80)
+                    {
+                        vec.y = 0.0f;
+                    }
+
+                    fv = xVec3Length2(&vec);
+                    if (fv > ds2_best)
+                        continue;
+
+                    ds2_best = fv;
+                    npc_best = npc;
+                    found = 1;
+                }
+            }
+        }
+
+        if (found)
+        {
+            this->TargetSet(npc_best, 0);
+        }
+    }
+
+    return found;
+}
+
+// Four more unreferenced templates the target holds between the one
+// NPCTarget::FindNearest creates and the one NPCTarget::InCylinder creates.
+void __deadstripped_zNPCSupport_target()
+{
+    const char _1093[0x24] = {};
+    const char _1094[0x50] = {};
+    const char _1095[0x0C] = {};
+    const char _1123[0x0C] = {};
+}
+
+S32 NPCTarget::InCylinder(xVec3* from, F32 rad, F32 hyt, F32 off)
+{
+    S32 inrange = 1;
+
+    xVec3 vec = {};
+    this->PosGet(&vec);
+    xVec3SubFrom(&vec, from);
+
+    F32 upper = hyt + off;
+    F32 lower = upper - hyt;
+
+    if (vec.y > upper)
+    {
+        inrange = 0;
+    }
+    else if (vec.y < lower)
+    {
+        inrange = 0;
+    }
+    else if (xVec3Length2(&vec) > SQ(rad))
+    {
+        inrange = 0;
+    }
+
+    return inrange;
+}
+
+// Three more unreferenced templates the target holds after the one
+// NPCTarget::InCylinder creates; the last is { 0.0f, 0.0f, 1.0f }.
+void __deadstripped_zNPCSupport_cylinder()
+{
+    const char _1146[0x0C] = {};
+    const char _1147[0x0C] = {};
+    const xVec3 _1375 = { 0.0f, 0.0f, 1.0f };
+}
+
+S32 NPCTarget::IsDead()
+{
+    S32 dead = 0;
+
+    switch (this->typ_target)
+    {
+    case NPC_TGT_PLYR:
+        if (globals.player.Health < 1)
+        {
+            dead = 1;
+        }
+        break;
+    case NPC_TGT_ENT:
+        if (this->ent_target->baseType == eBaseTypeNPC)
+        {
+            if (!((zNPCCommon*)this->ent_target)->IsAlive())
+            {
+                dead = 1;
+            }
+        }
+        break;
+    case NPC_TGT_BASE:
+        break;
+    case NPC_TGT_BUDDY:
+        if (buddy_target == NULL)
+        {
+            dead = 1;
+        }
+        break;
+    }
+
+    return dead;
+}
+
+void NPCLaser::Render(xVec3* pos_src, xVec3* pos_tgt)
+{
+    xVec3 pos_beg;
+    xVec3Copy(&pos_beg, pos_src);
+
+    xVec3 pos_end;
+    xVec3Copy(&pos_end, pos_tgt);
+
+    xVec3 dir_axis;
+    xVec3Sub(&dir_axis, &pos_end, &pos_beg);
+    xVec3Normalize(&dir_axis, &dir_axis);
+
+    xVec3 dir_horz;
+    xVec3Cross(&dir_horz, &globals.camera.mat.at, &dir_axis);
+
+    F32 ds2 = xVec3Length2(&dir_horz);
+    if (ds2 < 0.00001f)
+    {
+        xVec3Copy(&dir_horz, &g_X3);
+    }
+    else
+    {
+        xVec3SMulBy(&dir_horz, 1.0f / xsqrt(ds2));
+    }
+
+    xVec3 dir_vert;
+    xVec3Cross(&dir_vert, &dir_horz, &dir_axis);
+
+    S32 i;
+
+    static RwIm3DVertex laser_vtxbuf[2][14];
+    RwIm3DVertex* vtx_horz = laser_vtxbuf[0];
+    RwIm3DVertex* vtx_vert = laser_vtxbuf[1];
+
+    for (i = 0; i <= 6; i++)
+    {
+        F32 rat = (F32)i / 6.0f;
+        F32 rad = LERP(rat, this->radius[0], this->radius[1]);
+
+        xVec3 pos_lerp;
+        pos_lerp.x = LERP(rat, pos_beg.x, pos_end.x);
+        pos_lerp.y = LERP(rat, pos_beg.y, pos_end.y);
+        pos_lerp.z = LERP(rat, pos_beg.z, pos_end.z);
+
+        U8 cr = LERP(rat, this->rgba[0].red, this->rgba[1].red);
+        U8 cg = LERP(rat, this->rgba[0].green, this->rgba[1].green);
+        U8 cb = LERP(rat, this->rgba[0].blue, this->rgba[1].blue);
+        U8 ca = LERP(rat, this->rgba[0].alpha, this->rgba[1].alpha);
+
+        F32 fv = 1.0f - rat;
+        F32 u = this->uv_base[0] + fv;
+        F32 v = this->uv_base[1] + fv;
+
+        while (u > 1.0f)
+            u -= 1.0f;
+        while (v > 1.0f)
+            v -= 1.0f;
+
+        xVec3 pos_vtx;
+
+        xVec3SMul(&pos_vtx, &dir_horz, rad);
+        xVec3AddTo(&pos_vtx, &pos_lerp);
+        RwIm3DVertexSetPos(&vtx_horz[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_horz[0], cr, cg, cb, ca);
+        RwIm3DVertexSetUV(&vtx_horz[0], 0.0f, v);
+
+        xVec3SMul(&pos_vtx, &dir_horz, -rad);
+        xVec3AddTo(&pos_vtx, &pos_lerp);
+        RwIm3DVertexSetPos(&vtx_horz[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_horz[1], cr, cg, cb, ca);
+        RwIm3DVertexSetUV(&vtx_horz[1], 1.0f, v);
+
+        vtx_horz += 2;
+
+        xVec3SMul(&pos_vtx, &dir_vert, rad);
+        xVec3AddTo(&pos_vtx, &pos_lerp);
+        RwIm3DVertexSetPos(&vtx_vert[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_vert[0], cr, cg, cb, ca);
+        RwIm3DVertexSetUV(&vtx_vert[0], 0.0f, v);
+
+        xVec3SMul(&pos_vtx, &dir_vert, -rad);
+        xVec3AddTo(&pos_vtx, &pos_lerp);
+        RwIm3DVertexSetPos(&vtx_vert[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_vert[1], cr, cg, cb, ca);
+        RwIm3DVertexSetUV(&vtx_vert[1], 1.0f, v);
+
+        vtx_vert += 2;
+    }
+
+    _SDRenderState old_rendstat = zRenderStateCurrent();
+    if (old_rendstat == SDRS_Unknown)
+    {
+        old_rendstat = SDRS_Default;
+    }
+
+    zRenderState(SDRS_NPCVisual);
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)this->rast_laser);
+    RwIm3DTransform(laser_vtxbuf[0], 14, NULL,
+                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    RwIm3DEnd();
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)this->rast_laser);
+    RwIm3DTransform(laser_vtxbuf[1], 14, NULL,
+                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    RwIm3DEnd();
+
+    zRenderState(old_rendstat);
+}
+
+void NPCCone::RenderCone(xVec3* pos_tiptop, xVec3* pos_botcenter)
+{
+    F32 u_tip = this->uv_tip[0] + 0.5f * this->uv_slice[0];
+    F32 v_tip = this->uv_tip[1];
+    F32 u_base = this->uv_tip[0] + this->uv_slice[0];
+    F32 v_base = this->uv_tip[1] + this->uv_slice[1];
+    RwRGBA rgba_top = this->rgba_top;
+    RwRGBA rgba_bot = this->rgba_bot;
+    xVec3 pos_top = *pos_tiptop;
+    const xVec3 pos_bot = *pos_botcenter;
+
+    void* mem = xMemPushTemp(10 * sizeof(RwIm3DVertex));
+    if (!mem)
+    {
+        return;
+    }
+
+    memset(mem, 0, 10 * sizeof(RwIm3DVertex));
+
+    RwIm3DVertex* vert_list = (RwIm3DVertex*)mem;
+    RwIm3DVertex* vtx = vert_list + 1;
+
+    RwIm3DVertexSetPos(&vert_list[0], pos_top.x, pos_top.y, pos_top.z);
+    RwIm3DVertexSetRGBA(&vert_list[0], rgba_top.red, rgba_top.green, rgba_top.blue, rgba_top.alpha);
+    RwIm3DVertexSetUV(&vert_list[0], u_tip, v_tip);
+
+    for (S32 i = 0; i < 8; i++)
+    {
+        F32 ang_seg = i * (PI / 4);
+        F32 sn = isin(ang_seg);
+        F32 cs = icos(ang_seg);
+
+        xVec3 pos_vtx;
+        pos_vtx.x = sn;
+        pos_vtx.y = 0.0f;
+        pos_vtx.z = cs;
+        pos_vtx *= this->rad_cone;
+        pos_vtx += pos_bot;
+
+        F32 px = pos_vtx.x;
+        F32 py = pos_vtx.y;
+        F32 pz = pos_vtx.z;
+        RwIm3DVertexSetPos(vtx, px, py, pz);
+        RwIm3DVertexSetRGBA(vtx, rgba_bot.red, rgba_bot.green, rgba_bot.blue, rgba_bot.alpha);
+
+        F32 u_off = 1 / 8.0f * i;
+
+        vtx->u = u_base + u_off;
+        vtx->v = v_base;
+
+        vtx++;
+    }
+
+    *vtx = vert_list[1];
+    vtx->u = u_base + this->uv_slice[0];
+    vtx->v = v_base;
+
+    _SDRenderState old_rendstat = zRenderStateCurrent();
+    if (old_rendstat == SDRS_Unknown)
+    {
+        old_rendstat = SDRS_Default;
+    }
+
+    zRenderState(SDRS_NPCVisual);
+
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)this->rast_cone);
+    RwIm3DTransform(vert_list, 10, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRIFAN);
+    RwIm3DEnd();
+
+    zRenderState(old_rendstat);
+
+    xMemPopTemp(vert_list);
+}
+
+void NPCBlinker::Reset()
+{
+    tmr_uvcell = -1.0f;
+    idx_uvcell = 0;
+}
+
+void NPCBlinker::Update(F32 dt, F32 ratio, F32 tym_slow, F32 tym_fast)
+{
+    if (tmr_uvcell < 0.0f)
+    {
+        idx_uvcell++;
+        if (3 < idx_uvcell)
+        {
+            idx_uvcell = 0;
+        }
+        tmr_uvcell = LERP(SQ(ratio), tym_slow, tym_fast);
+    }
+    tmr_uvcell = MAX(-1.0f, tmr_uvcell - dt);
+}
+
+void NPCBlinker::IndexToUVCoord(S32 param_1, F32* param_2, F32* param_3)
+{
+    S32 shift = ((U32)param_1 >> 31);
+    S32 uVar1 = ((param_1 & 1) ^ shift) - shift;
+
+    param_2[0] = uVar1 * 0.5f;
+    param_2[1] = ((param_1 - uVar1) / 2) * 0.5f;
+
+    param_3[0] = param_2[0] + 0.5f;
+    param_3[1] = param_2[1] + 0.5f;
+}
+
+void NPCBlinker::Render(const xVec3* pos_blink, F32 rad_blink, const RwRaster* rast_blink)
+{
+    static F32 dst_toCamMax = SQ(25.0f);
+
+    if (NPCC_ds2_toCam(pos_blink, NULL) > dst_toCamMax)
+    {
+        return;
+    }
+
+    xMat3x3 mat;
+    xVec3 dir_up;
+    xVec3 dir_card;
+    xVec3 dir_perp;
+    xVec3 pos_top;
+    xVec3 pos_bot;
+    xVec3 pos_lerp;
+    xVec3 pos_vtx;
+    F32 uv_lo[2];
+    F32 uv_hi[2];
+    RwRGBA rgba = { 255, 255, 255, 255 };
+
+    xMat3x3LookAt(&mat, pos_blink, &globals.camera.mat.pos);
+
+    xVec3Add(&dir_card, &mat.at, &mat.right);
+    xVec3Normalize(&dir_card, &dir_card);
+
+    xVec3Sub(&dir_perp, &mat.at, &mat.right);
+    xVec3Normalize(&dir_perp, &dir_perp);
+
+    xVec3Copy(&dir_up, &mat.up);
+
+    xVec3Copy(&pos_top, pos_blink);
+    xVec3Copy(&pos_bot, pos_blink);
+
+    xVec3AddScaled(&pos_top, &dir_up, rad_blink);
+    xVec3AddScaled(&pos_bot, &dir_up, -rad_blink);
+
+    IndexToUVCoord(idx_uvcell, uv_lo, uv_hi);
+
+    S32 i;
+
+    static RwIm3DVertex blink_vtxbuf[2][14];
+    RwIm3DVertex* vtx_horz = blink_vtxbuf[0];
+    RwIm3DVertex* vtx_vert = blink_vtxbuf[1];
+
+    for (i = 0; i <= 6; i++)
+    {
+        F32 rat = (F32)i / 6.0f;
+        F32 px, py, pz;
+
+        pos_lerp.x = LERP(rat, pos_top.x, pos_bot.x);
+        pos_lerp.y = LERP(rat, pos_top.y, pos_bot.y);
+        pos_lerp.z = LERP(rat, pos_top.z, pos_bot.z);
+
+        F32 v = LERP(rat, uv_lo[1], uv_hi[1]);
+
+        pos_vtx = dir_card * rad_blink;
+        pos_vtx += pos_lerp;
+        px = pos_vtx.x;
+        py = pos_vtx.y;
+        pz = pos_vtx.z;
+        RwIm3DVertexSetPos(&vtx_horz[0], px, py, pz);
+        RwIm3DVertexSetRGBA(&vtx_horz[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_horz[0], uv_lo[0], v);
+
+        pos_vtx = dir_card * -rad_blink;
+        pos_vtx += pos_lerp;
+        px = pos_vtx.x;
+        py = pos_vtx.y;
+        pz = pos_vtx.z;
+        RwIm3DVertexSetPos(&vtx_horz[1], px, py, pz);
+        RwIm3DVertexSetRGBA(&vtx_horz[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_horz[1], uv_hi[0], v);
+
+        vtx_horz += 2;
+
+        pos_vtx = dir_perp * -rad_blink;
+        pos_vtx += pos_lerp;
+        px = pos_vtx.x;
+        py = pos_vtx.y;
+        pz = pos_vtx.z;
+        RwIm3DVertexSetPos(&vtx_vert[0], px, py, pz);
+        RwIm3DVertexSetRGBA(&vtx_vert[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_vert[0], uv_lo[0], v);
+
+        pos_vtx = dir_perp * rad_blink;
+        pos_vtx += pos_lerp;
+        px = pos_vtx.x;
+        py = pos_vtx.y;
+        pz = pos_vtx.z;
+        RwIm3DVertexSetPos(&vtx_vert[1], px, py, pz);
+        RwIm3DVertexSetRGBA(&vtx_vert[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_vert[1], uv_hi[0], v);
+
+        vtx_vert += 2;
+    }
+
+    _SDRenderState old_rendstat = zRenderStateCurrent();
+    if (old_rendstat == SDRS_Unknown)
+    {
+        old_rendstat = SDRS_Default;
+    }
+
+    zRenderState(SDRS_NPCVisual);
+
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)rast_blink);
+    RwIm3DTransform(blink_vtxbuf[0], 14, NULL,
+                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    RwIm3DEnd();
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)rast_blink);
+    RwIm3DTransform(blink_vtxbuf[1], 14, NULL,
+                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    RwIm3DEnd();
+
+    zRenderState(old_rendstat);
+}
+
+static Firework g_fireworks[MAX_FIREWORK];
+
+void Firework_Release(Firework* firework)
+{
+    firework->Cleanup();
+    firework->fwstate = FW_STAT_UNUSED;
+}
+
+void Firework_ScenePrepare()
+{
+    NPAR_PartySetup(NPAR_TYP_FIREWORKS, NULL, NULL);
+    Firework_SceneReset(0);
+}
+
+void Firework_SceneFinish()
+{
+    Firework_SceneReset(1);
+}
+
+void Firework::Cleanup()
+{
+}
+
+void NPAR_EmitFWExhaust(const xVec3* pos, const xVec3* vel);
+
+void Firework::Update(F32 dt)
+{
+    switch (this->fwstate)
+    {
+    case FW_STAT_FLIGHT:
+        this->FlyFlyFly(dt);
+        if (this->tmr_remain < 0.0f)
+        {
+            this->fwstate = FW_STAT_BOOM;
+        }
+        break;
+    case FW_STAT_BOOM:
+        this->Detonate();
+        this->fwstate = FW_STAT_DONE;
+        break;
+    case FW_STAT_DONE:
+        break;
+    }
+
+    this->tmr_remain = MAX(-1.0f, this->tmr_remain - dt);
+}
+
+void Firework::FlyFlyFly(F32 dt)
+{
+    F32 ratio = this->tmr_remain / this->tym_lifespan;
+    F32 pam_life = 1.0f - CLAMP(ratio, 0.0f, 1.0f);
+    if (pam_life < 0.75f)
+    {
+        xVec3 dir_trav = this->vel;
+        dir_trav.normalize();
+
+        this->vel += dir_trav * (Firework::acc_thrust * dt);
+    }
+
+    this->vel += g_NY3 * (Firework::acc_gravity * dt);
+
+    NPAR_EmitFWExhaust(&this->pos, &g_O3);
+}
+
+void Firework::Detonate()
+{
+    xUtil_yesno(0.25f);
+}
+
+void NPCC_ang_toXZDir(F32 angle, xVec3* dir)
+{
+    dir->x = isin(angle);
+    dir->y = 0.0f;
+    dir->z = icos(angle);
+}
+
+F32 NPCC_dir_toXZAng(const xVec3* dir)
+{
+    return xatan2(dir->x, dir->z);
+}
+
+F32 NPCC_aimMiss(xVec3* dir_aim, xVec3* pos_src, xVec3* pos_tgt, F32 dst_miss, xVec3* pos_miss)
+{
+    return NPCC_aimVary(dir_aim, pos_src, pos_tgt, dst_miss, 8, pos_miss);
+}
+
+F32 NPCC_aimVary(xVec3* dir_aim, xVec3* pos_src, xVec3* pos_tgt, F32 dst_vary, S32 flg_vary,
+                 xVec3* pos_aimPoint)
+{
+    F32 mag_toFake;
+    F32 mag_updown;
+    F32 mag_vary;
+    F32 dst_toFake;
+    xVec3 dir_left = {};
+    xVec3 dir_toFake = {};
+    xVec3 dir_toReal = {};
+    xVec3 vec_offset = {};
+    xVec3 pos_tgtFake = {};
+
+    dst_toFake = 0.0f;
+
+    xVec3Sub(&dir_toReal, pos_tgt, pos_src);
+
+    if (flg_vary & 0x10)
+    {
+        dir_toReal.y = 0.0f;
+    }
+
+    mag_vary = xVec3Length(&dir_toReal);
+    if (mag_vary < 0.001f)
+    {
+        if (mag_vary > 0.0f)
+        {
+            xVec3SMulBy(&dir_toReal, 100000.0f);
+            xVec3Normalize(&dir_toReal, &dir_toReal);
+        }
+        else
+        {
+            xVec3Copy(dir_aim, &g_X3);
+        }
+
+        if (pos_aimPoint)
+        {
+            xVec3Copy(pos_aimPoint, pos_tgt);
+        }
+
+        return mag_vary;
+    }
+
+    xVec3SMulBy(&dir_toReal, 1.0f / mag_vary);
+    xVec3Cross(&dir_left, &g_Y3, &dir_toReal);
+
+    if (flg_vary & 0x8)
+    {
+        mag_updown = dst_vary;
+    }
+    else
+    {
+        mag_updown = 2.0f * (xurand() - 0.5f) * dst_vary;
+
+        F32 fv;
+        if ((flg_vary & 0x1) && (flg_vary & 0x2))
+        {
+            fv = 2.0f * (xurand() - 0.5f);
+        }
+        else if (flg_vary == 0x1)
+        {
+            fv = xurand();
+        }
+        else if (flg_vary == 0x2)
+        {
+            fv = -xurand();
+        }
+        else
+        {
+            fv = 0.0f;
+        }
+
+        dst_toFake = fv * dst_vary;
+    }
+
+    xVec3AddScaled(&vec_offset, &dir_left, mag_updown);
+    xVec3AddScaled(&vec_offset, &g_Y3, dst_toFake);
+    xVec3Add(&pos_tgtFake, pos_tgt, &vec_offset);
+    xVec3Sub(&dir_toFake, &pos_tgtFake, pos_src);
+
+    mag_toFake = xVec3Normalize(dir_aim, &dir_toFake);
+
+    if (pos_aimPoint)
+    {
+        xVec3Copy(pos_aimPoint, &pos_tgtFake);
+    }
+
+    return (flg_vary & 0x4) ? mag_toFake : mag_vary;
+}
+
+S32 NPCC_chk_hitEnt(xEnt* tgt, xBound* bnd, xCollis* collide)
+{
+    S32 hittgt = 0;
+    xCollis* colrec;
+    xCollis lcl_collide = {};
+
+    if (collide)
+    {
+        colrec = collide;
+    }
+    else
+    {
+        colrec = &lcl_collide;
+    }
+
+    colrec->optr = tgt;
+    colrec->oid = tgt->id;
+
+    if (collide)
+    {
+        colrec->flags = k_HIT_0xF00 | k_HIT_CALC_HDNG;
+    }
+    else
+    {
+        colrec->flags = 0;
+    }
+
+    xQuickCullForEverything(&bnd->qcd);
+    xBoundHitsBound(bnd, &tgt->bound, colrec);
+
+    if (colrec->flags & ((U32)(1 << 0)))
+    {
+        hittgt = 1;
+    }
+
+    return hittgt;
+}
+
+// Three more unreferenced templates the target holds after the xCollis one
+// NPCC_chk_hitEnt creates.
+void __deadstripped_zNPCSupport_collide()
+{
+    const char _1929[0x0C] = {};
+    const char _1930[0x50] = {};
+    const char _1945[0x0C] = {};
+}
+
+S32 NPCC_chk_hitPlyr(xBound* bnd, xCollis* collide)
+{
+    return NPCC_chk_hitEnt(&globals.player.ent, bnd, collide);
+}
+
+void Firework_SceneReset(int param_1)
+{
+    Firework* fw;
+    for (int i = 0; i < (int)(sizeof(g_fireworks) / sizeof(Firework)); i++)
+    {
+        fw = &g_fireworks[i];
+        if ((param_1 != 0) && (fw->fwstate != 0))
+        {
+            Firework_Release(fw);
+        }
+        fw->fwstate = FW_STAT_UNUSED;
+        fw++;
+    }
+}
+
+void Firework_Timestep(F32 dt)
+{
+    for (int i = 0; i < 32; i++)
+    {
+        if (g_fireworks[i].fwstate != FW_STAT_UNUSED)
+        {
+            if ((g_fireworks[i].fwstate != FW_STAT_READY) && (g_fireworks[i].flg_firework & 4))
+            {
+                if (g_fireworks[i].fwstate == FW_STAT_DONE)
+                {
+                    Firework_Release(&g_fireworks[i]);
+                }
+                else
+                {
+                    g_fireworks[i].Update(dt);
+                    g_fireworks[i].flg_firework &= ~2;
+                }
+            }
+        }
+    }
+}
+
+S32 g_pc_playerInvisible;
+
+S32 NPCC_LampStatus()
+{
+    return g_pc_playerInvisible == 0 ? true : false;
+}
+
+U32 NPCC_ForceTalkOk()
+{
+    return globals.player.g.DisableForceConversation == 0;
+}
+
+RwRaster* NPCC_FindRWRaster(const char* txtrname)
+{
+    RwTexture* txtr = NPCC_FindRWTexture(txtrname);
+    if (txtr != NULL)
+    {
+        return txtr->raster;
+    }
+    return NULL;
+}
+
+RwTexture* NPCC_FindRWTexture(U32 hashid)
+{
+    return (RwTexture*)xSTFindAsset(hashid, NULL);
+}
+
+RwTexture* NPCC_FindRWTexture(const char* txtrname)
+{
+    return (RwTexture*)xSTFindAsset(xStrHash(txtrname), NULL);
+}
+
+RwRaster* NPCC_FindRWRaster(RwTexture* txtr)
+{
+    if (txtr != NULL)
+    {
+        return txtr->raster;
+    }
+    return NULL;
+}
+
+void zNPC_SNDInit()
+{
+    sNPCSndID[eNPCSnd_GloveAttack] = 0;
+    sNPCSndID[eNPCSnd_SleepyAttack] = 0;
+    sNPCSndID[eNPCSnd_TubeAttack] = 0;
+    sNPCSndID[eNPCSnd_FodBzztAttack] = 0;
+    sNPCSndID[eNPCSnd_JellyfishAttack] = 0;
+
+    sNPCSndFxVolume[eNPCSnd_GloveAttack] = 0.77f;
+    sNPCSndFxVolume[eNPCSnd_SleepyAttack] = 0.77f;
+    sNPCSndFxVolume[eNPCSnd_TubeAttack] = 0.77f;
+    sNPCSndFxVolume[eNPCSnd_FodBzztAttack] = 0.77f;
+    sNPCSndFxVolume[eNPCSnd_JellyfishAttack] = 0.77f;
+
+    sNPCSndFx[eNPCSnd_GloveAttack] = xStrHash("Glove_hover_loop");
+    sNPCSndFx[eNPCSnd_SleepyAttack] = xStrHash("ST_hit2_loop");
+    sNPCSndFx[eNPCSnd_TubeAttack] = xStrHash("Tube_attack21_loop");
+    sNPCSndFx[eNPCSnd_FodBzztAttack] = xStrHash("FodBzzt_attack_loop");
+    sNPCSndFx[eNPCSnd_JellyfishAttack] = xStrHash("Jellyfish_zap_loop");
+}
+
+void zNPC_SNDPlay3D(_tageNPCSnd snd, xEnt* ent)
+{
+    if (globals.cmgr)
+        return;
+    if (sNPCSndID[snd] != 0)
+        return;
+    if (sNPCSndFx[snd] == 0)
+        return;
+
+    sNPCSndID[snd] = xSndPlay3D(sNPCSndFx[snd], sNPCSndFxVolume[snd], 0.0f, 0x80, 0, ent, 2.0f,
+                                15.0f, SND_CAT_GAME, 0.0f);
+}
+
+void zNPC_SNDStop(_tageNPCSnd snd)
+{
+    if (sNPCSndFx[snd] == 0)
+        return;
+
+    xSndStop(sNPCSndID[snd]);
+    sNPCSndID[snd] = 0;
+}
+
+U32 NPCC_LineHitsBound(xVec3* a, xVec3* b, xBound* bnd, xCollis* callers_colrec)
+{
+    xRay3 ray;
+    xVec3 vec;
+    xCollis local_colrec;
+    xCollis* colrec = &local_colrec;
+    F32 len;
+
+    if (callers_colrec != NULL)
+    {
+        colrec = (xCollis*)callers_colrec;
+    }
+    xVec3Sub(&vec, b, a);
+    len = xVec3Length(&vec);
+    if (len < 0.001f)
+    {
+        len = 0.001f;
+    }
+    xVec3Copy(&ray.origin, a);
+    xVec3SMul(&ray.dir, &vec, (1.0f / len));
+
+    ray.min_t = 0.1f;
+    ray.max_t = len;
+    ray.flags = 3072;
+
+    xRayHitsBound(&ray, bnd, colrec);
+    return colrec->flags & 1;
+}
+
+S32 NPCC_bnd_ofBase(xBase* tgt, xBound* bnd)
+{
+    S32 retval = 1;
+
+    switch (tgt->baseType)
+    {
+    case eBaseTypeCamera:
+    case eBaseTypeDoor:
+    case eBaseTypeVolume:
+    case eBaseTypeEGenerator:
+        retval = 0;
+        break;
+    case eBaseTypePlayer:
+    case eBaseTypePickup:
+    case eBaseTypePlatform:
+    case eBaseTypeStatic:
+    case eBaseTypeDynamic:
+    case eBaseTypeBubble:
+    case eBaseTypePendulum:
+    case eBaseTypeHangable:
+    case eBaseTypeButton:
+    case eBaseTypeProjectile:
+    case eBaseTypeDestructObj:
+    case eBaseTypeNPC:
+    case eBaseTypeBoulder:
+        *bnd = *(xBound*)((UPtr)tgt + 0x64);
+        break;
+    default:
+        retval = 0;
+        break;
+    case eBaseTypeCruiseBubble:
+        break;
+    }
+    return retval;
+}
+
+S32 NPCC_pos_ofBase(xBase* tgt, xVec3* pos)
+{
+    xVec3* pxVar1;
+    S32 known = 1;
+
+    switch (tgt->baseType)
+    {
+    case eBaseTypeCamera:
+        xVec3Copy(pos, &globals.camera.mat.pos);
+        break;
+    case eBaseTypeDoor:
+    case eBaseTypeVolume:
+    case eBaseTypeEGenerator:
+        known = 0;
+        break;
+    case eBaseTypePlayer:
+    case eBaseTypePickup:
+    case eBaseTypePlatform:
+    case eBaseTypeStatic:
+    case eBaseTypeDynamic:
+    case eBaseTypeBubble:
+    case eBaseTypePendulum:
+    case eBaseTypeHangable:
+    case eBaseTypeButton:
+    case eBaseTypeProjectile:
+    case eBaseTypeDestructObj:
+    case eBaseTypeNPC:
+    case eBaseTypeBoulder:
+        xVec3Copy(pos, xEntGetPos((xEnt*)tgt));
+        break;
+    case eBaseTypeCruiseBubble:
+        known = 0;
+        break;
+    default:
+        known = 0;
+        break;
+    }
+    return known;
+}
+
+void NPCTarget::PosGet(xVec3* pos)
+{
+    switch (typ_target)
+    {
+    case NPC_TGT_NONE:
+        break;
+    case NPC_TGT_PLYR:
+    case NPC_TGT_ENT:
+    case NPC_TGT_BASE:
+        NPCC_pos_ofBase(bas_target, pos);
+        break;
+    case NPC_TGT_POS:
+        xVec3Copy(pos, &pos_target);
+        break;
+    case NPC_TGT_MVPT:
+        xVec3Copy(pos, zMovePointGetPos(nav_target));
+        break;
+    case NPC_TGT_BUDDY:
+        if (buddy_target != NULL)
+        {
+            xVec3Copy(pos, buddy_target);
+        }
+        break;
+    }
+}
+
+void NPCC_xBoundAway(xBound* bnd)
+{
+    if (bnd->type == XBOUND_TYPE_SPHERE)
+    {
+        bnd->box.center.y -= 1000000.0f;
+    }
+    else if (bnd->type == XBOUND_TYPE_BOX)
+    {
+        bnd->box.center.y -= 1000000.0f;
+    }
+}
+
+void NPCC_xBoundBack(xBound* bnd)
+{
+    if (bnd->type == XBOUND_TYPE_SPHERE)
+    {
+        bnd->box.center.y += 1000000.0f;
+    }
+    else if (bnd->type == XBOUND_TYPE_BOX)
+    {
+        bnd->box.center.y += 1000000.0f;
+    }
+}
+
+S32 NPCC_HaveLOSToPos(xVec3* pos_src, xVec3* pos_tgt, F32 dst_max, xBase* tgt, xCollis* colCallers)
+{
+    S32 result;
+    xRay3 ray = {};
+    xScene* xscn = globals.sceneCur;
+    xCollis* colrec;
+
+    if (colCallers)
+    {
+        colrec = colCallers;
+    }
+    else
+    {
+        static xCollis localCollis = { k_HIT_0xF00 | k_HIT_CALC_HDNG };
+
+        memset(&localCollis, 0, sizeof(xCollis));
+        localCollis.flags = k_HIT_0xF00 | k_HIT_CALC_HDNG;
+
+        colrec = &localCollis;
+    }
+
+    ray.max_t = dst_max;
+    ray.min_t = 0.0f;
+
+    xVec3Sub(&ray.dir, pos_tgt, pos_src);
+    xVec3Normalize(&ray.dir, &ray.dir);
+    xVec3Copy(&ray.origin, pos_src);
+
+    ray.flags = (1 << 10) | (1 << 11);
+
+    xRayHitsScene(xscn, &ray, colrec);
+
+    if (!(colrec->flags & ((U32)(1 << 0))))
+    {
+        result = 1;
+    }
+    else if (colrec->dist > dst_max)
+    {
+        result = 1;
+    }
+    else if (tgt && colrec->oid != 0)
+    {
+        if (tgt->id == colrec->oid)
+        {
+            result = 1;
+        }
+        else
+        {
+            result = 0;
+        }
+    }
+    else
+    {
+        result = 0;
+    }
+
+    return result;
+}
+
+F32 NPCC_DstSqPlyrToPos(const xVec3* pos)
+{
+    return NPCC_DstSq(pos, xEntGetPos(&globals.player.ent), NULL);
+}
+
+F32 NPCC_ds2_toCam(const xVec3* pos_from, xVec3* delta)
+{
+    xVec3 delt = {};
+    xVec3Sub(&delt, &globals.camera.mat.pos, pos_from);
+    F32 retval = xVec3Length2(&delt);
+    if (delta != (xVec3*)0)
+    {
+        xVec3Copy(delta, &delt);
+    }
+    return retval;
+}
+
+void NPCC_Bounce(xVec3* vec_input, xVec3* vec_anti, F32 elastic)
+{
+    if (vec_input->x * vec_anti->x < 0.0f)
+    {
+        vec_input->x *= -1.0f;
+    }
+
+    if (vec_input->y * vec_anti->y < 0.0f)
+    {
+        vec_input->y *= -1.0f;
+    }
+
+    if (vec_input->z * vec_anti->z < 0.0f)
+    {
+        vec_input->z *= -1.0f;
+    }
+
+    xVec3SMulBy(vec_input, elastic);
+}
+
+// Two more unreferenced templates the target holds between the one
+// NPCC_ds2_toCam creates and the xMat3x3 NPCC_rotHPB creates; the first is
+// { 0.0f, 0.0f, 1.0f }.
+void __deadstripped_zNPCSupport_cam()
+{
+    const xVec3 _2148 = { 0.0f, 0.0f, 1.0f };
+    const char _2149[0x0C] = {};
+}
+
+void NPCC_rotHPB(xMat3x3* mat, F32 heading, F32 pitch, F32 bank)
+{
+    xMat3x3 mat_rot = {};
+
+    xMat3x3RotZ(mat, bank);
+    xMat3x3RotX(&mat_rot, -pitch);
+    xMat3x3Mul(mat, mat, &mat_rot);
+    xMat3x3RotY(&mat_rot, heading);
+    xMat3x3Mul(mat, mat, &mat_rot);
+}
+
+// Three more unreferenced templates the target holds after the xMat3x3
+// NPCC_rotHPB creates.
+void __deadstripped_zNPCSupport_rot()
+{
+    const char _2155[0x30] = {};
+    const char _2156[0x0C] = {};
+    const char _2157[0x30] = {};
+}
+
+void NPCC_GenSmooth(xVec3** pos_base, xVec3** pos_mid)
+{
+    static F32 prepute[4][4];
+    static const F32 yews[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+    static S32 init = 0;
+
+    S32 i;
+
+    if (!init)
+    {
+        init = 1;
+
+        for (i = 0; i < 4; i++)
+        {
+            F32 u2, u, u3;
+            F32* pre = prepute[i];
+            u = yews[i];
+            u2 = u * u;
+            u3 = u * u2;
+
+            pre[0] = u2 + -0.5f * u3 + -0.5f * u;
+            pre[1] = 1.5f * u3 + -2.5f * u2 + 1.0f;
+            pre[2] = -1.5f * u3 + 2.0f * u2 + 0.5f * u;
+            pre[3] = 0.5f * u3 + -0.5f * u2;
+        }
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        xVec3SMul(pos_mid[i], pos_base[0], prepute[i][0]);
+        xVec3AddScaled(pos_mid[i], pos_base[1], prepute[i][1]);
+        xVec3AddScaled(pos_mid[i], pos_base[2], prepute[i][2]);
+        xVec3AddScaled(pos_mid[i], pos_base[3], prepute[i][3]);
+    }
+}
+
+F32 NPCC_TmrCycle(float* tmr, float dt, float interval)
+{
+    F32 parameterized;
+
+    if (*tmr < 0.0f)
+    {
+        *tmr = 0.0f;
+    }
+
+    parameterized = (*tmr / interval);
+    *tmr += dt;
+
+    if (*tmr > interval)
+    {
+        *tmr = xfmod(*tmr, interval);
+    }
+
+    return parameterized;
+}
+
+void NPCC_MakePerp(xVec3* dir_perp, const xVec3* dir_axis)
+{
+    dir_perp->x = dir_axis->y - dir_axis->z;
+    dir_perp->y = dir_axis->z - dir_axis->x;
+    dir_perp->z = dir_axis->x - dir_axis->y;
+
+    xVec3Normalize(dir_perp, dir_perp);
+}
+
+void NPCC_MakeArbPlane(const xVec3* dir_norm, xVec3* at, xVec3* rt)
+{
+    NPCC_MakePerp(at, dir_norm);
+    xVec3Cross(rt, at, dir_norm);
+}
+
+U32 NPCWidget::IsLocked()
+{
+    return npc_ownerlock != NULL;
+}

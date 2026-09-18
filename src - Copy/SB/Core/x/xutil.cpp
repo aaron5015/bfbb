@@ -1,0 +1,209 @@
+#include "xutil.h"
+
+#include "xMath.h"
+
+#include <ctype.h>
+#ifdef __MWERKS__
+#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
+#else
+#include <stdlib.h>
+#endif
+#ifdef __MWERKS__
+#include <PowerPC_EABI_Support/MSL_C/MSL_Common/ctype_api.h>
+#else
+#include <ctype.h>
+#endif
+
+static S32 g_xutilinit;
+static S32 g_crc_needinit = 1;
+static U32 g_crc32_table[256] = {};
+
+S32 xUtilStartup()
+{
+    if (!g_xutilinit++)
+    {
+        xUtil_crc_init();
+    }
+
+    return g_xutilinit;
+}
+
+S32 xUtilShutdown()
+{
+    g_xutilinit--;
+    return g_xutilinit;
+}
+
+// isprint's argument has to be representable as an unsigned char.
+//
+// uc walks the tag one byte at a time as a signed char -- the build passes
+// -char signed, matching CodeWarrior -- so any byte of an asset id at or above
+// 0x80 arrives here negative. On the console that is a table lookup that reads
+// slightly before the table and returns whatever is there, which at worst
+// prints the wrong character in a debug string. The host CRT range-checks it
+// instead and aborts the process, and asset ids are hashes: roughly half of
+// every tag printed has a high byte set.
+//
+// Same treatment as XFONT_CHARIDX in xFont.cpp, and for the same reason -- the
+// console keeps retail's expression exactly, the port makes the index unsigned.
+#ifdef PLATFORM_PC
+#define XUTIL_PRINTIDX(_c) ((U8)(_c))
+#else
+#define XUTIL_PRINTIDX(_c) (_c)
+#endif
+
+char* xUtil_idtag2string(U32 srctag, S32 bufidx)
+{
+    U32 tag = srctag;
+    char* strptr;
+    char* uc = (char*)&tag;
+    S32 l;
+    char t;
+    static char buf[6][10] = {};
+
+    if (bufidx < 0 || bufidx >= 7)
+    {
+        strptr = buf[0];
+    }
+    else
+    {
+        strptr = buf[bufidx];
+    }
+
+    // convert tag to big endian
+
+    l = 1;
+
+    if ((S32)((char*)&l)[3] != 0)
+    {
+        t = uc[0];
+        uc[0] = uc[3];
+        uc[3] = t;
+
+        t = uc[1];
+        uc[1] = uc[2];
+        uc[2] = t;
+    }
+
+    switch (bufidx)
+    {
+    case 4:
+    case 5:
+        strptr[0] = isprint(XUTIL_PRINTIDX(uc[0])) ? uc[0] : '?';
+        strptr[1] = isprint(XUTIL_PRINTIDX(uc[1])) ? uc[1] : '?';
+        strptr[2] = isprint(XUTIL_PRINTIDX(uc[2])) ? uc[2] : '?';
+        strptr[3] = isprint(XUTIL_PRINTIDX(uc[3])) ? uc[3] : '?';
+        break;
+    case 6:
+    default:
+        strptr[0] = isprint(XUTIL_PRINTIDX(uc[3])) ? uc[3] : '?';
+        strptr[1] = isprint(XUTIL_PRINTIDX(uc[2])) ? uc[2] : '?';
+        strptr[2] = isprint(XUTIL_PRINTIDX(uc[1])) ? uc[1] : '?';
+        strptr[3] = isprint(XUTIL_PRINTIDX(uc[0])) ? uc[0] : '?';
+        break;
+    }
+
+    strptr[4] = '\0';
+
+    if (bufidx == 6)
+    {
+        strptr[4] = '/';
+        strptr[5] = isprint(XUTIL_PRINTIDX(uc[0])) ? uc[0] : '?';
+        strptr[6] = isprint(XUTIL_PRINTIDX(uc[1])) ? uc[1] : '?';
+        strptr[7] = isprint(XUTIL_PRINTIDX(uc[2])) ? uc[2] : '?';
+        strptr[8] = isprint(XUTIL_PRINTIDX(uc[3])) ? uc[3] : '?';
+        strptr[9] = '\0';
+    }
+
+    return strptr;
+}
+
+U32 xUtil_crc_init()
+{
+    S32 i, j;
+    U32 crc_accum;
+
+    if (g_crc_needinit)
+    {
+        for (i = 0; i < 256; i++)
+        {
+            crc_accum = (U32)i << 24;
+
+            for (j = 0; j < 8; j++)
+            {
+                if (crc_accum & 0x80000000)
+                {
+                    crc_accum = (crc_accum << 1) ^ 0x04C11DB7;
+                }
+                else
+                {
+                    crc_accum = (crc_accum << 1);
+                }
+            }
+
+            g_crc32_table[i] = crc_accum;
+        }
+
+        g_crc_needinit = 0;
+    }
+
+    return 0xFFFFFFFF;
+}
+
+U32 xUtil_crc_update(U32 crc_accum, char* data, S32 datasize)
+{
+    S32 i, j;
+
+    if (g_crc_needinit)
+    {
+        xUtil_crc_init();
+    }
+
+    for (i = 0; i < datasize; i++)
+    {
+        j = ((crc_accum >> 24) ^ *data++) & 0xff;
+        crc_accum = (crc_accum << 8) ^ g_crc32_table[j];
+    }
+
+    return crc_accum;
+}
+
+S32 xUtil_yesno(F32 wt_yes)
+{
+    if (0.0f == wt_yes)
+    {
+        return 0;
+    }
+
+    if (1.0f == wt_yes)
+    {
+        return 1;
+    }
+
+    return (xurand() <= wt_yes);
+}
+
+void xUtil_wtadjust(F32* wts, S32 cnt, F32 arbref)
+{
+    const volatile F32 ZERO = 0.0f;
+
+    S32 i;
+    F32 sum = 0.0f, fac;
+
+    for (i = 0; i < cnt; i++)
+    {
+        if (wts[i] < ZERO)
+        {
+            wts[i] = -wts[i];
+        }
+
+        sum += wts[i];
+    }
+
+    fac = arbref / sum;
+
+    for (i = 0; i < cnt; i++)
+    {
+        wts[i] *= fac;
+    }
+}

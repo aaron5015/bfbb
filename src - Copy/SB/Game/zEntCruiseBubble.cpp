@@ -1,0 +1,4563 @@
+#ifdef __MWERKS__
+#include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
+#else
+#include <cmath>
+#endif
+#include <rpskin.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "zCamera.h"
+#include "zEnt.h"
+#include "zEntButton.h"
+#include "zEntCruiseBubble.h"
+#include "zEntDestructObj.h"
+#include "zEntPlayer.h"
+#include "zEntTrigger.h"
+#include "zGameExtras.h"
+#include "zGlobals.h"
+#include "zGrid.h"
+#include "zNPCHazard.h"
+#include "zNPCTypeCommon.h"
+#include "zPlatform.h"
+#include "zRenderState.h"
+#include "zTalkBox.h"
+
+#ifdef PLATFORM_PC
+// distort_screen stores the strength there; xScrFxDistortionRender draws it.
+#include "xScrFx.h"
+#endif
+
+#include "iMath.h"
+
+#include "xColor.h"
+#include "xDecal.h"
+#include "xFX.h"
+#include "xGrid.h"
+#include "xMath.h"
+#include "xMath3.h"
+#include "xMathInlines.h"
+#include "xModel.h"
+#include "xSnd.h"
+#include "xstransvc.h"
+#include "xString.h"
+#include "xVec3.h"
+
+// These are all defined in this translation unit only because the headers that
+// should declare them do not; see the report accompanying this change.
+bool xSphereHitsBound(const xSphere& o, const xBound& b);
+void xQuickCullForSphere(xQCData* q, const xSphere* s);
+void xCameraRotate(xCamera* cam, const xVec3& at, F32 roll, F32 time, F32 accel, F32 decl);
+
+// These structs were used in deadstripped functions.
+// This function is here to force the symbols to be linked.
+//
+// The target opens .rodata with the same eleven unreferenced all-zero
+// templates other units carry -- four of 0x0C and seven of 0x28 -- which
+// offsets every later .rodata relocation.
+void __deadstripped_zEntCruiseBubble_head()
+{
+    const char _405[0x0C] = {};
+    const char _406[0x0C] = {};
+    const char _410[0x0C] = {};
+    const char _441[0x0C] = {};
+
+    const char _624[0x28] = {};
+    const char _625[0x28] = {};
+    const char _626[0x28] = {};
+    const char _627[0x28] = {};
+    const char _628[0x28] = {};
+    const char _629[0x28] = {};
+    const char _630[0x28] = {};
+}
+
+const basic_rect<F32> screen_bounds = { 0.0f, 0.0f, 1.0f, 1.0f };
+const basic_rect<F32> default_adjust = { 0.0f, 0.0f, 1.0f, 1.0f };
+
+namespace cruise_bubble
+{
+    namespace
+    {
+        tweak_group normal_tweak;
+        tweak_group cheat_tweak;
+        xMat4x3 start_cam_mat;
+
+        // Two more unreferenced templates the target holds between
+        // default_adjust and wake_ribbon_curve.
+        void __deadstripped_zEntCruiseBubble_rects()
+        {
+            const char _822[0x10] = {};
+            const char _881[0x0C] = {};
+        }
+
+        const xFXRibbon::curve_node wake_ribbon_curve[2] = {
+            { 0.0f, { 0xFF, 0xFF, 0xFF, 0x64 }, 0.3f },
+            { 1.0f, { 0x00, 0x00, 0x00, 0x00 }, 1.0f },
+        };
+
+        const xFXRibbon::curve_node cheat_wake_ribbon_curve[2] = {
+            { 0.0f, { 0xFF, 0x9B, 0x9B, 0x64 }, 0.5f },
+            { 1.0f, { 0x00, 0x00, 0x00, 0x00 }, 2.0f },
+        };
+
+        const xDecalEmitter::curve_node explode_curve[3] = {
+            { 0.0f, { 0xFF, 0xFF, 0xFF, 0xFF }, 0.1f },
+            { 0.5f, { 0xFF, 0xFF, 0xFF, 0xFF }, 2.55f },
+            { 1.0f, { 0xFF, 0xFF, 0xFF, 0x00 }, 5.0f },
+        };
+
+        const xDecalEmitter::curve_node cheat_explode_curve[3] = {
+            { 0.0f, { 0xFF, 0xFF, 0xFF, 0xFF }, 0.1f },
+            { 0.5f, { 0xFF, 0xFF, 0xFF, 0xFF }, 3.55f },
+            { 1.0f, { 0xFF, 0xFF, 0xFF, 0x00 }, 7.0f },
+        };
+
+        fixed_queue<missle_record_data, 127> missle_record;
+        tweak_group* current_tweak = &normal_tweak;
+
+        xBase base = { 0, eBaseTypeCruiseBubble };
+
+        const char* start_anim_states[37] = {
+            "Idle01",     "Idle02",     "Idle03",     "Idle04",     "Idle05",     "Idle06",
+            "Idle07",     "Idle08",     "Idle09",     "Idle10",     "Idle11",     "Idle12",
+            "Idle13",     "SlipIdle01", "Inactive01", "Inactive02", "Inactive03", "Inactive04",
+            "Inactive05", "Inactive06", "Inactive07", "Inactive08", "Inactive09", "Inactive10",
+            "Walk01",     "Run01",      "Run02",      "Run03",      "Land01",     "LandRun01",
+            "LandHigh01", "WallLand01", "Hit01",      "Hit02",      "Hit03",      "Hit04",
+            "Hit05"
+        };
+
+        xFXRibbon wake_ribbon[2];
+        xDecalEmitter explode_decal;
+        state_missle_explode::quadrant_zone state_missle_explode::qzone;
+
+        struct
+        {
+            S32 flags;
+            state_type* state[MAX_THREAD];
+            // Offset: 0x10
+            state_type* states[MAX_STATE];
+            // Offset: 0x40
+            xVec2 last_sp;
+            // Offset: 0x48
+            xVec2 sp;
+            // Offset: 0x50
+            xVec3 hit_loc;
+            // Offset: 0x5c
+            xVec3 hit_norm;
+            // Offset: 0x68
+            xModelInstance* missle_model;
+            // Offset: 0x6c
+            xEnt* hits[32];
+            // Offset: 0xec
+            S32 hits_size;
+            U32 player_health;
+            xVec3 player_motion;
+            // Offset: 0x100
+            F32 fov_default;
+            zShrapnelAsset* droplet_shrapnel;
+            F32 dialog_freq;
+            struct
+            {
+                F32 samples;
+                F32 bubbles;
+                xMat4x3 mat;
+                xQuat dir;
+#ifdef PLATFORM_PC
+                F32 unspent_dt;
+#endif
+            } trail;
+            struct
+            {
+                struct
+                {
+                    xAnimState* aim;
+                    xAnimState* fire;
+                    xAnimState* idle;
+                } player;
+                struct
+                {
+                    // Offset: 0x170
+                    xAnimState* fire;
+                    xAnimState* fly;
+                } missle;
+            } astate;
+            struct
+            {
+                struct
+                {
+                    xAnimTransition* aim;
+                    xAnimTransition* fire;
+                    xAnimTransition* idle;
+                    xAnimTransition* end;
+                } player;
+                struct
+                {
+                    xAnimTransition* fly;
+                } missle;
+            } atran;
+        } shared = {
+            1 // flags
+        };
+
+        sound_config sounds[4] = {
+            { "SB_cruise_start", 1.0f, 5.0f, 20.0f, 0, 0, SDR_CruiseBubbleLaunch, 0, 0, 0, 0 },
+            { "SB_cruise_hit", 1.0f, 15.0f, 60.0f, 0, 0, SDR_CruiseBubbleExplode, 0, 0, 0, 0 },
+            { "SB_cruise_nav_loop", 1.0f, 0.0f, 10.0f, 0, 1, SDR_None, 0, 0, 0, 0 },
+            { NULL, 1.0f, 0.0f, 0.0f, 1, 0, SDR_None, 23, 25, 0, 0 },
+        };
+
+        void init_sound()
+        {
+            sound_config* s;
+            sound_config* end = &sounds[4];
+            for (s = &sounds[0]; s != end; ++s)
+            {
+                s->id = (s->name == 0) ? 0 : xStrHash(s->name);
+                s->handle = 0;
+            }
+        }
+
+        void stop_sound(S32 which, U32 handle)
+        {
+            sound_config* s = &sounds[which];
+
+            if (s->id == 0)
+            {
+                if (s->streamed == 0)
+                {
+                    for (S32 i = s->first; i <= s->last; ++i)
+                    {
+                        zEntPlayer_SNDStop((_tagePlayerSnd)i);
+                    }
+                }
+                return;
+            }
+
+            if (handle == 0)
+            {
+                handle = s->handle;
+            }
+
+            if (handle != 0)
+            {
+                xSndStop(handle);
+            }
+
+            s->handle = 0;
+        }
+
+        U32 play_sound(S32 which, F32 volFactor)
+        {
+            sound_config* s = &sounds[which];
+
+            if (s->id == 0)
+            {
+                S32 n = s->last - s->first + 1;
+                S32 i = n <= 1 ? s->first : s->first + (xrand() >> 13) % n;
+
+                if (s->streamed)
+                {
+                    zEntPlayer_SNDPlayStream((_tagePlayerStreamSnd)i);
+                }
+                else
+                {
+                    zEntPlayer_SNDPlay((_tagePlayerSnd)i, 0.0f);
+                }
+
+                s->handle = 0;
+            }
+            else
+            {
+                s->handle = xSndPlay((U32)s->id, s->volume * volFactor, 0.0f, (U32)128, (U32)0,
+                                     (U32)0, SND_CAT_GAME, 0.0f);
+            }
+
+            if (s->rumble != SDR_None)
+            {
+                zRumbleStart(s->rumble);
+            }
+            return s->handle;
+        }
+
+        U32 play_sound(S32 which, F32 volFactor, const xVec3* pos)
+        {
+            sound_config* s = &sounds[which];
+
+            if (s->id != 0)
+            {
+                // using float literals only the TOC address doesnt match
+                // -> will match when file is complete
+                s->handle = xSndPlay3D(s->id, s->volume * volFactor, 0.0f, (U32)128, (U32)2048, pos,
+                                       s->radius_inner, s->radius_outer, SND_CAT_GAME, 0.0f);
+            }
+
+            if (s->rumble != SDR_None)
+            {
+                zRumbleStart(s->rumble);
+            }
+            return s->handle;
+        }
+
+        void set_pitch(S32 which, F32 pitch, U32 handle)
+        {
+            sound_config* s = &sounds[which];
+
+            if (s->id == 0)
+            {
+                for (S32 i = s->first; i <= s->last; ++i)
+                {
+                    zEntPlayer_SNDSetPitch((_tagePlayerSnd)i, pitch);
+                }
+                return;
+            }
+
+            if (handle == 0)
+            {
+                handle = s->handle;
+            }
+
+            if (handle != 0)
+            {
+                xSndSetPitch(handle, pitch);
+            }
+        }
+
+        void show_wand()
+        {
+            globals.player.sb_models[5]->Flags |= 0x0001;
+        }
+
+        void hide_wand()
+        {
+            globals.player.sb_models[5]->Flags &= 0xfffe;
+        }
+
+        void show_missle()
+        {
+            shared.missle_model->Flags |= 0x0003;
+        }
+
+        void hide_missle()
+        {
+            shared.missle_model->Flags &= 0xfffc;
+        }
+
+        void capture_camera()
+        {
+            zCameraDisableInput();
+            zCameraDisableTracking(CO_CRUISE_BUBBLE);
+            xCameraDoCollisions(0, 1);
+        }
+
+        void release_camera()
+        {
+            zCameraEnableInput();
+            zCameraEnableTracking(CO_CRUISE_BUBBLE);
+            xCameraDoCollisions(1, 1);
+        }
+
+        bool camera_taken()
+        {
+            return zCameraGetConvers() != 0 || (zCameraIsTrackingDisabled() & 0xfffffffd);
+        }
+
+        bool camera_leave()
+        {
+            return zCameraGetConvers() != 0;
+        }
+
+        void start_damaging()
+        {
+            shared.hits_size = 0;
+        }
+
+        static void damage_entity(xEnt& ent, const xVec3& loc, const xVec3& dir,
+                                  const xVec3& hit_norm, F32 radius, bool explosive)
+        {
+            if (shared.hits_size >= 32)
+            {
+                return;
+            }
+            shared.hits[shared.hits_size] = &ent;
+            shared.hits_size++;
+
+            switch (ent.baseType)
+            {
+            case eBaseTypeButton:
+                zEntButton_Press((_zEntButton*)&ent, 0x10);
+                return;
+
+            case eBaseTypeDestructObj:
+                zEntDestructObj_Hit((zEntDestructObj*)&ent, 0x10000);
+                return;
+
+            case eBaseTypePlatform:
+                switch (ent.subType)
+                {
+                case ZPLATFORM_SUBTYPE_PADDLE:
+                    if (!(((zPlatform*)&ent)->passet->paddle.paddleFlags & 0x20))
+                    {
+                        return;
+                    }
+
+                    xCollis coll;
+                    coll.optr = &ent;
+                    coll.mptr = ent.collModel != NULL ? ent.collModel : ent.model;
+
+                    if (explosive)
+                    {
+                        coll.flags = 0x600;
+
+                        xSphere o;
+                        o.center = loc;
+                        o.r = radius;
+                        xSphereHitsBound(&o, &ent.bound, &coll);
+
+                        if (!(coll.flags & 0x1))
+                        {
+                            return;
+                        }
+
+                        if (ent.collLev == 0x5)
+                        {
+                            xSphereHitsModel(&o, coll.mptr, &coll);
+
+                            if (!(coll.flags & 0x1))
+                            {
+                                return;
+                            }
+                        }
+
+                        xVec3 hit_dir = coll.tohit.up_normal();
+                        zPlatform_PaddleCollide(&coll, &loc, &hit_dir, 0x1);
+                        return;
+                    }
+
+                    coll.flags = 0x201;
+                    coll.norm = hit_norm;
+                    zPlatform_PaddleCollide(&coll, &loc, &dir, 1);
+                    return;
+                }
+                break;
+
+            case eBaseTypeNPC:
+                if (explosive)
+                {
+                    const xVec3 edir = (*xEntGetCenter(&ent) - loc).up_normal();
+                    ((zNPCCommon*)&ent)->Damage(DMGTYP_CRUISEBUBBLE, &base, &edir);
+                }
+                else
+                {
+                    // while this matches
+                    ((zNPCCommon*)&ent)->Damage(DMGTYP_CRUISEBUBBLE, &base, &dir);
+                }
+                return;
+            }
+
+            zEntEvent(&ent, eEventHit_Cruise);
+        }
+
+        U8 can_damage(xEnt* ent)
+        {
+            if (ent == NULL)
+            {
+                return false;
+            }
+            if (!(ent->moreFlags & 0x10))
+            {
+                return false;
+            }
+            if (ent->baseType == eBaseTypeDestructObj &&
+                zEntDestructObj_isDestroyed((zEntDestructObj*)ent) != NULL)
+            {
+                return false;
+            }
+            if (ent->baseType == eBaseTypeNPC && !((zNPCCommon*)ent)->IsHealthy())
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        U8 was_damaged(xEnt* ent)
+        {
+            // no idea why this doesn't OK ...
+            // xEnt** i;
+            // xEnt** n = shared.hits + shared.hits_size;
+            // unnecessary offset is added
+            // for (i = shared.hits; i != n; ++i)
+
+            // ... but this does
+            xEnt** i = shared.hits;
+            xEnt** n = i + shared.hits_size;
+            for (; i != n; ++i)
+            {
+                if (ent == *i)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        void notify_triggers(xScene& s, const xSphere& o, const xVec3& dir)
+        {
+            zEntTrigger** it = (zEntTrigger**)s.trigs;
+            zEntTrigger** end = it + s.num_trigs;
+            for (; it != end; ++it)
+            {
+                zEntTrigger& trig = **it;
+
+                if (xBaseIsEnabled(&trig))
+                {
+                    zEntTriggerAsset(trig);
+
+                    bool want_enter = false;
+                    bool want_exit = false;
+                    xLinkAsset* link = trig.link;
+                    xLinkAsset* end_link = link + trig.linkCount;
+                    for (; link != end_link; ++link)
+                    {
+                        if (link->srcEvent == eEventEnterCruise)
+                        {
+                            want_enter = true;
+                        }
+                        else if (link->srcEvent == eEventExitCruise)
+                        {
+                            want_exit = true;
+                        }
+                    }
+                    want_enter = want_enter && !(trig.entered & 0x2);
+                    want_exit = want_exit && (trig.entered & 0x2);
+
+                    if (want_enter || want_exit)
+                    {
+                        bool inside = zEntTriggerHitsSphere(trig, o, dir);
+                        if (inside)
+                        {
+                            trig.entered |= 0x2;
+                        }
+                        else
+                        {
+                            trig.entered &= 0xfffffffd;
+                        }
+
+                        if (want_enter && inside)
+                        {
+                            zEntEvent(&trig, eEventEnterCruise);
+                        }
+                        else if (want_exit && !inside)
+                        {
+                            zEntEvent(&trig, eEventExitCruise);
+                        }
+                    }
+                }
+            }
+        }
+
+        void exit_triggers(xScene& s)
+        {
+            zEntTrigger** it;
+            zEntTrigger** end;
+            zEntTrigger* trig;
+            xLinkAsset* link;
+            xLinkAsset* end_link;
+
+            it = (zEntTrigger**)s.trigs;
+            end = it + s.num_trigs;
+            for (; it != end; ++it)
+            {
+                trig = *it;
+
+                if (xBaseIsEnabled(trig))
+                {
+                    zEntTriggerAsset(*trig);
+
+                    if (trig->entered & 0x2)
+                    {
+                        trig->entered &= 0xfffffffd;
+
+                        link = trig->link;
+                        end_link = link + trig->linkCount;
+                        for (; link != end_link; ++link)
+                        {
+                            if (link->srcEvent == eEventExitCruise)
+                            {
+                                zEntEvent(trig, eEventExitCruise);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        void signal_event(U32 toEvent)
+        {
+            zEntEvent(&globals.player.ent, &globals.player.ent, toEvent);
+        }
+
+        void refresh_trail(xMat4x3& mat, xQuat& quat)
+        {
+            xModelGetBoneMat(mat, *shared.missle_model, 8);
+            xQuatFromMat(&quat, &mat);
+        }
+
+        void start_trail()
+        {
+            if (shared.flags & 0x80)
+            {
+                return;
+            }
+
+            shared.flags = shared.flags | 0x180;
+            shared.trail.bubbles = 0.0f;
+            shared.trail.samples = 0.0f;
+
+            cruise_bubble::refresh_trail(shared.trail.mat, shared.trail.dir);
+        }
+
+        void stop_trail()
+        {
+            shared.flags &= 0xffffff7f;
+        }
+
+        void set_state(cruise_bubble::thread_enum thread, cruise_bubble::state_enum state)
+        {
+            state_type** st = &shared.state[thread];
+            if (*st != NULL)
+            {
+                (*st)->stop();
+                *st = NULL;
+            }
+
+            if (state != STATE_INVALID)
+            {
+                *st = shared.states[state];
+                (*st)->start();
+            }
+        }
+
+        void cruise_bubble::state_type::start()
+        {
+            // empty
+        }
+
+        void cruise_bubble::state_type::stop()
+        {
+            // empty
+        }
+
+        bool check_launch()
+        {
+            bool can_cruise_bubble =
+                (!(globals.player.ControlOff || globals.player.cheat_mode) &&
+                 globals.player.g.PowerUp[1] && (globals.player.s->pcType == ePlayer_SB) &&
+                 (globals.pad0->pressed & 0x100));
+
+            if (!can_cruise_bubble)
+            {
+                return false;
+            }
+
+            xAnimState* state = globals.player.ent.model->Anim->Single->State;
+            for (U32 i = 0; i < 37; ++i)
+            {
+                if (stricmp(start_anim_states[i], state->Name) == 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        void kill(bool reset_camera, bool abortive)
+        {
+            if (abortive)
+            {
+                for (S32 i = THREAD_PLAYER; i < MAX_THREAD; ++i)
+                {
+                    if (shared.state[i] != NULL)
+                    {
+                        (shared.state[i])->abort();
+                        shared.state[i] = NULL;
+                    }
+                }
+            }
+            else
+            {
+                for (S32 i = THREAD_PLAYER; i < MAX_THREAD; ++i)
+                {
+                    // either STATE_INVALID or BACKUP_STATE_PLAYER, both == 0x11111111
+                    set_state((thread_enum)i, STATE_INVALID);
+                }
+            }
+
+            shared.flags = 0x3;
+            zCameraEnableTracking(CO_CRUISE_BUBBLE);
+            ztalkbox::permit(0xffffffff, 0);
+            if (reset_camera)
+            {
+                zCameraEnableInput();
+                xCameraSetFOV(&globals.camera, shared.fov_default);
+            }
+
+            hide_wand();
+            hide_missle();
+            hide_hud();
+            stop_trail();
+            distort_screen(0.0f);
+            xSndSelectListenerMode(SND_LISTENER_MODE_PLAYER);
+
+            xAnimState* state = globals.player.ent.model->Anim->Single->State;
+            if (state == shared.astate.player.aim || state == shared.astate.player.fire ||
+                state == shared.astate.player.idle)
+            {
+                xAnimPlayStartTransition(
+                    globals.player.ent.model->Anim,
+                    shared.atran.player
+                        .end); // [xAnimPlayStartTransition__FP9xAnimPlayP15xAnimTransition]
+            }
+            exit_triggers(*globals.sceneCur);
+        }
+
+        // Empty on the console, and called from five places -- the same five
+        // the Xbox writes its distortion strength from (va 0x381b90). It only
+        // ever stored the number; xScrFxDistortionRender is what draws.
+        //
+        // The five are worth reading together, because between them they are
+        // the whole of when the effect is on: state_camera_seize::update ramps
+        // it in through xSCurve as the camera is taken over,
+        // state_camera_attach::start pins it at 1 while you fly, and stop and
+        // the two teardown paths put it back to 0.
+        void distort_screen(F32 amount)
+        {
+#ifdef PLATFORM_PC
+            xScrFxDistortAmount = amount;
+#endif
+        }
+
+        void state_type::abort()
+        {
+            // empty
+        }
+
+        void update_player(xScene& s, F32 dt)
+        {
+            const xVec3 pre_update_loc = cruise_bubble::get_player_loc();
+            xVec3 drive_motion;
+
+            bool stop = zEntPlayer_MinimalUpdate(&globals.player.ent, &s, dt, drive_motion) ||
+                        globals.player.Health < shared.player_health;
+
+            if (!stop)
+            {
+                shared.player_motion +=
+                    cruise_bubble::get_player_loc() - pre_update_loc - drive_motion;
+
+                if (shared.player_motion.length2() > 0.25f)
+                {
+                    stop = true;
+                }
+            }
+
+            if (stop)
+            {
+                cruise_bubble::kill(true, false);
+            }
+        }
+
+        xVec3& get_player_loc()
+        {
+            return *(xVec3*)&globals.player.ent.model->Mat->pos;
+        }
+
+        void render_player()
+        {
+            zEntPlayer_MinimalRender(&globals.player.ent);
+        }
+
+        void refresh_controls()
+        {
+            shared.last_sp = shared.sp;
+            shared.sp = globals.pad0->analog[0].offset;
+        }
+
+        void update_state(xScene* s, F32 dt)
+        {
+            for (S32 i = THREAD_PLAYER; i < MAX_THREAD; ++i)
+            {
+                state_type** state = &shared.state[i];
+                state_enum newtype;
+
+                if (*state != NULL)
+                {
+                    newtype = (*state)->update(dt);
+
+                    if (newtype != (*state)->type)
+                    {
+                        (*state)->stop();
+                        *state = NULL;
+
+                        if (newtype != STATE_INVALID)
+                        {
+                            *state = shared.states[newtype];
+                            (*state)->start();
+                        }
+                    }
+                }
+            }
+
+            if (shared.state[THREAD_PLAYER] == NULL)
+            {
+                kill(true, false);
+            }
+        }
+
+        void render_state()
+        {
+            for (int i = THREAD_PLAYER; i < MAX_THREAD; ++i)
+            {
+                if (shared.state[i] != NULL)
+                {
+                    shared.state[i]->render();
+                }
+            }
+        }
+
+        void state_type::render()
+        {
+            // empty
+        }
+
+        RpAtomic* custom_bubble_render(RpAtomic* atomic)
+        {
+            RwCullMode old_cull_mode;
+            F32 fade = shared.missle_model->Alpha;
+            F32 fresnel_coeff;
+            F32 env_coeff;
+
+            RwRenderStateGet(rwRENDERSTATECULLMODE, (void*)&old_cull_mode);
+            RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)1);
+            iDrawSetFBMSK(0xFFFFFFFF);
+            AtomicDisableMatFX(atomic);
+            RpSkinAtomicSetType(atomic, rpSKINTYPEMATFX);
+            (*gAtomicRenderCallBack)(atomic);
+            iDrawSetFBMSK(0);
+            if (current_tweak->material.fresnel_texture != 0)
+            {
+                fresnel_coeff = current_tweak->material.fresnel_coeff * fade;
+                iModelSetMaterialAlpha(
+                    atomic,
+                    (S32)(current_tweak->material.fresnel_alpha * 255.0f * fade + 0.5f) & 0xFF);
+                gFXSurfaceFlags = 0x10;
+                xFXAtomicEnvMapSetup(atomic, current_tweak->material.fresnel_texture,
+                                     fresnel_coeff);
+                gFXSurfaceFlags = 0;
+                (*gAtomicRenderCallBack)(atomic);
+            }
+            if (current_tweak->material.env_texture != 0)
+            {
+                env_coeff = current_tweak->material.env_coeff * fade;
+                iModelSetMaterialAlpha(
+                    atomic, (S32)(current_tweak->material.env_alpha * 255.0f * fade + 0.5f) & 0xFF);
+                AtomicDisableMatFX(atomic);
+                gFXSurfaceFlags = 0x10;
+                xFXAtomicEnvMapSetup(atomic, current_tweak->material.env_texture, env_coeff);
+                gFXSurfaceFlags = 0;
+                (*gAtomicRenderCallBack)(atomic);
+            }
+            RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)old_cull_mode);
+
+            return atomic;
+        }
+
+        void init_states()
+        {
+            static state_player_halt player_halt;
+            shared.states[STATE_PLAYER_HALT] = &player_halt;
+
+            static state_player_aim player_aim;
+            shared.states[STATE_PLAYER_AIM] = &player_aim;
+
+            static state_player_fire player_fire;
+            shared.states[STATE_PLAYER_FIRE] = &player_fire;
+
+            static state_player_wait player_wait;
+            shared.states[STATE_PLAYER_WAIT] = &player_wait;
+
+            static state_missle_appear missle_appear;
+            shared.states[STATE_MISSLE_APPEAR] = &missle_appear;
+
+            static state_missle_fly missle_fly;
+            shared.states[STATE_MISSLE_FLY] = &missle_fly;
+
+            static state_missle_explode missle_explode;
+            shared.states[STATE_MISSLE_EXPLODE] = &missle_explode;
+
+            static state_camera_aim camera_aim;
+            shared.states[STATE_CAMERA_AIM] = &camera_aim;
+
+            static state_camera_seize camera_seize;
+            shared.states[STATE_CAMERA_SEIZE] = &camera_seize;
+
+            static state_camera_attach camera_attach;
+            shared.states[STATE_CAMERA_ATTACH] = &camera_attach;
+
+            static state_camera_survey camera_survey;
+            shared.states[STATE_CAMERA_SURVEY] = &camera_survey;
+
+            static state_camera_restore camera_return;
+            shared.states[STATE_CAMERA_RESTORE] = &camera_return;
+        }
+
+        cruise_bubble::state_camera_restore::state_camera_restore()
+            : state_type(STATE_CAMERA_RESTORE)
+        {
+        }
+
+        cruise_bubble::state_type::state_type(cruise_bubble::state_enum type)
+        {
+            this->type = type;
+        }
+
+        cruise_bubble::state_camera_survey::state_camera_survey() : state_type(STATE_CAMERA_SURVEY)
+        {
+        }
+
+        cruise_bubble::state_camera_attach::state_camera_attach() : state_type(STATE_CAMERA_ATTACH)
+        {
+        }
+
+        cruise_bubble::state_camera_seize::state_camera_seize() : state_type(STATE_CAMERA_SEIZE)
+        {
+        }
+
+        cruise_bubble::state_camera_aim::state_camera_aim() : state_type(STATE_CAMERA_AIM)
+        {
+        }
+
+        cruise_bubble::state_missle_explode::state_missle_explode()
+            : state_type(STATE_MISSLE_EXPLODE)
+        {
+        }
+
+        cruise_bubble::state_missle_fly::state_missle_fly() : state_type(STATE_MISSLE_FLY)
+        {
+        }
+
+        cruise_bubble::state_missle_appear::state_missle_appear() : state_type(STATE_MISSLE_APPEAR)
+        {
+        }
+
+        cruise_bubble::state_player_wait::state_player_wait() : state_type(STATE_PLAYER_WAIT)
+        {
+        }
+
+        cruise_bubble::state_player_fire::state_player_fire() : state_type(STATE_PLAYER_FIRE)
+        {
+        }
+
+        cruise_bubble::state_player_aim::state_player_aim() : state_type(STATE_PLAYER_AIM)
+        {
+        }
+
+        cruise_bubble::state_player_halt::state_player_halt() : state_type(STATE_PLAYER_HALT)
+        {
+        }
+
+        void init_missle_model()
+        {
+            U32 aid = xStrHash("cruise_bubble_bind.MINF");
+            xEnt* ent = (xEnt*)xSTFindAsset(aid, NULL);
+            xModelInstance* model = zEntRecurseModelInfo(ent, NULL);
+
+            model->PipeFlags = model->PipeFlags & 0xffffffcf | 0x10;
+            model->Data->renderCallBack = &custom_bubble_render;
+            if (model->Data->renderCallBack == NULL)
+            {
+                model->Data->renderCallBack = &AtomicDefaultRenderCallBack;
+            }
+
+            shared.missle_model = model;
+        }
+
+        void reset_wake_ribbons()
+        {
+            wake_ribbon[0].set_default_config();
+            wake_ribbon[0].cfg.blend_src = 5;
+            wake_ribbon[0].cfg.blend_dst = 2;
+
+            if (!(shared.flags & 0x200))
+            {
+                wake_ribbon[0].set_texture("lightning");
+                wake_ribbon[1].set_texture("lightning");
+                wake_ribbon[0].set_curve(&wake_ribbon_curve[0], 2);
+                wake_ribbon[1].set_curve(&wake_ribbon_curve[0], 2);
+
+                wake_ribbon[0].cfg.life_time = 3.0f;
+            }
+            else
+            {
+                wake_ribbon[0].set_texture("lightning");
+                wake_ribbon[1].set_texture("lightning");
+                wake_ribbon[0].set_curve(&cheat_wake_ribbon_curve[0], 2);
+                wake_ribbon[1].set_curve(&cheat_wake_ribbon_curve[0], 2);
+
+                wake_ribbon[0].cfg.life_time = 3.0f;
+            }
+            wake_ribbon[0].cfg.pivot = 1.0f;
+            wake_ribbon[1].cfg = wake_ribbon[0].cfg;
+
+            wake_ribbon[0].refresh_config();
+            wake_ribbon[1].refresh_config();
+        }
+
+        void init_wake_ribbons()
+        {
+            wake_ribbon[0].init("Wake Ribbon 0", "Player|Cruise Bubble|Wake Ribbon 0|");
+            wake_ribbon[1].init("Wake Ribbon 1", "Player|Cruise Bubble|Wake Ribbon 1|");
+            cruise_bubble::reset_wake_ribbons();
+        }
+
+        void reset_explode_decal()
+        {
+            explode_decal.set_default_config();
+
+            explode_decal.cfg.flags = 0x3;
+            explode_decal.cfg.blend_src = 5;
+            explode_decal.cfg.blend_dst = 2;
+
+            if (!(shared.flags & 0x200))
+            {
+                explode_decal.cfg.life_time = 0.5f;
+                explode_decal.set_curve(&explode_curve[0], 3);
+                explode_decal.set_texture("par_cruise_explode");
+            }
+            else
+            {
+                explode_decal.cfg.life_time = 0.5f;
+                explode_decal.set_curve(&cheat_explode_curve[0], 3);
+                explode_decal.set_texture("par_cruise_explode");
+            }
+            explode_decal.refresh_config();
+        }
+
+        void init_explode_decal()
+        {
+            explode_decal.init(1, "Cruise Bubble Explosion");
+            explode_decal.set_default_config();
+
+            // r0 should be use here
+            explode_decal.cfg.flags = 0x3;
+            // scheduling off here
+            explode_decal.cfg.life_time = 0.5f;
+            explode_decal.cfg.blend_src = 5;
+            explode_decal.cfg.blend_dst = 2;
+
+            explode_decal.set_curve(explode_curve, 3);
+            explode_decal.set_texture("par_cruise_explode");
+            explode_decal.refresh_config();
+        }
+
+        void init_shrapnel()
+        {
+            shared.droplet_shrapnel =
+                (zShrapnelAsset*)xSTFindAsset(xStrHash("cruise_bubble_droplet_shrapnel"), NULL);
+        }
+
+        void add_trail_sample(const xVec3& loc0, const xVec3& dir0, const xVec3& loc1,
+                              const xVec3& dir1, F32 dt)
+        {
+            shared.trail.bubbles += dt * current_tweak->trail.bubble_rate;
+
+            U32 bubbles = (U32)shared.trail.bubbles;
+            if (bubbles != 0)
+            {
+                shared.trail.bubbles -= bubbles;
+
+                // The residue here is NOT source shape: every remaining differing row is a
+                // .rodata displacement (target reaches these templates as base+0x230/0x23c/
+                // 0x254, we reach them at +0x98/0xa4/0xbc). The 0x198 gap is exactly the 356
+                // bytes of unreferenced .rodata the retail link deadstripped (@410, @441,
+                // @624-@630, @822, @881) plus the 52 bytes of the hit_test/start_effects/
+                // perturb_direction/cb_damage_ent literal group, which the target emits
+                // BEFORE these. Both must be fixed together; neither is local to this body.
+                xVec3 vel_rnd = { 0.0f, 0.0f, 0.0f };
+                zFX_SpawnBubbleTrail(&loc0, &loc1, bubbles, &vel_rnd, NULL);
+
+                xVec3 off0 = dir0 * current_tweak->trail.bubble_emit_radius;
+                xVec3 off1 = dir1 * current_tweak->trail.bubble_emit_radius;
+                xVec3 edge0[2] = { loc0 + off0, loc0 - off0 };
+                xVec3 edge1[2] = { loc1 + off1, loc1 - off1 };
+
+                zFX_SpawnBubbleTrail(&edge0[0], &edge1[0], bubbles, &vel_rnd, NULL);
+                zFX_SpawnBubbleTrail(&edge0[1], &edge1[1], bubbles, &vel_rnd, NULL);
+            }
+
+            U32 restart = (shared.flags >> 8) & 1;
+            xVec3 off = dir1 * current_tweak->trail.wake_emit_radius;
+
+            wake_ribbon[0].insert(loc1 + off, dir1, 1.0f, 1.0f, restart);
+            wake_ribbon[1].insert(loc1 - off, -dir1, 1.0f, 1.0f, restart);
+        }
+
+        void update_trail(F32 dt)
+        {
+            if (!(shared.flags & 0x80))
+            {
+                return;
+            }
+
+#ifdef PLATFORM_PC
+            // sample_rate is joints a second and shared.trail.samples carries the
+            // unspent fraction, but the floor below throws that carry away and
+            // takes a sample anyway. Above sample_rate frames a second the floor
+            // fires every frame, so the wake gains a joint however little the
+            // bubble moved, and the ribbon holds a fixed number of joints, so the
+            // wake gets shorter the faster the game runs.
+            //
+            // Carry the unspent time next to the unspent fraction and hand the
+            // whole span to the frame that does sample, so the samples still
+            // cover the path travelled since the last one.
+            shared.trail.unspent_dt += dt;
+#endif
+
+            F32 nsamples = shared.trail.samples + dt * current_tweak->trail.sample_rate;
+            shared.trail.samples = nsamples;
+            S32 samples = (S32)nsamples;
+
+            if (samples <= 0)
+            {
+#ifdef PLATFORM_PC
+                // A rate of zero means every frame; any other rate waits.
+                if (current_tweak->trail.sample_rate > 0.0f)
+                {
+                    return;
+                }
+#endif
+                shared.trail.samples = 0.0f;
+                samples = 1;
+            }
+            else
+            {
+                // float cast
+                shared.trail.samples = nsamples - (F32)samples;
+            }
+
+#ifdef PLATFORM_PC
+            dt = shared.trail.unspent_dt;
+            shared.trail.unspent_dt = 0.0f;
+#endif
+
+            xMat4x3 end_mat;
+            xQuat end_dir;
+            cruise_bubble::refresh_trail(end_mat, end_dir);
+
+            // float cast
+            F32 ds = 1.0f / (F32)samples;
+            F32 ddt = dt * ds;
+            xVec3 dloc = (end_mat.pos - shared.trail.mat.pos) * ds;
+            S32 flip = 0;
+            F32 s = ds;
+
+            xMat4x3 mat[2];
+            mat[0] = shared.trail.mat;
+
+            for (int i = 0; i < samples; ++i)
+            {
+                xMat4x3* mat0 = mat + flip;
+                flip = flip ^ 1;
+                xMat4x3* mat1 = mat + flip;
+
+                xQuat subdir;
+                xQuatSlerp(&subdir, &shared.trail.dir, &end_dir, s);
+                xQuatToMat(&subdir, mat1);
+                mat1->pos = mat0->pos + dloc;
+                add_trail_sample(mat0->pos, mat0->right, mat1->pos, mat1->right, ddt);
+                s += ds;
+            }
+
+            shared.trail.mat = end_mat;
+            shared.trail.dir = end_dir;
+            shared.flags = shared.flags & 0xfffffeff;
+        }
+
+        void refresh_missle_model()
+        {
+        }
+
+        void update_missle(xScene& s, F32 dt)
+        {
+            xModelInstance* m = shared.missle_model;
+            if (!(m->Flags & 2))
+            {
+                return;
+            }
+            xModelUpdate(m, dt);
+            xModelEval(m);
+            update_trail(dt);
+        }
+
+        void render_missle()
+        {
+            xModelInstance* m = shared.missle_model;
+            if (!(m->Flags & 1))
+            {
+                return;
+            }
+            xModelRender(m);
+        }
+
+        // return type guessed based on return type of zEntRecurseModelInfo and xModelInstanceAlloc
+        xModelInstance* load_model(U32 aid)
+        {
+            xModelInstance* model;
+            U32 size;
+
+            model = (xModelInstance*)xSTFindAsset(xStrHashCat(aid, ".minf"), &size);
+            if (model != NULL)
+            {
+                model = zEntRecurseModelInfo(model, NULL);
+                return model;
+            }
+
+            model = (xModelInstance*)xSTFindAsset(aid, &size);
+            if (model == NULL)
+            {
+                model = (xModelInstance*)xSTFindAsset(xStrHashCat(aid, ".dff"), &size);
+            }
+            if (model == NULL)
+            {
+                return NULL;
+            }
+            return xModelInstanceAlloc((RpAtomic*)model, NULL, 0, 0, NULL);
+        }
+
+        void render_model_2d(xModelInstance* model, const basic_rect<F32>& rect, F32 param_3)
+        {
+            // Both are const so that the scheduler does not treat the stores
+            // that copy their .rodata templates onto the stack as aliasing the
+            // literal loads for the assign() calls below; retail issues those
+            // loads first, and the lwzu that folds away one addi depends on it.
+            const xVec3 r = { 0.0f, 0.0f, 1.0f };
+            const xVec3 from = { 0.0f, 0.0f, -0.01f };
+
+            xMat4x3 frame;
+
+            frame.right.assign(1.01f, 0.0f, 0.0f);
+            frame.up.assign(0.0f, 1.01f, 0.0f);
+            frame.at.assign(0.0f, 0.0f, 0.01f);
+            frame.pos = 0.0f;
+
+            for (; model != NULL; model = model->Next)
+            {
+                xModelSetMaterialAlpha(model, (S32)((param_3 * 255.0f) + 0.5f) & 0xFF);
+                xModelSetFrame(model, &frame);
+                xModelRender2D(*model, rect, r, from);
+            }
+        }
+
+        void render_glow(xModelInstance* model, const basic_rect<F32>& r, F32 glow, F32 alpha)
+        {
+            alpha *= glow;
+
+            // SCHED: the target keeps all three constants live at once (f4/f1/f2)
+            // and computes dalpha before dsize; mwcc reuses f1 for two of them.
+            // Statement order, split declarations and const were all measured, and
+            // re-measured after the clause-V compiler patch: bound-first 73.043,
+            // dalpha-before-dloc 81.957, all-decl-then-assign 82.101; every other
+            // spelling of the three products is inert. The constant order (1/3, 0.25,
+            // 0.5) already matches -- only the allocation and the fmuls interleave differ.
+            F32 dsize = (1.0f / 3.0f) * (glow * current_tweak->hud.glow_size);
+            F32 dloc = 0.5f * -dsize;
+            F32 dalpha = 0.25f * -alpha;
+
+            basic_rect<F32> bound = r;
+
+            for (S32 i = 0; i < 3; i++)
+            {
+                render_model_2d(model, bound, alpha);
+
+                bound.x += dloc;
+                bound.y += dloc;
+                bound.w += dsize;
+                bound.h += dsize;
+                alpha += dalpha;
+            }
+        }
+
+        struct
+        {
+            bool hiding;
+            F32 alpha;
+            F32 alpha_vel;
+            F32 glow;
+            F32 glow_vel;
+
+            // Offset 0x14
+            struct
+            {
+                xModelInstance* reticle;
+                xModelInstance* target;
+                xModelInstance* swirl;
+                xModelInstance* wind;
+            } model;
+            // Offset 0x24
+            hud_gizmo gizmo[33];
+            // Offset 0x654
+            U32 gizmos_used;
+            // Offset 0x658
+            uv_animated_model uv_swirl;
+            // Offset 0x674
+            uv_animated_model uv_wind;
+        } hud;
+
+        void init_hud()
+        {
+            // should use stbu here and save an addi instruction
+            // which should also fix the rest of the function by correcting offsets
+
+            hud.hiding = false;
+            hud.alpha = 0.0f;
+            hud.alpha_vel = 0.0f;
+            hud.glow = 0.0f;
+            hud.gizmos_used = 0;
+
+            hud.model.reticle = load_model(xStrHash("ui_3dicon_reticle"));
+            hud.model.target = load_model(xStrHash("ui_3dicon_target_lock"));
+            hud.model.wind = load_model(xStrHash("ui_3dicon_missile_frame02"));
+
+            hud.uv_wind.init(hud.model.wind->Data);
+            hud.uv_wind.offset_vel.assign(current_tweak->hud.wind.du, current_tweak->hud.wind.dv);
+        }
+
+        bool uv_animated_model::init(RpAtomic* m)
+        {
+            this->model = m;
+            if (m == NULL)
+            {
+                return false;
+            }
+
+            if (!this->clone_uv(this->uv, this->uvsize, m))
+            {
+                return false;
+            }
+
+            this->offset.assign(0.0f, 0.0f);
+            this->offset_vel.assign(0.0f, 0.0f);
+            return true;
+        }
+
+        bool uv_animated_model::clone_uv(RwTexCoords*& coords, S32& size, RpAtomic* m) const
+        {
+            RwTexCoords* c;
+            if (!this->get_uv(c, size, m))
+            {
+                return false;
+            }
+
+            coords = (RwTexCoords*)xMemAlloc(gActiveHeap, size * 8, 0);
+            if (coords == NULL)
+            {
+                return false;
+            }
+
+            memcpy(coords, c, size * 8); // [memcpy]
+            return true;
+        }
+
+        bool uv_animated_model::get_uv(RwTexCoords*& coords, S32& size, RpAtomic* m) const
+        {
+            coords = NULL;
+            size = 0;
+
+            RpGeometry* geo = m->geometry;
+            if (geo == NULL)
+            {
+                return false;
+            }
+
+            size = geo->numVertices;
+            if (!(size > 0))
+            {
+                return false;
+            }
+
+            coords = *geo->texCoords;
+            return coords != NULL;
+        }
+
+        void show_gizmo(hud_gizmo& gizmo, const basic_rect<F32>& rect, xModelInstance* m)
+        {
+            gizmo.flags = 0x1;
+            gizmo.bound = rect;
+            gizmo.alpha = 0.0f;
+            gizmo.alpha_vel = 1.0f / current_tweak->hud.time_fade;
+            gizmo.glow = 1.0f;
+            gizmo.glow_vel = -1.0f / current_tweak->hud.time_glow;
+            gizmo.opacity = 1.0f;
+            gizmo.target = NULL;
+            gizmo.model = m;
+        }
+
+        void update_gizmo(cruise_bubble::hud_gizmo& gizmo, F32 dt)
+        {
+            gizmo.alpha = range_limit<F32>(gizmo.alpha_vel * dt + gizmo.alpha, 0.0f, 1.0f);
+            gizmo.glow = range_limit<F32>(gizmo.glow_vel * dt + gizmo.glow, 0.0f, 1.0f);
+        }
+
+        void flash_hud()
+        {
+            // nice meme
+            hud.glow = 1.0f;
+            hud.glow_vel = -1.0f / current_tweak->hud.time_glow;
+        }
+
+        void render_timer(F32 alpha, F32 glow)
+        {
+            state_missle_fly* state = (state_missle_fly*)shared.state[THREAD_MISSLE];
+            if (state == NULL || state->type != STATE_MISSLE_FLY)
+            {
+                return;
+            }
+
+            F32 life = state->life;
+            char buffer[16];
+            sprintf(buffer, "%02d:%02d", (S32)life, ((S32)(100.0f * life)) - (100 * (S32)life));
+
+            F32 dsize = glow * current_tweak->hud.timer.glow_size;
+            // zEntCruiseBubble_f_0_0 is loaded too early, should be just before the call
+            xfont font = xfont::create(current_tweak->hud.timer.font,
+                                       current_tweak->hud.timer.font_width + dsize,
+                                       current_tweak->hud.timer.font_height + dsize, 0.0f, g_WHITE,
+                                       screen_bounds);
+            iColor_tag lo = { 0x80, 0x00, 0x00, 0xFF };
+            iColor_tag hi = { 0xFF, 0x14, 0x14, 0xFF };
+
+            cruise_bubble::lerp(font.color, glow, lo, hi);
+            font.color.a = (S32)(255.0f * alpha + 0.5f);
+
+            const basic_rect<F32> bound = font.bounds(buffer);
+            F32 x = current_tweak->hud.timer.x - bound.x - 0.5f * bound.w;
+            F32 y = current_tweak->hud.timer.y - bound.y - 0.5f * bound.h;
+
+            font.render(buffer, x, y);
+        }
+
+        void lerp(iColor_tag& c, F32 t, iColor_tag a, iColor_tag b)
+        {
+            lerp(c.r, t, a.r, b.r);
+            lerp(c.g, t, a.g, b.g);
+            lerp(c.b, t, a.b, b.b);
+            lerp(c.a, t, a.a, b.a);
+        }
+
+        void lerp(U8& x, F32 t, U8 a, U8 b)
+        {
+            x = 0.5f + ((F32)a + t * ((F32)b - (F32)a));
+        }
+
+        S32 cruise_bubble::state_camera_survey::find_nearest(F32 radius) const
+        {
+            S32 j;
+            S32 i = 0;
+            S32 size = missle_record.size();
+            S32 range = size;
+
+            while (i < range)
+            {
+                j = (i + range) / 2;
+
+                if (radius < path_distance[j])
+                {
+                    size = range;
+                }
+                if (radius <= path_distance[j])
+                {
+                    range = j;
+                }
+                else if (radius > path_distance[j])
+                {
+                    i = j + 1;
+                }
+            }
+
+            return i;
+        }
+
+        void update_hud(F32 dt)
+        {
+            if (hud.gizmos_used == 0)
+            {
+                return;
+            }
+
+            hud.alpha = range_limit<F32>(hud.alpha_vel * dt + hud.alpha, 0.0f, 1.0f);
+            hud.glow = range_limit<F32>(hud.glow_vel * dt + hud.glow, 0.0f, 1.0f);
+
+            // scheduling off
+            F32 vel_frac = ((state_missle_fly*)shared.states[STATE_MISSLE_FLY])->vel /
+                           current_tweak->missle.fly.max_vel;
+
+            hud.uv_wind.offset_vel.assign(current_tweak->hud.wind.du, current_tweak->hud.wind.dv);
+            hud.uv_wind.offset_vel *= vel_frac;
+            hud.model.wind->Alpha = vel_frac;
+            hud.uv_wind.update(dt);
+
+            // SCHED: the target loads the -1.0f inside the loop; mwcc hoists it into the
+            // preheader here, and that single misplaced `lfs` is the whole residue. Loop
+            // shape and shared-counter forms were measured; re-measured after the clause-V
+            // compiler patch: U32 index 85.706, gizmo reference 95.832, tweak local 96.891,
+            // and continue / i++ / while / value-temp / divisor-temp forms are all inert.
+            for (S32 i = 1; i < hud.gizmos_used; ++i)
+            {
+                if (!(hud.gizmo[i].flags & 0x1))
+                {
+                    hud.gizmo[i].alpha_vel = -1.0f / current_tweak->hud.time_fade;
+                }
+            }
+
+            S32 i = 0;
+            while (i < hud.gizmos_used)
+            {
+                update_gizmo(hud.gizmo[i], dt);
+                if (hud.gizmo[i].alpha <= 0.0f)
+                {
+                    hud.gizmos_used -= 1;
+                    hud.gizmo[i] = hud.gizmo[hud.gizmos_used];
+                }
+                else
+                {
+                    ++i;
+                }
+            }
+
+            for (S32 i = 1; i < hud.gizmos_used; ++i)
+            {
+                hud.gizmo[i].flags &= 0xfffffffe;
+            }
+        }
+
+        void uv_animated_model::update(F32 dt)
+        {
+            if (0.0f == this->offset_vel.x && 0.0f == this->offset_vel.y)
+            {
+                return;
+            }
+
+            this->offset += this->offset_vel * dt;
+            this->offset.x = xfmod(this->offset.x, 1.0f);
+            this->offset.y = xfmod(this->offset.y, 1.0f);
+            this->refresh();
+        }
+
+        void uv_animated_model::refresh()
+        {
+            RpGeometry* geo = this->model->geometry;
+            RwTexCoords* src = this->uv;
+            RwTexCoords* end = this->uv + this->uvsize;
+            RwTexCoords* dst = *geo->texCoords;
+
+            // 0x10 is rpGEOMETRYLOCKTEXCOORDS1; the enum is not declared in any header here.
+            RpGeometryLock(geo, 0x10);
+
+            for (; src < end; ++src, ++dst)
+            {
+                dst->u = src->u + this->offset.x;
+                dst->v = src->v + this->offset.y;
+            }
+
+            RpGeometryUnlock(geo);
+        }
+
+        void render_hud()
+        {
+            if (hud.gizmos_used == 0)
+            {
+                return;
+            }
+
+            zRenderState(SDRS_CruiseHUD);
+
+            if (hud.model.wind->Alpha > 0.0f)
+            {
+                RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)5);
+                RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)2);
+
+                basic_rect<F32> bound;
+                bound.set_size(current_tweak->hud.wind.size, current_tweak->hud.wind.size);
+                bound.center(0.5f, 0.5f);
+
+                render_model_2d(hud.model.wind, bound, hud.model.wind->Alpha);
+            }
+
+            RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)5);
+            RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)6);
+
+            for (S32 i = 0; i < hud.gizmos_used; ++i)
+            {
+                hud_gizmo* gizmo = &hud.gizmo[i];
+                F32 alpha = hud.alpha * gizmo->alpha * gizmo->opacity;
+                if (!(alpha <= 0.0f))
+                {
+                    render_model_2d(gizmo->model, gizmo->bound, alpha);
+                }
+            }
+
+            RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)5);
+            RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)2);
+
+            for (S32 i = 0; i < hud.gizmos_used; ++i)
+            {
+                hud_gizmo* gizmo = &hud.gizmo[i];
+
+                F32 glow = gizmo->glow + hud.glow;
+                if (glow > 1.0f)
+                {
+                    glow = 1.0f;
+                }
+                else if (glow <= 0.0f)
+                {
+                    continue;
+                }
+
+                F32 alpha = hud.alpha * gizmo->alpha * gizmo->opacity;
+                if (!(alpha <= 0.0f))
+                {
+                    render_glow(gizmo->model, gizmo->bound, glow, alpha);
+                }
+            }
+
+            render_timer(hud.alpha, hud.glow);
+        }
+
+        void show_hud()
+        {
+            // scheduling and register usage off
+            hud.gizmos_used = 1;
+            basic_rect<F32> reticle_bound;
+            // Chained, because retail never re-materialises r3 between these
+            // two calls. Only this site chains -- doing the same at the other
+            // two set_size call sites measures worse.
+            reticle_bound.set_size(current_tweak->hud.reticle.size).center(0.5f, 0.5f);
+            show_gizmo(hud.gizmo[0], reticle_bound, hud.model.reticle);
+
+            hud.model.wind->Alpha = 0.0f;
+            // scheduling off for this float
+            hud.alpha = 0.0f;
+            hud.alpha_vel = 1.0f / current_tweak->hud.time_fade;
+
+            flash_hud();
+        }
+
+        void hide_hud()
+        {
+            hud.gizmos_used = 0;
+            // float scheduling ...
+            hud.model.wind->Alpha = 0.0f;
+        }
+
+        xVec3 world_to_screen(const xVec3& loc)
+        {
+            iCameraUpdatePos(globals.camera.lo_cam, &globals.camera.mat);
+
+            xVec3 world_loc;
+            xMat4x3* view_mat = (xMat4x3*)&globals.camera.lo_cam->viewMatrix;
+            xMat4x3Toworld(&world_loc, view_mat, &loc);
+
+            xVec3 screen_loc;
+            F32 iz = 1.0f / world_loc.z;
+            screen_loc.assign(world_loc.x * iz, world_loc.y * iz, 1.0f);
+
+            return screen_loc;
+        }
+
+        S32 find_locked_target(const xVec3* target)
+        {
+            for (S32 i = 1; i < hud.gizmos_used; ++i)
+            {
+                if (hud.gizmo[i].target == target)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        void lock_target(S32 index, const xVec3* target, F32 opacity)
+        {
+            if (index <= -1 && hud.gizmos_used >= 33)
+            {
+                return;
+            }
+
+            hud_gizmo* gizmo;
+            if (index <= -1)
+            {
+                index = hud.gizmos_used;
+                hud.gizmos_used++;
+                gizmo = &hud.gizmo[index];
+                show_gizmo(hud.gizmo[index], hud.gizmo[index].bound, hud.model.target);
+            }
+            gizmo = &hud.gizmo[index];
+            // const so that the stores filling screen_loc are not treated as
+            // aliasing the current_tweak load below, which retail hoists above
+            // them.
+            const xVec3 screen_loc = cruise_bubble::world_to_screen(*target);
+
+            gizmo->bound.set_size(current_tweak->hud.target.size);
+            gizmo->bound.center(screen_loc.x, screen_loc.y);
+            gizmo->flags = 0x1;
+            gizmo->alpha_vel = 1.0f / current_tweak->hud.time_fade;
+            gizmo->model = hud.model.target;
+            gizmo->target = target;
+            gizmo->opacity = opacity;
+        }
+
+        void check_lock_target(const xVec3* target)
+        {
+            xMat4x3* mat = &globals.camera.mat;
+            xVec3 offset = *target - mat->pos;
+            F32 ang = offset.dot(mat->at);
+
+            if (ang < current_tweak->reticle.dist_min || ang > current_tweak->reticle.dist_max)
+            {
+                return;
+            }
+
+            ang = offset.length();
+            if ((ang >= -0.00001f) && (ang <= 0.00001f))
+            {
+                ang = 0.0f;
+            }
+            else
+            {
+                ang = xacos(offset.dot(mat->at) / ang);
+            }
+
+            F32 max_ang = current_tweak->reticle.ang_show;
+            F32 min_ang = current_tweak->reticle.ang_hide;
+
+            if (ang >= min_ang)
+            {
+                return;
+            }
+
+            if (ang >= max_ang)
+            {
+                S32 t = find_locked_target(target);
+                if (t < 0)
+                {
+                    return;
+                }
+
+                lock_target(t, target, (min_ang - ang) / (min_ang - max_ang));
+            }
+
+            else
+            {
+                lock_target(find_locked_target(target), target, 1.0f);
+            }
+        }
+
+        U32 check_anim_aim(xAnimTransition*, xAnimSingle*, void*)
+        {
+            return false;
+        }
+
+        // Very dumb scheduling.
+        void load_cheat_tweak()
+        {
+            *(volatile F32*)(&cheat_tweak.missle.crash_angle) = 0.7536f;
+            *(volatile F32*)(&cheat_tweak.missle.collide_twist) = 0.05f;
+            *(volatile F32*)(&cheat_tweak.missle.appear.delay_fly) = 0.16666667f;
+            *(volatile F32*)(&cheat_tweak.missle.fly.accel) = 12.0f;
+            *(volatile F32*)(&cheat_tweak.missle.fly.turn.xdelta) = 7.0f;
+            *(volatile F32*)(&cheat_tweak.missle.fly.turn.ydelta) = 5.0f;
+            *(volatile F32*)(&cheat_tweak.missle.fly.turn.ydecay) =
+                *(volatile F32*)(&cheat_tweak.missle.fly.turn.xdecay) = 0.985f;
+            *(volatile F32*)(&cheat_tweak.missle.fly.turn.ybound) = 1.24248f;
+
+            F32 one_tenth = 0.1f;
+            *(volatile F32*)(&cheat_tweak.missle.fly.turn.roll_frac) = one_tenth;
+            *(volatile F32*)(&cheat_tweak.missle.explode.hit_radius) = 2.0f;
+            *(volatile F32*)(&cheat_tweak.camera.seize.blend_time) = 0.75f;
+            *(volatile F32*)(&cheat_tweak.camera.survey.duration) = 1.0f;
+            *(volatile F32*)(&cheat_tweak.camera.survey.min_duration) = one_tenth;
+
+            *(volatile F32*)(&cheat_tweak.camera.survey.drift_dist) = 10.0f;
+            *(volatile F32*)(&cheat_tweak.material.env_alpha) = 0.2f;
+            *(volatile U32*)(&cheat_tweak.material.env_texture) = xStrHash("aura2");
+            *(volatile F32*)(&cheat_tweak.material.fresnel_alpha) = 0.1f;
+            *(volatile F32*)(&cheat_tweak.material.fresnel_coeff) = 1.0f;
+            *(volatile U32*)(&cheat_tweak.material.fresnel_texture) =
+                xStrHash("par_cruise_explode");
+            *(volatile F32*)(&cheat_tweak.trail.bubble_rate) = 90.0f;
+            *(volatile F32*)(&cheat_tweak.trail.bubble_emit_radius) = 0.75f;
+            *(volatile F32*)(&cheat_tweak.trail.wake_emit_radius) = 0.3f;
+            *(volatile U32*)(&cheat_tweak.blast.emit) = 400;
+            *(volatile F32*)(&cheat_tweak.blast.vel) = 7.5f;
+            *(volatile U32*)(&cheat_tweak.droplet.emit_min) = 0xf;
+            *(volatile F32*)(&cheat_tweak.droplet.vel_min) = 4.0f;
+            *(volatile F32*)(&cheat_tweak.droplet.vel_max) = 8.0f;
+        }
+
+        void load_settings()
+        {
+            U32 params_size;
+            xModelAssetParam* params =
+                zEntGetModelParams(xStrHash("cruise_bubble_bind.MINF"), &params_size);
+
+            if (params == NULL)
+            {
+                params_size = 0;
+            }
+
+            normal_tweak.load(params, params_size);
+            memcpy(&cheat_tweak, &normal_tweak, sizeof(tweak_group));
+            load_cheat_tweak();
+            refresh_missle_model();
+        }
+
+        void tweak_group::load(xModelAssetParam* params, U32 size)
+        {
+            this->register_tweaks(true, params, size, NULL);
+        }
+
+        void tweak_group::register_tweaks(bool init, xModelAssetParam* ap, U32 apsize, const char*)
+        {
+            if (init)
+            {
+                this->aim_delay = 0.2f;
+                auto_tweak::load_param<F32, F32>(this->aim_delay, 1.0f, 0.0f, 1.0f, ap, apsize,
+                                                 "aim_delay");
+            }
+
+            if (init)
+            {
+                this->player.halt_time = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->player.halt_time, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "player.halt_time");
+            }
+
+            if (init)
+            {
+                this->player.aim.turn_speed = 0.05f;
+                auto_tweak::load_param<F32, F32>(this->player.aim.turn_speed, 1.0f, 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "player.aim.turn_speed");
+            }
+
+            if (init)
+            {
+                this->player.aim.anim_delta = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->player.aim.anim_delta, 1.0f, 0.0f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "player.aim.anim_delta");
+            }
+
+            if (init)
+            {
+                this->player.fire.delay_wand = 0.06666667f;
+                auto_tweak::load_param<F32, F32>(this->player.fire.delay_wand, 1.0f, 0.0f, 100.0f,
+                                                 ap, apsize, "player.fire.delay_wand");
+            }
+
+            if (init)
+            {
+                this->missle.life = 6.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.life, 1.0f, 0.01f, 1000000000.0f, ap,
+                                                 apsize, "missle.life");
+            }
+
+            if (init)
+            {
+                this->missle.hit_dist = 0.3f;
+                auto_tweak::load_param<F32, F32>(this->missle.hit_dist, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "missle.hit_dist");
+            }
+
+            if (init)
+            {
+                this->missle.crash_angle = 30.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.crash_angle, DEG2RAD(1), 0.0f, 60.0f,
+                                                 ap, apsize, "missle.crash_angle");
+            }
+
+            if (init)
+            {
+                this->missle.collide_twist = 0.025f;
+                auto_tweak::load_param<F32, F32>(this->missle.collide_twist, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "missle.collide_twist");
+            }
+
+            if (init)
+            {
+                this->missle.hit_tests = 4;
+                auto_tweak::load_param<S32, S32>(this->missle.hit_tests, 1, 1, 100, ap, apsize,
+                                                 "missle.hit_tests");
+            }
+
+            if (init)
+            {
+                this->missle.appear.delay_show = 0.13333334f;
+                auto_tweak::load_param<F32, F32>(this->missle.appear.delay_show, 1.0f, 0.0f, 100.0f,
+                                                 ap, apsize, "missle.appear.delay_show");
+            }
+
+            if (init)
+            {
+                this->missle.appear.delay_fly = 0.6666667f;
+                auto_tweak::load_param<F32, F32>(this->missle.appear.delay_fly, 1.0f, 0.0f, 100.0f,
+                                                 ap, apsize, "missle.appear.delay_fly");
+            }
+
+            if (init)
+            {
+                this->missle.appear.offset = xVec3::create(-0.049f, 1.728f, 0.922f);
+                auto_tweak::load_param<xVec3, S32>(this->missle.appear.offset, 0, 0, 0, ap, apsize,
+                                                   "missle.appear.offset");
+            }
+
+            if (init)
+            {
+                this->missle.fly.accel = 6.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.accel, 1.0f, 0.01f, 1000000000.0f,
+                                                 ap, apsize, "missle.fly.accel");
+            }
+
+            if (init)
+            {
+                this->missle.fly.max_vel = 12.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.max_vel, 1.0f, 0.01f,
+                                                 1000000000.0f, ap, apsize, "missle.fly.max_vel");
+            }
+
+            if (init)
+            {
+                this->missle.fly.engine_pitch_max = 10.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.engine_pitch_max, 1.0f, 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "missle.fly.engine_pitch_max");
+            }
+
+            if (init)
+            {
+                this->missle.fly.engine_pitch_sensitivity = 0.005f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.engine_pitch_sensitivity, 1.0f,
+                                                 0.0f, 1.0f, ap, apsize,
+                                                 "missle.fly.engine_pitch_sensitivity");
+            }
+
+            if (init)
+            {
+                this->missle.fly.flash_interval = 2.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.flash_interval, 1.0f, 0.0f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "missle.fly.flash_interval");
+            }
+
+            if (init)
+            {
+                this->missle.fly.turn.xdelta = 5.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.turn.xdelta, 1.0f, 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "missle.fly.turn.xdelta");
+            }
+
+            if (init)
+            {
+                this->missle.fly.turn.ydelta = 4.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.turn.ydelta, 1.0f, 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "missle.fly.turn.ydelta");
+            }
+
+            if (init)
+            {
+                this->missle.fly.turn.xdecay = 0.99f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.turn.xdecay, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "missle.fly.turn.xdecay");
+            }
+
+            if (init)
+            {
+                this->missle.fly.turn.ydecay = 0.99f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.turn.ydecay, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "missle.fly.turn.ydecay");
+            }
+
+            if (init)
+            {
+                this->missle.fly.turn.ybound = 0.6f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.turn.ybound, PI / 2, 0.0f, 1.0f,
+                                                 ap, apsize, "missle.fly.turn.ybound");
+            }
+
+            if (init)
+            {
+                this->missle.fly.turn.roll_frac = 0.2f;
+                auto_tweak::load_param<F32, F32>(this->missle.fly.turn.roll_frac, 1.0f, -1.0f, 1.0f,
+                                                 ap, apsize, "missle.fly.turn.roll_frac");
+            }
+
+            if (init)
+            {
+                this->missle.explode.hit_radius = 1.0f;
+                auto_tweak::load_param<F32, F32>(this->missle.explode.hit_radius, 1.0f, 0.0f, 10.0f,
+                                                 ap, apsize, "missle.explode.hit_radius");
+            }
+
+            if (init)
+            {
+                this->missle.explode.hit_duration = 0.25f;
+                auto_tweak::load_param<F32, F32>(this->missle.explode.hit_duration, 1.0f, 0.0f,
+                                                 10.0f, ap, apsize, "missle.explode.hit_duration");
+            }
+
+            if (init)
+            {
+                this->camera.aim.dist = 2.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.dist, 1.0f, 0.0f, 100.0f, ap,
+                                                 apsize, "camera.aim.dist");
+            }
+
+            if (init)
+            {
+                this->camera.aim.height = 1.5f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.height, 1.0f, -10.0f, 10.0f, ap,
+                                                 apsize, "camera.aim.height");
+            }
+
+            if (init)
+            {
+                this->camera.aim.pitch = 0.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.pitch, DEG2RAD(1), -90.0f, 90.0f,
+                                                 ap, apsize, "camera.aim.pitch");
+            }
+
+            if (init)
+            {
+                this->camera.aim.accel = 10.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.accel, 1.0f, 0.01f, 1000000000.0f,
+                                                 ap, apsize, "camera.aim.accel");
+            }
+
+            if (init)
+            {
+                this->camera.aim.max_vel = 5.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.max_vel, 1.0f, 0.01f,
+                                                 1000000000.0f, ap, apsize, "camera.aim.max_vel");
+            }
+
+            if (init)
+            {
+                this->camera.aim.stick_decel = 720.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.stick_decel, DEG2RAD(1), 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "camera.aim.stick_decel");
+            }
+
+            if (init)
+            {
+                this->camera.aim.stick_accel = 360.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.stick_accel, DEG2RAD(1), 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "camera.aim.stick_accel");
+            }
+
+            if (init)
+            {
+                this->camera.aim.stick_max_vel = 135.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.stick_max_vel, DEG2RAD(1), 0.01f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "camera.aim.stick_max_vel");
+            }
+
+            if (init)
+            {
+                this->camera.aim.turn_speed = 0.2f;
+                auto_tweak::load_param<F32, F32>(this->camera.aim.turn_speed, 1.0f, 0.001f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "camera.aim.turn_speed");
+            }
+
+            if (init)
+            {
+                this->camera.seize.delay = 0.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.seize.delay, 1.0f, 0.0f,
+                                                 1000000000.0f, ap, apsize, "camera.seize.delay");
+            }
+
+            if (init)
+            {
+                this->camera.seize.blend_time = 1.5f;
+                auto_tweak::load_param<F32, F32>(this->camera.seize.blend_time, 1.0f, 0.0f,
+                                                 1000000000.0f, ap, apsize,
+                                                 "camera.seize.blend_time");
+            }
+
+            if (init)
+            {
+                this->camera.seize.fade_dist = 2.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.seize.fade_dist, 1.0f, 0.0f, 10.0f,
+                                                 ap, apsize, "camera.seize.fade_dist");
+            }
+
+            if (init)
+            {
+                this->camera.seize.hide_dist = 1.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.seize.hide_dist, 1.0f, 0.0f, 10.0f,
+                                                 ap, apsize, "camera.seize.hide_dist");
+            }
+
+            if (init)
+            {
+                this->camera.seize.fov = 95.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.seize.fov, 1.0f, 10.0f, 180.0f, ap,
+                                                 apsize, "camera.seize.fov");
+            }
+
+            if (init)
+            {
+                this->camera.survey.duration = 2.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.duration, 1.0f, 0.0f, 10.0f,
+                                                 ap, apsize, "camera.survey.duration");
+            }
+
+            if (init)
+            {
+                this->camera.survey.min_duration = 0.25f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.min_duration, 1.0f, 0.0f,
+                                                 10.0f, ap, apsize, "camera.survey.min_duration");
+            }
+
+            if (init)
+            {
+                this->camera.survey.min_dist = 10.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.min_dist, 1.0f, 0.0f, 100.0f,
+                                                 ap, apsize, "camera.survey.min_dist");
+            }
+
+            if (init)
+            {
+                this->camera.survey.cut_dist = 6.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.cut_dist, 1.0f, 0.0f, 100.0f,
+                                                 ap, apsize, "camera.survey.cut_dist");
+            }
+
+            if (init)
+            {
+                this->camera.survey.drift_dist = 8.0f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.drift_dist, 1.0f, 0.0f, 100.0f,
+                                                 ap, apsize, "camera.survey.drift_dist");
+            }
+
+            if (init)
+            {
+                this->camera.survey.drift_softness = 0.1f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.drift_softness, 1.0f, 0.0f,
+                                                 0.5f, ap, apsize, "camera.survey.drift_softness");
+            }
+
+            if (init)
+            {
+                this->camera.survey.jerk_offset = 0.8f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.jerk_offset, 1.0f, 0.0f, 2.0f,
+                                                 ap, apsize, "camera.survey.jerk_offset");
+            }
+
+            if (init)
+            {
+                this->camera.survey.jerk_deflect = 0.6f;
+                auto_tweak::load_param<F32, F32>(this->camera.survey.jerk_deflect, 1.0f, 0.0f, 1.0f,
+                                                 ap, apsize, "camera.survey.jerk_deflect");
+            }
+
+            if (init)
+            {
+                this->camera.restore.control_delay = 0.25f;
+                auto_tweak::load_param<F32, F32>(this->camera.restore.control_delay, 1.0f, 0.0f,
+                                                 1.0f, ap, apsize, "camera.restore.control_delay");
+            }
+
+            if (init)
+            {
+                this->material.env_alpha = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->material.env_alpha, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "material.env_alpha");
+            }
+
+            if (init)
+            {
+                this->material.env_coeff = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->material.env_coeff, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "material.env_coeff");
+            }
+
+            if (init)
+            {
+                this->material.fresnel_alpha = 0.0f;
+                auto_tweak::load_param<F32, F32>(this->material.fresnel_alpha, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "material.fresnel_alpha");
+            }
+
+            if (init)
+            {
+                this->material.fresnel_coeff = 0.75f;
+                auto_tweak::load_param<F32, F32>(this->material.fresnel_coeff, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "material.fresnel_coeff");
+            }
+
+            if (init)
+            {
+                this->reticle.dist_min = 3.0f;
+                auto_tweak::load_param<F32, F32>(this->reticle.dist_min, 1.0f, 1.0f, 10.0f, ap,
+                                                 apsize, "reticle.dist_min");
+            }
+
+            if (init)
+            {
+                this->reticle.dist_max = 30.0f;
+                auto_tweak::load_param<F32, F32>(this->reticle.dist_max, 1.0f, 1.0f, 10000.0f, ap,
+                                                 apsize, "reticle.dist_max");
+            }
+
+            if (init)
+            {
+                this->reticle.ang_show = 4.0f;
+                auto_tweak::load_param<F32, F32>(this->reticle.ang_show, DEG2RAD(1), 0.0f, 90.0f,
+                                                 ap, apsize, "reticle.ang_show");
+            }
+
+            if (init)
+            {
+                this->reticle.ang_hide = 22.5f;
+                auto_tweak::load_param<F32, F32>(this->reticle.ang_hide, DEG2RAD(1), 0.0f, 90.0f,
+                                                 ap, apsize, "reticle.ang_hide");
+            }
+
+            if (init)
+            {
+                this->reticle.delay_retarget = 0.25f;
+                auto_tweak::load_param<F32, F32>(this->reticle.delay_retarget, 1.0f, 0.0f, 5.0f, ap,
+                                                 apsize, "reticle.delay_retarget");
+            }
+
+            if (init)
+            {
+                this->trail.sample_rate = 60.0f;
+                auto_tweak::load_param<F32, F32>(this->trail.sample_rate, 1.0f, 0.0f, 10000.0f, ap,
+                                                 apsize, "trail.sample_rate");
+            }
+
+            if (init)
+            {
+                this->trail.bubble_rate = 60.0f;
+                auto_tweak::load_param<F32, F32>(this->trail.bubble_rate, 1.0f, 0.0f, 10000.0f, ap,
+                                                 apsize, "trail.bubble_rate");
+            }
+
+            if (init)
+            {
+                this->trail.bubble_emit_radius = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->trail.bubble_emit_radius, 1.0f, 0.0f, 10.0f,
+                                                 ap, apsize, "trail.bubble_emit_radius");
+            }
+
+            if (init)
+            {
+                this->trail.wake_emit_radius = 0.1f;
+                auto_tweak::load_param<F32, F32>(this->trail.wake_emit_radius, 1.0f, 0.0f, 10.0f,
+                                                 ap, apsize, "trail.wake_emit_radius");
+            }
+
+            if (init)
+            {
+                this->blast.emit = 300;
+                auto_tweak::load_param<U32, S32>(this->blast.emit, 1, 0, 0x3e8, ap, apsize,
+                                                 "blast.emit");
+            }
+
+            if (init)
+            {
+                this->blast.radius = 0.0f;
+                auto_tweak::load_param<F32, F32>(this->blast.radius, 1.0f, 0.0f, 10.0f, ap, apsize,
+                                                 "blast.radius");
+            }
+
+            if (init)
+            {
+                this->blast.vel = 5.0f;
+                auto_tweak::load_param<F32, F32>(this->blast.vel, 1.0f, -100000.0f, 100000.0f, ap,
+                                                 apsize, "blast.vel");
+            }
+
+            if (init)
+            {
+                this->blast.rand_vel = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->blast.rand_vel, 1.0f, -100000.0f, 100000.0f,
+                                                 ap, apsize, "blast.rand_vel");
+            }
+
+            if (init)
+            {
+                this->droplet.dist_min = 1.0f;
+                auto_tweak::load_param<F32, F32>(this->droplet.dist_min, 1.0f, 0.0f, 10.0f, ap,
+                                                 apsize, "droplet.dist_min");
+            }
+
+            if (init)
+            {
+                this->droplet.dist_max = 2.0f;
+                auto_tweak::load_param<F32, F32>(this->droplet.dist_max, 1.0f, 0.0f, 10.0f, ap,
+                                                 apsize, "droplet.dist_max");
+            }
+
+            if (init)
+            {
+                this->droplet.emit_min = 10;
+                auto_tweak::load_param<U32, S32>(this->droplet.emit_min, 1, 0, 0x1e, ap, apsize,
+                                                 "droplet.emit_min");
+            }
+
+            if (init)
+            {
+                this->droplet.emit_max = 20;
+                auto_tweak::load_param<U32, S32>(this->droplet.emit_max, 1, 0, 0x1e, ap, apsize,
+                                                 "droplet.emit_max");
+            }
+
+            if (init)
+            {
+                this->droplet.vel_min = 2.0f;
+                auto_tweak::load_param<F32, F32>(this->droplet.vel_min, 1.0f, 0.0f, 100000.0f, ap,
+                                                 apsize, "droplet.vel_min");
+            }
+
+            if (init)
+            {
+                this->droplet.vel_max = 6.0f;
+                auto_tweak::load_param<F32, F32>(this->droplet.vel_max, 1.0f, 0.0f, 100000.0f, ap,
+                                                 apsize, "droplet.vel_max");
+            }
+
+            if (init)
+            {
+                this->droplet.vel_perturb = 0.25f;
+                auto_tweak::load_param<F32, F32>(this->droplet.vel_perturb, 1.0f, 0.0f, 100000.0f,
+                                                 ap, apsize, "droplet.vel_perturb");
+            }
+
+            if (init)
+            {
+                this->droplet.vel_angle = 60.0f;
+                auto_tweak::load_param<F32, F32>(this->droplet.vel_angle, DEG2RAD(1), 0.0f,
+                                                 100000.0f, ap, apsize, "droplet.vel_angle");
+            }
+
+            if (init)
+            {
+                this->droplet.rot_vel_max = 360.0f;
+                auto_tweak::load_param<F32, F32>(this->droplet.rot_vel_max, DEG2RAD(1), 0.0f,
+                                                 100000.0f, ap, apsize, "droplet.rot_vel_max");
+            }
+
+            if (init)
+            {
+                this->hud.glow_size = 0.05f;
+                auto_tweak::load_param<F32, F32>(this->hud.glow_size, 1.0f, 0.001f, 10.0f, ap,
+                                                 apsize, "hud.glow_size");
+            }
+
+            if (init)
+            {
+                this->hud.time_fade = 0.25f;
+                auto_tweak::load_param<F32, F32>(this->hud.time_fade, 1.0f, 0.001f, 10.0f, ap,
+                                                 apsize, "hud.time_fade");
+            }
+
+            if (init)
+            {
+                this->hud.time_glow = 0.5f;
+                auto_tweak::load_param<F32, F32>(this->hud.time_glow, 1.0f, 0.001f, 10.0f, ap,
+                                                 apsize, "hud.time_glow");
+            }
+
+            if (init)
+            {
+                this->hud.wind.size = 0.75f;
+                auto_tweak::load_param<F32, F32>(this->hud.wind.size, 1.0f, 0.0f, 100.0f, ap,
+                                                 apsize, "hud.wind.size");
+            }
+
+            if (init)
+            {
+                this->hud.wind.du = 0.0f;
+                auto_tweak::load_param<F32, F32>(this->hud.wind.du, 1.0f, -1000000000.0f,
+                                                 1000000000.0f, ap, apsize, "hud.wind.du");
+            }
+
+            if (init)
+            {
+                this->hud.wind.dv = 4.0f;
+                auto_tweak::load_param<F32, F32>(this->hud.wind.dv, 1.0f, -1000000000.0f,
+                                                 1000000000.0f, ap, apsize, "hud.wind.dv");
+            }
+
+            if (init)
+            {
+                this->hud.reticle.size = 0.1f;
+                auto_tweak::load_param<F32, F32>(this->hud.reticle.size, 1.0f, 0.0f, 100.0f, ap,
+                                                 apsize, "hud.reticle.size");
+            }
+
+            if (init)
+            {
+                this->hud.target.size = 0.1f;
+                auto_tweak::load_param<F32, F32>(this->hud.target.size, 1.0f, 0.0f, 100.0f, ap,
+                                                 apsize, "hud.target.size");
+            }
+
+            if (init)
+            {
+                this->hud.timer.font = 2;
+                auto_tweak::load_param<S32, S32>(this->hud.timer.font, 1, 0, 4, ap, apsize,
+                                                 "hud.timer.font");
+            }
+
+            if (init)
+            {
+                this->hud.timer.font_width = 0.0275f;
+                auto_tweak::load_param<F32, F32>(this->hud.timer.font_width, 1.0f, 0.001f, 1.0f, ap,
+                                                 apsize, "hud.timer.font_width");
+            }
+
+            if (init)
+            {
+                this->hud.timer.font_height = 0.047f;
+                auto_tweak::load_param<F32, F32>(this->hud.timer.font_height, 1.0f, 0.001f, 1.0f,
+                                                 ap, apsize, "hud.timer.font_height");
+            }
+
+            if (init)
+            {
+                this->hud.timer.x = 0.78f;
+                auto_tweak::load_param<F32, F32>(this->hud.timer.x, 1.0f, 0.0f, 1.0f, ap, apsize,
+                                                 "hud.timer.x");
+            }
+
+            if (init)
+            {
+                this->hud.timer.y = 0.86f;
+                auto_tweak::load_param<F32, F32>(this->hud.timer.y, 1.0f, 0.0f, 1.0f, ap, apsize,
+                                                 "hud.timer.y");
+            }
+
+            if (init)
+            {
+                this->hud.timer.glow_size = 0.01f;
+                auto_tweak::load_param<F32, F32>(this->hud.timer.glow_size, 1.0f, 0.0f, 10.0f, ap,
+                                                 apsize, "hud.timer.glow_size");
+            }
+
+            if (init)
+            {
+                this->dialog.freq = 1.0f;
+                auto_tweak::load_param<F32, F32>(this->dialog.freq, 1.0f, 0.0f, 1.0f, ap, apsize,
+                                                 "dialog.freq");
+            }
+
+            if (init)
+            {
+                this->dialog.decay = 0.75f;
+                auto_tweak::load_param<F32, F32>(this->dialog.decay, 1.0f, 0.0f, 1.0f, ap, apsize,
+                                                 "dialog.decay");
+            }
+
+            if (init)
+            {
+                this->dialog.min_freq = 0.1f;
+                auto_tweak::load_param<F32, F32>(this->dialog.min_freq, 1.0f, 0.0f, 1.0f, ap,
+                                                 apsize, "dialog.min_freq");
+            }
+
+            if (init)
+            {
+                this->material.fresnel_texture = xStrHash("gloss_edge");
+                this->material.env_texture = xStrHash("rainbowfilm_smooth32");
+            }
+        }
+
+    } // namespace
+
+    // The public entry points below are defined at cruise_bubble scope, not in
+    // the anonymous namespace, so that they keep external linkage -- eight other
+    // translation units call them. Retail writes them as cruise_bubble::init()
+    // from *inside* the anonymous namespace, which CodeWarrior accepts as naming
+    // the outer namespace. Standard C++ reads that as an internal-linkage
+    // function of a different name, so the qualifier cannot simply be dropped:
+    // doing so unexports the unit while still compiling cleanly.
+    void init()
+    {
+        if ((shared.flags & 0x1) != 0x1)
+        {
+            return;
+        }
+
+        cruise_bubble::init_sound();
+
+        shared.flags |= 0x2;
+
+        cruise_bubble::load_settings();
+        cruise_bubble::init_states();
+        cruise_bubble::init_missle_model();
+        cruise_bubble::init_wake_ribbons();
+        cruise_bubble::init_explode_decal();
+        cruise_bubble::init_shrapnel();
+        cruise_bubble::init_hud();
+        cruise_bubble::init_debug();
+
+        // scheduling off
+        shared.fov_default = xCameraGetFOV(&globals.camera);
+        shared.dialog_freq = current_tweak->dialog.freq;
+    }
+
+    namespace
+    {
+
+        void init_debug()
+        {
+            // empty
+        }
+
+    } // namespace
+
+    void reset()
+    {
+        if ((shared.flags & 0x3) == 0x3)
+        {
+            cruise_bubble::kill(true, false);
+        }
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    void launch()
+    {
+        if ((shared.flags & 0x13) != 0x3)
+        {
+            return;
+        }
+
+        if (zGameExtras_CheatFlags() & 0x20000000)
+        {
+            // scheduling off
+            shared.flags |= 0x200;
+            current_tweak = &cheat_tweak;
+        }
+        else
+        {
+            current_tweak = &normal_tweak;
+        }
+
+        cruise_bubble::reset_wake_ribbons();
+        cruise_bubble::reset_explode_decal();
+
+        shared.flags = shared.flags | 0x14;
+        shared.last_sp = shared.sp = globals.pad0->analog[0].offset;
+        shared.player_health = globals.player.Health;
+        // scheduling off
+        shared.player_motion = 0.0f;
+        shared.fov_default = xCameraGetFOV(&globals.camera);
+
+        ztalkbox::permit(0x0, 0xffffffff);
+        cruise_bubble::set_state(THREAD_PLAYER, BEGIN_STATE_PLAYER);
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    bool update(xScene* s, F32 dt)
+    {
+        if ((shared.flags & 0x3) != 0x3)
+        {
+            return false;
+        }
+
+        if (!(shared.flags & 0x10))
+        {
+            if (cruise_bubble::check_launch())
+            {
+                launch();
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        if (globals.player.ControlOff)
+        {
+            cruise_bubble::kill(true, false);
+            return false;
+        }
+
+        cruise_bubble::refresh_controls();
+        cruise_bubble::update_state(s, dt);
+
+        if (!(shared.flags & 0x10))
+        {
+            return false;
+        }
+
+        cruise_bubble::update_player(*s, dt);
+        cruise_bubble::update_missle(*s, dt);
+        cruise_bubble::update_hud(dt);
+        return true;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    bool render()
+    {
+        if ((shared.flags & 0x7) != 0x7)
+        {
+            return false;
+        }
+
+        cruise_bubble::render_state();
+        cruise_bubble::render_player();
+        cruise_bubble::render_missle();
+        cruise_bubble::render_debug();
+
+        return true;
+    }
+
+    namespace
+    {
+
+        void render_debug()
+        {
+            // empty
+        }
+
+    } // namespace
+
+    void render_screen()
+    {
+        if ((shared.flags & 0x7) == 0x7)
+        {
+            cruise_bubble::render_hud();
+        }
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    void insert_player_animations(xAnimTable& table)
+    {
+        if (shared.astate.player.aim != NULL)
+        {
+            return;
+        }
+
+        shared.astate.player.aim =
+            xAnimTableNewState(&table, "cruise_bubble_aim", 0x10, 0, 1.0f, NULL, NULL, 0.0f, NULL,
+                               NULL, xAnimDefaultBeforeEnter, NULL, NULL);
+
+        shared.astate.player.fire =
+            xAnimTableNewState(&table, "cruise_bubble_fire", 0x20, 0, 1.0f, NULL, NULL, 0.0f, NULL,
+                               NULL, xAnimDefaultBeforeEnter, NULL, NULL);
+
+        shared.astate.player.idle =
+            xAnimTableNewState(&table, "cruise_bubble_idle", 0x10, 0, 1.0f, NULL, NULL, 0.0f, NULL,
+                               NULL, xAnimDefaultBeforeEnter, NULL, NULL);
+
+        char* start_from = (char*)xMemPushTemp(0x250);
+        memset(start_from, 0, 0x250);
+        char* s = start_from;
+        *s = '\0';
+        for (U32 i = 0; i < 37; ++i)
+        {
+            strcat(s, start_anim_states[i]);
+            s += strlen(s);
+            *s = ' ';
+            *++s = '\0';
+        }
+
+        shared.atran.player.aim =
+            xAnimTableNewTransition(&table, start_from, "cruise_bubble_aim",
+                                    (xAnimTransitionConditionalCallback)&check_anim_aim, NULL, 0, 0,
+                                    0.0f, 0.0f, 0, 0, 0.15f, NULL);
+
+        shared.atran.player.fire =
+            xAnimTableNewTransition(&table, "cruise_bubble_aim", "cruise_bubble_fire", NULL, NULL,
+                                    0, 0, 0.0f, 0.0f, 0, 0, 0.15f, NULL);
+
+        shared.atran.player.idle =
+            xAnimTableNewTransition(&table, "cruise_bubble_fire", "cruise_bubble_idle", NULL, NULL,
+                                    0x10, 0, 0.0f, 0.0f, 0, 0, 0.15f, NULL);
+
+        shared.atran.player.end =
+            xAnimTableNewTransition(&table,
+                                    "cruise_bubble_aim cruise_bubble_fire cruise_bubble_idle",
+                                    "Idle01", NULL, NULL, 0, 0, 0.0f, 0.0f, 0, 0, 0.15f, NULL);
+
+        xMemPopTemp(start_from);
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    xAnimTable* anim_table()
+    {
+        xAnimTable* table = xAnimTableNew("Cruise Bubble", 0, 0);
+        shared.astate.missle.fire =
+            xAnimTableNewState(table, "fire", 0x20, 0, 1.0f, NULL, NULL, 0.0f, NULL, NULL,
+                               xAnimDefaultBeforeEnter, NULL, NULL);
+        shared.astate.missle.fly =
+            xAnimTableNewState(table, "fly", 0x10, 0, 1.0f, NULL, NULL, 0.0f, NULL, NULL,
+                               xAnimDefaultBeforeEnter, NULL, NULL);
+        shared.atran.missle.fly = xAnimTableNewTransition(table, "fire", "fly", NULL, NULL, 0x10, 0,
+                                                          0.0f, 0.0f, 0, 0, 0.15f, NULL);
+        return table;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    bool active()
+    {
+        return shared.flags & 0x10;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    F32 exploding()
+    {
+        state_missle_explode* state = (state_missle_explode*)shared.state[THREAD_MISSLE];
+        if (state == NULL || state->type != STATE_MISSLE_EXPLODE)
+        {
+            return 0.0f;
+        }
+
+        return current_tweak->missle.explode.hit_duration - state->hit_time;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    void get_explode_sphere(xVec3& center, F32& radius)
+    {
+        state_missle_explode* state = (state_missle_explode*)shared.state[THREAD_MISSLE];
+        if (state == NULL || state->type != STATE_MISSLE_EXPLODE)
+        {
+            return;
+        }
+        if (state->hit_time >= current_tweak->missle.explode.hit_duration)
+        {
+            return;
+        }
+
+        center = shared.hit_loc;
+        radius = state->get_radius();
+    }
+
+    namespace
+    {
+
+        F32 cruise_bubble::state_missle_explode::get_radius() const
+        {
+            F32 t_frac = this->hit_time / current_tweak->missle.explode.hit_duration;
+            return t_frac * current_tweak->missle.explode.hit_radius;
+        }
+
+    } // namespace
+
+    xEnt** get_explode_hits(S32& size)
+    {
+        state_missle_explode* state = (state_missle_explode*)shared.state[THREAD_MISSLE];
+        if (state == NULL || state->type != STATE_MISSLE_EXPLODE)
+        {
+            size = 0;
+            return NULL;
+        }
+        if (state->hit_time >= current_tweak->missle.explode.hit_duration)
+        {
+            size = 0;
+            return NULL;
+        }
+
+        size = shared.hits_size;
+        return shared.hits;
+    }
+
+    namespace
+    {
+
+        // param names guessed
+    } // namespace
+
+    void add_life(F32 life, F32 max)
+    {
+        state_missle_fly* state = (state_missle_fly*)shared.state[THREAD_MISSLE];
+        if (state == NULL || state->type != STATE_MISSLE_FLY)
+        {
+            return;
+        }
+
+        state->life += life;
+
+        if (max < 0.0f)
+        {
+            max = current_tweak->missle.life;
+        }
+
+        if (!(max > 0.0f))
+        {
+            return;
+        }
+        if (!(state->life > max))
+        {
+            return;
+        }
+
+        state->life = max;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    void set_life(F32 life)
+    {
+        state_missle_fly* state = (state_missle_fly*)shared.state[THREAD_MISSLE];
+        if (state == NULL || state->type != STATE_MISSLE_FLY)
+        {
+            return;
+        }
+
+        state->life = life;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    void reset_life()
+    {
+        state_missle_fly* state = (state_missle_fly*)shared.state[THREAD_MISSLE];
+        if (state == NULL || state->type != STATE_MISSLE_FLY)
+        {
+            return;
+        }
+
+        state->life = current_tweak->missle.life;
+    }
+
+    namespace
+    {
+
+    } // namespace
+
+    bool event_handler(xBase* from, U32 event, const F32* fparam, xBase* to)
+    {
+        switch (event)
+        {
+        case eEventCruiseAddLife:
+            add_life(fparam[0], fparam[1]);
+            return true;
+
+        case eEventCruiseSetLife:
+            set_life(fparam[0]);
+            return true;
+
+        case eEventCruiseResetLife:
+            reset_life();
+            return true;
+
+        case eEventCruiseFired:
+        case eEventCruiseDied:
+            return true;
+        }
+
+        return false;
+    }
+
+    namespace
+    {
+
+        void cruise_bubble::state_player_halt::start()
+        {
+            this->first_update = true;
+        }
+
+        void cruise_bubble::state_player_halt::stop()
+        {
+            shared.flags &= 0xffffffdf;
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_player_halt::update(F32 dt)
+        {
+            this->time += dt;
+
+            if (this->first_update)
+            {
+                this->first_update = false;
+                this->last_motion = shared.player_motion;
+                return STATE_PLAYER_HALT;
+            }
+
+            xVec3 dmotion = shared.player_motion - this->last_motion;
+            if (dmotion.length2() < 0.0001f)
+            {
+                return STATE_PLAYER_AIM;
+            }
+
+            if (this->time > current_tweak->player.halt_time)
+            {
+                return STATE_INVALID;
+            }
+
+            return STATE_PLAYER_HALT;
+        }
+
+        void cruise_bubble::state_player_aim::start()
+        {
+            shared.flags |= 0x20;
+
+            xVec3* player_dir = &get_player_mat()->at;
+            this->yaw = xatan2(player_dir->x, player_dir->z);
+            this->yaw_vel = 0.0f;
+            this->turn_delay = 0.0f;
+
+            xAnimPlayStartTransition(globals.player.ent.model->Anim, shared.atran.player.aim);
+            cruise_bubble::set_state(THREAD_CAMERA, STATE_CAMERA_AIM);
+        }
+
+        xMat4x3* get_player_mat()
+        {
+            return (xMat4x3*)globals.player.ent.model->Mat;
+        }
+
+        void cruise_bubble::state_player_aim::stop()
+        {
+            shared.flags &= 0xffffffdf;
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_player_aim::update(F32 dt)
+        {
+            this->turn_delay += dt;
+
+            if (this->turn_delay >= current_tweak->aim_delay)
+            {
+                this->face_camera(dt);
+            }
+            this->apply_yaw();
+            this->update_animation(dt);
+
+            if (!(globals.pad0->on & 0x100))
+            {
+                return STATE_PLAYER_FIRE;
+            }
+            return STATE_PLAYER_AIM;
+        }
+
+        void cruise_bubble::state_player_aim::update_animation(F32 dt)
+        {
+            F32 r =
+                range_limit<F32>(this->yaw_vel * current_tweak->player.aim.anim_delta, -1.0f, 1.0f);
+            xAnimSingle* s = globals.player.ent.model->Anim->Single;
+#ifdef PLATFORM_PC
+            // 0.5f * ((1 + L) + r) is L + 0.5 * ((1 + r) - L): the lean blend
+            // weight closes half the distance to 1 + r every frame, and the
+            // weight persists across frames. Half a frame is half a sixtieth of
+            // a second here, so the fraction is rebased on elapsed time.
+            F32 k = 1.0f - xpow(0.5f, 60.0f * dt);
+            s->BilinearLerp[0] += k * ((1.0f + r) - s->BilinearLerp[0]);
+#else
+            s->BilinearLerp[0] = 0.5f * ((1.0f + s->BilinearLerp[0]) + r);
+#endif
+        }
+
+        void cruise_bubble::state_player_aim::apply_yaw()
+        {
+            xMat4x3* m = cruise_bubble::get_player_mat();
+            m->at.assign(isin(this->yaw), 0.0f, icos(this->yaw));
+            m->right.assign(m->at.z, 0.0f, -m->at.x);
+            m->up.assign(0.0f, 1.0f, 0.0f);
+        }
+
+        void cruise_bubble::state_player_aim::face_camera(F32 dt)
+        {
+            xMat4x3* mat = &globals.camera.mat;
+
+            F32 new_yaw;
+            if (mat->at.x >= -0.00001f && mat->at.x <= 0.00001f && mat->at.z >= -0.00001f &&
+                mat->at.z <= 0.00001f)
+            {
+                new_yaw = this->yaw;
+            }
+            else
+            {
+                new_yaw = xatan2(mat->at.x, mat->at.z);
+            }
+
+            F32 diff = new_yaw - this->yaw;
+            if (diff > PI)
+            {
+                diff -= PI * 2;
+            }
+            else if (diff < -PI)
+            {
+                diff += PI * 2;
+            }
+#ifdef PLATFORM_PC
+            // yaw closes a fraction of the remaining angle every frame, so the
+            // turn finishes in a number of frames rather than a length of time.
+            // turn_speed is that fraction per console frame; xexp(dt) moves it
+            // by under two percent at 60 fps and does not make it a rate. What
+            // compounds is the part that survives the frame.
+            F32 tspeed = xFrameApproach(current_tweak->player.aim.turn_speed, dt);
+#else
+            F32 tspeed = current_tweak->player.aim.turn_speed * xexp(dt);
+#endif
+            if (tspeed > 1.0f)
+            {
+                tspeed = 1.0f;
+            }
+            tspeed = diff * tspeed;
+            this->yaw_vel = tspeed / dt;
+            this->yaw = this->yaw + tspeed;
+            this->yaw = xrmod(this->yaw);
+        }
+
+        void cruise_bubble::state_player_fire::start()
+        {
+            this->wand_shown = false;
+
+            cruise_bubble::play_sound(0, 1.0f, &get_missle_mat()->pos);
+            xAnimPlayStartTransition(globals.player.ent.model->Anim, shared.atran.player.fire);
+            cruise_bubble::set_state(THREAD_MISSLE, STATE_MISSLE_APPEAR);
+
+            if (xurand() <= shared.dialog_freq)
+            {
+                play_sound(3, 1.0f);
+                shared.dialog_freq *= current_tweak->dialog.decay;
+
+                if (shared.dialog_freq < current_tweak->dialog.min_freq)
+                {
+                    shared.dialog_freq = current_tweak->dialog.min_freq;
+                }
+            }
+        }
+
+        xMat4x3* get_missle_mat()
+        {
+            return (xMat4x3*)shared.missle_model->Mat;
+        }
+
+        void cruise_bubble::state_player_fire::stop()
+        {
+            cruise_bubble::hide_wand();
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_player_fire::update(F32 dt)
+        {
+            xAnimSingle* asingle = globals.player.ent.model->Anim->Single;
+            xAnimState* astate = asingle->State;
+
+            if (astate == shared.astate.player.fire)
+            {
+                F32 time = astate->Data->Duration;
+                F32 max_time = asingle->Time + dt;
+
+                if (this->wand_shown == 0 && max_time >= current_tweak->player.fire.delay_wand)
+                {
+                    show_wand();
+                }
+                if (max_time >= time)
+                {
+                    return STATE_PLAYER_WAIT;
+                }
+            }
+
+            if (this->wand_shown != 0)
+            {
+                this->update_wand(dt);
+            }
+
+            return STATE_PLAYER_FIRE;
+        }
+
+        void cruise_bubble::state_player_fire::update_wand(F32 dt)
+        {
+            // empty
+        }
+
+        void cruise_bubble::state_player_wait::start()
+        {
+            cruise_bubble::hide_wand();
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_player_wait::update(F32)
+        {
+            return STATE_PLAYER_WAIT;
+        }
+
+        void cruise_bubble::state_missle_appear::start()
+        {
+            cruise_bubble::show_missle();
+            shared.missle_model->Flags = shared.missle_model->Flags & 0xfffe;
+            shared.missle_model->Alpha = 1.0f;
+            xAnimPlaySetState(shared.missle_model->Anim->Single, shared.astate.missle.fire, 0.0f);
+            this->move();
+        }
+
+        void cruise_bubble::state_missle_appear::move()
+        {
+            xMat4x3& mat = *cruise_bubble::get_missle_mat();
+            xVec3 euler;
+            xVec3 prod;
+
+            mat = *cruise_bubble::get_player_mat();
+            xMat3x3GetEuler(&mat, &euler);
+            xMat3x3Euler(&mat, &euler);
+            xMat3x3RMulVec(&prod, &mat, &current_tweak->missle.appear.offset);
+            mat.pos += prod;
+        }
+
+        void cruise_bubble::state_missle_appear::stop()
+        {
+            hide_missle();
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_missle_appear::update(F32 dt)
+        {
+            F32 time = shared.missle_model->Anim->Single->Time + dt;
+            if (time >= current_tweak->missle.appear.delay_show)
+            {
+                shared.missle_model->Flags = shared.missle_model->Flags | 0x1;
+                start_trail();
+            }
+            move();
+
+            if (time >= current_tweak->missle.appear.delay_fly)
+            {
+                return STATE_MISSLE_FLY;
+            }
+
+            this->update_effects(dt);
+            return STATE_MISSLE_APPEAR;
+        }
+
+        void cruise_bubble::state_missle_appear::update_effects(F32 dt)
+        {
+            //empty
+        }
+
+        void cruise_bubble::state_missle_fly::start()
+        {
+            // lwzu
+            // & to match function size
+            shared.flags |= 0x8;
+            this->life = current_tweak->missle.life;
+
+            cruise_bubble::show_missle();
+            start_trail();
+            cruise_bubble::start_damaging();
+
+            this->vel = 0.0f;
+            xMat3x3GetEuler(cruise_bubble::get_missle_mat(), &this->rot);
+            this->rot_vel = 0.0f;
+            this->engine_pitch = 0.0f;
+            this->flash_time = 0.0f;
+            this->last_loc = globals.player.ent.bound.sph.center;
+#ifdef PLATFORM_PC
+            this->record_dt = 0.0f;
+#endif
+
+            missle_record.reset();
+            missle_record.push_front(missle_record_data(this->last_loc, this->rot.z));
+            missle_record.push_front(
+                missle_record_data(cruise_bubble::get_missle_mat()->pos, this->rot.z));
+
+            play_sound(2, 1.0f, &cruise_bubble::get_missle_mat()->pos);
+            signal_event(eEventCruiseFired);
+        }
+
+        missle_record_data::missle_record_data(const xVec3& loc, F32 roll) : loc(loc), roll(roll)
+        {
+        }
+
+        void cruise_bubble::state_missle_fly::stop()
+        {
+            shared.flags &= 0xfffffff7;
+
+            hide_missle();
+            stop_trail();
+            stop_sound(2, 0);
+            signal_event(eEventCruiseDied);
+
+            xSphere o;
+            o.center = 1e38;
+            o.r = 0.0f;
+            notify_triggers(*globals.sceneCur, o, xVec3::create(0.0f));
+        }
+
+        void cruise_bubble::state_missle_fly::abort()
+        {
+            stop_sound(2, 0);
+            signal_event(eEventCruiseDied);
+
+            xSphere o;
+            o.center = 1e38;
+            o.r = 0.0f;
+            notify_triggers(*globals.sceneCur, o, xVec3::create(0.0f));
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_missle_fly::update(F32 dt)
+        {
+            this->life -= dt;
+            if (this->life <= 0.0f || (globals.pad0->pressed & 0x100))
+            {
+                shared.hit_loc = get_missle_mat()->pos;
+                shared.hit_norm = get_missle_mat()->at;
+
+                return STATE_MISSLE_EXPLODE;
+            }
+
+            this->update_turn(dt);
+            this->update_move(dt);
+
+#ifdef PLATFORM_PC
+            // One sample a frame into 127 slots is 2.1 seconds of flight on
+            // console and a quarter of that at 240 fps. The explosion's survey
+            // camera walks 6 to 8 world units back along this path, and
+            // eval_missle_path does not clamp its lerp: once the record is
+            // shorter than that, the camera is extrapolated off the oldest pair
+            // of samples, through whatever the missile flew past, at a roll of
+            // one frame's roll times however far past the end it landed.
+            //
+            // Sample at the rate the 127 slots were sized for. The impact
+            // sample is never skipped -- the path has to end at hit_loc.
+            this->record_dt += dt;
+
+            bool record = this->record_dt >= 1.0f / 60.0f;
+
+            if (record)
+            {
+                this->record_dt -= 1.0f / 60.0f;
+            }
+
+            if (this->collide() || this->collide_hazards())
+            {
+                if (missle_record.full())
+                {
+                    missle_record.pop_back();
+                }
+
+                missle_record.push_front(missle_record_data(shared.hit_loc, this->rot.z));
+                return STATE_MISSLE_EXPLODE;
+            }
+
+            if (record)
+            {
+                if (missle_record.full())
+                {
+                    missle_record.pop_back();
+                }
+
+                missle_record.push_front(missle_record_data(get_missle_mat()->pos, this->rot.z));
+            }
+#else
+            if (missle_record.full())
+            {
+                missle_record.pop_back();
+            }
+
+            if (this->collide() || this->collide_hazards())
+            {
+                missle_record.push_front(missle_record_data(shared.hit_loc, this->rot.z));
+                return STATE_MISSLE_EXPLODE;
+            }
+            missle_record.push_front(missle_record_data(get_missle_mat()->pos, this->rot.z));
+#endif
+
+            this->last_loc = get_missle_mat()->pos;
+            this->update_engine_sound(dt);
+            this->update_flash(dt);
+
+            xMat4x3* mat = get_missle_mat();
+            xSphere o;
+            o.center = mat->pos;
+            o.r = current_tweak->missle.hit_dist;
+            notify_triggers(*globals.sceneCur, o, mat->at);
+
+            return STATE_MISSLE_FLY;
+        }
+
+        void cruise_bubble::state_missle_fly::update_flash(F32 dt)
+        {
+            this->flash_time += dt;
+
+            F32 tflash = current_tweak->missle.fly.flash_interval *
+                         (this->life / current_tweak->missle.life);
+            if (this->flash_time > tflash)
+            {
+                flash_hud();
+
+                F32 floor_frac = std::floorf(this->flash_time / tflash);
+                this->flash_time = this->flash_time - (floor_frac * tflash);
+            }
+        }
+
+        void cruise_bubble::state_missle_fly::update_engine_sound(F32 dt)
+        {
+            F32 tmp = current_tweak->missle.fly.engine_pitch_max *
+                      (iabs(shared.last_sp.x) + iabs(shared.last_sp.y));
+
+            // A one-pole filter on state that survives the frame, so the pitch
+            // chases the throttle four times as fast at 240 fps.
+#ifdef PLATFORM_PC
+            this->engine_pitch +=
+                (tmp - this->engine_pitch) *
+                xFrameApproach(current_tweak->missle.fly.engine_pitch_sensitivity, dt);
+#else
+            this->engine_pitch +=
+                (tmp - this->engine_pitch) * current_tweak->missle.fly.engine_pitch_sensitivity;
+#endif
+
+            set_pitch(2, this->engine_pitch, 0);
+        }
+
+        U8 cruise_bubble::state_missle_fly::collide_hazards()
+        {
+            NPCHazard* c[2];
+            c[0] = NULL;
+            HAZ_Iterate(&cruise_bubble::state_missle_fly::hazard_check, c, 0xa000);
+
+            if (c[0] == NULL)
+            {
+                return false;
+            }
+
+            if ((c[0]->flg_hazard & 0x200000))
+            {
+                c[0]->MarkForRecycle();
+            }
+            shared.hit_loc = cruise_bubble::get_missle_mat()->pos;
+            return true;
+        }
+
+        bool cruise_bubble::state_missle_fly::hazard_check(NPCHazard& haz, void* context)
+        {
+            const xVec3& mpos = get_missle_mat()->pos;
+            const xVec3 vvar = haz.pos_hazard - mpos;
+            F32 fvar = current_tweak->missle.hit_dist + haz.custdata.typical.rad_cur;
+
+            if (vvar.length2() < fvar * fvar)
+            {
+                ((NPCHazard**)context)[0] = &haz;
+                return false;
+            }
+
+            return true;
+        }
+
+        U8 cruise_bubble::state_missle_fly::collide()
+        {
+            xVec3* hit_norm = &shared.hit_norm;
+            xVec3* hit_loc = &shared.hit_loc;
+            xEnt* hit_ent;
+            xVec3 hit_depen;
+            S32 i = 0;
+
+            do
+            {
+                if (!this->hit_test(*hit_loc, *hit_norm, hit_depen, hit_ent))
+                {
+                    return false;
+                }
+
+                if (cruise_bubble::can_damage(hit_ent))
+                {
+                    damage_entity(*hit_ent, *hit_loc, cruise_bubble::get_missle_mat()->at,
+                                  *hit_norm, 0.0f, false);
+                    return true;
+                }
+
+                xMat4x3* mat = cruise_bubble::get_missle_mat();
+                F32 ang = xasin(mat->at.dot(*hit_norm));
+                if (ang < -current_tweak->missle.crash_angle)
+                {
+                    return true;
+                }
+
+                mat->pos += hit_depen;
+                xVec3 diff = mat->pos - this->last_loc;
+                F32 len = diff.length2();
+                if (len < 0.001f)
+                {
+                    return false;
+                }
+
+                len = xsqrt(len);
+                xVec3 diff_normalized = diff * (1.0f / len);
+                F32 sin = -xasin(diff_normalized.y);
+                if (F32(iabs(sin)) > (PI / 2) * current_tweak->missle.fly.turn.ybound)
+                {
+                    return true;
+                }
+
+                F32 tan = xatan2(diff_normalized.x, diff_normalized.z);
+                F32 mod = xrmod(PI + (tan - this->rot.x)) - PI;
+                this->rot.x += mod * current_tweak->missle.collide_twist;
+                this->rot.y += (sin - this->rot.y) * current_tweak->missle.collide_twist;
+                xMat3x3Euler(mat, &this->rot);
+
+                if (hit_depen.length2() < 1.0000001e-6f)
+                {
+                    return false;
+                }
+            } while (++i < current_tweak->missle.hit_tests);
+
+            F32 dist = 0.1f * current_tweak->missle.hit_dist;
+            if (hit_depen.length2() < dist * dist)
+            {
+                return false;
+            }
+
+            return this->hit_test(*hit_loc, *hit_norm, hit_depen, hit_ent);
+        }
+
+        U8 cruise_bubble::state_missle_fly::hit_test(xVec3& hit_loc, xVec3& hit_norm,
+                                                     xVec3& hit_depen, xEnt*& hit_ent) const
+        {
+            xScene& s = *globals.sceneCur;
+            xVec3& loc = get_missle_mat()->pos;
+            xSweptSphere ss;
+            xSweptSpherePrepare(&ss, (xVec3*)&this->last_loc, &loc,
+                                current_tweak->missle.hit_dist);
+            ss.optr = NULL;
+            if (!xSweptSphereToScene(&ss, &s, NULL, 0x10))
+            {
+                return false;
+            }
+
+            xSweptSphereGetResults(&ss);
+            const xVec3 overshoot = { loc.x - ss.worldPos.x, loc.y - ss.worldPos.y,
+                                      loc.z - ss.worldPos.z };
+            hit_loc = ss.worldPos + ss.worldTangent * overshoot.dot(ss.worldTangent);
+            hit_depen = hit_loc - loc;
+            hit_norm = ss.worldNormal;
+            hit_ent = (xEnt*)ss.optr;
+
+            return true;
+        }
+
+        void cruise_bubble::state_missle_fly::update_move(F32 dt)
+        {
+            F32 accel = current_tweak->missle.fly.accel;
+            F32 max = current_tweak->missle.fly.max_vel;
+            F32 move = 0.0f;
+
+            xAccelMove(move, this->vel, accel, dt, max);
+
+            xMat4x3* mat = get_missle_mat();
+            mat->pos += mat->at * move;
+        }
+
+        void cruise_bubble::state_missle_fly::update_turn(F32 dt)
+        {
+            xVec2& sp = shared.sp;
+            xVec2& last_sp = shared.last_sp;
+            tweak_group* tweak = current_tweak;
+
+            // ybound is declared first (that is what puts it in f31) but loaded
+            // last, which is the order the target emits the six tweak loads in.
+            F32 ybound;
+            F32 xdelta = -tweak->missle.fly.turn.xdelta;
+            F32 ydelta = -tweak->missle.fly.turn.ydelta;
+            F32 roll_frac = -tweak->missle.fly.turn.roll_frac;
+            F32 xdecay = tweak->missle.fly.turn.xdecay;
+            F32 ydecay = tweak->missle.fly.turn.ydecay;
+
+            ybound = tweak->missle.fly.turn.ybound;
+
+            xVec2 d0, d1, v0, v1, a0, a1;
+
+            d0.x = this->rot.x;
+            d0.y = this->rot.y;
+
+            v0.x = this->rot_vel.x * xpow(1.0f - xdecay, dt);
+            v0.y = this->rot_vel.y * xpow(1.0f - ydecay, dt);
+
+            F32 damp;
+            if (d0.y * (ydelta * sp.y) <= 0.0f)
+            {
+                damp = 1.0f;
+            }
+            else
+            {
+                damp = 1.0f - xabs(d0.y) / ybound;
+            }
+
+            a0.x = xdelta * last_sp.x;
+            a0.y = damp * (ydelta * last_sp.y);
+            a1.x = xdelta * sp.x;
+            a1.y = damp * (ydelta * sp.y);
+
+            this->calculate_rotation(d1, v1, dt, d0, v0, a0, a1);
+
+            this->rot.x = d1.x;
+            this->rot.y = d1.y;
+            this->rot_vel.x = v1.x;
+            this->rot_vel.y = v1.y;
+
+            this->rot.z = roll_frac * (this->rot_vel.x * this->rot_vel.x);
+            if (this->rot_vel.x < 0.0f)
+            {
+                this->rot.z *= -1.0f;
+            }
+
+            xMat3x3Euler(get_missle_mat(), &this->rot);
+        }
+
+        void cruise_bubble::state_missle_fly::calculate_rotation(xVec2& d1, xVec2& v1, F32 dt,
+                                                                 const xVec2& d0, const xVec2& v0,
+                                                                 const xVec2& a0,
+                                                                 const xVec2& a1) const
+        {
+            v1.x = dt * (0.5f * (a0.x + a1.x)) + v0.x;
+            v1.y = dt * (0.5f * (a0.y + a1.y)) + v0.y;
+            d1.x = d0.x + (dt * (dt * ((1.0f / 6.0f) * (a1.x + (a0.x + a0.x)))) + v0.x * dt);
+            d1.y = d0.y + (dt * (dt * ((1.0f / 6.0f) * (a1.y + (a0.y + a0.y)))) + v0.y * dt);
+        }
+
+        void cruise_bubble::state_missle_explode::start()
+        {
+            shared.flags |= 0x40;
+            // scheduling for zEntCruiseBubble_f_0_0
+            this->hit_time = 0.0f;
+
+            if (current_tweak->missle.explode.hit_duration <= 0.0f)
+                this->apply_damage(current_tweak->missle.explode.hit_radius);
+
+            F32 dist = (shared.hit_loc - get_player_loc()).length2();
+            F32 mul = current_tweak->camera.survey.min_dist * current_tweak->camera.survey.min_dist;
+            F32 min_dist = mul;
+            set_state(THREAD_CAMERA, dist <= min_dist ? STATE_CAMERA_RESTORE : STATE_CAMERA_SURVEY);
+
+            play_sound(1, 1.0f, &get_missle_mat()->pos);
+            this->start_effects();
+        }
+
+        void cruise_bubble::state_missle_explode::start_effects()
+        {
+            U32 emit;
+            U32 emit_max;
+            tweak_group* tweak = current_tweak;
+
+            zFX_SpawnBubbleBlast(&get_missle_mat()->pos, tweak->blast.emit, tweak->blast.radius,
+                                 tweak->blast.vel, tweak->blast.rand_vel);
+
+            xVec3 scale = { 1.0f, 1.0f, 1.0f };
+
+            explode_decal.emit(*get_missle_mat(), scale, -1);
+
+            zShrapnelAsset* shrap = shared.droplet_shrapnel;
+            if ((shrap != NULL) && (shrap->initCB != NULL))
+            {
+                emit = current_tweak->droplet.emit_min;
+                emit_max = current_tweak->droplet.emit_max;
+
+                if (emit >= emit_max)
+                {
+                    emit = emit_max;
+                }
+                else
+                {
+                    U32 rand = xrand();
+                    emit += (rand / 0x2000) -
+                            ((rand / 0x2000) / (emit_max - emit)) * (emit_max - emit);
+                }
+
+                reset_quadrants(emit, current_tweak->droplet.vel_angle);
+
+                for (U32 i = 0; i < emit; i++)
+                {
+                    shrap->initCB(shrap, shared.missle_model, NULL, cb_droplet);
+                }
+            }
+        }
+
+        void cruise_bubble::state_missle_explode::cb_droplet(zFrag* frag, zFragAsset* asset)
+        {
+            F32 rand;
+            F32 zmin, zmax, amin, amax;
+
+            frag->info.projectile.fasset->flags |= 0x22;
+
+            get_next_quadrant(zmin, zmax, amin, amax);
+
+            xVec3 vx = perturb_direction(shared.hit_norm, zmin, zmax, amin, amax);
+
+            rand = xpow(xurand(), 1.0f / 3.0f);
+
+            frag->info.projectile.path.initPos =
+                get_missle_mat()->pos +
+                (vx * ((rand * (current_tweak->droplet.dist_max - current_tweak->droplet.dist_min) +
+                        current_tweak->droplet.dist_min)));
+            frag->info.projectile.path.initVel =
+                vx *
+                (((current_tweak->droplet.vel_max - current_tweak->droplet.vel_min) * xurand() +
+                  current_tweak->droplet.vel_min));
+            frag->info.projectile.path.initVel.x =
+                current_tweak->droplet.vel_perturb * (xurand() - 0.5f) +
+                frag->info.projectile.path.initVel.x;
+            frag->info.projectile.path.initVel.y =
+                current_tweak->droplet.vel_perturb * (xurand() - 0.5f) +
+                frag->info.projectile.path.initVel.y;
+            frag->info.projectile.path.initVel.z =
+                current_tweak->droplet.vel_perturb * (xurand() - 0.5f) +
+                frag->info.projectile.path.initVel.z;
+            frag->info.projectile.angVel = current_tweak->droplet.rot_vel_max * xurand();
+            frag->info.projectile.alpha = 0.25f;
+        }
+
+        xVec3 cruise_bubble::state_missle_explode::perturb_direction(const xVec3& dir, F32 zmin,
+                                                                     F32 zmax, F32 amin, F32 amax)
+        {
+            xMat3x3 mat;
+
+            F32 a = amin + (amax - amin) * xurand();
+            F32 z = zmin + (zmax - zmin) * xurand();
+            F32 r = xsqrt(1.0f - z * z);
+
+            xVec3 v = { r * icos(a), r * isin(a), z };
+            xVec3 result;
+
+            mat.at = v;
+
+            if (xabs(z) > 0.5f)
+            {
+                mat.right.assign(1.0f, 0.0f, 0.0f);
+            }
+            else
+            {
+                mat.right.assign(0.0f, 0.0f, 1.0f);
+            }
+
+            mat.up = mat.at.cross(mat.right);
+            mat.up.normalize();
+            mat.right = mat.up.cross(mat.at);
+
+            xMat3x3LMulVec(&result, &mat, &dir);
+            return result;
+        }
+
+        void cruise_bubble::state_missle_explode::get_next_quadrant(F32& zmin, F32& zmax, F32& amin,
+                                                                    F32& amax)
+        {
+            // Faithful to retail, and it ships a bug: `bit` is computed from the
+            // PRE-increment index, so once this loop actually iterates it tests
+            // the first bit twice and exits with index == found + 1. row/col then
+            // describe the quadrant after the one whose mask bit was set --
+            // sometimes one reset_quadrants deliberately cleared. Droplet
+            // quadrants get skipped. Do not "fix" it.
+            U32 bit = 1 << qzone.index;
+
+            while (!(qzone.mask & bit))
+            {
+                bit = 1 << qzone.index++;
+            }
+
+            U32 row = qzone.index / qzone.count;
+            // `%` and `- row * qzone.count` emit the same mullw/subf pair, but %
+            // shifts register allocation just enough that CW stops fusing the
+            // addi/lwz into an lwzu. That one instruction is the whole tail delta.
+            U32 col = qzone.index % qzone.count;
+
+            zmax = 1.0f - row * qzone.dz;
+            zmin = zmax - qzone.dz;
+            amin = col * qzone.da;
+            amax = amin + qzone.da;
+
+            qzone.index++;
+        }
+
+        void cruise_bubble::state_missle_explode::reset_quadrants(U32 size, F32 ring)
+        {
+            // SCHED: the residue is the prologue only -- the target defers `stw <0x43300000>`
+            // past the qzone.index store, so it needs a second GPR for the zero (r5) and a
+            // free f1 for the u32->double magic; we emit the magic store immediately after
+            // its `lis` and cascade into r0/f2. Measured and rejected: count-before-index
+            // 92.785, a `U32 count` local 77.892, an `F32` local for the cast inert, and
+            // dropping the `c` local inert. Everything after `bl xsqrt` matches.
+            qzone.index = 0;
+            qzone.count = (U32)xsqrt((F32)size);
+
+            U32 rows = (size + qzone.count - 1) / qzone.count;
+            F32 c = icos(ring);
+
+            qzone.dz = (1.0f - c) / rows;
+            qzone.da = 6.28318548f / qzone.count;
+
+            U32 total = rows * qzone.count;
+
+            qzone.mask = (1 << total) - 1;
+
+            for (U32 i = 0, end = total - size; i < end; i++)
+            {
+                U32 k = (xrand() >> 13) % (total - i);
+                U32 j = 0;
+                U32 seen = 0;
+
+                for (;; j++)
+                {
+                    if (qzone.mask & (1 << j))
+                    {
+                        if (seen >= k)
+                        {
+                            qzone.mask &= ~(1 << j);
+                            break;
+                        }
+                        else
+                        {
+                            seen++;
+                        }
+                    }
+                }
+            }
+        }
+
+        void cruise_bubble::state_missle_explode::apply_damage(F32 radius)
+        {
+            xBound bound;
+
+            bound.type = XBOUND_TYPE_SPHERE;
+            bound.sph.center = shared.hit_loc;
+            bound.sph.r = radius;
+
+            xQuickCullForSphere(&bound.qcd, &bound.sph);
+
+            cb_damage_ent cb(radius);
+            xGridCheckBound<cb_damage_ent>(colls_grid, bound, bound.qcd, cb);
+            xGridCheckBound<cb_damage_ent>(colls_oso_grid, bound, bound.qcd, cb);
+            xGridCheckBound<cb_damage_ent>(npcs_grid, bound, bound.qcd, cb);
+
+            this->apply_damage_hazards(radius);
+        }
+
+        void cruise_bubble::state_missle_explode::apply_damage_hazards(F32 param)
+        {
+            HAZ_Iterate(&hazard_check, *(void**)&param, 0x208000);
+        }
+
+        bool cruise_bubble::state_missle_explode::hazard_check(NPCHazard& haz, void* context)
+        {
+            F32 radius = *(F32*)&context;
+
+            const xVec3 vvar = haz.pos_hazard - shared.hit_loc;
+            F32 fvar = radius + haz.custdata.typical.rad_cur;
+
+            if (vvar.length2() < fvar * fvar)
+            {
+                haz.MarkForRecycle();
+            }
+
+            return true;
+        }
+
+        cruise_bubble::state_missle_explode::cb_damage_ent::cb_damage_ent(F32 radius)
+        {
+            this->radius = radius;
+        }
+
+        void cruise_bubble::state_missle_explode::stop()
+        {
+            shared.flags &= 0xffffffbf;
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_missle_explode::update(F32 dt)
+        {
+            this->hit_time += dt;
+
+            if (this->hit_time <= current_tweak->missle.explode.hit_duration)
+            {
+                F32 t = this->hit_time / current_tweak->missle.explode.hit_duration;
+                this->apply_damage(t * current_tweak->missle.explode.hit_radius);
+            }
+
+            return STATE_MISSLE_EXPLODE;
+        }
+
+        void cruise_bubble::state_camera_aim::start()
+        {
+            capture_camera();
+            xSndSelectListenerMode(SND_LISTENER_MODE_CAMERA);
+            xCameraUpdate(&globals.camera, 0.001f);
+
+            this->phi_vel = this->height_vel = this->dist_vel = 0.0f;
+            xMat4x3* mat = &globals.camera.mat;
+            xVec3& ploc = get_player_loc();
+            F32 x = mat->pos.x - ploc.x;
+            F32 y = mat->pos.z - ploc.z;
+            const xVec2 offset = { x, y };
+
+            this->phi = xatan2(offset.x, offset.y);
+            this->height = mat->pos.y - ploc.y;
+            this->dist = offset.length();
+            this->control_delay = this->seize_delay = 0.0f;
+
+            xQuatFromMat(&this->facing, mat);
+            start_cam_mat = *mat;
+            start_cam_mat.pos -= ploc;
+        }
+
+        void cruise_bubble::state_camera_aim::stop()
+        {
+            release_camera();
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_camera_aim::update(F32 dt)
+        {
+            this->control_delay += dt;
+            bool control = false;
+            if ((shared.flags & 0x20) && this->control_delay >= current_tweak->aim_delay)
+            {
+                control = true;
+            }
+
+            if (control)
+            {
+                this->move(dt);
+            }
+            else
+            {
+                this->stop(dt);
+            }
+
+            this->apply_motion();
+            this->collide_inward();
+            this->turn(dt);
+            this->apply_turn();
+
+            if (shared.flags & 0x8)
+            {
+                this->seize_delay += dt;
+                if (this->seize_delay >= current_tweak->camera.seize.delay)
+                {
+                    return STATE_CAMERA_SEIZE;
+                }
+            }
+            return STATE_CAMERA_AIM;
+        }
+
+        void cruise_bubble::state_camera_aim::apply_turn() const
+        {
+            xMat3x3 mat;
+
+            xQuatToMat(&this->facing, &mat);
+            xCameraRotate(&globals.camera, mat, 0.0f, 0.0f, 0.0f);
+        }
+
+        void cruise_bubble::state_camera_aim::turn(F32 dt)
+        {
+            xVec3 loc = get_player_loc();
+            loc.y += current_tweak->camera.aim.height;
+
+            xVec3 dir = globals.camera.mat.pos - loc;
+
+            xMat3x3 mat;
+            xMat3x3LookVec(&mat, &dir);
+            xQuatFromMat(&this->target, &mat);
+
+#ifdef PLATFORM_PC
+            // The slerp closes a fraction of the angle to the target each
+            // frame, the same exponential approach as the player's aim yaw.
+            F32 t = xFrameApproach(current_tweak->camera.aim.turn_speed, dt);
+#else
+            F32 t = current_tweak->camera.aim.turn_speed * xexp(dt);
+#endif
+            if (t >= 1.0f)
+            {
+                this->facing = this->target;
+            }
+            else
+            {
+                xQuatSlerp(&this->facing, &this->facing, &this->target, t);
+            }
+        }
+
+        void cruise_bubble::state_camera_aim::collide_inward()
+        {
+            zGlobals& g = globals;
+            xSweptSphere sws;
+
+            xVec3 tgtpos = get_player_loc();
+            tgtpos.y += current_tweak->camera.aim.height;
+
+            xSweptSpherePrepare(&sws, &tgtpos, &globals.camera.mat.pos, 0.07f);
+            xSweptSphereToEnv(&sws, globals.sceneCur->env);
+
+            xRay3 ray;
+            xVec3Copy(&ray.origin, &sws.start);
+            xVec3Sub(&ray.dir, &sws.end, &sws.start);
+
+            ray.max_t = xVec3Length(&ray.dir);
+
+            F32 one_len = 1.0f / MAX(ray.max_t, 1e-5f);
+            xVec3SMul(&ray.dir, &ray.dir, one_len);
+
+            ray.flags = 0x800;
+            if (!(ray.flags & 0x400))
+            {
+                ray.flags |= 0x400;
+                ray.min_t = 0.0f;
+            }
+
+            xRayHitsGrid(&colls_grid, globals.sceneCur, &ray, SweptSphereHitsCameraEnt, &sws.qcd,
+                         &sws);
+            xRayHitsGrid(&colls_oso_grid, globals.sceneCur, &ray, SweptSphereHitsCameraEnt,
+                         &sws.qcd, &sws);
+
+            if (sws.curdist != sws.dist)
+            {
+                F32 stopdist = MAX(sws.curdist, 0.5f);
+                g.camera.mat.pos.x = ray.origin.x + stopdist * ray.dir.x;
+                g.camera.mat.pos.y = ray.origin.y + stopdist * ray.dir.y;
+                g.camera.mat.pos.z = ray.origin.z + stopdist * ray.dir.z;
+            }
+        }
+
+        void cruise_bubble::state_camera_aim::apply_motion() const
+        {
+            xVec3 loc = get_player_loc();
+
+            loc.x += this->dist * isin(this->phi);
+            loc.y += this->height;
+            loc.z += this->dist * icos(this->phi);
+
+            xCameraMove(&globals.camera, loc);
+        }
+
+        void cruise_bubble::state_camera_aim::stop(F32 dt)
+        {
+            xAccelStop(this->height, this->height_vel, current_tweak->camera.aim.accel, dt);
+            xAccelStop(this->dist, this->dist_vel, current_tweak->camera.aim.accel, dt);
+            xAccelStop(this->phi, this->phi_vel, current_tweak->camera.aim.stick_decel, dt);
+
+            this->phi = xrmod(this->phi);
+        }
+
+        void cruise_bubble::state_camera_aim::move(F32 dt)
+        {
+            xAccelMove(this->height, this->height_vel, current_tweak->camera.aim.accel, dt,
+                       current_tweak->camera.aim.height, current_tweak->camera.aim.max_vel);
+            xAccelMove(this->dist, this->dist_vel, current_tweak->camera.aim.accel, dt,
+                       current_tweak->camera.aim.dist, current_tweak->camera.aim.max_vel);
+
+            F32 stick = -shared.sp.x;
+            F32 mag = xabs(stick);
+            F32 accel = mag * current_tweak->camera.aim.stick_accel +
+                        (1.0f - mag) * current_tweak->camera.aim.stick_decel;
+
+            if (stick < 0.0f)
+            {
+                if (accel > 0.0f)
+                {
+                    accel = -accel;
+                }
+            }
+            else if (accel < 0.0f)
+            {
+                accel = -accel;
+            }
+
+            xAccelMove(this->phi, this->phi_vel, accel, dt,
+                       mag * current_tweak->camera.aim.stick_max_vel);
+
+            this->phi = xrmod(this->phi);
+        }
+
+        void cruise_bubble::state_camera_seize::start()
+        {
+            capture_camera();
+
+            this->blend_time = 0.0f;
+            this->start_loc = globals.camera.mat.pos;
+            xQuatFromMat(&this->start_dir, &globals.camera.mat);
+            this->last_s = 0.0f;
+            this->fov = 0.0f;
+            this->wipe_bubbles = 0.0f;
+
+            show_hud();
+            distort_screen(0.0f);
+        }
+
+        void cruise_bubble::state_camera_seize::stop()
+        {
+            release_camera();
+            xCameraSetFOV(&globals.camera, shared.fov_default);
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_camera_seize::update(F32 dt)
+        {
+            this->blend_time += dt;
+            if (this->blend_time >= current_tweak->camera.seize.blend_time)
+            {
+                return STATE_CAMERA_ATTACH;
+            }
+
+            F32 time_frac = this->blend_time / current_tweak->camera.seize.blend_time;
+            F32 s = xSCurve(time_frac);
+            this->update_move(s);
+            this->update_turn(s);
+            xVec3 offset = get_missle_mat()->pos - globals.camera.mat.pos;
+            this->refresh_missle_alpha(offset.length());
+
+            F32 dist = current_tweak->camera.seize.fov - shared.fov_default;
+            xCameraSetFOV(&globals.camera, s * dist + shared.fov_default);
+            distort_screen(s);
+
+            return STATE_CAMERA_SEIZE;
+        }
+
+        void cruise_bubble::state_camera_seize::refresh_missle_alpha(F32 dt)
+        {
+            F32 fade = current_tweak->camera.seize.fade_dist;
+            F32 hide = current_tweak->camera.seize.hide_dist;
+            if (dt >= fade)
+            {
+                show_missle();
+                shared.missle_model->Alpha = 1.0f;
+            }
+            else if (dt <= hide)
+            {
+                hide_missle();
+                shared.missle_model->Flags |= 2;
+            }
+            else
+            {
+                dt = hide - dt;
+                F32 dx = hide - fade;
+                shared.missle_model->Alpha = dt / dx;
+            }
+        }
+
+        void cruise_bubble::state_camera_seize::update_turn(F32 s)
+        {
+            if (iabs(s - 1.0f) <= 0.0001f)
+            {
+                xCameraRotate(&globals.camera, *get_missle_mat(), 0.0f, 0.0f, 0.0f);
+            }
+            else
+            {
+                xQuatFromMat(&this->end_dir, get_missle_mat());
+                xQuatSlerp(&this->cur_dir, &this->start_dir, &this->end_dir,
+                           (s - this->last_s) / (1.0f - this->last_s));
+                this->start_dir = this->cur_dir;
+                this->last_s = s;
+
+                xMat3x3 mat;
+                xQuatToMat(&this->cur_dir, &mat);
+                xCameraRotate(&globals.camera, mat, 0.0f, 0.0f, 0.0f);
+            }
+        }
+
+        void cruise_bubble::state_camera_seize::update_move(F32 s)
+        {
+            const xVec3& pos = get_missle_mat()->pos;
+            xVec3 dir = pos - this->start_loc;
+            xVec3 loc = this->start_loc + dir * s;
+
+            xCameraMove(&globals.camera, loc);
+        }
+
+        void cruise_bubble::state_camera_attach::start()
+        {
+            capture_camera();
+            xMat4x3* mat = get_missle_mat();
+            xCameraMove(&globals.camera, mat->pos);
+            xCameraRotate(&globals.camera, *mat, 0.0f, 0.0f, 0.0f);
+            xCameraSetFOV(&globals.camera, current_tweak->camera.seize.fov);
+            distort_screen(1.0f);
+        }
+
+        void cruise_bubble::state_camera_attach::stop()
+        {
+            xCameraSetFOV(&globals.camera, shared.fov_default);
+            release_camera();
+            hide_hud();
+            distort_screen(0.0f);
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_camera_attach::update(F32 dt)
+        {
+            xMat4x3* mat = get_missle_mat();
+            xCameraMove(&globals.camera, mat->pos);
+            xCameraRotate(&globals.camera, *mat, 0.0f, 0.0f, 0.0f);
+            this->lock_targets();
+
+            return STATE_CAMERA_ATTACH;
+        }
+
+        void cruise_bubble::state_camera_attach::lock_targets()
+        {
+            cb_lock_targets targets;
+            xBound bound;
+
+            get_view_bound(bound);
+            xGridCheckBound<cb_lock_targets>(colls_grid, bound, bound.qcd, targets);
+            xGridCheckBound<cb_lock_targets>(colls_oso_grid, bound, bound.qcd, targets);
+            xGridCheckBound<cb_lock_targets>(npcs_grid, bound, bound.qcd, targets);
+            lock_hazard_targets();
+        }
+
+        void cruise_bubble::state_camera_attach::lock_hazard_targets()
+        {
+            HAZ_Iterate(hazard_check, 0, 0x208000);
+        }
+
+        bool cruise_bubble::state_camera_attach::hazard_check(NPCHazard& haz, void* context)
+        {
+            check_lock_target(&haz.pos_hazard);
+            return 1;
+        }
+
+        void cruise_bubble::state_camera_attach::get_view_bound(xBound& bound) const
+        {
+            bound.type = XBOUND_TYPE_BOX;
+
+            xMat4x3& mat = globals.camera.mat;
+            F32 dist = current_tweak->reticle.dist_max - current_tweak->reticle.dist_min;
+            F32 s = isin(current_tweak->reticle.ang_hide);
+            F32 r1 = s * current_tweak->reticle.dist_min;
+            F32 r2 = s * current_tweak->reticle.dist_max;
+
+            xVec3 center = mat.pos + mat.at * current_tweak->reticle.dist_min;
+
+            xBoxFromCone(bound.box.box, center, mat.at, dist, r1, r2);
+            bound.box.center = (bound.box.box.upper + bound.box.box.lower) * 0.5f;
+
+            xQuickCullForBox(&bound.qcd, &bound.box.box);
+        }
+
+        void cruise_bubble::state_camera_survey::start()
+        {
+            if (camera_taken())
+            {
+                release_camera();
+                this->time = current_tweak->camera.survey.duration;
+                return;
+            }
+
+            capture_camera();
+            this->time = 0.0f;
+            this->init_path();
+            this->move();
+            this->start_sp = shared.sp;
+        }
+
+        void cruise_bubble::state_camera_survey::move()
+        {
+            F32 s = xSCurve(this->time / current_tweak->camera.survey.duration,
+                            current_tweak->camera.survey.drift_softness);
+
+            xVec3 loc;
+            F32 roll;
+            this->eval_missle_path(s * (current_tweak->camera.survey.drift_dist -
+                                        current_tweak->camera.survey.cut_dist) +
+                                       current_tweak->camera.survey.cut_dist,
+                                   loc, roll);
+
+            xVec3 dir = (shared.hit_loc - loc).up_normal();
+
+            xCameraMove(&globals.camera, loc);
+            roll = roll * (1.0f - s);
+            xCameraRotate(&globals.camera, dir, roll, 0.0f, 0.0f, 0.0f);
+        }
+
+        void cruise_bubble::state_camera_survey::eval_missle_path(F32 dist, xVec3& loc,
+                                                                  F32& roll) const
+        {
+            S32 index = this->find_nearest(dist);
+
+            if (index <= 0)
+            {
+                index++;
+            }
+            else if (index >= (S32)missle_record.size())
+            {
+                index = missle_record.size() - 1;
+            }
+
+            const missle_record_data& rec0 = missle_record[index - 1];
+            const missle_record_data& rec1 = missle_record[index];
+
+            F32 d0 = this->path_distance[index - 1];
+            F32 d1 = this->path_distance[index];
+
+            if (xabs(d0 - d1) <= 0.0001f)
+            {
+                loc = rec0.loc;
+                roll = rec0.roll;
+            }
+            else
+            {
+                F32 t = (dist - d0) / (d1 - d0);
+
+                this->lerp(loc, t, rec0.loc, rec1.loc);
+                this->lerp(roll, t, rec0.roll, rec1.roll);
+            }
+        }
+
+        void cruise_bubble::state_camera_survey::lerp(F32& a, F32 b, F32 c, F32 d) const
+        {
+            a = (b * (d - c)) + c;
+        }
+
+        void cruise_bubble::state_camera_survey::lerp(xVec3& a, F32 b, const xVec3& c,
+                                                      const xVec3& d) const
+        {
+            lerp(a.x, b, c.x, d.x);
+            lerp(a.y, b, c.y, d.y);
+            lerp(a.z, b, c.z, d.z);
+        }
+
+        void cruise_bubble::state_camera_survey::init_path()
+        {
+            F32 dist = 0.0f;
+
+            fixed_queue<missle_record_data, 127>::iterator it = missle_record.begin();
+            fixed_queue<missle_record_data, 127>::iterator end = missle_record.end();
+
+            xVec3 last = it->loc;
+            F32* d = this->path_distance;
+
+            while (it != end)
+            {
+                // retail binds this through operator-> (a bl to __rf__), not
+                // operator*; `*it` emits a bl to __ml__ and loses the match.
+                const missle_record_data& rec = *it.operator->();
+
+                *d = dist + (rec.loc - last).length();
+                dist = *d;
+                last = rec.loc;
+
+                ++it;
+                d++;
+            }
+        }
+
+        void cruise_bubble::state_camera_survey::stop()
+        {
+            release_camera();
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_camera_survey::update(F32 dt)
+        {
+            this->time += dt;
+
+            if (camera_taken())
+            {
+                return STATE_CAMERA_RESTORE;
+            }
+
+            if (this->time >= current_tweak->camera.survey.duration)
+            {
+                return STATE_CAMERA_RESTORE;
+            }
+
+            if (this->time >= current_tweak->camera.survey.min_duration &&
+                ((globals.pad0->pressed & 0x100) || this->control_jerked()))
+            {
+                return STATE_CAMERA_RESTORE;
+            }
+
+            this->move();
+            return STATE_CAMERA_SURVEY;
+        }
+
+        bool cruise_bubble::state_camera_survey::control_jerked() const
+        {
+            F32 offset = current_tweak->camera.survey.jerk_offset;
+            F32 deflect = current_tweak->camera.survey.jerk_deflect;
+
+            xVec2 dsp = shared.sp - this->start_sp;
+            bool jerked = false;
+
+            if (dsp.length2() >= offset * offset && shared.sp.length2() >= deflect * deflect)
+            {
+                jerked = true;
+            }
+
+            return jerked;
+        }
+
+        void cruise_bubble::state_camera_restore::start()
+        {
+            this->control_delay = 0.0f;
+            hide_hud();
+
+            if (!camera_leave())
+            {
+                xVec3 loc = get_player_loc() + start_cam_mat.pos;
+                xCameraMove(&globals.camera, loc);
+                xCameraRotate(&globals.camera, start_cam_mat, 0.0f, 0.0f, 0.0f);
+            }
+
+            if (camera_taken())
+            {
+                release_camera();
+            }
+            else
+            {
+                capture_camera();
+            }
+
+            xSndSelectListenerMode(SND_LISTENER_MODE_PLAYER);
+        }
+
+        void cruise_bubble::state_camera_restore::stop()
+        {
+            cruise_bubble::set_state(THREAD_PLAYER, STATE_INVALID);
+            release_camera();
+        }
+
+        cruise_bubble::state_enum cruise_bubble::state_camera_restore::update(F32 dt)
+        {
+            this->control_delay += dt;
+            if (this->control_delay >= current_tweak->camera.restore.control_delay)
+            {
+                return STATE_INVALID;
+            }
+
+            return STATE_CAMERA_RESTORE;
+        }
+
+        bool cruise_bubble::state_missle_explode::cb_damage_ent::operator()(xEnt& ent,
+                                                                            xGridBound& bound)
+        {
+            if (!(ent.chkby & 0x10))
+            {
+                return 1;
+            }
+            if (!(cruise_bubble::can_damage(&ent)))
+            {
+                return 1;
+            }
+
+            F32 rad = this->radius;
+            xSphere o = { shared.hit_loc, rad };
+
+            if (!xSphereHitsBound(o, ent.bound))
+            {
+                return 1;
+            }
+            if (cruise_bubble::was_damaged(&ent))
+            {
+                return 1;
+            }
+
+            if (ent.collLev == 5)
+            {
+                xCollis coll;
+                coll.flags = 0;
+                xSphereHitsModel(&o, ent.model, &coll);
+                if (!(coll.flags & 0x1))
+                {
+                    return 1;
+                }
+            }
+
+            damage_entity(ent, shared.hit_loc, get_missle_mat()->at, shared.hit_norm, this->radius,
+                          true);
+
+            return 1;
+        }
+
+        bool cruise_bubble::state_camera_attach::cb_lock_targets::operator()(xEnt& ent,
+                                                                             xGridBound& bound)
+        {
+            if (!(ent.chkby & 0x10))
+            {
+                return 1;
+            }
+            if (!(cruise_bubble::can_damage(&ent)))
+            {
+                return 1;
+            }
+
+            check_lock_target(xEntGetCenter(&ent));
+
+            return 1;
+        }
+
+        missle_record_data::missle_record_data()
+        {
+        }
+    } // namespace
+} // namespace cruise_bubble
+
+S32 zNPCCommon::IsHealthy()
+{
+    return 1;
+}
+
+WEAK F32 xSCurve(F32 val, F32 s)
+{
+    F32 t = 1.0f - s;
+
+    if (val < s)
+    {
+        return (0.5f * val * val) / (s * t);
+    }
+    if (val > t)
+    {
+        F32 a = 1.0f - val;
+        return 1.0f - ((0.5f * a * a) / (s * t));
+    }
+    return -(0.5f * s - val) / t;
+}
+
+WEAK F32 xSCurve(float val)
+{
+    if (val <= 0.5f)
+    {
+        return (2.0f * val * val);
+    }
+    F32 a = (1.0f - val);
+    return (1.0f - (2.0f * a * a));
+}
+
+// The following belong in shared headers (the target emits them as weak, per-TU
+// symbols out of a header). They are defined here because this agent may not
+// edit shared headers; see the accompanying report.
+
+xTriggerAsset* zEntTriggerAsset(const zEntTrigger& trig)
+{
+    return (xTriggerAsset*)(trig.asset + 1);
+}
+
+void NPCHazard::MarkForRecycle()
+{
+    this->flg_hazard |= 4;
+}
+
+void xQuickCullForSphere(xQCData* q, const xSphere* s)
+{
+    xQuickCullForSphere(&xqc_def_ctrl, q, s);
+}
+
+template <class T> basic_rect<T>& basic_rect<T>::set_size(T w, T h)
+{
+    this->w = w;
+    this->h = h;
+    return *this;
+}
+
+template <class T> basic_rect<T>& basic_rect<T>::set_size(T s)
+{
+    this->h = s;
+    this->w = s;
+    return *this;
+}
+
+template <class T> void basic_rect<T>::center(T x, T y)
+{
+    this->x = x - 0.5f * this->w;
+    this->y = y - 0.5f * this->h;
+}
+
+namespace auto_tweak
+{
+    template <>
+    inline void load_param<U32, S32>(U32& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
+                              U32 apsize, const char* name)
+    {
+        S32 v = zParamGetInt(ap, apsize, name, value);
+        if (v < lo)
+        {
+            v = lo;
+        }
+        else if (v > hi)
+        {
+            v = hi;
+        }
+        v = v * scale;
+        value = v;
+    }
+
+    template <>
+    inline void load_param<xVec3, S32>(xVec3& value, S32, S32, S32, xModelAssetParam* ap, U32 apsize,
+                                const char* name)
+    {
+        xVec3 def = value;
+        zParamGetVector(ap, apsize, name, def, &value);
+    }
+
+    template <>
+    inline void load_param<S32, S32>(S32& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
+                              U32 apsize, const char* name)
+    {
+        S32 v = zParamGetInt(ap, apsize, name, value);
+        if (v < lo)
+        {
+            v = lo;
+        }
+        else if (v > hi)
+        {
+            v = hi;
+        }
+        v = v * scale;
+        value = v;
+    }
+
+    template <>
+    inline void load_param<F32, F32>(F32& value, F32 scale, F32 lo, F32 hi, xModelAssetParam* ap,
+                              U32 apsize, const char* name)
+    {
+        value = zParamGetFloat(ap, apsize, name, value);
+        if (value < lo)
+        {
+            value = lo;
+        }
+        else if (value > hi)
+        {
+            value = hi;
+        }
+        value = value * scale;
+    }
+} // namespace auto_tweak

@@ -1,0 +1,1750 @@
+#ifdef PLATFORM_PC
+#include <stdio.h>
+#include <stdlib.h>
+#endif
+
+#include "xCollide.h"
+#include "xEntBoulder.h"
+#include "xFX.h"
+#include "xGroup.h"
+#include "xMarkerAsset.h"
+#include "xMathInlines.h"
+#include "xMath3.h"
+#include "xNPCBasic.h"
+#include "xShadow.h"
+#include "xVec3.h"
+
+#include "zEntButton.h"
+#include "zEntDestructObj.h"
+#include "zGlobals.h"
+#include "zGoo.h"
+#include "zGrid.h"
+#include "zNPCTypeCommon.h"
+#include "zPlatform.h"
+#include "zSurface.h"
+
+#include <types.h>
+
+static U32 sBubbleStreakID = 0xDEAD;
+
+extern xEntBoulder* boulderVehicle;
+static xEntCollis sBoulderCollis;
+
+void xShadowManager_Add(xEnt* ent);
+S32 xEntBoulder_KilledBySurface(xEntBoulder* ent);
+S32 xEntBoulder_KilledBySurface(xEntBoulder* ent, xScene* sc, F32 dt);
+S32 xBoulderGenerator_EventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
+                              xBase* toParamWidget);
+void xBoulderGenerator_Reset(xBoulderGenerator* gen);
+static S32 RecurseLinks(xLinkAsset*, S32, xEntBoulder**);
+static void RecurseChild(xBase* child, xEntBoulder** boulList, S32& currBoul);
+
+void xEntBoulder_FitToModel(xEntBoulder* ent)
+{
+    xVec3Copy(&ent->bound.cyl.center, (xVec3*)(&ent->model->Data->boundingSphere.center));
+    ent->bound.cyl.r = ent->model->Data->boundingSphere.radius;
+    xVec3Copy(&ent->localCenter, &ent->bound.cyl.center);
+    xVec3AddTo(&ent->bound.cyl.center, (xVec3*)&ent->model->Mat->pos);
+}
+
+void xEntBoulder_Render(xEnt* ent)
+{
+    xModelInstance* model = ent->model;
+    S32 shadowResult;
+    xVec3 shadVec;
+    F32 radius;
+
+    if ((model != NULL) && xEntIsVisible(ent))
+    {
+        switch (model->Flags & 0x400)
+        {
+        case 0:
+            if (ent->flags & 0x40)
+            {
+                if (!iModelCull(model->Data, model->Mat))
+                {
+                    xModelRender(model);
+                }
+            }
+            else
+            {
+                shadVec.x = model->Mat->pos.x;
+                shadVec.y = model->Mat->pos.y - 10.0f;
+                shadVec.z = model->Mat->pos.z;
+
+                if (!iModelCullPlusShadow(model->Data, model->Mat, &shadVec, &shadowResult))
+                {
+                    xModelRender(model);
+                }
+
+                if (!shadowResult)
+                {
+                    if (ent->flags & 0x10)
+                    {
+                        xShadowManager_Add(ent);
+                    }
+                    else
+                    {
+                        radius = ent->model->Data->boundingSphere.radius;
+                        if (radius > 0.75f)
+                        {
+                            radius = 0.75f;
+                        }
+                        xShadowSimple_Add(ent->simpShadow, ent, 2.0f * radius, 1.0f);
+                    }
+                }
+            }
+            break;
+        }
+    }
+}
+
+void xEntBoulder_Init(void* ent, void* asset)
+{
+    xEntBoulder_Init((xEntBoulder*)ent, (xEntAsset*)asset);
+}
+
+void xEntBoulder_BUpdate(xEnt*, xVec3*);
+void xEntBoulder_Update(xEntBoulder*, xScene*, F32);
+
+void xEntBoulder_Init(xEntBoulder* ent, xEntAsset* asset)
+{
+    xEntBoulderAsset* basset;
+
+    xEntInit(ent, asset);
+    ent->collType = XENT_COLLTYPE_DYN;
+    ent->collLev = 4;
+    ent->bound.type = XBOUND_TYPE_SPHERE;
+    ent->moreFlags |= 0x10;
+    zEntParseModelInfo(ent, asset->modelInfoID);
+    xEntInitShadow(*ent, ent->entShadow_embedded);
+    ent->simpShadow = &ent->simpShadow_embedded;
+    xShadowSimple_CacheInit(ent->simpShadow, ent, 0x50);
+    ent->frame = (xEntFrame*)xMemAlloc(gActiveHeap, sizeof(xEntFrame), 0);
+    memset(ent->frame, 0, sizeof(xEntFrame));
+    basset = (xEntBoulderAsset*)(&asset[1]);
+    ent->collis = NULL;
+    ent->basset = basset;
+    ent->eventFunc = xEntBoulderEventCB;
+    ent->update = (xEntUpdateCallback)xEntBoulder_Update;
+    ent->bupdate = (xEntBoundUpdateCallback)xEntBoulder_BUpdate;
+    ent->render = xEntBoulder_Render;
+
+    if (ent->linkCount != 0)
+    {
+        ent->link = (xLinkAsset*)((xEntBoulderAsset*)&ent->asset[1] + 1);
+    }
+    else
+    {
+        ent->link = NULL;
+    }
+
+    xEntBoulder_FitToModel(ent);
+
+    if (basset->mass <= 0.0f)
+    {
+        basset->mass = 1.0f;
+    }
+
+    xEntBoulder_Reset(ent, globals.sceneCur);
+
+    if (ent->asset->id == xStrHash("BUBBLEBOWL"))
+    {
+        ent->update = NULL;
+        xEntHide(ent);
+        ent->chkby = XENT_COLLTYPE_NONE;
+        ent->penby = XENT_COLLTYPE_NONE;
+        ent->collis_chk = 0;
+        ent->collis_pen = 0;
+        globals.player.bubblebowl = ent;
+        ent->model->Data->renderCallBack = xFXBubbleRender;
+        if (ent->model->Data->renderCallBack == NULL)
+        {
+            ent->model->Data->renderCallBack = AtomicDefaultRenderCallBack;
+        }
+    }
+
+    ent->lastRolling = 0.0f;
+    ent->rollingID = NULL;
+    if (ent->asset->modelInfoID == xStrHash("cannon_puffer"))
+    {
+        ent->rollingID = xStrHash("Boulder_Bounce");
+    }
+
+    ent->baseFlags |= 0x20;
+}
+
+void xEntBoulder_AddForce(xEntBoulder* ent, xVec3* force);
+
+void xEntBoulder_ApplyForces(xEntCollis* collis)
+{
+    for (S32 i = collis->dyn_sidx; i < collis->dyn_eidx; i++)
+    {
+        xCollis* coll = &collis->colls[i];
+        xBase* obj = (xBase*)(coll->optr);
+        if ((obj != NULL) && (obj->baseType == eBaseTypeBoulder))
+        {
+            xEntBoulder* boul = ((xEntBoulder*)(coll->optr));
+            xVec3 vec;
+            xVec3SMul(&vec, &collis->colls[i].norm, -5.0f);
+            if ((boul == globals.player.drv.odriver) || (boul == globals.player.drv.driver))
+            {
+                if (collis->colls[i].norm.y > 0.5f)
+                {
+                    vec.x = -vec.x;
+                    vec.z = -vec.z;
+                }
+            }
+            xEntBoulder_AddForce(boul, &vec);
+            if (boul->basset->flags & 2)
+            {
+                zEntPlayer_DamageNPCKnockBack(boul, 1, &boul->bound.sph.center);
+            }
+        }
+    }
+}
+
+void xEntBoulder_AddInstantForce(xEntBoulder* ent, xVec3* force)
+{
+    if (ent->update != NULL)
+    {
+        xVec3* frcptr = &ent->instForce;
+        xVec3AddTo(frcptr, force);
+    }
+}
+
+void xEntBoulder_AddForce(xEntBoulder* ent, xVec3* force)
+{
+    if (ent->update != NULL)
+    {
+        xVec3* frcptr = &ent->force;
+        xVec3AddTo(frcptr, force);
+    }
+}
+
+void xEntBoulder_BUpdate(xEnt*, xVec3*)
+{
+    //For some reason this seems to be a completely empty function
+}
+
+void xEntBoulder_RealBUpdate(xEnt* ent, xVec3* pos)
+{
+    xVec3 vec;
+    xEntBoulder* boul = (xEntBoulder*)ent;
+
+    xMat3x3RMulVec(&vec, (xMat3x3*)boul->model->Mat, (xVec3*)&boul->localCenter);
+    xVec3Add(&boul->bound.sph.center, pos, &vec);
+    xBoundUpdate(&boul->bound);
+    zGridUpdateEnt(boul);
+}
+
+#ifdef PLATFORM_PC
+// Boulder physics is not frame-rate independent, and cannot be made so.
+//
+// xEntBoulder_Update depenetrates by moving the sphere and then recomputes the
+// whole velocity from the position change, `vel = (newCenter - oldCenter)/dt`.
+// That is exactly the right thing when this frame's motion CAUSED the
+// penetration -- a boulder resting, rolling or bouncing sinks by |vel|*dt into
+// the surface, the depenetration cancels exactly that, and the quotient is the
+// velocity with its into-surface component removed, at any frame time. It is
+// not the right thing for an overlap the motion did not cause, which arrives
+// as a push of overlap/dt with nothing to bound it as dt falls.
+//
+// JF01's cannon is the case that matters. BOULDERGEN_01 spawns its
+// cannon_puffer 0.59 units inside CANNON_DESTR_01's own mesh, and what saves
+// the shot on console is that one 1/60 step carries the boulder 0.24 units --
+// far enough that only 0.025 of overlap is left to resolve. Below 1/60 the
+// step is too short to clear the barrel, the boulder scrapes along its inside
+// for several frames instead, and it leaves going UP: 57 degrees off the
+// barrel at 240 fps, missing its own aim point by 7.1 units.
+//
+// That is tunnelling, and tunnelling is not something a smaller step can
+// reproduce. No clamp on the depenetration fixes it -- an excess-depenetration
+// guard and a full contact projection were both measured, and both leave the
+// shot wrong above 120 fps, because the boulder really is in contact with
+// geometry that the console's longer step skipped over.
+//
+// So the boulder is stepped at the rate its behaviour was authored for. The
+// leftover frame time accumulates, whole 1/60 steps run, and the transform the
+// renderer sees is interpolated between the last two stepped states so the
+// motion stays smooth however fast the display runs. At 60 fps this is one
+// step per frame with a zero remainder and the arithmetic below is retail's,
+// untouched; above 60 the trajectory is the console's, identically, at every
+// frame rate measured from 30 to 1000.
+//
+// Returns TRUE when it has done the stepping itself and the caller should not
+// fall through into the update body.
+static const F32 kBoulderStep = 1.0f / 60.0f;
+static S32 sBoulderStepping;
+
+static S32 xEntBoulder_FixedStep(xEntBoulder* ent, xScene* sc, F32 dt)
+{
+    if (sBoulderStepping)
+    {
+        // Re-entered from the loop below. Run the body.
+        return FALSE;
+    }
+
+    if (ent->collis != NULL)
+    {
+        // Somebody outside handed this boulder its own collision buffer to
+        // fill, which means they are going to read this update's contacts back
+        // out of it -- the spongeball does, at zEntPlayer.cpp:6524, to find the
+        // boulder that hurt the player. A caller like that is driving the
+        // boulder itself, every frame, at the frame's own dt: it also places
+        // the player at the sphere centre this update leaves behind and writes
+        // the steering lean straight into the model matrix. An update that only
+        // ran every fourth frame would hand it an unwritten buffer and a half
+        // interpolated matrix.
+        //
+        // Nothing is lost by leaving it alone. The spongeball is in continuous
+        // rolling contact, and rolling contact is depenetrated correctly at any
+        // frame time; only an overlap the frame's motion did not cause is not,
+        // and the player is never launched into one.
+        return FALSE;
+    }
+
+    if (ent->model == NULL)
+    {
+        return FALSE;
+    }
+
+    if (!ent->fixedInit)
+    {
+        ent->fixedInit = TRUE;
+
+        // Seeded so that this very frame takes one whole step and keeps no
+        // remainder, which is the console's phase: a boulder is launched and
+        // then updated, not launched and left at the muzzle for three frames
+        // until the accumulator fills.
+        ent->fixedAcc = kBoulderStep - dt;
+        if (ent->fixedAcc < 0.0f)
+        {
+            ent->fixedAcc = 0.0f;
+        }
+
+        xMat4x3Copy(&ent->fixedMat, (xMat4x3*)ent->model->Mat);
+        xVec3Copy(&ent->fixedPrevPos, &ent->fixedMat.pos);
+    }
+    else if (memcmp(ent->model->Mat, &ent->fixedRenderMat, sizeof(xMat4x3)) != 0)
+    {
+        // Somebody else authored the transform since the last frame, and their
+        // write is the truth. A launch is not this case -- it goes through
+        // xEntBoulder_Reset and is caught above -- this is a reposition that
+        // does not. Re-anchor to what they wrote, but keep the accumulator, or
+        // a boulder written to every frame would never reach a whole step and
+        // never simulate at all.
+        xMat4x3Copy(&ent->fixedMat, (xMat4x3*)ent->model->Mat);
+        xVec3Copy(&ent->fixedPrevPos, &ent->fixedMat.pos);
+    }
+    else
+    {
+        // Undo the render interpolation, so the step starts from the state the
+        // last step left and the sequence stays what it is on console.
+        xMat4x3Copy((xMat4x3*)ent->model->Mat, &ent->fixedMat);
+    }
+
+    ent->fixedAcc += dt;
+
+    // zGame clamps a frame to a tenth of a second, so this is six steps at
+    // worst. The cap is here for the frame a level finishes loading on.
+    if (ent->fixedAcc > 8.0f * kBoulderStep)
+    {
+        ent->fixedAcc = 8.0f * kBoulderStep;
+    }
+
+    while (ent->fixedAcc >= kBoulderStep)
+    {
+        ent->fixedAcc -= kBoulderStep;
+
+        xVec3Copy(&ent->fixedPrevPos, (xVec3*)&ent->model->Mat->pos);
+
+        sBoulderStepping = TRUE;
+        xEntBoulder_Update(ent, sc, kBoulderStep);
+        sBoulderStepping = FALSE;
+
+        // xEntBoulder_Kill clears the callback, and a killed boulder must not
+        // be stepped again this frame.
+        if (ent->update == NULL)
+        {
+            ent->fixedAcc = 0.0f;
+            xMat4x3Copy(&ent->fixedMat, (xMat4x3*)ent->model->Mat);
+            xVec3Copy(&ent->fixedPrevPos, &ent->fixedMat.pos);
+            return TRUE;
+        }
+    }
+
+    xMat4x3Copy(&ent->fixedMat, (xMat4x3*)ent->model->Mat);
+
+    // The transform to draw: between the state the last step started from and
+    // the one it produced. Position lerps. Orientation does not have to be
+    // reconstructed at all -- the step applied exactly one rotation, by
+    // angVel * kBoulderStep about rotVec, under the threshold the body uses,
+    // and both are still sitting in the entity. Turning back by the part of
+    // that angle which has not elapsed yet gives the intermediate orientation
+    // exactly, because rotations about one axis compose.
+    F32 alpha = ent->fixedAcc * (1.0f / kBoulderStep);
+
+    xVec3 rpos;
+    xVec3Copy(&rpos, &ent->fixedPrevPos);
+    xVec3AddScaled(&rpos, &ent->fixedMat.pos, alpha);
+    xVec3AddScaled(&rpos, &ent->fixedPrevPos, -alpha);
+    xVec3Copy((xVec3*)&ent->model->Mat->pos, &rpos);
+
+    if ((ent->angVel > 0.075f) || (ent->angVel < -0.075f))
+    {
+        xMat3x3 rotM;
+        xMat3x3Rot(&rotM, &ent->rotVec, -ent->angVel * kBoulderStep * (1.0f - alpha));
+        xMat3x3Mul((xMat3x3*)ent->model->Mat, (xMat3x3*)ent->model->Mat, &rotM);
+    }
+
+    // Remembered so the next frame can tell this transform apart from one
+    // somebody else wrote.
+    xMat4x3Copy(&ent->fixedRenderMat, (xMat4x3*)ent->model->Mat);
+
+    return TRUE;
+}
+#endif
+
+void xEntBoulder_Update(xEntBoulder* ent, xScene* sc, F32 dt)
+{
+#ifdef PLATFORM_PC
+    if (xEntBoulder_FixedStep(ent, sc, dt))
+    {
+        return;
+    }
+#endif
+
+    // Names come from dwarf/SB/Core/x/xEntBoulder.cpp. These declarations used to
+    // sit in one 26-line block at the top; they are spread through the function
+    // now, and two rules govern where they may go.
+    //
+    // 1. Their relative ORDER is fixed. The compiler assigns stack slots in
+    //    declaration order, so swapping any two changes the frame: swapping just
+    //    `depen` and `tmp` in place, re-scoping nothing, takes this function from
+    //    100% to 99.984%, and the whole difference is offsets shifting by 12
+    //    while every instruction stays the same.
+    //
+    // 2. They must stay at FUNCTION scope. Moving one into the block that uses
+    //    it breaks the match even when the order is preserved exactly -- 99.943%
+    //    with every declaration still in retail's sequence, just nested. Placing
+    //    each at its natural first-use point inside its own block gives 99.913%.
+    //    In both cases the only difference is permuted stack offsets.
+    //
+    // Within those two rules the position is free, so each declaration sits as
+    // close to its first use as its predecessor allows. That is not merely
+    // tidier, it is probably what retail wrote: the fourteen xVec3s come out in
+    // first-use order, thirteen of fourteen, which would be a strange
+    // coincidence if they had all been declared up top.
+    //
+    // rotM, npc and boul are not in this scheme at all -- a pointer or a matrix
+    // here lives in a callee-saved register and never takes a stack slot, so
+    // those move freely and are declared at their point of use.
+    //
+    // dVar16/dVar18/dVar20 keep placeholder names because each is shared scratch
+    // with no single role -- dVar18 alone carries the bubble-count scalar, a
+    // boulder-vs-boulder velocity component, |vel| and a depen dot product.
+    // someVec has no dwarf counterpart either.
+
+    S32 i;
+    F32 dx__;
+    F32 dy__;
+    F32 dz__;
+    if ((ent->timeToLive > 0.0f) && (ent->timeToLive -= dt, ent->timeToLive <= 0.0f))
+    {
+        zEntEvent(ent, eEventKill);
+        return;
+    }
+    else if ((ent == globals.player.bubblebowl) &&
+             (dx__ = (globals.player.ent.bound.sph.center.x - ent->model->Mat->pos.x),
+              dy__ = (globals.player.ent.bound.sph.center.y - ent->model->Mat->pos.y),
+              dz__ = (globals.player.ent.bound.sph.center.z - ent->model->Mat->pos.z),
+              (dx__ * dx__) + (dy__ * dy__) + (dz__ * dz__) > 3600.0f))
+    {
+        zEntEvent(ent, eEventKill);
+        return;
+    }
+
+    if (ent->collis == NULL)
+    {
+        ent->collis = (xEntCollis*)&sBoulderCollis;
+    }
+
+    ent->collis->chk = ent->collis_chk;
+    ent->collis->pen = ent->collis_pen;
+    ent->collis->post = NULL;
+    ent->collis->depenq = NULL;
+    F32 depenComp;
+    F32 dVar16;
+    F32 dVar18;
+    F32 dVar20;
+    F32 fn;
+    xVec3 newRotVec;
+    xMat3x3RMulVec(&newRotVec, (xMat3x3*)ent->model->Mat, &ent->localCenter);
+    xVec3Add(&ent->bound.sph.center, (xVec3*)&ent->model->Mat->pos, &newRotVec);
+
+    xVec3 a;
+    xVec3 b;
+    if ((sBubbleStreakID != 0xDEAD) && (globals.player.bubblebowl == ent))
+    {
+        a = ent->bound.sph.center - (ent->rotVec * ent->bound.sph.r);
+        b = ent->bound.sph.center + (ent->rotVec * ent->bound.sph.r);
+
+        xFXStreakUpdate(sBubbleStreakID, &a, &b);
+    }
+
+    xVec3 bubVelRnd;
+    bubVelRnd.x = bubVelRnd.y = bubVelRnd.z = ent->bound.sph.r * 4.0f;
+
+    U32 numBubbles;
+    dVar18 = xVec3LengthFast(&ent->vel) * 0.1f;
+
+    // A tenth of the speed in bubbles every frame is a rate per frame. Scale
+    // the count by the frame's own length; the sub-one case is the same coin
+    // flip retail does, taken over the scaled count instead.
+#ifdef PLATFORM_PC
+    numBubbles = xFrameEmitCount(dVar18, dt);
+#else
+    if (dVar18 >= 1.0f)
+    {
+        numBubbles = dVar18;
+    }
+    else
+    {
+        numBubbles = xurand() < dVar18;
+    }
+#endif
+
+    if (numBubbles != 0)
+    {
+        zFX_SpawnBubbleTrail(&ent->bound.sph.center, numBubbles, NULL, &bubVelRnd);
+    }
+
+    xVec3 oldSphCen;
+    xVec3Copy(&oldSphCen, &ent->bound.sph.center);
+    ent->vel.y = -(ent->basset->gravity * dt - ent->vel.y);
+    xVec3AddScaled(&ent->vel, &ent->instForce, (1.0f / ent->basset->mass));
+    xVec3Init(&ent->instForce, 0.0f, 0.0f, 0.0f);
+    xVec3AddScaled(&ent->vel, &ent->force, dt / ent->basset->mass);
+    xVec3Init(&ent->force, 0.0f, 0.0f, 0.0f);
+    xVec3 velNorm;
+    xVec3Normalize(&velNorm, &ent->vel);
+    xVec3AddScaled(&ent->bound.sph.center, &ent->vel, dt);
+    xQuickCullForBound(&ent->bound.qcd, &ent->bound);
+    zGridUpdateEnt(ent);
+    zGooCollsBegin();
+    xEntBeginUpdate(ent, sc, dt);
+    ent->collType = XENT_COLLTYPE_PLYR;
+    xEntCollide(ent, sc, dt);
+    ent->collType = XENT_COLLTYPE_DYN;
+    xEntEndUpdate(ent, sc, dt);
+    zGooCollsEnd();
+
+    if (xEntBoulder_KilledBySurface(ent, sc, dt))
+    {
+        if (ent->collis == &sBoulderCollis)
+        {
+            ent->collis = NULL;
+        }
+        return;
+    }
+
+    xVec3 depen;
+    xVec3 tmp;
+    xVec3 depenNorm0;
+    xVec3 force;
+    xVec3 sphDist;
+    xVec3 depenNorm1;
+    xVec3 scaleVel;
+    xVec3 someVec;
+    S32 numDepens = 0;
+    S32 iter_npc;
+    xVec3Init(&tmp, 0.0f, 0.0f, 0.0f); // Let's initialize a vector for no reason.
+    if ((ent->collis->env_eidx > ent->collis->env_sidx) ||
+        (ent->collis->dyn_eidx > ent->collis->dyn_sidx) ||
+        (ent->collis->npc_eidx > ent->collis->npc_sidx) ||
+        (ent->collis->stat_eidx > ent->collis->stat_sidx))
+    {
+        xVec3Init(&depen, 0.0f, 0.0f, 0.0f);
+
+        // Env
+        for (i = ent->collis->env_sidx; i < ent->collis->env_eidx; i++)
+        {
+            if (ent->basset->flags & 1)
+            {
+                xVec3AddTo(&depen, (xVec3*)(&ent->collis->colls[i].depen));
+            }
+            else
+            {
+                fn = xVec3Dot(&ent->collis->colls[i].norm, &ent->collis->colls[i].depen);
+
+                if ((ent == globals.player.bubblebowl) &&
+                    (xVec3Dot(&ent->collis->colls[i].norm, &velNorm) < -0.70710676f) &&
+                    (ent->timeToLive > 0.05f))
+                {
+                    ent->timeToLive = 0.05f;
+                }
+
+                xVec3AddScaled(&depen, &ent->collis->colls[i].norm, fn);
+            }
+            numDepens++;
+        }
+
+        // Dyn
+        for (i = ent->collis->dyn_sidx; i < ent->collis->dyn_eidx; i++)
+        {
+            if (ent->basset->flags & 1)
+            {
+                xVec3AddTo(&depen, (xVec3*)(&ent->collis->colls[i].depen));
+            }
+            else
+            {
+                xVec3AddScaled(&depen, &ent->collis->colls[i].norm,
+                               xVec3Dot(&ent->collis->colls[i].norm, &ent->collis->colls[i].depen));
+            }
+
+            xEntBoulder* boul = ((xEntBoulder*)(ent->collis->colls[i].optr));
+            if (boul->baseType == eBaseTypeBoulder)
+            {
+                xVec3Normalize(&depenNorm0, (xVec3*)(&ent->collis->colls[i].depen));
+                dVar18 = xVec3Dot(&ent->vel, &depenNorm0);
+                dVar16 = xVec3Dot(&boul->vel, &depenNorm0);
+                F32 collMass = boul->basset->mass;
+                F32 boulMass = ent->basset->mass;
+                xVec3SMulBy(&depenNorm0, ((2.0f * boulMass) * collMass * (dVar16 - dVar18)) /
+                                             (boulMass + collMass));
+                xVec3SMul(&force, &depenNorm0, ent->basset->bounce);
+                xEntBoulder_AddInstantForce(ent, &force);
+                xVec3SMul(&force, &depenNorm0, -boul->basset->bounce);
+                xEntBoulder_AddInstantForce(boul, &force);
+                if ((boul == boulderVehicle) && (ent->basset->flags & 2))
+                {
+                    zEntPlayer_Damage(boul, 1);
+                }
+            }
+
+            _zEntButton* butt = (_zEntButton*)boul;
+            if (butt->baseType == eBaseTypeButton)
+            {
+                zEntButton_Press(butt, 8);
+                zEntButton_Hold(butt, 0x1000);
+            }
+
+            zPlatform* plat = ((zPlatform*)(boul));
+            if ((ent == globals.player.bubblebowl) && (plat->moreFlags & 0x10) &&
+                (plat->baseType == eBaseTypePlatform) &&
+                (plat->subType == ZPLATFORM_SUBTYPE_PADDLE &&
+                 (plat->passet->paddle.paddleFlags & 0x10)))
+            {
+                zPlatform_PaddleCollide(&ent->collis->colls[i], (xVec3*)(&ent->model->Mat->pos),
+                                        &ent->vel, 1);
+            }
+
+            numDepens++;
+        }
+
+        // Stat
+        for (i = ent->collis->stat_sidx; i < ent->collis->stat_eidx; i++)
+        {
+            if (ent->basset->flags & 1)
+            {
+                xVec3AddTo(&depen, (xVec3*)(&ent->collis->colls[i].depen));
+            }
+            else
+            {
+                fn = xVec3Dot(&ent->collis->colls[i].norm, &ent->collis->colls[i].depen);
+                if ((ent == globals.player.bubblebowl) &&
+                    (xVec3Dot(&ent->collis->colls[i].norm, &velNorm) < -0.70710676f) &&
+                    (ent->timeToLive > 0.05f))
+                {
+                    ent->timeToLive = 0.05f;
+                }
+                xVec3AddScaled(&depen, &ent->collis->colls[i].norm, fn);
+            }
+
+            xEntBoulder* boul = (xEntBoulder*)(ent->collis->colls[i].optr);
+            if ((ent->basset->flags & 4) && (boul->baseType == eBaseTypeDestructObj))
+            {
+                if ((zEntDestructObj_GetHit((zEntDestructObj*)boul, 0x8000)) &&
+                    (ent == globals.player.bubblebowl) && (ent->timeToLive > 0.05f))
+                {
+                    ent->timeToLive = 0.05f;
+                }
+                zEntDestructObj_Hit((zEntDestructObj*)boul, 0x8000);
+            }
+            else if ((ent == globals.player.bubblebowl) && (boul->moreFlags & 0x10) &&
+                     (boul->baseType != eBaseTypeBoulder || (boul->basset->flags & 0x100)))
+            {
+                zEntEvent(ent, boul, eEventHit_BubbleBowl);
+                zEntEvent(ent, boul, eEventHit);
+                if (ent->timeToLive > 0.05f)
+                {
+                    ent->timeToLive = 0.05f;
+                }
+            }
+
+            numDepens++;
+        }
+
+        // NPC
+        for (iter_npc = ent->collis->npc_sidx; iter_npc < ent->collis->npc_eidx; iter_npc++)
+        {
+            // optr is an xEnt*, and only CodeWarrior's layout lets that be an NPC
+            // pointer unchanged, and the hop through it is free there. See xEnt.h.
+            zNPCCommon* npc = (zNPCCommon*)(xEnt*)(ent->collis->colls[iter_npc].optr);
+
+            if (ent->basset->flags & 1)
+            {
+                xVec3AddTo(&depen, (xVec3*)(&ent->collis->colls[iter_npc].depen));
+            }
+            else
+            {
+                fn = xVec3Dot(&ent->collis->colls[iter_npc].norm,
+                                  &ent->collis->colls[iter_npc].depen);
+                if ((ent != globals.player.bubblebowl) || (npc->SelfType() & ~0xFF) != 'NTT\0')
+                {
+                    xVec3AddScaled(&depen, &ent->collis->colls[iter_npc].norm, fn);
+                }
+            }
+
+            if (ent->basset->flags & 8)
+            {
+                zEntEvent(ent, npc, eEventHit, 0);
+                zEntPlayer_SNDPlayStreamRandom(0x00, 0x10, ePlayerStreamSnd_BowlComment1,
+                                               ePlayerStreamSnd_BowlComment3, 0.1f);
+                zEntPlayer_SNDPlayStreamRandom(0x10, 0x23, ePlayerStreamSnd_BowlComment1,
+                                               ePlayerStreamSnd_BowlComment4, 0.1f);
+                zEntPlayer_SNDPlayStreamRandom(0x24, 0x64, ePlayerStreamSnd_BowlComment1,
+                                               ePlayerStreamSnd_BowlComment5, 0.1f);
+                if ((ent == globals.player.bubblebowl) &&
+                    (((npc->SelfType() & ~0xFF) != 'NTT\0') ||
+                     (npc->SelfType() == NPC_TYPE_TIKI_STONE)) &&
+                    (ent->timeToLive > 0.05f))
+                {
+                    ent->timeToLive = 0.05f;
+                }
+            }
+
+            numDepens++;
+        }
+
+        if (numDepens != 0)
+        {
+            xVec3AddScaled(&ent->bound.sph.center, &depen, 1.0f / numDepens);
+        }
+    }
+
+    xVec3Sub(&sphDist, &ent->bound.sph.center, &oldSphCen);
+    xVec3SMul(&sphDist, &sphDist, (1.0f / dt));
+    dVar18 = xVec3Length(&ent->vel);
+    dVar20 = xVec3Length(&sphDist);
+    if (dVar18 > ent->basset->maxVel)
+    {
+        dVar18 = ent->basset->maxVel;
+    }
+    if (dVar20 > dVar18)
+    {
+        xVec3SMulBy(&sphDist, (dVar18 / dVar20));
+    }
+    if (numDepens != 0)
+    {
+        xVec3Normalize(&depenNorm1, &depen);
+        depenComp = xVec3Dot(&ent->vel, &depenNorm1);
+    }
+    if (!(ent->basset->flags & 1) && (numDepens != 0))
+    {
+        F32 bounce = ent->basset->bounce;
+        if (bounce && ((depenComp / dVar18) < bounce + -1.0f))
+        {
+            dVar18 = xVec3Dot(&sphDist, &depenNorm1);
+            if (-depenComp > ent->basset->bounceDamp)
+            {
+                xVec3AddScaled(&sphDist, &depenNorm1, (-ent->basset->bounce * depenComp) - dVar18);
+            }
+        }
+        if (ent->basset->friction)
+        {
+            xVec3Copy(&scaleVel, &ent->vel);
+            xVec3AddScaled(&scaleVel, &depenNorm1, -depenComp);
+            xVec3AddScaled(&sphDist, &scaleVel, -ent->basset->friction * dt);
+        }
+    }
+
+    xVec3Copy(&ent->vel, &sphDist);
+
+    if (numDepens != 0)
+    {
+        if (xVec3Length2(&depen) < 0.001f)
+        {
+            xVec3Init(&someVec, ent->vel.z, 0.0f, -ent->vel.x);
+        }
+        else
+        {
+            xVec3Cross(&someVec, &depen, &ent->vel);
+        }
+        xVec3Normalize(&someVec, &someVec);
+#ifdef PLATFORM_PC
+        // stickiness is the fraction of the way the spin axis and rate close on
+        // the contact-derived values each frame, on state that lives in the
+        // entity. Four times the frames snaps the axis over in one visual
+        // instant and the boulder loses the skid it has on console. It comes
+        // out of the asset unclamped, which is why this goes through the
+        // helper.
+        F32 stick = xFrameApproach(ent->basset->stickiness, dt);
+
+        xVec3SMulBy(&ent->rotVec, 1.0f - stick);
+        xVec3AddScaled(&ent->rotVec, &someVec, stick);
+#else
+        xVec3SMulBy(&ent->rotVec, 1.0f - ent->basset->stickiness);
+        xVec3AddScaled(&ent->rotVec, &someVec, ent->basset->stickiness);
+#endif
+        if (xVec3Normalize(&ent->rotVec, &ent->rotVec) < 1e-5f)
+        {
+            ent->angVel = 0.0f;
+        }
+        else
+        {
+            F32 div = xVec3Length(&ent->vel) / ent->bound.sph.r;
+#ifdef PLATFORM_PC
+            ent->angVel = ((1.0f - stick) * ent->angVel) + (stick * div);
+#else
+            ent->angVel =
+                ((1.0f - ent->basset->stickiness) * ent->angVel) + (ent->basset->stickiness * div);
+#endif
+        }
+    }
+
+    if (ent->angVel > ent->basset->maxAngVel)
+    {
+        ent->angVel = ent->basset->maxAngVel;
+    }
+    if (ent->angVel < -ent->basset->maxAngVel)
+    {
+        ent->angVel = -ent->basset->maxAngVel;
+    }
+    if ((ent->angVel > 0.075f) || (ent->angVel < -0.075f))
+    {
+        xMat3x3 rotM;
+
+        xMat3x3Rot(&rotM, &ent->rotVec, (ent->angVel * dt));
+        xMat3x3Mul((xMat3x3*)ent->model->Mat, (xMat3x3*)ent->model->Mat, &rotM);
+    }
+
+    xMat3x3RMulVec(&newRotVec, (xMat3x3*)(ent->model->Mat), &ent->localCenter);
+    xVec3Sub((xVec3*)&ent->model->Mat->pos, &ent->bound.sph.center, &newRotVec);
+    F32 vol;
+    if ((ent->basset->soundID != 0) && (numDepens != 0) && (ent->lastRolling > 0.25f))
+    {
+        if (-depenComp > ent->basset->minSoundVel)
+        {
+            vol = ent->basset->maxSoundVel - ent->basset->minSoundVel;
+            F32 max = MAX(1e-5f, vol);
+            vol = (-depenComp - ent->basset->minSoundVel);
+            vol /= max;
+
+            if (vol > 1.0f)
+            {
+                vol = 1.0f;
+            }
+
+            vol *= (ent->basset->volume * 0.77f);
+
+            xSndPlay3D(ent->basset->soundID, vol, 0.0f, 0, 0, (xVec3*)&ent->model->Mat->pos,
+                       ent->basset->innerRadius, ent->basset->outerRadius, SND_CAT_GAME, 0.0f);
+        }
+    }
+
+    if ((ent->rollingID != 0) && (numDepens != 0) && (ent->lastRolling > 0.25f))
+    {
+        vol = 0.77f;
+
+        xSndPlay3D(ent->rollingID, vol, 0.0f, 0, 0, (xVec3*)(&ent->model->Mat->pos), 20.0f,
+                   SND_CAT_GAME, 0.0f);
+    }
+
+    if (numDepens != 0)
+    {
+        ent->lastRolling = 0.0f;
+    }
+    else
+    {
+        ent->lastRolling += dt;
+    }
+
+    if (ent->collis == &sBoulderCollis)
+    {
+        ent->collis = NULL;
+    }
+}
+
+S32 xEntBoulder_KilledBySurface(xEntBoulder* ent, xScene* sc, F32 dt)
+{
+    xCollis* coll;
+    xCollis* cend;
+    F32 temp;
+    xSurface* surf;
+    zSurfaceProps* prop;
+
+    if (!(ent->basset->flags & 0x70))
+    {
+        return 0;
+    }
+
+    coll = &ent->collis->colls[0];
+    cend = &coll[ent->collis->idx];
+    for (; coll < cend; coll++)
+    {
+        if (!(coll->flags & 1))
+        {
+            continue;
+        }
+
+        if ((ent->basset->flags & 0x40) && (coll->optr != NULL) &&
+            (zGooIs((xEnt*)coll->optr, temp, 0)))
+        {
+            xVec3AddScaled(&ent->vel, &coll->norm,
+                           -(ent->basset->bounce + 1.0f) * xVec3Dot(&ent->vel, &coll->norm));
+            zEntEvent(ent, eEventKill);
+            return 1;
+        }
+
+        surf = zSurfaceGetSurface(coll);
+        if ((surf == NULL) || (surf->state != 0))
+        {
+            continue;
+        }
+
+        prop = (zSurfaceProps*)surf->moprops;
+        if ((prop == NULL) || (prop->asset == NULL))
+        {
+            continue;
+        }
+
+        if (ent->basset->flags & 0x10)
+        {
+            switch (prop->asset->game_damage_type)
+            {
+            case 0:
+                break;
+            case 1:
+            case 2:
+            case 3:
+            case 4:
+            case 6:
+                ent->hitpoints--;
+                if (ent->hitpoints <= 0)
+                {
+                    xVec3AddScaled(&ent->vel, &coll->norm,
+                                   -(ent->basset->bounce + 1.0f) *
+                                       xVec3Dot(&ent->vel, &coll->norm));
+                    zEntEvent(ent, eEventKill);
+                    return 1;
+                }
+                break;
+            case 5:
+                xVec3AddScaled(&ent->vel, &coll->norm,
+                               -(ent->basset->bounce + 1.0f) * xVec3Dot(&ent->vel, &coll->norm));
+                zEntEvent((xBase*)ent, eEventKill);
+                return 1;
+            }
+        }
+
+        if ((ent->basset->flags & 0x20) && (prop->asset->phys_flags & 0x10))
+        {
+            xVec3AddScaled(&ent->vel, &coll->norm,
+                           -(ent->basset->bounce + 1.0f) * xVec3Dot(&ent->vel, &coll->norm));
+            zEntEvent((xBase*)ent, eEventKill);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+void xEntBoulder_Kill(xEntBoulder* ent)
+{
+    ent->chkby = XENT_COLLTYPE_NONE;
+    ent->penby = XENT_COLLTYPE_NONE;
+    ent->collis_chk = 0;
+    ent->collis_pen = 0;
+    ent->update = NULL;
+    xEntHide(ent);
+    if ((ent == globals.player.bubblebowl) && (sBubbleStreakID != 0xdead))
+    {
+        xFXStreakStop(sBubbleStreakID);
+        sBubbleStreakID = 0xdead;
+    }
+}
+
+void xEntBoulder_BubbleBowl(F32 multiplier)
+{
+    xEntBoulder* ent = globals.player.bubblebowl;
+    xRay3 ray;
+    xCollis rayCollis;
+    xEnt* optr;
+
+    if (ent == NULL)
+    {
+        return;
+    }
+
+    if (ent->update == (xEntUpdateCallback)xEntBoulder_Update)
+    {
+        zEntEvent(ent, eEventKill);
+    }
+
+    xEntBoulder_Reset(ent, globals.sceneCur);
+    ent->update = (xEntUpdateCallback)xEntBoulder_Update;
+
+    if (sBubbleStreakID != 0xdead)
+    {
+        xFXStreakStop(sBubbleStreakID);
+        sBubbleStreakID = 0xdead;
+    }
+
+    xVec3Copy((xVec3*)&ent->model->Mat->pos, (xVec3*)&globals.player.ent.model->Mat->pos);
+    xVec3AddScaled((xVec3*)&ent->model->Mat->pos, (xVec3*)&globals.player.ent.model->Mat->right,
+                   globals.player.g.BubbleBowlLaunchPosLeft);
+    xVec3AddScaled((xVec3*)&ent->model->Mat->pos, (xVec3*)&globals.player.ent.model->Mat->up,
+                   globals.player.g.BubbleBowlLaunchPosUp);
+    xVec3AddScaled((xVec3*)&ent->model->Mat->pos, (xVec3*)&globals.player.ent.model->Mat->at,
+                   globals.player.g.BubbleBowlLaunchPosAt);
+    xVec3Copy(&ent->bound.sph.center, (xVec3*)&ent->model->Mat->pos);
+    xVec3Copy(&ent->frame->mat.pos, (xVec3*)&ent->model->Mat->pos);
+    xVec3SMul(&ent->vel, (xVec3*)&globals.player.ent.model->Mat->right,
+              globals.player.g.BubbleBowlLaunchVelLeft);
+    xVec3AddScaled(&ent->vel, (xVec3*)&globals.player.ent.model->Mat->up,
+                   globals.player.g.BubbleBowlLaunchVelUp);
+    xVec3AddScaled(&ent->vel, (xVec3*)&globals.player.ent.model->Mat->at,
+                   globals.player.g.BubbleBowlLaunchVelAt);
+    xVec3SMulBy(&ent->vel, multiplier);
+    xVec3Copy(&ent->rotVec, (xVec3*)globals.player.ent.model->Mat);
+    ent->angVel = (multiplier * 10.0f);
+    xVec3Copy(&ray.origin, (xVec3*)&globals.player.ent.bound.sph.center);
+    xVec3Sub(&ray.dir, (xVec3*)&ent->model->Mat->pos, &ray.origin);
+    ray.max_t = xVec3Normalize(&ray.dir, &ray.dir);
+    ray.min_t = 0.01f + globals.player.ent.bound.box.box.upper.x;
+    ray.flags = 0xc00;
+    xRayHitsScene(globals.sceneCur, &ray, &rayCollis);
+
+    if (rayCollis.flags & 1)
+    {
+        optr = (xEnt*)(rayCollis.optr);
+        if ((optr == NULL) ||
+            ((((optr->baseType == eBaseTypeDestructObj) &&
+               (zEntDestructObj_GetHit((zEntDestructObj*)optr, 0x8000) == 0)) ||
+              !(optr->moreFlags & 0x10) || (optr->baseType == eBaseTypeStatic))) &&
+                (optr->baseType != eBaseTypeNPC))
+        {
+            if ((optr != NULL) && (optr->collLev == 5))
+            {
+                iRayHitsModel(&ray, optr->model, &rayCollis);
+                if (rayCollis.flags & 1)
+                {
+                    ent->timeToLive = 0.0001f;
+                }
+            }
+            else
+            {
+                ent->timeToLive = 0.0001f;
+            }
+        }
+    }
+
+    ent->lastRolling = 0.0f;
+    ent->rollingID = xStrHash("sound_bubblebowl_loop");
+    sBubbleStreakID = xFXStreakStart(0.01f, 4.0f, 1.0f, 0, 0, 0, 1);
+}
+
+void xEntBoulder_Setup(xEntBoulder* ent)
+{
+    ent->asset->redMult = 1.0f;
+    ent->asset->greenMult = 1.0f;
+    ent->asset->blueMult = 1.0f;
+
+    if (ent->model != NULL)
+    {
+        ent->asset->seeThru = ent->model->Alpha;
+    }
+    else
+    {
+        ent->asset->seeThru = 1.0f;
+    }
+
+    xEntSetup(ent);
+}
+
+void xEntBoulder_Reset(xEntBoulder* boul, xScene* sc)
+{
+    boul->chkby = XENT_COLLTYPE_PLYR | XENT_COLLTYPE_NPC | XENT_COLLTYPE_DYN;
+    boul->penby = XENT_COLLTYPE_PLYR;
+    boul->collis_chk = 0x2e;
+    boul->collis_pen = 0;
+
+    xEntReset(boul);
+
+    if ((boul->id == 0x5f2e37b4) || (boul->id + 0xa0d1c84b <= 1) || (boul->id == 0x5f2e37b7))
+    {
+        boul->flags |= 0x10;
+    }
+
+    xVec3Init(&boul->force, 0.0f, 0.0f, 0.0f);
+    xVec3Init(&boul->instForce, 0.0f, 0.0f, 0.0f);
+    xVec3Init(&boul->vel, 0.0f, 0.0f, 0.0f);
+    xVec3Init(&boul->rotVec, 1.0f, 0.0f, 0.0f);
+
+    boul->angVel = 0.0f;
+
+    if (boul->basset->flags & 0x200)
+    {
+        boul->timeToLive = boul->basset->killtimer;
+    }
+    else
+    {
+        boul->timeToLive = -1.0f;
+    }
+
+    boul->hitpoints = boul->basset->hitpoints;
+#ifdef PLATFORM_PC
+    // A boulder is repositioned after this runs -- xBoulderGenerator_Launch
+    // writes the muzzle into model->Mat->pos -- so the fixed-step state has to
+    // reseed from wherever it ends up rather than from here.
+    boul->fixedInit = FALSE;
+#endif
+    xEntBoulder_RealBUpdate(boul, (xVec3*)&boul->model->Mat->pos);
+
+    if ((globals.sceneCur->sceneID == 'BC04') && (boul->id == xStrHash("BALL_BOULDER")))
+    {
+        boul->collis_chk &= 0xf7;
+    }
+}
+
+S32 xEntBoulderEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
+                       xBase* toParamWidget)
+{
+    xEntBoulder* s = (xEntBoulder*)to;
+
+    switch (toEvent)
+    {
+    case eEventVisible:
+    case eEventFastVisible:
+        xEntShow(s);
+        if (toParam && (S32)(0.5f + toParam[0]) == 77)
+        {
+            zFXPopOn(*s, toParam[1], toParam[2]);
+        }
+        break;
+    case eEventInvisible:
+    case eEventFastInvisible:
+        xEntHide(s);
+        if (toParam && (S32)(0.5f + toParam[0]) == 77)
+        {
+            zFXPopOff(*s, toParam[1], toParam[2]);
+        }
+        break;
+    case eEventCollisionOn:
+        s->chkby |= XENT_COLLTYPE_PLYR;
+        break;
+    case eEventCollisionOff:
+        s->chkby &= (U8)~XENT_COLLTYPE_PLYR;
+        break;
+    case eEventCollision_Visible_On:
+        s->chkby |= XENT_COLLTYPE_PLYR;
+        xEntShow(s);
+        if (toParam && (S32)(0.5f + toParam[0]) == 77)
+        {
+            zFXPopOn(*s, toParam[1], toParam[2]);
+        }
+        break;
+    case eEventCollision_Visible_Off:
+        s->chkby &= (U8)~XENT_COLLTYPE_PLYR;
+        xEntHide(s);
+        if (toParam && (S32)(0.5f + toParam[0]) == 77)
+        {
+            zFXPopOff(*s, toParam[1], toParam[2]);
+        }
+        break;
+    case eEventCameraCollideOn:
+        zCollGeom_CamEnable(s);
+        break;
+    case eEventCameraCollideOff:
+        zCollGeom_CamDisable(s);
+        break;
+    case eEventReset:
+        xEntBoulder_Reset(s, globals.sceneCur);
+        if (xEntIsVisible(s))
+        {
+            s->update = (xEntUpdateCallback)xEntBoulder_Update;
+        }
+        break;
+    case eEventHit:
+        if (s->update)
+        {
+            s->hitpoints--;
+            if (s->hitpoints <= 0)
+            {
+                zEntEvent(s, eEventKill);
+            }
+        }
+        break;
+    case eEventKill:
+        xEntBoulder_Kill(s);
+        if (s == globals.player.bubblebowl)
+        {
+            zFX_SpawnBubbleHit(&s->bound.sph.center, xrand() % 64 + 36);
+        }
+        break;
+    case eEventSetUpdateDistance:
+        if (globals.updateMgr)
+        {
+            if (toParam[0] <= 0.0f)
+            {
+                xUpdateCull_SetCB(globals.updateMgr, s, xUpdateCull_AlwaysTrueCB, NULL);
+            }
+            else
+            {
+                FloatAndVoid dist;
+                dist.f = SQR(toParam[0]);
+                xUpdateCull_SetCB(globals.updateMgr, s, xUpdateCull_DistanceSquaredCB, dist.v);
+            }
+        }
+        break;
+    case eEventLaunchShrapnel:
+        if (toParamWidget)
+        {
+            zShrapnelAsset* shrap = (zShrapnelAsset*)toParamWidget;
+            if (shrap->initCB)
+            {
+                shrap->initCB(shrap, s->model, &s->vel, NULL);
+            }
+        }
+        break;
+    case eEventSetLightKit:
+        s->lightKit = (xLightKit*)toParamWidget;
+        break;
+    }
+
+    return 1;
+}
+
+static S32 RecurseLinks(xLinkAsset* link, S32 count, xEntBoulder** boulList)
+{
+    S32 i;
+    S32 numInList = 0;
+
+    for (i = 0; i < count; i++)
+    {
+        xLinkAsset* currLink = &link[i];
+        if (currLink->dstEvent == eEventConnectToChild)
+        {
+            xBase* mychild = zSceneFindObject(currLink->dstAssetID);
+            if (mychild)
+            {
+                RecurseChild(mychild, boulList, numInList);
+            }
+        }
+    }
+
+    return numInList;
+}
+
+static void RecurseChild(xBase* child, xEntBoulder** boulList, S32& currBoul)
+{
+    switch (child->baseType)
+    {
+    case eBaseTypeBoulder:
+        if (boulList)
+        {
+            boulList[currBoul] = (xEntBoulder*)child;
+        }
+        currBoul++;
+        break;
+    case eBaseTypeGroup:
+    {
+        S32 i, cnt;
+        xGroup* grp = (xGroup*)child;
+
+        cnt = xGroupGetCount(grp);
+        for (i = 0; i < cnt; i++)
+        {
+            xBase* grpitem = xGroupGetItemPtr(grp, i);
+            if (grpitem)
+            {
+                if (grpitem->baseType == eBaseTypeBoulder)
+                {
+                    if (boulList)
+                    {
+                        boulList[currBoul] = (xEntBoulder*)grpitem;
+                    }
+                    currBoul++;
+                }
+                else if (grpitem->baseType == eBaseTypeGroup)
+                {
+                    RecurseChild(grpitem, boulList, currBoul);
+                }
+            }
+        }
+
+        break;
+    }
+    }
+}
+
+// size_t, not unsigned long, to agree with the declaration in the header.
+// include/types.h typedefs size_t to unsigned long for the console, so this is
+// character-for-character the same type there and the mangled name does not
+// move. On 32-bit Windows size_t is unsigned int, and unsigned int and
+// unsigned long are distinct types for overload resolution even at the same
+// width -- so the header declared one function and this defined another.
+void xBoulderGenerator_Init(xBase& data, xDynAsset& asset, size_t)
+{
+    xBoulderGenerator_Init((xBoulderGenerator*)&data, (xBoulderGeneratorAsset*)&asset);
+}
+
+void xBoulderGenerator_Init(xBoulderGenerator* bg, xBoulderGeneratorAsset* asset)
+{
+    U32 size;
+
+    xBaseInit(bg, asset);
+
+    bg->eventFunc = xBoulderGenerator_EventCB;
+    bg->bgasset = asset;
+
+    if (bg->linkCount != 0)
+    {
+        bg->link = (xLinkAsset*)(&bg->bgasset[1]);
+    }
+    else
+    {
+        bg->link = NULL;
+    }
+
+    size = 0;
+    bg->objectPtr = (RwTexture*)xSTFindAsset(asset->object, &size);
+
+    if (size == sizeof(xMarkerAsset))
+    {
+        bg->isMarker = 1;
+    }
+    else
+    {
+        bg->isMarker = 0;
+        bg->objectPtr = (void*)zSceneFindObject(asset->object);
+    }
+
+    bg->numBoulders = RecurseLinks(bg->link, bg->linkCount, 0);
+    bg->nextBoulder = bg->numBoulders;
+    bg->boulderList = (xEntBoulder**)xMemAlloc(
+        gActiveHeap,
+        (bg->numBoulders * sizeof(xEntBoulder*)) + (bg->numBoulders * sizeof(xEntBoulder*)), 0);
+    bg->boulderAges = (S32*)(&bg->boulderList[bg->numBoulders]);
+    RecurseLinks(bg->link, bg->linkCount, bg->boulderList);
+
+    xVec3Normalize(&bg->bgasset->initaxis, &bg->bgasset->initaxis);
+
+    bg->lengthOfInitVel = xVec3Length(&bg->bgasset->initvel);
+    if (bg->lengthOfInitVel > 1e-5f)
+    {
+        bg->perp1.x = bg->bgasset->initvel.z - bg->bgasset->initvel.y;
+        bg->perp1.y = bg->bgasset->initvel.x - bg->bgasset->initvel.z;
+        bg->perp1.z = bg->bgasset->initvel.y - bg->bgasset->initvel.x;
+        xVec3Normalize(&bg->perp1, &bg->perp1);
+        xVec3Cross(&bg->perp2, &bg->bgasset->initvel, &bg->perp1);
+        xVec3SMulBy(&bg->perp1, bg->lengthOfInitVel);
+    }
+
+    xBoulderGenerator_Reset(bg);
+}
+
+void xBoulderGenerator_Reset(xBoulderGenerator* gen)
+{
+    for (S32 i = 0; i < gen->numBoulders; i++)
+    {
+        xEntBoulder_Kill(gen->boulderList[i]);
+        gen->boulderAges[i] = 0;
+    }
+}
+
+static void BoulderGen_GiveBirth(xBoulderGenerator* gen, S32 param)
+{
+    for (S32 i = 0; i < gen->numBoulders; i++)
+    {
+        gen->boulderAges[i]++;
+    }
+    gen->boulderAges[param] = 1;
+}
+
+static S32 GetBoulderForGenerating(xBoulderGenerator* bg)
+{
+    S32 numList;
+    S32 j;
+    S32 i;
+    S32 oldestCulled = -1;
+    S32 minAge = bg->numBoulders >> 1;
+
+    for (i = 0, numList = bg->numBoulders; i < numList; i++)
+    {
+        j = i + bg->nextBoulder;
+
+        if (j >= numList)
+        {
+            j -= numList;
+        }
+
+        if (!xEntIsVisible(bg->boulderList[j]))
+        {
+            break;
+        }
+
+        if (bg->boulderAges[j] < minAge)
+        {
+            // :^)
+        }
+        else if (oldestCulled < 0)
+        {
+            oldestCulled = j;
+        }
+        else if (bg->boulderList[oldestCulled]->isCulled)
+        {
+            if (bg->boulderList[j]->isCulled &&
+                (bg->boulderAges[oldestCulled] < bg->boulderAges[j]))
+            {
+                oldestCulled = j;
+            }
+        }
+        else if (bg->boulderList[j]->isCulled ||
+                 (bg->boulderAges[oldestCulled] < bg->boulderAges[j]))
+        {
+            oldestCulled = j;
+        }
+    }
+
+    if (i == numList)
+    {
+        if (oldestCulled < 0)
+        {
+            j = (numList - 1) * xurand();
+            if (j >= numList)
+            {
+                j = numList - 1;
+            }
+        }
+        else
+        {
+            j = oldestCulled;
+        }
+    }
+
+    bg->nextBoulder = j + 1;
+    if (bg->nextBoulder >= numList)
+    {
+        bg->nextBoulder = 0;
+    }
+
+    return j;
+}
+
+void xBoulderGenerator_Launch(xBoulderGenerator* bg, xVec3* pnt, F32 t)
+{
+    S32 i = GetBoulderForGenerating(bg);
+    xEntBoulder* b = bg->boulderList[i];
+    F32 invTime;
+
+    if ((b != (xEntBoulder*)bg->objectPtr) || (!xEntIsVisible(b)))
+    {
+        xEntBoulder_Reset(b, globals.sceneCur);
+        zEntEvent(b, eEventBorn);
+        b->update = (xEntUpdateCallback)xEntBoulder_Update;
+        if (bg->isMarker)
+        {
+            xVec3Copy((xVec3*)(&b->model->Mat->pos), &((xMarkerAsset*)(bg->objectPtr))->pos);
+        }
+        else
+        {
+            xVec3Copy((xVec3*)(&b->model->Mat->pos),
+                      (xVec3*)(&((xEnt*)(bg->objectPtr))->model->Mat->pos));
+        }
+        xVec3AddTo((xVec3*)(&b->model->Mat->pos), &bg->bgasset->offset);
+        xVec3Copy(&b->rotVec, &bg->bgasset->initaxis);
+        b->angVel = bg->bgasset->angvel;
+    }
+
+    invTime = (1.0f / t);
+    b->vel.x = invTime * (pnt[0].x - b->model->Mat->pos.x);
+    b->vel.z = invTime * (pnt[0].z - b->model->Mat->pos.z);
+    b->vel.y = invTime * (pnt[0].y - b->model->Mat->pos.y) + b->basset->gravity * t * 0.5f;
+    BoulderGen_GiveBirth(bg, i);
+}
+
+void xBoulderGenerator_GenBoulder(xBoulderGenerator*);
+
+S32 xBoulderGenerator_EventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam,
+                              xBase* toParamWidget)
+{
+    xVec3 pnt;
+
+    switch (toEvent)
+    {
+    case eEventGenerateBoulder:
+        xBoulderGenerator_GenBoulder((xBoulderGenerator*)to);
+        break;
+    case eEventLaunchBoulderAtWidget:
+        switch (toParamWidget->baseType)
+        {
+        case eBaseTypeVillain:
+        case eBaseTypePlayer:
+        case eBaseTypePickup:
+        case eBaseTypePlatform:
+        case eBaseTypeDoor:
+        case eBaseTypeStatic:
+        case eBaseTypeDynamic:
+        case eBaseTypePendulum:
+        case eBaseTypeHangable:
+        case eBaseTypeButton:
+        case eBaseTypeDestructObj:
+        case eBaseTypeNPC:
+        case eBaseTypeBoulder:
+        {
+            xVec3Copy(&pnt, (xVec3*)xEntGetPos((xEnt*)toParamWidget));
+
+            F32 f0 = 0.0f;
+            F32 f1 = toParam[1];
+            F32 f2;
+            F32 f3;
+
+            if (f1 != f0)
+            {
+                f1 = xurand();
+                f0 = 0.5f;
+                f2 = 2.0f;
+                f3 = f1 - f0;
+                f1 = toParam[1];
+                f0 = pnt.x;
+                f2 *= f3;
+                pnt.x = (f1 * f2) + f0;
+
+                f1 = xurand();
+                f0 = 0.5f;
+                f2 = 2.0f;
+                f3 = f1 - f0;
+                f1 = toParam[1];
+                f2 *= f3;
+                pnt.y = (f1 * f2) + pnt.y;
+
+                f1 = xurand();
+                f0 = 0.5f;
+                f2 = 2.0f;
+                f3 = f1 - f0;
+                f1 = toParam[1];
+                f0 = pnt.z;
+                f2 *= f3;
+                pnt.z = (f1 * f2) + f0;
+            }
+
+            xBoulderGenerator_Launch((xBoulderGenerator*)to, &pnt, *toParam);
+            break;
+        }
+        case eBaseTypeMovePoint:
+        {
+            xVec3Copy(&pnt, (xVec3*)zMovePointGetPos((zMovePoint*)toParamWidget));
+
+            F32 f0 = 0.0f;
+            F32 f1 = toParam[1];
+            F32 f2;
+            F32 f3;
+
+            if (f1 != f0)
+            {
+                f1 = xurand();
+                f2 = 2.0f;
+                f3 = f1 - 0.5f;
+                f1 = toParam[1];
+                f0 = pnt.x;
+                f2 *= f3;
+                pnt.x = (f1 * f2) + f0;
+
+                f1 = xurand();
+                f0 = 0.5f;
+                f2 = 2.0f;
+                f3 = f1 - f0;
+                f1 = toParam[1];
+                f2 *= f3;
+                pnt.y = (f1 * f2) + pnt.y;
+
+                f1 = xurand();
+                f0 = 0.5f;
+                f2 = 2.0f;
+                f3 = f1 - f0;
+                f1 = toParam[1];
+                f0 = pnt.z;
+                f2 *= f3;
+                pnt.z = (f1 * f2) + f0;
+            }
+            xBoulderGenerator_Launch((xBoulderGenerator*)to, &pnt, *toParam);
+            break;
+        }
+        }
+        break;
+    case eEventLaunchBoulderAtPoint:
+        pnt.x = toParam[0];
+        pnt.y = toParam[1];
+        pnt.z = toParam[2];
+        xBoulderGenerator_Launch((xBoulderGenerator*)to, &pnt, toParam[3]);
+        break;
+    case eEventLaunchBoulderAtPlayer:
+    {
+        xVec3Copy(&pnt, (xVec3*)&(globals.player.ent.model)->Mat->pos);
+        xVec3AddScaled(&pnt, &globals.player.ent.frame->dpos,
+                       ((*toParam * toParam[1]) / globals.update_dt));
+
+        F32 f0 = 0.0f;
+        F32 f1 = toParam[2];
+        F32 f2;
+        F32 f3;
+
+        if (f1 != f0)
+        {
+            f1 = xurand();
+            f2 = 2.0f;
+            f3 = f1 - 0.5f;
+            f1 = toParam[2];
+            f2 *= f3;
+            pnt.x = (f1 * f2) + pnt.x;
+
+            f1 = xurand();
+            f2 = 2.0f;
+            f3 = f1 - 0.5f;
+            f2 *= f3;
+            pnt.y = (toParam[2] * f2) + pnt.y;
+
+            f1 = xurand();
+            f2 = 2.0f;
+            f3 = f1 - 0.5f;
+            f1 = toParam[2];
+            f2 *= f3;
+            pnt.z += (f1 * f2);
+        }
+
+        xBoulderGenerator_Launch((xBoulderGenerator*)to, &pnt, *toParam);
+        break;
+    }
+    case eEventReset:
+        xBoulderGenerator_Reset((xBoulderGenerator*)to);
+        break;
+    }
+    return 1;
+}
+
+void xBoulderGenerator_GenBoulder(xBoulderGenerator* bg)
+{
+    S32 i = GetBoulderForGenerating(bg);
+    xEntBoulder* b = bg->boulderList[i];
+
+    if (bg->objectPtr == globals.player.bubblebowl)
+    {
+        xEntBoulder_Reset(b, globals.sceneCur);
+        zEntEvent(b, eEventBorn);
+
+        b->update = (xEntUpdateCallback)xEntBoulder_Update;
+
+        xEntBoulder* bb = globals.player.bubblebowl;
+
+        xVec3Copy((xVec3*)&b->model->Mat->pos, (xVec3*)&bb->model->Mat->pos);
+        xVec3Copy(&b->rotVec, &bb->rotVec);
+        b->angVel = bb->angVel;
+        xVec3Copy(&b->vel, &bb->vel);
+
+        xEntBoulder_Kill(bb);
+    }
+    else
+    {
+        if (b != bg->objectPtr || !xEntIsVisible(b))
+        {
+            xEntBoulder_Reset(b, globals.sceneCur);
+            zEntEvent(b, eEventBorn);
+
+            b->update = (xEntUpdateCallback)xEntBoulder_Update;
+
+            if (bg->isMarker)
+            {
+                xVec3Copy((xVec3*)&b->model->Mat->pos, &((xMarkerAsset*)bg->objectPtr)->pos);
+            }
+            else
+            {
+                xVec3Copy((xVec3*)&b->model->Mat->pos,
+                          (xVec3*)&((xEnt*)bg->objectPtr)->model->Mat->pos);
+            }
+
+            xVec3AddTo((xVec3*)&b->model->Mat->pos, &bg->bgasset->offset);
+
+            if (bg->bgasset->offsetRand)
+            {
+                b->model->Mat->pos.x += 2.0f * (xurand() - 0.5f) * bg->bgasset->offsetRand;
+                b->model->Mat->pos.y += 2.0f * (xurand() - 0.5f) * bg->bgasset->offsetRand;
+                b->model->Mat->pos.z += 2.0f * (xurand() - 0.5f) * bg->bgasset->offsetRand;
+            }
+
+            xVec3Copy(&b->rotVec, &bg->bgasset->initaxis);
+
+            b->angVel = bg->bgasset->angvel;
+        }
+
+        if (bg->lengthOfInitVel > 0.00001f && bg->bgasset->velAngleRand > 0.00001f)
+        {
+            F32 p1c = xurand() - 0.5f;
+            F32 p2c = xurand() - 0.5f;
+            F32 nf = 1.0f / xsqrt(SQR(p1c) + SQR(p2c));
+            if (nf < 0.00001f)
+            {
+                p1c = 1.0f;
+                p2c = 0.0f;
+            }
+            else
+            {
+                p1c *= nf;
+                p2c *= nf;
+            }
+
+            xVec3 perpRand;
+            xVec3SMul(&perpRand, &bg->perp1, p1c);
+            xVec3AddScaled(&perpRand, &bg->perp2, p2c);
+
+            F32 randAng = bg->bgasset->velAngleRand * (xurand() - 0.5f);
+            randAng = DEG2RAD(randAng);
+
+            p1c = icos(randAng);
+            p2c = isin(randAng);
+
+            xVec3SMul(&b->vel, &bg->bgasset->initvel, p1c);
+            xVec3AddScaled(&b->vel, &perpRand, p2c);
+        }
+        else
+        {
+            xVec3Copy(&b->vel, &bg->bgasset->initvel);
+        }
+
+        if (bg->bgasset->velMagRand > 0.00001f)
+        {
+            if (bg->lengthOfInitVel > 0.00001f)
+            {
+                F32 sclMag = bg->bgasset->velMagRand * xurand() + 1.0f;
+                xVec3SMulBy(&b->vel, sclMag);
+            }
+            else
+            {
+                b->vel.x = 2.0f * (xurand() - 0.5f) * bg->bgasset->velMagRand;
+                b->vel.y = 2.0f * (xurand() - 0.5f) * bg->bgasset->velMagRand;
+                b->vel.z = 2.0f * (xurand() - 0.5f) * bg->bgasset->velMagRand;
+            }
+        }
+    }
+
+    BoulderGen_GiveBirth(bg, i);
+}
+
+WEAK F32 xVec3LengthFast(const xVec3* v)
+{
+    F32 len;
+    xsqrtfast(len, SQR(v->x) + SQR(v->y) + SQR(v->z));
+    return len;
+}
