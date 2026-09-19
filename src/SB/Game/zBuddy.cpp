@@ -299,6 +299,19 @@ S32 zBuddy_IsAvailable()
     return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
 }
 
+S32 zBuddy_IsSleepyAlerting()
+{
+    if (!zBuddy_IsAvailable())
+    {
+        return 0;
+    }
+
+    // These are the Buddy equivalents of the player's alerting movement:
+    // actively attacking something, or moving at normal/run speed instead
+    // of sneaking around a sleeping Sleepy.
+    return state == BUDDY_STATE_STRIKE || follow_running;
+}
+
 const xVec3* zBuddy_GetPosition()
 {
     return zBuddy_IsAvailable() ? &position : NULL;
