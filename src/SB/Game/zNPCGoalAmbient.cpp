@@ -267,7 +267,7 @@ S32 zNPCGoalJellyAttack::Enter(F32 arg0, void* arg1)
     flg_attack = 0;
     target_buddy = zBuddy_IsAvailable() &&
         zBuddy_IsCloserTarget(npc->Pos()) &&
-        npc->XZDstSqToPos(zBuddy_GetTargetPosition(), 0, 0) < SQ(3.0f);
+        npc->XZDstSqToPos(zBuddy_GetTargetPosition(), NULL, NULL) < SQ(3.0f);
     zNPCGoalJellyAttack::ZapperStart();
     return zNPCGoalPushAnim::Enter(arg0, arg1);
 }
