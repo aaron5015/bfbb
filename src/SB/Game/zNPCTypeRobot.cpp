@@ -3933,18 +3933,18 @@ void zNPCSleepy::RendConeOfDeath(S32 tgt_isBowlingBall)
 
         xVec3 alert_target;
         S32 alert_source = zNPCSleepy_GetAlertTarget(this, &alert_target);
-        if (alert_source == 2)
+
+        /*
+         * There is no valid death-cone target until an actual alert source
+         * exists. Never render a Buddy alert cone down to the player as a
+         * fallback.
+         */
+        if (alert_source == 0)
         {
-            /*
-             * Buddy is the active Sleepy target. The death cone must follow
-             * Buddy's actual position just like it follows the player.
-             */
-            xVec3Copy(&pos_bot, &alert_target);
+            return;
         }
-        else
-        {
-            xVec3Copy(&pos_bot, xEntGetPos(&globals.player.ent));
-        }
+
+        xVec3Copy(&pos_bot, &alert_target);
     }
 
     F32 u_beg = zNPCSleepy::uv_deathcone[0];
