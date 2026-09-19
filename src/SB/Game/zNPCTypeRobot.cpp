@@ -6215,13 +6215,13 @@ S32 zNPCRobot::LaunchProjectile(en_npchaz haztyp, F32 spd_proj, F32 dst_minRange
 
     S32 buddy_target = (haztyp == NPC_HAZ_CHUCKBOMB || haztyp == NPC_HAZ_OILBUBBLE) &&
                        zBuddy_IsAvailable() &&
-                       arena.IncludesPos((xVec3*)zBuddy_GetPosition(), 0.0f, NULL) &&
+                       arena.IncludesPos((xVec3*)zBuddy_GetTargetPosition(), 0.0f, NULL) &&
                        zBuddy_IsCloserTarget(Pos());
 
     if (buddy_target)
     {
-        pos_target = *zBuddy_GetPosition();
-        haz->SetBuddyTarget(zBuddy_GetPosition());
+        pos_target = *zBuddy_GetTargetPosition();
+        haz->SetBuddyTarget(zBuddy_GetTargetPosition());
     }
     else
     {
