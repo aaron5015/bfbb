@@ -306,7 +306,7 @@ void zNPCGoalJellyAttack::ZapperStart()
 
     info.time = 1000000.0f;
     info.start = &pos_bone;
-    info.end = target_buddy ? zBuddy_GetTargetPosition() : xEntGetPos(&globals.player.ent);
+    info.end = target_buddy ? const_cast<xVec3*>(zBuddy_GetTargetPosition()) : xEntGetPos(&globals.player.ent);
 
     for (S32 i = 0; i < 3; i++)
     {
