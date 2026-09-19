@@ -3179,10 +3179,14 @@ S32 zNPCGoalAlertSleepy::Process(en_trantype* trantype, F32 dt, void* updCtxt, x
     en_slepatak old_sleepattack = sleepattack;
     S32 subenter = flg_info & 2;
     xVec3 dir_plyr;
+    xVec3 alert_target;
+    S32 alert_source = zNPCSleepy_GetAlertTarget(npc, &alert_target);
+    const xVec3* target_pos = alert_source ? &alert_target : xEntGetPos(&globals.player.ent);
 
     flg_info &= ~6;
 
-    F32 dsq = npc->XZDstSqToPlayer(&dir_plyr, NULL);
+    xVec3Sub(&dir_plyr, target_pos, npc->Pos());
+    F32 dsq = dir_plyr.x * dir_plyr.x + dir_plyr.z * dir_plyr.z;
 
     if (zEntTeleportBox_playerIn())
     {
@@ -3212,11 +3216,26 @@ S32 zNPCGoalAlertSleepy::Process(en_trantype* trantype, F32 dt, void* updCtxt, x
         {
             tmr_minAttack = 0.3f;
         }
-        zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
+        if (alert_source == 2)
+        {
+            zBuddy_Damage(1);
+            npc->FacePos(&alert_target, dt, 3.0f * PI);
+        }
+        else
+        {
+            zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
+            npc->FacePlayer(dt, 3.0f * PI);
+        }
         npc->SndPlayRandom(NPC_STYP_ATTACK);
-        npc->FacePlayer(dt, 3.0f * PI);
         tmr_minAttack = MAX(-1.0f, (tmr_minAttack - dt));
-        zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
+        if (alert_source == 2)
+        {
+            zBuddy_Damage(1);
+        }
+        else
+        {
+            zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
+        }
         if ((tmr_minAttack < 0.0f) && !(npc->AnimTimeRemain(NULL) > dt) &&
             (globals.player.Health == 0))
         {
