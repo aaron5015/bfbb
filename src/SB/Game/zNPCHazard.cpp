@@ -2602,9 +2602,19 @@ void NPCHazard::Upd_DuploBoom(F32 dt)
 
     ball->rad_cur = LERP(this->pam_interp, ball->rad_min, ball->rad_max);
 
-    if (this->flg_hazard & 0x2000 && !(globals.player.DamageTimer > 0.0f))
+    if (this->flg_hazard & 0x2000)
     {
-        if (ColPlyrSphere(ball->rad_cur))
+        S32 buddy_hit = !(this->flg_hazard & 0x40) && ColBuddySphere(ball->rad_cur);
+        S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrSphere(ball->rad_cur);
+
+        if (buddy_hit)
+        {
+            zBuddy_Damage(1);
+            this->flg_hazard |= 0x40;
+        }
+
+        if (player_hit)
         {
             HurtThePlayer();
         }
