@@ -123,8 +123,13 @@ bool buddy_escape_active_sleepy(F32 dt)
         zNPCCommon* npc = (zNPCCommon*)sleepy_list->list[i];
         if (npc == NULL || npc->SelfType() != NPC_TYPE_SLEEPY || !npc->frame ||
             !npc->IsAlive() || !npc->IsHealthy() || zNPCSleepy_IsAsleep(npc) ||
-            !npc->alert_buddy ||
             !zNPCSleepy_IsInDetectionRange(npc, zBuddy_GetTargetPosition()))
+        {
+            continue;
+        }
+
+        zNPCSleepy* sleepy = (zNPCSleepy*)npc;
+        if (!sleepy->alert_buddy)
         {
             continue;
         }
