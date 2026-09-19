@@ -6107,6 +6107,16 @@ S32 SLEP_grul_goAlert(xGoal* rawgoal, void*, en_trantype* trantype, F32, void*)
      * Buddy does not wake Sleepy merely by entering the cone. A Buddy attack
      * on the Sleepy is handled by the normal NPC damage path instead.
      */
+    const xVec3* buddy_pos = zBuddy_GetTargetPosition();
+    if (buddy_pos != NULL && arena->IncludesPos(buddy_pos, 0.0f, NULL) &&
+        zNPCSleepy_IsInDetectionRange(npc, buddy_pos) &&
+        zBuddy_IsSleepyAlerting())
+    {
+        npc->alert_buddy = 1;
+        *trantype = GOAL_TRAN_SET;
+        return NPC_GOAL_ALERT;
+    }
+
     if (!arena->IncludesPlayer(0.0f, NULL))
     {
         return 0;
