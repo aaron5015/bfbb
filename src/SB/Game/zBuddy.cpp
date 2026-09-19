@@ -102,6 +102,73 @@ bool buddy_sleepy_destination_safe(const xVec3* destination)
     return !buddy_has_sleepy_hazard(destination);
 }
 
+bool buddy_escape_active_sleepy(F32 dt)
+{
+    if (health > 2)
+    {
+        return false;
+    }
+
+    st_XORDEREDARRAY* sleepy_list = zNPCMgr_GetNPCList();
+    if (sleepy_list == NULL)
+    {
+        return false;
+    }
+
+    xVec3 away_sum = xVec3{ 0.0f, 0.0f, 0.0f };
+    S32 threat_count = 0;
+
+    for (S32 i = 0; i < sleepy_list->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)sleepy_list->list[i];
+        if (npc == NULL || npc->SelfType() != NPC_TYPE_SLEEPY || !npc->frame ||
+            !npc->IsAlive() || !npc->IsHealthy() || zNPCSleepy_IsAsleep(npc) ||
+            !npc->alert_buddy ||
+            !zNPCSleepy_IsInDetectionRange(npc, zBuddy_GetTargetPosition()))
+        {
+            continue;
+        }
+
+        xVec3 away;
+        xVec3Sub(&away, &position, npc->Pos());
+        away.y = 0.0f;
+        F32 len2 = xVec3Length2(&away);
+        if (len2 > 0.001f)
+        {
+            F32 inv_len = 1.0f / sqrtf(len2);
+            away_sum.x += away.x * inv_len;
+            away_sum.z += away.z * inv_len;
+            threat_count++;
+        }
+    }
+
+    if (threat_count == 0)
+    {
+        return false;
+    }
+
+    state = BUDDY_STATE_FOLLOW;
+    attack_target = NULL;
+    attack_timer = 0.0f;
+    attack_count = 0;
+    frame_index = 0;
+    frame_timer = 0.0f;
+    buddy_sneaking_sleepy = false;
+
+    F32 away_len2 = xVec3Length2(&away_sum);
+    if (away_len2 > 0.001f)
+    {
+        F32 inv_len = 1.0f / sqrtf(away_len2);
+        F32 escape_distance = 2.0f + buddy_sleepy_escape_margin;
+        position.x += away_sum.x * inv_len * escape_distance *
+                      (1.0f - expf(-8.0f * dt));
+        position.z += away_sum.z * inv_len * escape_distance *
+                      (1.0f - expf(-8.0f * dt));
+    }
+
+    return true;
+}
+
 
 struct buddy_frame
 {
@@ -387,6 +454,11 @@ void zBuddy_SceneUpdate(F32 dt)
             frame_index = 0;
             frame_timer = 0.0f;
         }
+        return;
+    }
+
+    if (buddy_escape_active_sleepy(dt))
+    {
         return;
     }
 
