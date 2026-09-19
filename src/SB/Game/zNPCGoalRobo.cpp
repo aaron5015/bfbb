@@ -1024,6 +1024,10 @@ void zNPCGoalAlertFodBomb::Detonate()
 {
     zNPCFodBomb* npc = (zNPCFodBomb*)psyche->clt_owner;
 
+    // Retail plays the FodBomb attack/detonation sound here, before the
+    // hazard is started. Keep this isolated from the hazard changes.
+    npc->SndPlayRandom(NPC_STYP_ATTACK);
+
     NPCHazard* haz = HAZ_Acquire();
     if (haz != NULL && npc != NULL && haz->ConfigHelper(NPC_HAZ_FODBOMB))
     {
