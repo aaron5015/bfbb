@@ -2355,19 +2355,20 @@ void NPCHazard::Upd_FodBomb(F32 dt)
     ball->rad_cur = LERP(isin(PI * this->pam_interp), ball->rad_min, ball->rad_max);
     if (this->flg_hazard & 0x2000)
     {
-        S32 hit = 0;
-        if (this->GetBuddyTarget() != NULL)
+        // FodBomb is an area explosion, not a single-target hazard. Test the
+        // buddy and player independently so either or both can be hit.
+        S32 buddy_hit = ColBuddySphere(ball->rad_cur);
+        S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrSphere(ball->rad_cur);
+
+        if (buddy_hit)
         {
-            hit = ColBuddySphere(ball->rad_cur);
-        }
-        else if (!(globals.player.DamageTimer > 0.0f))
-        {
-            hit = ColPlyrSphere(ball->rad_cur);
+            zBuddy_Damage(1);
         }
 
-        if (hit)
+        if (player_hit)
         {
-            HurtTarget();
+            HurtThePlayer();
         }
     }
 
@@ -2541,10 +2542,6 @@ void NPCHazard::Upd_TubeletBlast(F32 dt)
         S32 buddy_hit = ColBuddySphere(ball->rad_cur);
         S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
                          ColPlyrSphere(ball->rad_cur);
-
-        printf("[HAZDBG] TEST17 TUBELET buddy=%d player=%d rad=%.3f pos=(%.3f,%.3f,%.3f)\n",
-               buddy_hit, player_hit, ball->rad_cur,
-               this->pos_hazard.x, this->pos_hazard.y, this->pos_hazard.z);
 
         if (buddy_hit)
         {
@@ -3270,8 +3267,10 @@ void NPCHazard::Upd_ChuckBlast(F32 dt)
 
     ball->rad_cur = LERP(this->pam_interp, ball->rad_min, ball->rad_max);
 
-    if (this->flg_hazard & 0x2000 && this->pam_interp < 0.75f)
+    if (this->flg_hazard & 0x2000)
     {
+        // The splash FX remains alive while pam_interp runs to 1.0, so keep
+        // its collision active for the same lifetime.
         S32 buddy_hit = ColBuddySphere(ball->rad_cur);
         S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
                          ColPlyrCyl(ball->rad_cur, 0.5f * ball->rad_cur);
