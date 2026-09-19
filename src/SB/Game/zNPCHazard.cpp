@@ -1868,13 +1868,13 @@ S32 NPCHazard::ColBuddySphere(F32 rad)
     }
 
     F32 buddy_radius = 0.325f;
-    F32 buddy_height = 1.0f;
+    F32 half_height = 0.5f;
     xVec3 delta;
     xVec3Sub(&delta, &this->pos_hazard, this->GetBuddyTarget());
-    F32 closest_y = MAX(0.0f, MIN(buddy_height, delta.y));
+    F32 closest_y = MAX(-half_height, MIN(half_height, delta.y));
     F32 hit_radius = rad + buddy_radius;
-    if (SQ(delta.x) + SQ(delta.z) > SQ(hit_radius) ||
-        SQ(delta.y - closest_y) > SQ(rad + 0.0f))
+    F32 dy = delta.y - closest_y;
+    if (SQ(delta.x) + SQ(delta.z) + SQ(dy) > SQ(hit_radius))
     {
         return 0;
     }
