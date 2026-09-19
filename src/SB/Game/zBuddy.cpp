@@ -550,20 +550,11 @@ void zBuddy_SceneUpdate(F32 dt)
             bool low_health = health <= 2;
 
             /*
-             * At 2 HP or less, a sleeping Sleepy is not a viable target.
-             * Do not enter STRIKE just because the Buddy reached its attack
-             * radius; wait for a safer target instead.
+             * Health does not prevent a stealth attack. A sleeping Sleepy
+             * can be approached and attacked at any health value. If that
+             * attack wakes it while Buddy is low-health, the top-level
+             * active-Sleepy escape check takes over on the next update.
              */
-            if (target_is_sleepy && low_health)
-            {
-                state = BUDDY_STATE_FOLLOW;
-                attack_target = NULL;
-                buddy_sneaking_sleepy = false;
-                frame_index = 0;
-                frame_timer = 0.0f;
-                return;
-            }
-
             if (xVec3Length2(&delta) <= 1.0f)
             {
                 state = BUDDY_STATE_STRIKE;
@@ -734,11 +725,24 @@ void zBuddy_SceneUpdate(F32 dt)
     buddy_sneaking_sleepy = in_sleepy_range;
     F32 follow_speed = in_sleepy_range ? buddy_sneak_speed : 1.0f;
     F32 follow = 1.0f - expf(-8.0f * follow_speed * dt);
+    xVec3 old_position = position;
     position.x += (target.x - position.x) * follow;
     position.y += (target.y - position.y) * follow;
     position.z += (target.z - position.z) * follow;
+
+    /*
+     * Being inside Sleepy's detection range is not itself movement. If Buddy
+     * is standing still, keep the idle animation rather than showing the
+     * sneak/walk cycle indefinitely.
+     */
+    F32 moved2 = xVec3Dist2(&old_position, &position);
+    if (in_sleepy_range && moved2 < 0.0001f)
+    {
+        follow_running = false;
+    }
+
     frame_timer += dt;
-    F32 frame_duration = in_sleepy_range ? 0.14f : follow_running ? 0.10f : 0.18f;
+    F32 frame_duration = follow_running ? 0.10f : 0.18f;
     if (frame_timer >= frame_duration)
     {
         frame_timer -= frame_duration;
