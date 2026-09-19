@@ -311,7 +311,7 @@ S32 zBuddy_WokeSleepy(zNPCCommon* sleepy)
     delta.y = 0.0f;
     delta.z -= position.z;
 
-    return xVec3Length2(&delta) <= SQ(2.0f);
+    return xVec3Length2(&delta) <= 4.0f;
 }
 
 S32 zBuddy_IsAvailable()
