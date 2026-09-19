@@ -102,50 +102,6 @@ bool buddy_sleepy_destination_safe(const xVec3* destination)
     return !buddy_has_sleepy_hazard(destination);
 }
 
-bool buddy_has_active_bzzt(const xVec3* test_position, xVec3* away)
-{
-    if (test_position == NULL || away == NULL)
-    {
-        return false;
-    }
-
-    *away = xVec3{ 0.0f, 0.0f, 0.0f };
-    bool found = false;
-    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
-    if (npclist == NULL)
-    {
-        return false;
-    }
-
-    for (S32 i = 0; i < npclist->cnt; i++)
-    {
-        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
-        if (npc == NULL || npc->SelfType() != NPC_TYPE_FODBZZT || !npc->frame ||
-            !npc->IsAlive() || !npc->IsHealthy() || npc->psy_instinct == NULL ||
-            npc->psy_instinct->GIDOfActive() != NPC_GOAL_ALERTFODBZZT)
-        {
-            continue;
-        }
-
-        xVec3 delta;
-        xVec3Sub(&delta, test_position, npc->Pos());
-        delta.y = 0.0f;
-        F32 len2 = xVec3Length2(&delta);
-        if (len2 < SQ(8.0f))
-        {
-            if (len2 > 0.001f)
-            {
-                F32 inv_len = 1.0f / sqrtf(len2);
-                away->x += delta.x * inv_len;
-                away->z += delta.z * inv_len;
-            }
-            found = true;
-        }
-    }
-
-    return found;
-}
-
 
 struct buddy_frame
 {
@@ -515,44 +471,6 @@ void zBuddy_SceneUpdate(F32 dt)
 
             bool target_is_sleepy = attack_target->SelfType() == NPC_TYPE_SLEEPY;
             bool low_health = health <= 2;
-
-            /*
-             * An active Bzzt is a sustained ranged threat. At 2 HP or less,
-             * do not stand still in attack range trying to fight it. Retreat
-             * from all nearby active Bzzts before the STRIKE check.
-             */
-            if (low_health)
-            {
-                xVec3 bzzt_away;
-                if (buddy_has_active_bzzt(&position, &bzzt_away))
-                {
-                    F32 away_len2 = xVec3Length2(&bzzt_away);
-                    if (away_len2 > 0.001f)
-                    {
-                        F32 inv_len = 1.0f / sqrtf(away_len2);
-                        xVec3 escape = position;
-                        escape.x += bzzt_away.x * inv_len * 4.0f;
-                        escape.z += bzzt_away.z * inv_len * 4.0f;
-
-                        if (buddy_sleepy_destination_safe(&escape))
-                        {
-                            buddy_sneaking_sleepy = false;
-                            F32 follow = 1.0f - expf(-8.0f * dt);
-                            position.x += (escape.x - position.x) * follow;
-                            position.y += (escape.y - position.y) * follow;
-                            position.z += (escape.z - position.z) * follow;
-                            frame_timer += dt;
-                            if (frame_timer >= 0.10f)
-                            {
-                                frame_timer -= 0.10f;
-                                frame_index = (frame_index + 1) %
-                                    (S32)(sizeof(run_frames) / sizeof(run_frames[0]));
-                            }
-                            return;
-                        }
-                    }
-                }
-            }
 
             /*
              * At 2 HP or less, a sleeping Sleepy is not a viable target.
