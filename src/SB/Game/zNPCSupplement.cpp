@@ -2241,14 +2241,21 @@ void NPAR_Upd_DogBreath(NPARMgmt* mgmt, F32 dt)
                 }
             }
 
-            if (npdata->nparmode != 1 && !(globals.player.DamageTimer > 0.0f) &&
-                globals.player.Health && rat_rev > seg_allowCollide[0] &&
+            if (npdata->nparmode != 1 && rat_rev > seg_allowCollide[0] &&
                 rat_rev < seg_allowCollide[1] && npdata->color.alpha > 0x20)
             {
-                F32 ds2_plyr = NPCC_DstSq(&npdata->pos, &pos_plyr, NULL);
-                if (ds2_plyr < SQ(0.5f))
+                if (!(globals.player.DamageTimer > 0.0f) && globals.player.Health)
                 {
-                    zEntPlayer_DamageNPCKnockBack(NULL, 1, &npdata->pos);
+                    F32 ds2_plyr = NPCC_DstSq(&npdata->pos, &pos_plyr, NULL);
+                    if (ds2_plyr < SQ(0.5f))
+                    {
+                        zEntPlayer_DamageNPCKnockBack(NULL, 1, &npdata->pos);
+                    }
+                }
+
+                if (zBuddy_IsAvailable())
+                {
+                    zBuddy_HitBySphere(&npdata->pos, npdata->xy_size[0]);
                 }
 
                 static S32 howfreq = 0;
