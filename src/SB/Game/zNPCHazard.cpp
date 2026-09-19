@@ -1867,10 +1867,14 @@ S32 NPCHazard::ColBuddySphere(F32 rad)
         return 0;
     }
 
+    F32 buddy_radius = 0.325f;
+    F32 buddy_height = 1.0f;
     xVec3 delta;
     xVec3Sub(&delta, &this->pos_hazard, this->GetBuddyTarget());
-    F32 hit_radius = rad + 0.35f;
-    if (SQ(delta.x) + SQ(delta.z) > SQ(hit_radius) || xabs(delta.y) > rad + 0.75f)
+    F32 closest_y = MAX(0.0f, MIN(buddy_height, delta.y));
+    F32 hit_radius = rad + buddy_radius;
+    if (SQ(delta.x) + SQ(delta.z) > SQ(hit_radius) ||
+        SQ(delta.y - closest_y) > SQ(rad + 0.0f))
     {
         return 0;
     }
@@ -2344,15 +2348,21 @@ void NPCHazard::Upd_FodBomb(F32 dt)
     HAZBall* ball = &this->custdata.ball;
 
     ball->rad_cur = LERP(isin(PI * this->pam_interp), ball->rad_min, ball->rad_max);
-    if (this->flg_hazard & 0x2000 && !(globals.player.DamageTimer > 0.0f))
+    if (this->flg_hazard & 0x2000)
     {
-        S32 hit = ColPlyrSphere(ball->rad_cur);
-        printf("[HAZDBG] TEST17 FODBOMB hit=%d rad=%.3f pos=(%.3f,%.3f,%.3f)\n",
-               hit, ball->rad_cur, this->pos_hazard.x, this->pos_hazard.y, this->pos_hazard.z);
+        S32 hit = 0;
+        if (this->GetBuddyTarget() != NULL)
+        {
+            hit = ColBuddySphere(ball->rad_cur);
+        }
+        else if (!(globals.player.DamageTimer > 0.0f))
+        {
+            hit = ColPlyrSphere(ball->rad_cur);
+        }
+
         if (hit)
         {
-            printf("[HAZDBG] TEST17 FODBOMB calling HurtThePlayer\n");
-            HurtThePlayer();
+            HurtTarget();
         }
     }
 
@@ -3876,7 +3886,7 @@ void NPCHazard::Upd_OilOoze(F32 dt)
 
     this->tmr_nextglob = -1.0f > this->tmr_nextglob - dt ? -1.0f : this->tmr_nextglob - dt;
 
-    if (this->flg_hazard & 0x2000)
+    if (this->flg_hazard & 0x2000 && !(this->flg_casthurt & 1))
     {
         S32 hit = 0;
         if (this->GetBuddyTarget() != NULL)
@@ -3898,6 +3908,7 @@ void NPCHazard::Upd_OilOoze(F32 dt)
             {
                 NPCC_Slick_MakePlayerSlip(this->npc_owner);
             }
+            this->flg_casthurt |= 1;
         }
     }
 
