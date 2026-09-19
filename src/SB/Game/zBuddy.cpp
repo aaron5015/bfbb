@@ -309,7 +309,7 @@ S32 zBuddy_IsSleepyAlerting()
     // These are the Buddy equivalents of the player's alerting movement:
     // actively attacking something, or moving at normal/run speed instead
     // of sneaking around a sleeping Sleepy.
-    return state == BUDDY_STATE_STRIKE || follow_running;
+    return state == BUDDY_STATE_STRIKE || (follow_running && !buddy_sneaking_sleepy);
 }
 
 const xVec3* zBuddy_GetPosition()
@@ -423,6 +423,12 @@ void zBuddy_SceneUpdate(F32 dt)
                 delta.y = 0.0f;
                 delta.z -= position.z;
                 F32 distance = xVec3Length2(&delta);
+                if (npc->SelfType() == NPC_TYPE_SLEEPY && health <= 2 &&
+                    zNPCSleepy_IsAsleep(npc))
+                {
+                    continue;
+                }
+
                 if (distance < nearest_distance)
                 {
                     nearest = npc;
@@ -462,6 +468,25 @@ void zBuddy_SceneUpdate(F32 dt)
             xVec3 delta;
             xVec3Sub(&delta, &position, &target);
             delta.y = 0.0f;
+
+            bool target_is_sleepy = attack_target->SelfType() == NPC_TYPE_SLEEPY;
+            bool low_health = health <= 2;
+
+            /*
+             * At 2 HP or less, a sleeping Sleepy is not a viable target.
+             * Do not enter STRIKE just because the Buddy reached its attack
+             * radius; wait for a safer target instead.
+             */
+            if (target_is_sleepy && low_health)
+            {
+                state = BUDDY_STATE_FOLLOW;
+                attack_target = NULL;
+                buddy_sneaking_sleepy = false;
+                frame_index = 0;
+                frame_timer = 0.0f;
+                return;
+            }
+
             if (xVec3Length2(&delta) <= 1.0f)
             {
                 state = BUDDY_STATE_STRIKE;
@@ -476,8 +501,8 @@ void zBuddy_SceneUpdate(F32 dt)
                 S32 sleepy_count = 0;
                 bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &sleepy_count);
                 bool target_in_sleepy_range = buddy_has_sleepy_hazard(&target);
-                bool target_is_sleepy = attack_target->SelfType() == NPC_TYPE_SLEEPY;
-                bool low_health = health <= 2;
+                // target_is_sleepy and low_health were evaluated above so the
+                // low-health Sleepy case can bail out before STRIKE.
                 bool active_sleepy_range = false;
                 xVec3 active_sleepy_away = xVec3{ 0.0f, 0.0f, 0.0f };
                 buddy_sneaking_sleepy = in_sleepy_range || target_in_sleepy_range;
