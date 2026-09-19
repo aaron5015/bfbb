@@ -294,26 +294,6 @@ void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius)
     zBuddy_HitBySphere(robot_position, radius);
 }
 
-S32 zBuddy_WokeSleepy(zNPCCommon* sleepy)
-{
-    if (!zBuddy_IsAvailable() || sleepy == NULL || sleepy->SelfType() != NPC_TYPE_SLEEPY)
-    {
-        return 0;
-    }
-
-    if (!sleepy->IsAlive() || !sleepy->IsHealthy())
-    {
-        return 0;
-    }
-
-    xVec3 delta = *xEntGetCenter(sleepy);
-    delta.x -= position.x;
-    delta.y = 0.0f;
-    delta.z -= position.z;
-
-    return xVec3Length2(&delta) <= 4.0f;
-}
-
 S32 zBuddy_IsAvailable()
 {
     return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
@@ -612,6 +592,10 @@ void zBuddy_SceneUpdate(F32 dt)
             frame_index = xrand() & 1;
             if (attack_target != NULL && attack_target->IsAlive() && attack_target->IsHealthy())
             {
+                if (attack_target->SelfType() == NPC_TYPE_SLEEPY)
+                {
+                    zNPCSleepy_BuddyAttack(attack_target);
+                }
                 attack_target->Damage(DMGTYP_SIDE, NULL, &position);
             }
             attack_count++;
@@ -671,7 +655,7 @@ void zBuddy_Render()
                     ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
                     : &approach_frame
                 : buddy_sneaking_sleepy
-                    ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
+                    ? &run_frames[frame_index % (S32)(sizeof(run_frames) / sizeof(run_frames[0]))]
                     : follow_running ? &run_frames[frame_index] : &idle_frames[frame_index];
     F32 frame_aspect = (F32)frame->width / (F32)frame->height;
     F32 half_width = buddy_width * frame_aspect * 0.5f;
