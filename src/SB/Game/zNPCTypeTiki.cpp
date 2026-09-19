@@ -204,6 +204,14 @@ void zNPCTiki_ExplodeFX(zNPCTiki* tiki)
                  (xVec3*)&globals.player.ent.model->Mat->pos);
         if (xVec3Length2(&delta) < 25.0f)
             zEntEvent((xBase*)&globals.player, 0x3A);
+
+        if (zBuddy_IsAvailable())
+        {
+            xVec3Sub(&delta, (xVec3*)&tiki->model->Mat->pos,
+                     zBuddy_GetTargetPosition());
+            if (xVec3Length2(&delta) < 25.0f)
+                zBuddy_Damage(1);
+        }
     }
 
     if (tiki->explosion && tiki->explosion->initCB)
