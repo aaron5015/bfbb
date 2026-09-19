@@ -6108,8 +6108,14 @@ S32 SLEP_grul_goAlert(xGoal* rawgoal, void*, en_trantype* trantype, F32, void*)
      * on the Sleepy is handled by the normal NPC damage path instead.
      */
     const xVec3* buddy_pos = zBuddy_GetTargetPosition();
-    if (buddy_pos != NULL && arena->IncludesPos(buddy_pos, 0.0f, NULL) &&
-        zNPCSleepy_IsInDetectionRange(npc, buddy_pos) &&
+    xVec3 buddy_pos_copy;
+    if (buddy_pos != NULL)
+    {
+        buddy_pos_copy = *buddy_pos;
+    }
+
+    if (buddy_pos != NULL && arena->IncludesPos(&buddy_pos_copy, 0.0f, NULL) &&
+        zNPCSleepy_IsInDetectionRange(npc, &buddy_pos_copy) &&
         zBuddy_IsSleepyAlerting())
     {
         npc->alert_buddy = 1;
