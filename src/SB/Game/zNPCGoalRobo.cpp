@@ -3228,14 +3228,6 @@ S32 zNPCGoalAlertSleepy::Process(en_trantype* trantype, F32 dt, void* updCtxt, x
         }
         npc->SndPlayRandom(NPC_STYP_ATTACK);
         tmr_minAttack = MAX(-1.0f, (tmr_minAttack - dt));
-        if (alert_source == 2)
-        {
-            zBuddy_Damage(1);
-        }
-        else
-        {
-            zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
-        }
         if ((tmr_minAttack < 0.0f) && !(npc->AnimTimeRemain(NULL) > dt) &&
             (globals.player.Health == 0))
         {
