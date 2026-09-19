@@ -8,6 +8,7 @@
 #include "zNPCSndTable.h"
 #include "zNPCSupplement.h"
 #include "zGlobals.h"
+#include "zBuddy.h"
 
 xFactoryInst* GOALCreate_Ambient(S32 who, RyzMemGrow* grow, void*)
 {
