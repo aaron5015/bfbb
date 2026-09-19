@@ -4662,15 +4662,19 @@ void zNPCGoalAttackChomper::BreathAttack()
 
     if (zBuddy_IsAvailable())
     {
-        xVec3 delta;
-        xVec3Sub(&delta, zBuddy_GetPosition(), &pos_emit);
-        F32 distance = xVec3Length(&delta);
-        if (distance < 6.0f)
+        const xVec3* buddy = zBuddy_GetTargetPosition();
+        if (buddy != NULL)
         {
-            xVec3SMulBy(&delta, 1.0f / MAX(distance, 0.001f));
-            if (xVec3Dot(&delta, NPCC_faceDir(npc)) > 0.2f)
+            xVec3 delta;
+            xVec3Sub(&delta, buddy, &pos_emit);
+            F32 distance = xVec3Length(&delta);
+            if (distance < 6.0f)
             {
-                zBuddy_HitByRobot(zBuddy_GetPosition(), 0.0f);
+                xVec3SMulBy(&delta, 1.0f / MAX(distance, 0.001f));
+                if (xVec3Dot(&delta, NPCC_faceDir(npc)) > 0.2f)
+                {
+                    zBuddy_HitByRobot(&pos_emit, 0.5f);
+                }
             }
         }
     }
