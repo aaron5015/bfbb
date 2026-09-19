@@ -59,6 +59,7 @@ const F32 buddy_sneak_speed = 0.35f;
 const F32 buddy_sleepy_escape_margin = 1.0f;
 S32 buddy_sleepy_count = 0;
 bool buddy_sneaking_sleepy = false;
+bool buddy_moving = false;
 
 bool buddy_has_sleepy_hazard(const xVec3* test_position, S32* sleepy_count = NULL)
 {
@@ -223,6 +224,7 @@ void reset_position()
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
     buddy_sneaking_sleepy = false;
+    buddy_moving = false;
 }
 }
 
@@ -381,7 +383,7 @@ S32 zBuddy_IsSleepyAlerting()
     // These are the Buddy equivalents of the player's alerting movement:
     // actively attacking something, or moving at normal/run speed instead
     // of sneaking around a sleeping Sleepy.
-    return state == BUDDY_STATE_STRIKE || (follow_running && !buddy_sneaking_sleepy);
+    return state == BUDDY_STATE_STRIKE || (buddy_moving && !buddy_sneaking_sleepy);
 }
 
 const xVec3* zBuddy_GetPosition()
@@ -442,6 +444,8 @@ void zBuddy_SceneUpdate(F32 dt)
     robot_hit_cooldown = MAX(0.0f, robot_hit_cooldown - dt);
     damage_cooldown = MAX(0.0f, damage_cooldown - dt);
 
+    buddy_moving = false;
+
     if (state == BUDDY_STATE_DEAD)
     {
         death_timer -= dt;
@@ -500,12 +504,6 @@ void zBuddy_SceneUpdate(F32 dt)
                 delta.y = 0.0f;
                 delta.z -= position.z;
                 F32 distance = xVec3Length2(&delta);
-                if (npc->SelfType() == NPC_TYPE_SLEEPY && health <= 2 &&
-                    zNPCSleepy_IsAsleep(npc))
-                {
-                    continue;
-                }
-
                 if (distance < nearest_distance)
                 {
                     nearest = npc;
@@ -545,6 +543,7 @@ void zBuddy_SceneUpdate(F32 dt)
             xVec3 delta;
             xVec3Sub(&delta, &position, &target);
             delta.y = 0.0f;
+            xVec3 old_position = position;
 
             bool target_is_sleepy = attack_target->SelfType() == NPC_TYPE_SLEEPY;
             bool low_health = health <= 2;
@@ -673,6 +672,11 @@ void zBuddy_SceneUpdate(F32 dt)
                     position.z += (target.z - position.z) * follow;
                 }
 
+                if (xVec3Dist2(&old_position, &position) >= 0.0001f)
+                {
+                    buddy_moving = true;
+                }
+
                 frame_timer += dt;
                 if (frame_timer >= (in_sleepy_range ? 0.14f : 0.10f))
                 {
@@ -736,9 +740,11 @@ void zBuddy_SceneUpdate(F32 dt)
      * sneak/walk cycle indefinitely.
      */
     F32 moved2 = xVec3Dist2(&old_position, &position);
-    if (in_sleepy_range && moved2 < 0.0001f)
+    buddy_moving = moved2 >= 0.0001f;
+    if (in_sleepy_range && !buddy_moving)
     {
         follow_running = false;
+        buddy_sneaking_sleepy = false;
     }
 
     frame_timer += dt;
@@ -765,7 +771,7 @@ void zBuddy_Render()
             : state == BUDDY_STATE_STRIKE || state == BUDDY_STATE_RECOVER
             ? &attack_frames[frame_index]
             : state == BUDDY_STATE_CHASE
-                ? buddy_sneaking_sleepy
+                ? (buddy_sneaking_sleepy && buddy_moving)
                     ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
                     : &approach_frame
                 : buddy_sneaking_sleepy
