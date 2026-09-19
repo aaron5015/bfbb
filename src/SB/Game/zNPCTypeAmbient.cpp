@@ -731,7 +731,7 @@ S32 JELY_grul_getAngry(xGoal* rawgoal, void* p1, en_trantype* trantype, F32 f, v
         const xVec3* buddy_pos = zBuddy_GetTargetPosition();
         if (buddy_pos != NULL)
         {
-            F32 buddy_dst_sq = npc->XZDstSqToPos(buddy_pos, 0, 0);
+            F32 buddy_dst_sq = npc->XZDstSqToPos(buddy_pos, NULL, NULL);
             if (buddy_dst_sq < dst_sq)
             {
                 dst_sq = buddy_dst_sq;
