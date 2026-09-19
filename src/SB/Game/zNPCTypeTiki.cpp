@@ -13,6 +13,7 @@
 #include "zNPCGoalTiki.h"
 #include "zNPCHazard.h"
 #include "zNPCSupplement.h"
+#include "zBuddy.h"
 #include "zNPCTypeTiki.h"
 #include "zSurface.h"
 
