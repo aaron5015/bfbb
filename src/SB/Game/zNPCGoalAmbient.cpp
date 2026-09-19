@@ -385,6 +385,13 @@ void zNPCGoalJellyAttack::ZapperUpdate()
         if (target_buddy)
         {
             zBuddy_Damage(1);
+
+            // Buddy can die from this exact hit. Do not query its target
+            // position after the damage call if it is now unavailable.
+            if (!zBuddy_IsAvailable())
+            {
+                target_buddy = 0;
+            }
         }
         else
         {
