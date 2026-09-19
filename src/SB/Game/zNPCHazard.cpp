@@ -114,7 +114,9 @@ void NPCHazard::SetBuddyTarget(const xVec3* target)
     S32 idx = BuddyHazardIndex(this);
     if (idx >= 0)
     {
-        g_buddy_targets[idx] = target;
+        // Keep a stable live pointer. zBuddy_GetTargetPosition() is a
+        // temporary aim-point value and must not be retained by a hazard.
+        g_buddy_targets[idx] = target != NULL ? zBuddy_GetPosition() : NULL;
     }
     this->flg_hazard &= ~0x40000000;
 }
@@ -1856,21 +1858,23 @@ S32 NPCHazard::ColPlyrCyl(F32 rad, F32 hyt)
 
 S32 NPCHazard::ColBuddySphere(F32 rad)
 {
-    if (this->GetBuddyTarget() == NULL)
-    {
-        return 0;
-    }
-
     if (!zBuddy_IsAvailable())
     {
         this->flg_hazard &= ~0x40000000;
         return 0;
     }
 
-    F32 buddy_radius = 0.325f;
+    const xVec3* buddy = zBuddy_GetTargetPosition();
+    if (buddy == NULL)
+    {
+        this->flg_hazard &= ~0x40000000;
+        return 0;
+    }
+
+    F32 buddy_radius = 0.5f * 0.65f;
     F32 half_height = 0.5f;
     xVec3 delta;
-    xVec3Sub(&delta, &this->pos_hazard, this->GetBuddyTarget());
+    xVec3Sub(&delta, &this->pos_hazard, buddy);
     F32 closest_y = MAX(-half_height, MIN(half_height, delta.y));
     F32 hit_radius = rad + buddy_radius;
     F32 dy = delta.y - closest_y;
@@ -2323,19 +2327,18 @@ void NPCHazard::Upd_PuppyNuke(F32 dt)
 
     if (this->flg_hazard & 0x2000)
     {
-        S32 hit = 0;
-        if (this->GetBuddyTarget() != NULL)
+        S32 buddy_hit = ColBuddySphere(ball->rad_cur);
+        S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrSphere(ball->rad_cur);
+
+        if (buddy_hit)
         {
-            hit = ColBuddySphere(ball->rad_cur);
-        }
-        else if (!(globals.player.DamageTimer > 0.0f))
-        {
-            hit = ColPlyrSphere(ball->rad_cur);
+            zBuddy_Damage(1);
         }
 
-        if (hit)
+        if (player_hit)
         {
-            HurtTarget();
+            HurtThePlayer();
         }
     }
 
@@ -2533,22 +2536,22 @@ void NPCHazard::Upd_TubeletBlast(F32 dt)
 
     if (this->flg_hazard & 0x2000)
     {
-        S32 hit = 0;
-        if (this->GetBuddyTarget() != NULL)
+        S32 buddy_hit = ColBuddySphere(ball->rad_cur);
+        S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrSphere(ball->rad_cur);
+
+        printf("[HAZDBG] TEST17 TUBELET buddy=%d player=%d rad=%.3f pos=(%.3f,%.3f,%.3f)\n",
+               buddy_hit, player_hit, ball->rad_cur,
+               this->pos_hazard.x, this->pos_hazard.y, this->pos_hazard.z);
+
+        if (buddy_hit)
         {
-            hit = ColBuddySphere(ball->rad_cur);
-        }
-        else if (!(globals.player.DamageTimer > 0.0f))
-        {
-            hit = ColPlyrSphere(ball->rad_cur);
+            zBuddy_Damage(1);
         }
 
-        printf("[HAZDBG] TEST17 TUBELET hit=%d rad=%.3f pos=(%.3f,%.3f,%.3f)\n",
-               hit, ball->rad_cur, this->pos_hazard.x, this->pos_hazard.y, this->pos_hazard.z);
-        if (hit)
+        if (player_hit)
         {
-            printf("[HAZDBG] TEST17 TUBELET calling HurtTarget\n");
-            HurtTarget();
+            HurtThePlayer();
         }
     }
 
@@ -3169,19 +3172,22 @@ void NPCHazard::Upd_ChuckBomb(F32 dt)
 
     if (this->flg_hazard & 0x2000)
     {
-        S32 hit = 0;
-        if (this->GetBuddyTarget() != NULL)
+        S32 buddy_hit = ColBuddySphere(tartar->rad_cur);
+        S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrSphere(tartar->rad_cur);
+
+        if (buddy_hit)
         {
-            hit = ColBuddySphere(tartar->rad_cur);
-        }
-        else if (!(globals.player.DamageTimer > 0.0f))
-        {
-            hit = ColPlyrSphere(tartar->rad_cur);
+            zBuddy_Damage(1);
         }
 
-        if (hit)
+        if (player_hit)
         {
-            HurtTarget();
+            HurtThePlayer();
+        }
+
+        if (buddy_hit || player_hit)
+        {
             ReconChuck();
             return;
         }
@@ -3264,19 +3270,18 @@ void NPCHazard::Upd_ChuckBlast(F32 dt)
 
     if (this->flg_hazard & 0x2000 && this->pam_interp < 0.75f)
     {
-        S32 hit = 0;
-        if (this->GetBuddyTarget() != NULL)
+        S32 buddy_hit = ColBuddySphere(ball->rad_cur);
+        S32 player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrCyl(ball->rad_cur, 0.5f * ball->rad_cur);
+
+        if (buddy_hit)
         {
-            hit = ColBuddyCyl(ball->rad_cur, 0.5f * ball->rad_cur);
-        }
-        else if (!(globals.player.DamageTimer > 0.0f))
-        {
-            hit = ColPlyrCyl(ball->rad_cur, 0.5f * ball->rad_cur);
+            zBuddy_Damage(1);
         }
 
-        if (hit)
+        if (player_hit)
         {
-            HurtTarget();
+            HurtThePlayer();
         }
     }
 
@@ -3723,23 +3728,25 @@ void NPCHazard::Upd_OilBubble(F32 dt)
         }
 
         S32 hit = 0;
+        S32 buddy_hit = 0;
+        S32 player_hit = 0;
         if (this->flg_hazard & 0x2000)
         {
-            if (this->GetBuddyTarget() != NULL)
-            {
-                hit = ColBuddySphere(0.75f * tartar->rad_cur);
-            }
-            else if (!(globals.player.DamageTimer > 0.0f))
-            {
-                hit = ColPlyrSphere(0.75f * tartar->rad_cur);
-            }
+            buddy_hit = ColBuddySphere(0.75f * tartar->rad_cur);
+            player_hit = !(globals.player.DamageTimer > 0.0f) &&
+                         ColPlyrSphere(0.75f * tartar->rad_cur);
+            hit = buddy_hit || player_hit;
         }
 
         if (hit)
         {
-            HurtTarget();
-            if (this->GetBuddyTarget() == NULL)
+            if (buddy_hit)
             {
+                zBuddy_Damage(1);
+            }
+            if (player_hit)
+            {
+                HurtThePlayer();
                 NPCC_Slick_MakePlayerSlip(this->npc_owner);
             }
 
@@ -3886,28 +3893,15 @@ void NPCHazard::Upd_OilOoze(F32 dt)
 
     this->tmr_nextglob = -1.0f > this->tmr_nextglob - dt ? -1.0f : this->tmr_nextglob - dt;
 
-    if (this->flg_hazard & 0x2000 && !(this->flg_casthurt & 1))
+    // The puddle's buddy hit is intentionally only checked during its
+    // initial formation window. Once it has formed, it is ordinary Slick
+    // ground hazard and must not keep damaging the buddy.
+    if (this->flg_hazard & 0x2000 && !(this->flg_casthurt & 1) &&
+        this->tmr_remain > 10.0f - (2.0f / 60.0f))
     {
-        S32 hit = 0;
-        if (this->GetBuddyTarget() != NULL)
+        if (ColBuddySphere(ball->rad_cur))
         {
-            hit = ColBuddySphere(ball->rad_cur);
-        }
-        else if (!(globals.player.DamageTimer > 0.0f))
-        {
-            hit = ColPlyrSphere(ball->rad_cur);
-        }
-
-        if (hit)
-        {
-            if (this->GetBuddyTarget() != NULL)
-            {
-                HurtTarget();
-            }
-            else
-            {
-                NPCC_Slick_MakePlayerSlip(this->npc_owner);
-            }
+            zBuddy_Damage(1);
             this->flg_casthurt |= 1;
         }
     }
