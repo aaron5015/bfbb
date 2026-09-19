@@ -697,6 +697,7 @@ void ROBO_KillEffects();
 void zNPCFodBzzt_ResetDanceParty();
 void ROBO_InitEffects();
 void zNPCRobot_Timestep(xScene* xscn, F32 dt);
+S32 zBuddy_WokeSleepy(zNPCCommon* sleepy);
 S32 zNPCSleepy_IsAsleep(zNPCCommon* npc);
 S32 zNPCSleepy_IsInDetectionRange(zNPCCommon* npc, const xVec3* pos);
 xAnimTable* ZNPC_AnimTable_ArfArf();
