@@ -2544,7 +2544,10 @@ S32 zNPCGoalAlertGlove::Process(en_trantype* trantype, F32 dt, void* updCtxt, xS
 
     if (psyche->TimerGet(XPSY_TYMR_CURGOAL) > 0.25f)
     {
-        if (!npc->arena.IncludesPlayer(0.0f, NULL))
+        if (!npc->arena.IncludesPlayer(0.0f, NULL) &&
+            !(zBuddy_IsAvailable() &&
+              npc->arena.IncludesPos((xVec3*)zBuddy_GetTargetPosition(), 0.0f, NULL) &&
+              zBuddy_IsCloserTarget(npc->Pos())))
         {
             *trantype = GOAL_TRAN_SET;
             nextgoal = NPC_GOAL_IDLE;
@@ -2721,7 +2724,9 @@ void zNPCGoalAlertGlove::CalcAttackVector()
 {
     zNPCCommon* npc = (zNPCCommon*)(psyche->clt_owner);
 
-    xVec3Sub(&dir_axis, xEntGetPos(&globals.player.ent), npc->Pos());
+    xVec3 target;
+    zBuddy_GetPreferredTarget(npc->Pos(), &target);
+    xVec3Sub(&dir_axis, &target, npc->Pos());
     dir_axis.y = 0.0f;
     dst_extend = xVec3Normalize(&dir_axis, &dir_axis);
 
@@ -2807,6 +2812,11 @@ S32 zNPCGoalAlertGlove::CheckHandBones()
         {
             zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
             yeppers_hitplayer = 1;
+        }
+
+        if (zBuddy_IsAvailable())
+        {
+            zBuddy_HitBySphere(&pos, bnd.sph.r);
         }
 
         if (doball != 0)
