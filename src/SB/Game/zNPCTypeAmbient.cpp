@@ -15,6 +15,7 @@
 #include "zGrid.h"
 #include "zLightning.h"
 #include "zNPCSupplement.h"
+#include "zBuddy.h"
 
 U32 g_hash_ambianim[12] = { 0 };
 char* g_strz_ambianim[12] = {
