@@ -26,6 +26,7 @@ struct zNPCGoalJellyBirth : zNPCGoalCommon
 struct zNPCGoalJellyAttack : zNPCGoalPushAnim
 {
     S32 flg_attack;
+    S32 target_buddy;
     zLightning* zap_lytnin[3];
 
     zNPCGoalJellyAttack(S32 who);

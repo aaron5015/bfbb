@@ -15,6 +15,7 @@
 #include "zGrid.h"
 #include "zLightning.h"
 #include "zNPCSupplement.h"
+#include "zBuddy.h"
 
 U32 g_hash_ambianim[12] = { 0 };
 char* g_strz_ambianim[12] = {
@@ -724,6 +725,19 @@ S32 JELY_grul_getAngry(xGoal* rawgoal, void* p1, en_trantype* trantype, F32 f, v
     }
 
     dst_sq = npc->XYZDstSqToPlayer(NULL);
+
+    if (zBuddy_IsAvailable())
+    {
+        const xVec3* buddy_pos = zBuddy_GetTargetPosition();
+        if (buddy_pos != NULL)
+        {
+            F32 buddy_dst_sq = npc->XZDstSqToPos(buddy_pos, NULL, NULL);
+            if (buddy_dst_sq < dst_sq)
+            {
+                dst_sq = buddy_dst_sq;
+            }
+        }
+    }
 
     if (dst_sq < SQ(5.0f))
     {
