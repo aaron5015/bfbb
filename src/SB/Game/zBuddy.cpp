@@ -294,6 +294,26 @@ void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius)
     zBuddy_HitBySphere(robot_position, radius);
 }
 
+S32 zBuddy_WokeSleepy(zNPCCommon* sleepy)
+{
+    if (!zBuddy_IsAvailable() || sleepy == NULL || sleepy->SelfType() != NPC_TYPE_SLEEPY)
+    {
+        return 0;
+    }
+
+    if (!sleepy->IsAlive() || !sleepy->IsHealthy())
+    {
+        return 0;
+    }
+
+    xVec3 delta = *xEntGetCenter(sleepy);
+    delta.x -= position.x;
+    delta.y = 0.0f;
+    delta.z -= position.z;
+
+    return xVec3Length2(&delta) <= SQ(2.0f);
+}
+
 S32 zBuddy_IsAvailable()
 {
     return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
@@ -401,6 +421,11 @@ void zBuddy_SceneUpdate(F32 dt)
             {
                 zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
                 if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy())
+                {
+                    continue;
+                }
+
+                if (npc->SelfType() == NPC_TYPE_SLEEPY && zNPCSleepy_IsAsleep(npc))
                 {
                     continue;
                 }
