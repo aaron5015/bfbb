@@ -215,21 +215,34 @@ void zBuddy_ForgetTarget(zNPCCommon* target)
     }
 }
 
-void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius)
+void zBuddy_HitBySphere(const xVec3* sphere_center, F32 radius)
 {
     if (!enabled || selected == BUDDY_NONE || state == BUDDY_STATE_DEAD ||
-        robot_position == NULL || robot_hit_cooldown > 0.0f)
+        sphere_center == NULL || robot_hit_cooldown > 0.0f)
     {
         return;
     }
 
-    xVec3 delta;
-    xVec3Sub(&delta, robot_position, &position);
-    if (xVec3Length2(&delta) <= radius * radius)
+    F32 buddy_radius = 0.5f * buddy_width;
+    F32 min_y = position.y;
+    F32 max_y = position.y + buddy_height;
+    F32 closest_y = MAX(min_y, MIN(max_y, sphere_center->y));
+
+    F32 dx = sphere_center->x - position.x;
+    F32 dy = sphere_center->y - closest_y;
+    F32 dz = sphere_center->z - position.z;
+    F32 hit_radius = buddy_radius + MAX(0.0f, radius);
+
+    if (dx * dx + dy * dy + dz * dz <= hit_radius * hit_radius)
     {
         zBuddy_Damage(1);
         robot_hit_cooldown = 0.5f;
     }
+}
+
+void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius)
+{
+    zBuddy_HitBySphere(robot_position, radius);
 }
 
 S32 zBuddy_IsAvailable()
@@ -240,6 +253,19 @@ S32 zBuddy_IsAvailable()
 const xVec3* zBuddy_GetPosition()
 {
     return zBuddy_IsAvailable() ? &position : NULL;
+}
+
+const xVec3* zBuddy_GetTargetPosition()
+{
+    static xVec3 target;
+    if (!zBuddy_IsAvailable())
+    {
+        return NULL;
+    }
+
+    target = position;
+    target.y += 0.5f * buddy_height;
+    return &target;
 }
 
 S32 zBuddy_IsCloserTarget(const xVec3* source_position)
