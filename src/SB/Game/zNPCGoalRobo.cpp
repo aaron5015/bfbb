@@ -1472,13 +1472,18 @@ void zNPCGoalAlertFodBzzt::DeathRayUpdate(F32 dt)
     xMat3x3RMulVec(&pos_src, (const xMat3x3*)npc->BoneMat(0), &pos_src);
     pos_src += *(const xVec3*)npc->BonePos(0);
 
+    /*
+     * Buddy is a real combat target for Bzzt once she is inside its arena.
+     * Do not re-run the player-vs-buddy distance test here: that could leave
+     * the laser visually locked onto the player while its intended target is
+     * the Buddy.
+     */
     S32 buddy_target = zBuddy_IsAvailable() &&
-                       npc->arena.IncludesPos((xVec3*)zBuddy_GetPosition(), 0.0f, NULL) &&
-                       zBuddy_IsCloserTarget(npc->Pos());
+                       npc->arena.IncludesPos((xVec3*)zBuddy_GetTargetPosition(), 0.0f, NULL);
     xVec3 pos_tgt;
     if (buddy_target)
     {
-        pos_tgt = *zBuddy_GetPosition();
+        pos_tgt = *zBuddy_GetTargetPosition();
         pos_tgt.y = npc->Pos()->y;
     }
     else
