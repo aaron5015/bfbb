@@ -6030,18 +6030,9 @@ S32 SLEP_grul_goAlert(xGoal* rawgoal, void*, en_trantype* trantype, F32, void*)
     }
 
     /*
-     * Sleepy's original alert evaluator only tests the player. Buddy actors
-     * are separate from the player, so let Cherry enter the same detection
-     * cone and wake Sleepy through the normal alert goal. This is deliberately
-     * kept here instead of making Buddy directly force Sleepy's state.
+     * Buddy does not wake Sleepy merely by entering the cone. A Buddy attack
+     * on the Sleepy is handled by the normal NPC damage path instead.
      */
-    const xVec3* buddy_pos = zBuddy_GetTargetPosition();
-    if (buddy_pos != NULL && zNPCSleepy_IsInDetectionRange(npc, buddy_pos))
-    {
-        *trantype = GOAL_TRAN_SET;
-        return NPC_GOAL_ALERT;
-    }
-
     if (!arena->IncludesPlayer(0.0f, NULL))
     {
         return 0;
