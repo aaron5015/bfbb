@@ -58,6 +58,7 @@ F32 damage_cooldown;
 const F32 buddy_sneak_speed = 0.35f;
 const F32 buddy_sleepy_escape_margin = 1.0f;
 S32 buddy_sleepy_count = 0;
+bool buddy_sneaking_sleepy = false;
 
 bool buddy_has_sleepy_hazard(const xVec3* test_position, S32* sleepy_count = NULL)
 {
@@ -149,6 +150,7 @@ void reset_position()
     death_velocity = 0.0f;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
+    buddy_sneaking_sleepy = false;
 }
 }
 
@@ -465,6 +467,7 @@ void zBuddy_SceneUpdate(F32 dt)
                 bool low_health = health <= 2;
                 bool active_sleepy_range = false;
                 xVec3 active_sleepy_away = xVec3{ 0.0f, 0.0f, 0.0f };
+                buddy_sneaking_sleepy = in_sleepy_range || target_in_sleepy_range;
 
                 /*
                  * Once Sleepy is awake, use every active Sleepy in range as
@@ -493,7 +496,7 @@ void zBuddy_SceneUpdate(F32 dt)
                         F32 len2 = xVec3Length2(&away);
                         if (len2 > 0.001f)
                         {
-                            F32 inv_len = 1.0f / xsqrt(len2);
+                            F32 inv_len = 1.0f / sqrtf(len2);
                             active_sleepy_away.x += away.x * inv_len;
                             active_sleepy_away.z += away.z * inv_len;
                         }
@@ -515,12 +518,13 @@ void zBuddy_SceneUpdate(F32 dt)
                 }
                 else if (active_sleepy_range)
                 {
+                    buddy_sneaking_sleepy = false;
                     xVec3 escape = position;
                     F32 escape_len2 = xVec3Length2(&active_sleepy_away);
 
                     if (escape_len2 > 0.001f)
                     {
-                        F32 inv_len = 1.0f / xsqrt(escape_len2);
+                        F32 inv_len = 1.0f / sqrtf(escape_len2);
                         escape.x += active_sleepy_away.x * inv_len *
                                      (2.0f + buddy_sleepy_escape_margin);
                         escape.z += active_sleepy_away.z * inv_len *
@@ -556,6 +560,7 @@ void zBuddy_SceneUpdate(F32 dt)
                 }
                 else
                 {
+                    buddy_sneaking_sleepy = false;
                     F32 follow = 1.0f - expf(-8.0f * dt);
                     position.x += (target.x - position.x) * follow;
                     position.y += (target.y - position.y) * follow;
@@ -607,6 +612,7 @@ void zBuddy_SceneUpdate(F32 dt)
         frame_timer = 0.0f;
     }
     bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &buddy_sleepy_count);
+    buddy_sneaking_sleepy = in_sleepy_range;
     F32 follow_speed = in_sleepy_range ? buddy_sneak_speed : 1.0f;
     F32 follow = 1.0f - expf(-8.0f * follow_speed * dt);
     position.x += (target.x - position.x) * follow;
@@ -636,8 +642,12 @@ void zBuddy_Render()
             : state == BUDDY_STATE_STRIKE || state == BUDDY_STATE_RECOVER
             ? &attack_frames[frame_index]
             : state == BUDDY_STATE_CHASE
-                ? &approach_frame
-                : follow_running ? &run_frames[frame_index] : &idle_frames[frame_index];
+                ? buddy_sneaking_sleepy
+                    ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
+                    : &approach_frame
+                : buddy_sneaking_sleepy
+                    ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
+                    : follow_running ? &run_frames[frame_index] : &idle_frames[frame_index];
     F32 frame_aspect = (F32)frame->width / (F32)frame->height;
     F32 half_width = buddy_width * frame_aspect * 0.5f;
     F32 half_height = buddy_height * 0.5f;
