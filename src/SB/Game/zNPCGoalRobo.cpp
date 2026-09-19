@@ -3181,8 +3181,19 @@ S32 zNPCGoalAlertSleepy::Process(en_trantype* trantype, F32 dt, void* updCtxt, x
     xVec3 dir_plyr;
     xVec3 alert_target;
     S32 alert_source = zNPCSleepy_GetAlertTarget(npc, &alert_target);
-    const xVec3* target_pos = alert_source ? &alert_target : xEntGetPos(&globals.player.ent);
 
+    /*
+     * AlertSleepy is only meaningful while an actual alert source exists.
+     * Do not fall back to the player here: Buddy may have been the source,
+     * and a nearby player must not inherit Buddy's laser.
+     */
+    if (alert_source == 0)
+    {
+        *trantype = GOAL_TRAN_SET;
+        return NPC_GOAL_IDLE;
+    }
+
+    const xVec3* target_pos = &alert_target;
     flg_info &= ~6;
 
     xVec3Sub(&dir_plyr, target_pos, npc->Pos());
