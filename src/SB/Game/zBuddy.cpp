@@ -405,11 +405,6 @@ void zBuddy_SceneUpdate(F32 dt)
                     continue;
                 }
 
-                if (npc->SelfType() == NPC_TYPE_SLEEPY && zNPCSleepy_IsAsleep(npc))
-                {
-                    continue;
-                }
-
                 xVec3 delta = *xEntGetCenter(npc);
                 delta.x -= position.x;
                 delta.y = 0.0f;
@@ -456,12 +451,24 @@ void zBuddy_SceneUpdate(F32 dt)
             delta.y = 0.0f;
             if (xVec3Length2(&delta) <= 1.0f)
             {
-                state = BUDDY_STATE_STRIKE;
-                attack_position = position;
-                attack_position.y = target.y;
-                attack_timer = 0.0f;
-                attack_count = 0;
-                frame_index = 0;
+                /*
+                 * Cherry may approach a sleeping Sleepy, but must not attack it
+                 * until Sleepy has actually been alerted.
+                 */
+                if (attack_target->SelfType() == NPC_TYPE_SLEEPY &&
+                    zNPCSleepy_IsAsleep(attack_target))
+                {
+                    buddy_sneaking_sleepy = true;
+                }
+                else
+                {
+                    state = BUDDY_STATE_STRIKE;
+                    attack_position = position;
+                    attack_position.y = target.y;
+                    attack_timer = 0.0f;
+                    attack_count = 0;
+                    frame_index = 0;
+                }
             }
             else
             {
