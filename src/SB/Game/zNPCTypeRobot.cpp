@@ -3365,6 +3365,8 @@ void zNPCSleepy::Init(xEntAsset* asset)
 
     // Weirdness related to this line.
     g_cnt_sleepy++;
+    alert_player = 0;
+    alert_buddy = 0;
 
     NPAR_PartySetup(NPAR_TYP_SLEEPYZEEZ, NULL, NULL);
 }
@@ -3376,6 +3378,8 @@ void zNPCSleepy::Reset()
     ModelAtomicShow(0, NULL);
     ModelAtomicHide(1, NULL);
     ModelAtomicShow(4, NULL);
+    alert_player = 0;
+    alert_buddy = 0;
 
     if (rast_killcone == NULL)
     {
@@ -3523,9 +3527,79 @@ S32 zNPCSleepy_IsInDetectionRange(zNPCCommon* common, const xVec3* pos)
     return 1;
 }
 
+S32 zNPCSleepy_BuddyAttack(zNPCCommon* common)
+{
+    zNPCSleepy* npc = (zNPCSleepy*)common;
+    const xVec3* buddy = zBuddy_GetTargetPosition();
+    if (npc == NULL || npc->IsDead() || npc->psy_instinct == NULL || buddy == NULL ||
+        !zNPCSleepy_IsInDetectionRange(npc, buddy))
+    {
+        return 0;
+    }
+
+    npc->alert_buddy = 1;
+    npc->psy_instinct->GoalSet(NPC_GOAL_ALERTSLEEPY, 0);
+    return 1;
+}
+
+S32 zNPCSleepy_GetAlertTarget(zNPCCommon* common, xVec3* target)
+{
+    zNPCSleepy* npc = (zNPCSleepy*)common;
+    if (npc == NULL || target == NULL)
+    {
+        return 0;
+    }
+
+    const xVec3* buddy = zBuddy_GetTargetPosition();
+    bool player_alert = npc->alert_player &&
+        zNPCSleepy_IsInDetectionRange(npc, xEntGetPos(&globals.player.ent));
+    bool buddy_alert = npc->alert_buddy && buddy != NULL &&
+        zNPCSleepy_IsInDetectionRange(npc, buddy);
+
+    if (!player_alert && !buddy_alert)
+    {
+        npc->alert_player = 0;
+        npc->alert_buddy = 0;
+        return 0;
+    }
+
+    if (player_alert && buddy_alert)
+    {
+        F32 player_d2 = xVec3Dist2(npc->Pos(), xEntGetPos(&globals.player.ent));
+        F32 buddy_d2 = xVec3Dist2(npc->Pos(), buddy);
+        if (buddy_d2 < player_d2)
+        {
+            *target = *buddy;
+            return 2;
+        }
+    }
+
+    if (buddy_alert)
+    {
+        *target = *buddy;
+        return 2;
+    }
+
+    *target = *xEntGetPos(&globals.player.ent);
+    return 1;
+}
+
 void zNPCSleepy::Process(xScene* xscn, F32 dt)
 {
     zNPCRobot::Process(xscn, dt);
+
+    if (!IsDead())
+    {
+        if (alert_player && !zNPCSleepy_IsInDetectionRange(this, xEntGetPos(&globals.player.ent)))
+        {
+            alert_player = 0;
+        }
+        const xVec3* buddy = zBuddy_GetTargetPosition();
+        if (alert_buddy && (buddy == NULL || !zNPCSleepy_IsInDetectionRange(this, buddy)))
+        {
+            alert_buddy = 0;
+        }
+    }
 
     if (!IsDead())
     {
@@ -6079,6 +6153,7 @@ S32 SLEP_grul_goAlert(xGoal* rawgoal, void*, en_trantype* trantype, F32, void*)
         return 0;
     }
 
+    npc->alert_player = 1;
     *trantype = GOAL_TRAN_SET;
 
     return NPC_GOAL_ALERT;
