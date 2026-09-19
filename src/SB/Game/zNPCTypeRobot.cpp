@@ -3460,6 +3460,69 @@ U32 zNPCSleepy::AnimPick(int gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
     return uVar1;
 }
 
+S32 zNPCSleepy_IsAsleep(zNPCCommon* common)
+{
+    zNPCSleepy* npc = (zNPCSleepy*)common;
+
+    if (npc == NULL || npc->psy_instinct == NULL || npc->IsDead())
+    {
+        return 0;
+    }
+
+    S32 gid = npc->psy_instinct->GIDOfActive();
+    if (gid == NPC_GOAL_ALERTSLEEPY)
+    {
+        return 0;
+    }
+
+    for (S32 i = 0; g_sleepy_angryStates[i]; i++)
+    {
+        if (gid == g_sleepy_angryStates[i])
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+S32 zNPCSleepy_IsInDetectionRange(zNPCCommon* common, const xVec3* pos)
+{
+    zNPCSleepy* npc = (zNPCSleepy*)common;
+
+    if (npc == NULL || pos == NULL || npc->cfg_npc == NULL || npc->IsDead())
+    {
+        return 0;
+    }
+
+    NPCConfig* cfg = npc->cfg_npc;
+    xVec3 delta;
+    xVec3Sub(&delta, pos, npc->Pos());
+    F32 ds2 = delta.x * delta.x + delta.z * delta.z;
+
+    if (ds2 > SQ(cfg->rad_detect))
+    {
+        return 0;
+    }
+
+    xVec3 pos_light;
+    npc->NightLightPos(&pos_light);
+
+    xVec3 pos_edge = *npc->Pos() + g_X3 * cfg->rad_detect;
+    xVec3 dir_edge = pos_edge - pos_light;
+    dir_edge.normalize();
+
+    xVec3 dir_target = *pos - pos_light;
+    dir_target.normalize();
+
+    if (xVec3Dot(&dir_target, &g_NY3) < xVec3Dot(&dir_edge, &g_NY3))
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
 void zNPCSleepy::Process(xScene* xscn, F32 dt)
 {
     zNPCRobot::Process(xscn, dt);
