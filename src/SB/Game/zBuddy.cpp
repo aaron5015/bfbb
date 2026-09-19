@@ -463,6 +463,42 @@ void zBuddy_SceneUpdate(F32 dt)
                 bool target_in_sleepy_range = buddy_has_sleepy_hazard(&target);
                 bool target_is_sleepy = attack_target->SelfType() == NPC_TYPE_SLEEPY;
                 bool low_health = health <= 2;
+                bool active_sleepy_range = false;
+                xVec3 active_sleepy_away = xVec3{ 0.0f, 0.0f, 0.0f };
+
+                /*
+                 * Once Sleepy is awake, use every active Sleepy in range as
+                 * an escape source. This is deliberately accumulated rather
+                 * than choosing one NPC, so two overlapping Sleepies cannot
+                 * make the Buddy escape directly into the other one's range.
+                 */
+                st_XORDEREDARRAY* sleepy_list = zNPCMgr_GetNPCList();
+                if (sleepy_list != NULL && low_health)
+                {
+                    for (S32 i = 0; i < sleepy_list->cnt; i++)
+                    {
+                        zNPCCommon* npc = (zNPCCommon*)sleepy_list->list[i];
+                        if (npc == NULL || npc->SelfType() != NPC_TYPE_SLEEPY || !npc->frame ||
+                            !npc->IsAlive() || !npc->IsHealthy() ||
+                            zNPCSleepy_IsAsleep(npc) ||
+                            !zNPCSleepy_IsInDetectionRange(npc, &position))
+                        {
+                            continue;
+                        }
+
+                        active_sleepy_range = true;
+                        xVec3 away;
+                        xVec3Sub(&away, &position, npc->Pos());
+                        away.y = 0.0f;
+                        F32 len2 = xVec3Length2(&away);
+                        if (len2 > 0.001f)
+                        {
+                            F32 inv_len = 1.0f / xsqrt(len2);
+                            active_sleepy_away.x += away.x * inv_len;
+                            active_sleepy_away.z += away.z * inv_len;
+                        }
+                    }
+                }
 
                 /*
                  * A sleeping Sleepy is a movement hazard, not a target lock.
@@ -477,21 +513,18 @@ void zBuddy_SceneUpdate(F32 dt)
                     position.y += (target.y - position.y) * follow;
                     position.z += (target.z - position.z) * follow;
                 }
-                else if (in_sleepy_range && low_health)
+                else if (active_sleepy_range)
                 {
                     xVec3 escape = position;
-                    xVec3 away;
-                    xVec3Sub(&away, &position, &player);
-                    away.y = 0.0f;
-                    F32 away_len2 = xVec3Length2(&away);
+                    F32 escape_len2 = xVec3Length2(&active_sleepy_away);
 
-                    if (away_len2 > 0.001f)
+                    if (escape_len2 > 0.001f)
                     {
-                        F32 inv_len = 1.0f / xsqrt(away_len2);
-                        away.x *= inv_len;
-                        away.z *= inv_len;
-                        escape.x += away.x * (2.0f + buddy_sleepy_escape_margin);
-                        escape.z += away.z * (2.0f + buddy_sleepy_escape_margin);
+                        F32 inv_len = 1.0f / xsqrt(escape_len2);
+                        escape.x += active_sleepy_away.x * inv_len *
+                                     (2.0f + buddy_sleepy_escape_margin);
+                        escape.z += active_sleepy_away.z * inv_len *
+                                     (2.0f + buddy_sleepy_escape_margin);
                     }
 
                     if (buddy_sleepy_destination_safe(&escape))
@@ -501,6 +534,18 @@ void zBuddy_SceneUpdate(F32 dt)
                         position.y += (escape.y - position.y) * follow;
                         position.z += (escape.z - position.z) * follow;
                     }
+                }
+                else if (in_sleepy_range && low_health)
+                {
+                    /*
+                     * If the Sleepy is still asleep, low-health stealth should
+                     * not turn into an immediate sprint. Keep the Buddy moving
+                     * cautiously unless an active Sleepy actually threatens it.
+                     */
+                    F32 follow = 1.0f - expf(-8.0f * buddy_sneak_speed * dt);
+                    position.x += (target.x - position.x) * follow;
+                    position.y += (target.y - position.y) * follow;
+                    position.z += (target.z - position.z) * follow;
                 }
                 else if (target_in_sleepy_range || target_is_sleepy)
                 {
