@@ -929,7 +929,10 @@ S32 zNPCGoalAlertFodBomb::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
         *trantype = GOAL_TRAN_SET;
         nextgoal = NPC_GOAL_IDLE;
     }
-                else if (!npc->arena.IncludesPlayer(0, 0))
+                else if (!npc->arena.IncludesPlayer(0, 0) &&
+             !(zBuddy_IsAvailable() &&
+               npc->arena.IncludesPos((xVec3*)zBuddy_GetTargetPosition(), 0.0f, NULL) &&
+               zBuddy_IsCloserTarget(npc->Pos())))
     {
         *trantype = GOAL_TRAN_SET;
         nextgoal = NPC_GOAL_IDLE;
@@ -1025,6 +1028,12 @@ void zNPCGoalAlertFodBomb::Detonate()
     if (haz != NULL && npc != NULL && haz->ConfigHelper(NPC_HAZ_FODBOMB))
     {
         haz->SetNPCOwner(npc);
+        if (zBuddy_IsAvailable() &&
+            npc->arena.IncludesPos((xVec3*)zBuddy_GetTargetPosition(), 0.0f, NULL) &&
+            zBuddy_IsCloserTarget(npc->Pos()))
+        {
+            haz->SetBuddyTarget(zBuddy_GetTargetPosition());
+        }
         xVec3* center = xEntGetCenter(npc);
         haz->Start(center, -1.0f);
     }
@@ -1052,7 +1061,13 @@ void zNPCGoalAlertFodBomb::SonarHoming(F32 dt)
     xVec3 dir;
 
     zEntPlayer_PredictPos(&pos_plyr, 0.5f, 1.0f, 0);
-    if (npc->XZDstSqToPlayer(0, 0) < npc->XZDstSqToPos(&pos_plyr, 0, 0))
+    if (zBuddy_IsAvailable() &&
+        npc->arena.IncludesPos((xVec3*)zBuddy_GetTargetPosition(), 0.0f, NULL) &&
+        zBuddy_IsCloserTarget(npc->Pos()))
+    {
+        pos_plyr = *zBuddy_GetTargetPosition();
+    }
+    else if (npc->XZDstSqToPlayer(0, 0) < npc->XZDstSqToPos(&pos_plyr, 0, 0))
     {
         xVec3Copy(&pos_plyr, xEntGetPos(&globals.player.ent));
     }
