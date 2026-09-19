@@ -1871,8 +1871,10 @@ S32 NPCHazard::ColBuddySphere(F32 rad)
         return 0;
     }
 
-    F32 buddy_radius = 0.5f * 0.65f;
-    F32 half_height = 0.5f;
+    // The rendered buddy is a billboard, so give hazards a slightly
+    // forgiving 3D body rather than requiring a pixel-perfect hit.
+    F32 buddy_radius = 0.45f;
+    F32 half_height = 0.65f;
     xVec3 delta;
     xVec3Sub(&delta, &this->pos_hazard, buddy);
     F32 closest_y = MAX(-half_height, MIN(half_height, delta.y));
