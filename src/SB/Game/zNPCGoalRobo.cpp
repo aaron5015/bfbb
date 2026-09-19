@@ -4685,24 +4685,6 @@ void zNPCGoalAttackChomper::BreathAttack()
         NPAR_EmitDoggyAttack(&pos_emit, &vel_emit);
     }
 
-    if (zBuddy_IsAvailable())
-    {
-        const xVec3* buddy = zBuddy_GetTargetPosition();
-        if (buddy != NULL)
-        {
-            xVec3 delta;
-            xVec3Sub(&delta, buddy, &pos_emit);
-            F32 distance = xVec3Length(&delta);
-            if (distance < 6.0f)
-            {
-                xVec3SMulBy(&delta, 1.0f / MAX(distance, 0.001f));
-                if (xVec3Dot(&delta, NPCC_faceDir(npc)) > 0.2f)
-                {
-                    zBuddy_HitByRobot(&pos_emit, 0.5f);
-                }
-            }
-        }
-    }
 }
 
 S32 zNPCGoalAttackHammer::Enter(F32 dt, void* updCtxt)
