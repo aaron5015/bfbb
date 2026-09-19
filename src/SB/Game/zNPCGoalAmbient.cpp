@@ -264,6 +264,9 @@ S32 zNPCGoalJellyAttack::Enter(F32 arg0, void* arg1)
     npc->SndPlayRandom(NPC_STYP_ENCOUNTER);
     npc->VelStop();
     flg_attack = 0;
+    target_buddy = zBuddy_IsAvailable() &&
+        zBuddy_IsCloserTarget(npc->Pos()) &&
+        npc->XZDstSqToPos(zBuddy_GetTargetPosition(), 0, 0) < SQ(3.0f);
     zNPCGoalJellyAttack::ZapperStart();
     return zNPCGoalPushAnim::Enter(arg0, arg1);
 }
@@ -302,7 +305,7 @@ void zNPCGoalJellyAttack::ZapperStart()
 
     info.time = 1000000.0f;
     info.start = &pos_bone;
-    info.end = xEntGetPos(&globals.player.ent);
+    info.end = target_buddy ? zBuddy_GetTargetPosition() : xEntGetPos(&globals.player.ent);
 
     for (S32 i = 0; i < 3; i++)
     {
@@ -378,9 +381,16 @@ void zNPCGoalJellyAttack::ZapperUpdate()
     }
     else
     {
-        zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
+        if (target_buddy)
+        {
+            zBuddy_Damage(1);
+        }
+        else
+        {
+            zEntPlayer_DamageNPCKnockBack(npc, 1, npc->Pos());
+        }
 
-        xVec3 pos_plyr = *xEntGetCenter(&globals.player.ent);
+        xVec3 pos_plyr = target_buddy ? *zBuddy_GetTargetPosition() : *xEntGetCenter(&globals.player.ent);
 
         zNPC_SNDPlay3D(eNPCSnd_JellyfishAttack, npc);
 
