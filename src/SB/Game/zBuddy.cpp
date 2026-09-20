@@ -29,6 +29,8 @@ enum buddy_state
     BUDDY_STATE_FOLLOW,
     BUDDY_STATE_CHASE,
     BUDDY_STATE_STRIKE,
+    BUDDY_STATE_SKILL,
+    BUDDY_STATE_SKILL_RECOVER,
     BUDDY_STATE_RECOVER,
     BUDDY_STATE_DEAD
 };
@@ -57,6 +59,15 @@ F32 death_alpha;
 F32 death_velocity;
 F32 robot_hit_cooldown;
 F32 damage_cooldown;
+S32 skill_kills;
+zNPCCommon* skill_target;
+zNPCCommon* pending_kill_target;
+F32 pending_kill_timer;
+xVec3 skill_start_position;
+xVec3 skill_target_position;
+bool skill_damage_applied;
+S32 skill_kill_cost = 9;
+F32 skill_sweep_timer;
 const F32 buddy_sneak_speed = 0.35f;
 const F32 buddy_sleepy_escape_margin = 1.0f;
 S32 buddy_sleepy_count = 0;
@@ -208,6 +219,15 @@ static const buddy_frame attack_frames[] = {
     { 520, 240, 145, 159 },
 };
 
+static const buddy_frame skill_frames[] = {
+    { 639, 0, 202, 114 },
+    { 400, 238, 120, 133 },
+    { 0, 103, 209, 118 },
+    { 356, 0, 143, 112 },
+    { 447, 114, 216, 124 },
+    { 0, 0, 232, 103 },
+};
+
 void reset_position()
 {
     position = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -225,6 +245,14 @@ void reset_position()
     death_velocity = 0.0f;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
+    skill_kills = 0;
+    skill_target = NULL;
+    pending_kill_target = NULL;
+    pending_kill_timer = 0.0f;
+    skill_start_position = xVec3{ 0.0f, 0.0f, 0.0f };
+    skill_target_position = xVec3{ 0.0f, 0.0f, 0.0f };
+    skill_damage_applied = false;
+    skill_sweep_timer = 0.0f;
     buddy_sneaking_sleepy = false;
     buddy_moving = false;
 }
@@ -249,6 +277,7 @@ void zBuddy_ParseINI(xIniFile* ini)
     attack_radius = xIniGetFloat(ini, "Buddy.AttackRadius", 6.0f);
     max_health = MAX(1, xIniGetInt(ini, "Buddy.MaxHealth", 3));
     respawn_time = MAX(0.1f, xIniGetFloat(ini, "Buddy.RespawnTime", 5.0f));
+    skill_kill_cost = MAX(1, xIniGetInt(ini, "Buddy.SkillKillCost", 9));
 }
 
 void zBuddy_SceneInit()
@@ -292,6 +321,7 @@ void zBuddy_SceneExit()
 void zBuddy_Damage(S32 amount)
 {
     if (!enabled || selected == BUDDY_NONE || state == BUDDY_STATE_DEAD || amount <= 0 ||
+        state == BUDDY_STATE_SKILL || state == BUDDY_STATE_SKILL_RECOVER ||
         damage_cooldown > 0.0f)
     {
         return;
@@ -303,6 +333,10 @@ void zBuddy_Damage(S32 amount)
     {
         state = BUDDY_STATE_DEAD;
         attack_target = NULL;
+        skill_target = NULL;
+        pending_kill_target = NULL;
+        pending_kill_timer = 0.0f;
+        skill_kills = 0;
         death_timer = respawn_time;
         death_alpha = 1.0f;
         death_velocity = 5.0f;
@@ -319,6 +353,10 @@ void zBuddy_PlayerDeath()
     health = 0;
     state = BUDDY_STATE_DEAD;
     attack_target = NULL;
+    skill_target = NULL;
+    pending_kill_target = NULL;
+    pending_kill_timer = 0.0f;
+    skill_kills = 0;
     death_timer = respawn_time;
     death_alpha = 1.0f;
     death_velocity = 5.0f;
@@ -352,8 +390,33 @@ static S32 buddy_target_is_valid(zNPCCommon* target)
     return 1;
 }
 
+static bool buddy_begin_skill(zNPCCommon* target)
+{
+    if (skill_kills < skill_kill_cost || !buddy_target_is_valid(target))
+    {
+        return false;
+    }
+
+    state = BUDDY_STATE_SKILL;
+    attack_target = NULL;
+    skill_target = target;
+    skill_start_position = position;
+    skill_target_position = *xEntGetCenter(target);
+    skill_target_position.y = target->frame->mat.pos.y;
+    frame_index = 0;
+    attack_timer = 0.0f;
+    skill_damage_applied = false;
+    skill_kills -= skill_kill_cost;
+    return true;
+}
+
 void zBuddy_ForgetTarget(zNPCCommon* target)
 {
+    if (skill_target == target)
+    {
+        skill_target = NULL;
+    }
+
     if (attack_target == NULL)
     {
         return;
@@ -510,6 +573,21 @@ void zBuddy_SceneUpdate(F32 dt)
     const xVec3& player = globals.player.ent.frame->mat.pos;
     robot_hit_cooldown = MAX(0.0f, robot_hit_cooldown - dt);
     damage_cooldown = MAX(0.0f, damage_cooldown - dt);
+    skill_sweep_timer += dt;
+
+    if (pending_kill_target != NULL)
+    {
+        if (!pending_kill_target->IsAlive())
+        {
+            skill_kills = MIN(skill_kill_cost, skill_kills + 1);
+            pending_kill_target = NULL;
+            pending_kill_timer = 0.0f;
+        }
+        else if ((pending_kill_timer -= dt) <= 0.0f)
+        {
+            pending_kill_target = NULL;
+        }
+    }
 
     buddy_moving = false;
 
@@ -541,6 +619,25 @@ void zBuddy_SceneUpdate(F32 dt)
     if (state == BUDDY_STATE_RECOVER)
     {
         attack_timer -= dt;
+        if (attack_timer <= 0.0f)
+        {
+            state = BUDDY_STATE_FOLLOW;
+            frame_index = 0;
+            frame_timer = 0.0f;
+        }
+        return;
+    }
+
+    if (state == BUDDY_STATE_SKILL_RECOVER)
+    {
+        attack_timer -= dt;
+        frame_timer += dt;
+        if (frame_timer >= 0.18f)
+        {
+            frame_timer -= 0.18f;
+            frame_index = (frame_index + 1) %
+                          (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]));
+        }
         if (attack_timer <= 0.0f)
         {
             state = BUDDY_STATE_FOLLOW;
@@ -618,8 +715,11 @@ void zBuddy_SceneUpdate(F32 dt)
 
         if (nearest != NULL)
         {
-            state = BUDDY_STATE_CHASE;
-            attack_target = nearest;
+            if (!buddy_begin_skill(nearest))
+            {
+                state = BUDDY_STATE_CHASE;
+                attack_target = nearest;
+            }
         }
     }
 
@@ -632,6 +732,11 @@ void zBuddy_SceneUpdate(F32 dt)
         }
         else
         {
+            if (buddy_begin_skill(attack_target))
+            {
+                return;
+            }
+
             xVec3 target = *xEntGetCenter(attack_target);
             xVec3 from_target;
             xVec3Sub(&from_target, &player, &target);
@@ -806,6 +911,8 @@ void zBuddy_SceneUpdate(F32 dt)
                     zNPCSleepy_BuddyAttack(attack_target);
                 }
                 attack_target->Damage(DMGTYP_SIDE, NULL, &position);
+                pending_kill_target = attack_target;
+                pending_kill_timer = 1.0f;
             }
             attack_count++;
             attack_timer += 0.2f;
@@ -814,6 +921,108 @@ void zBuddy_SceneUpdate(F32 dt)
                 state = BUDDY_STATE_RECOVER;
                 attack_timer = 0.5f;
                 attack_target = NULL;
+            }
+        }
+        return;
+    }
+
+    if (state == BUDDY_STATE_SKILL)
+    {
+        attack_timer += dt;
+        const F32 frame_one_time = 0.10f;
+        const F32 frame_two_time = 0.25f;
+        const F32 frame_three_time = 0.20f;
+        const F32 frame_four_time = 0.10f;
+        const F32 frame_five_time = 0.10f;
+        const F32 frame_six_time = 0.15f;
+        const F32 frame_two_start = frame_one_time;
+        const F32 frame_three_start = frame_two_start + frame_two_time;
+        const F32 frame_four_start = frame_three_start + frame_three_time;
+        const F32 frame_five_start = frame_four_start + frame_four_time;
+        const F32 frame_six_start = frame_five_start + frame_five_time;
+        const F32 skill_total_time = frame_six_start + frame_six_time;
+
+        if (attack_timer >= skill_total_time)
+        {
+            state = BUDDY_STATE_SKILL_RECOVER;
+            attack_timer = 0.5f;
+            frame_index = 0;
+            frame_timer = 0.0f;
+            skill_target = NULL;
+            skill_damage_applied = false;
+            return;
+        }
+
+        if (attack_timer < frame_two_start)
+        {
+            frame_index = 0;
+        }
+        else if (attack_timer < frame_three_start)
+        {
+            frame_index = 1;
+        }
+        else if (attack_timer < frame_four_start)
+        {
+            frame_index = 2;
+        }
+        else if (attack_timer < frame_five_start)
+        {
+            frame_index = 3;
+        }
+        else if (attack_timer < frame_six_start)
+        {
+            frame_index = 4;
+        }
+        else
+        {
+            frame_index = 5;
+        }
+
+        if (frame_index == 0)
+        {
+            position = skill_start_position;
+        }
+        else if (frame_index == 1)
+        {
+            F32 progress = (attack_timer - frame_two_start) / frame_two_time;
+            progress = progress * progress * (3.0f - 2.0f * progress);
+            position.x = skill_start_position.x +
+                         (skill_target_position.x - skill_start_position.x) * progress;
+            position.y = skill_start_position.y +
+                         (skill_target_position.y + 3.0f - skill_start_position.y) * progress;
+            position.z = skill_start_position.z +
+                         (skill_target_position.z - skill_start_position.z) * progress;
+        }
+        else if (frame_index == 2)
+        {
+            position = skill_target_position;
+            position.y += 3.0f;
+        }
+        else if (frame_index == 3)
+        {
+            F32 progress = (attack_timer - frame_four_start) / frame_four_time;
+            progress = 1.0f - (1.0f - progress) * (1.0f - progress);
+            position = skill_target_position;
+            position.y += 3.0f * (1.0f - progress);
+        }
+        else
+        {
+            position = skill_target_position;
+            if (!skill_damage_applied)
+            {
+                if (skill_target != NULL && buddy_target_is_valid(skill_target))
+                {
+                    if (skill_target->SelfType() == NPC_TYPE_SLICK &&
+                        ((zNPCSlick*)skill_target)->IsShield())
+                    {
+                        skill_target->Damage(DMGTYP_SIDE, NULL, &position);
+                    }
+                    else
+                    {
+                        skill_target->Damage(DMGTYP_INSTAKILL, NULL, &position);
+                    }
+                }
+                skill_damage_applied = true;
             }
         }
         return;
@@ -872,6 +1081,10 @@ void zBuddy_Render()
     const buddy_frame* frame =
         state == BUDDY_STATE_DEAD
             ? &death_frame
+            : state == BUDDY_STATE_SKILL
+            ? &skill_frames[frame_index]
+            : state == BUDDY_STATE_SKILL_RECOVER
+            ? &idle_frames[frame_index]
             : state == BUDDY_STATE_STRIKE || state == BUDDY_STATE_RECOVER
             ? &attack_frames[frame_index]
             : state == BUDDY_STATE_CHASE
@@ -931,6 +1144,75 @@ void zBuddy_Render()
 
     if (state != BUDDY_STATE_DEAD)
     {
+        F32 skill_ratio = (F32)skill_kills / (F32)skill_kill_cost;
+        F32 skill_bar_width = buddy_width * 0.9f;
+        F32 skill_bar_height = 0.045f;
+        F32 skill_bar_center_y = position.y + buddy_height + 0.20f;
+        F32 skill_bar_left_x = position.x - camera_matrix->right.x * skill_bar_width * 0.5f;
+        F32 skill_bar_left_y = skill_bar_center_y - camera_matrix->right.y * skill_bar_width * 0.5f;
+        F32 skill_bar_left_z = position.z - camera_matrix->right.z * skill_bar_width * 0.5f;
+        F32 skill_bar_right_x = position.x + camera_matrix->right.x * skill_bar_width * 0.5f;
+        F32 skill_bar_right_y = skill_bar_center_y + camera_matrix->right.y * skill_bar_width * 0.5f;
+        F32 skill_bar_right_z = position.z + camera_matrix->right.z * skill_bar_width * 0.5f;
+        F32 skill_bar_top_x = camera_matrix->up.x * skill_bar_height * 0.5f;
+        F32 skill_bar_top_y = camera_matrix->up.y * skill_bar_height * 0.5f;
+        F32 skill_bar_top_z = camera_matrix->up.z * skill_bar_height * 0.5f;
+        RwIm3DVertex skill_bar[4];
+
+        RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+        RwIm3DVertexSetPos(&skill_bar[0], skill_bar_left_x, skill_bar_left_y, skill_bar_left_z);
+        RwIm3DVertexSetPos(&skill_bar[1], skill_bar_left_x + skill_bar_top_x,
+                           skill_bar_left_y + skill_bar_top_y,
+                           skill_bar_left_z + skill_bar_top_z);
+        RwIm3DVertexSetPos(&skill_bar[2], skill_bar_right_x, skill_bar_right_y, skill_bar_right_z);
+        RwIm3DVertexSetPos(&skill_bar[3], skill_bar_right_x + skill_bar_top_x,
+                           skill_bar_right_y + skill_bar_top_y,
+                           skill_bar_right_z + skill_bar_top_z);
+        for (S32 i = 0; i < 4; i++)
+        {
+            RwIm3DVertexSetRGBA(&skill_bar[i], 35, 35, 40, 225);
+        }
+        if (RwIm3DTransform(skill_bar, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+        {
+            RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        }
+
+        F32 skill_fill_width = skill_bar_width * skill_ratio;
+        skill_bar_right_x = skill_bar_left_x + camera_matrix->right.x * skill_fill_width;
+        skill_bar_right_y = skill_bar_left_y + camera_matrix->right.y * skill_fill_width;
+        skill_bar_right_z = skill_bar_left_z + camera_matrix->right.z * skill_fill_width;
+        RwIm3DVertexSetPos(&skill_bar[2], skill_bar_right_x, skill_bar_right_y, skill_bar_right_z);
+        RwIm3DVertexSetPos(&skill_bar[3], skill_bar_right_x + skill_bar_top_x,
+                           skill_bar_right_y + skill_bar_top_y,
+                           skill_bar_right_z + skill_bar_top_z);
+
+        U8 skill_left_red = 255;
+        U8 skill_left_green = 55;
+        U8 skill_left_blue = 55;
+        U8 skill_right_red = (U8)(255.0f * (1.0f - skill_ratio));
+        U8 skill_right_green = (U8)(55.0f + 200.0f * skill_ratio);
+        U8 skill_right_blue = (U8)(55.0f + 200.0f * skill_ratio);
+        if (skill_kills >= skill_kill_cost)
+        {
+            F32 sweep = skill_sweep_timer * 3.0f;
+            skill_left_red = (U8)(80.0f + 100.0f * (0.5f + 0.5f * sinf(sweep - 2.1f)));
+            skill_left_green = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep)));
+            skill_left_blue = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep + 2.1f)));
+            skill_right_red = (U8)(80.0f + 100.0f * (0.5f + 0.5f * sinf(sweep + 1.0f)));
+            skill_right_green = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep + 3.1f)));
+            skill_right_blue = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep + 5.2f)));
+        }
+        RwIm3DVertexSetRGBA(&skill_bar[0], skill_left_red, skill_left_green, skill_left_blue, 255);
+        RwIm3DVertexSetRGBA(&skill_bar[1], skill_left_red, skill_left_green, skill_left_blue, 255);
+        RwIm3DVertexSetRGBA(&skill_bar[2], skill_right_red, skill_right_green, skill_right_blue,
+                            255);
+        RwIm3DVertexSetRGBA(&skill_bar[3], skill_right_red, skill_right_green, skill_right_blue,
+                            255);
+        if (RwIm3DTransform(skill_bar, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+        {
+            RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        }
+
         F32 health_ratio = (F32)health / (F32)max_health;
         F32 bar_width = buddy_width * 0.9f;
         F32 bar_height = 0.06f;
