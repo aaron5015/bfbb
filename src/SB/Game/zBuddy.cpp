@@ -368,6 +368,36 @@ void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius)
     zBuddy_HitBySphere(robot_position, radius);
 }
 
+void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius)
+{
+    if (!enabled || selected == BUDDY_NONE || state == BUDDY_STATE_DEAD ||
+        sphere_center == NULL || robot_hit_cooldown > 0.0f)
+    {
+        return;
+    }
+
+    /*
+     * Glove's hand sweep has small gaps between its individual bone spheres.
+     * Give Buddy the extra reach needed to avoid a dead center blind spot
+     * without changing the hitboxes used by other robots.
+     */
+    F32 buddy_radius = 0.5f * buddy_width;
+    F32 min_y = position.y;
+    F32 max_y = position.y + buddy_height;
+    F32 closest_y = MAX(min_y, MIN(max_y, sphere_center->y));
+
+    F32 dx = sphere_center->x - position.x;
+    F32 dy = sphere_center->y - closest_y;
+    F32 dz = sphere_center->z - position.z;
+    F32 hit_radius = buddy_radius + MAX(0.0f, radius) + 0.5f * buddy_width;
+
+    if (dx * dx + dy * dy + dz * dz <= hit_radius * hit_radius)
+    {
+        zBuddy_Damage(1);
+        robot_hit_cooldown = 0.5f;
+    }
+}
+
 S32 zBuddy_IsAvailable()
 {
     return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
@@ -491,10 +521,19 @@ void zBuddy_SceneUpdate(F32 dt)
 
         if (npclist != NULL)
         {
+            /*
+             * Arf's kennel dogs are reusable NPC objects. Prefer a live,
+             * healthy ARFDOG in range so a respawned kennel dog is reacquired
+             * regardless of the level-specific asset/name used for it.
+             */
+            zNPCCommon* nearest_arf_dog = NULL;
+            F32 nearest_arf_distance = nearest_distance;
+
             for (S32 i = 0; i < npclist->cnt; i++)
             {
                 zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
-                if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy())
+                if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy() ||
+                    npc->SelfType() != NPC_TYPE_ARFDOG)
                 {
                     continue;
                 }
@@ -504,10 +543,38 @@ void zBuddy_SceneUpdate(F32 dt)
                 delta.y = 0.0f;
                 delta.z -= position.z;
                 F32 distance = xVec3Length2(&delta);
-                if (distance < nearest_distance)
+                if (distance < nearest_arf_distance)
                 {
-                    nearest = npc;
-                    nearest_distance = distance;
+                    nearest_arf_dog = npc;
+                    nearest_arf_distance = distance;
+                }
+            }
+
+            if (nearest_arf_dog != NULL)
+            {
+                nearest = nearest_arf_dog;
+                nearest_distance = nearest_arf_distance;
+            }
+            else
+            {
+                for (S32 i = 0; i < npclist->cnt; i++)
+                {
+                    zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+                    if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy())
+                    {
+                        continue;
+                    }
+
+                    xVec3 delta = *xEntGetCenter(npc);
+                    delta.x -= position.x;
+                    delta.y = 0.0f;
+                    delta.z -= position.z;
+                    F32 distance = xVec3Length2(&delta);
+                    if (distance < nearest_distance)
+                    {
+                        nearest = npc;
+                        nearest_distance = distance;
+                    }
                 }
             }
         }
