@@ -333,7 +333,22 @@ void zNPCDuplotron::DuploNotice(en_SM_NOTICES note, void* data)
 S32 zNPCDuplotron::IsAlive()
 {
     xPsyche* psy = this->psy_instinct;
-    return psy->GIDOfActive() != NPC_GOAL_DUPLODEAD;
+    if (psy == NULL)
+    {
+        return 0;
+    }
+
+    if (psy->GIDOfActive() == NPC_GOAL_DUPLODEAD)
+    {
+        return 0;
+    }
+
+    if (this->AnimCurStateID() == g_hash_dupoanim[ANIM_Hurt01])
+    {
+        return 0;
+    }
+
+    return 1;
 }
 
 S32 zNPCDuplotron::NPCMessage(NPCMsg* mail)
