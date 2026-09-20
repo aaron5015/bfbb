@@ -14,6 +14,8 @@
 #include <rwcore.h>
 #include <string.h>
 
+extern U32 g_hash_dupoanim[5];
+
 namespace
 {
 enum buddy_type
@@ -322,9 +324,44 @@ void zBuddy_PlayerDeath()
     death_velocity = 5.0f;
 }
 
+static S32 buddy_target_is_valid(zNPCCommon* target)
+{
+    if (target == NULL || !target->frame || !target->IsAlive())
+    {
+        return 0;
+    }
+
+    if (target->SelfType() == NPC_TYPE_DUPLOTRON &&
+        target->AnimCurStateID() == g_hash_dupoanim[4])
+    {
+        return 0;
+    }
+
+    if (target->SelfType() == NPC_TYPE_ARFDOG)
+    {
+        // Do not force-cast to zNPCRobot here. Reused kennel dogs can be
+        // temporarily in a respawn/owner-transition state, and the generic
+        // alive+healthy checks are the safe gate for this Buddy target pass.
+    }
+
+    if (!target->IsHealthy())
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
 void zBuddy_ForgetTarget(zNPCCommon* target)
 {
-    if (attack_target == target)
+    if (attack_target == NULL)
+    {
+        return;
+    }
+
+    if (attack_target == target ||
+        (attack_target->SelfType() == NPC_TYPE_ARFDOG && target != NULL &&
+         target->SelfType() == NPC_TYPE_ARFDOG))
     {
         attack_target = NULL;
         if (state == BUDDY_STATE_CHASE || state == BUDDY_STATE_STRIKE)
@@ -532,11 +569,11 @@ void zBuddy_SceneUpdate(F32 dt)
             for (S32 i = 0; i < npclist->cnt; i++)
             {
                 zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
-                if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy() ||
-                    npc->SelfType() != NPC_TYPE_ARFDOG)
+                if (!npc || !npc->frame || !npc->IsAlive() || npc->SelfType() != NPC_TYPE_ARFDOG)
                 {
                     continue;
                 }
+
 
                 xVec3 delta = *xEntGetCenter(npc);
                 delta.x -= position.x;
@@ -588,7 +625,7 @@ void zBuddy_SceneUpdate(F32 dt)
 
     if (state == BUDDY_STATE_CHASE)
     {
-        if (attack_target == NULL || !attack_target->IsAlive() || !attack_target->IsHealthy())
+        if (!buddy_target_is_valid(attack_target))
         {
             state = BUDDY_STATE_FOLLOW;
             attack_target = NULL;
@@ -762,7 +799,7 @@ void zBuddy_SceneUpdate(F32 dt)
         if (attack_timer <= 0.0f)
         {
             frame_index = xrand() & 1;
-            if (attack_target != NULL && attack_target->IsAlive() && attack_target->IsHealthy())
+            if (buddy_target_is_valid(attack_target))
             {
                 if (attack_target->SelfType() == NPC_TYPE_SLEEPY)
                 {
