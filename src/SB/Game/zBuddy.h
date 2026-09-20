@@ -18,6 +18,7 @@ void zBuddy_PlayerDeath();
 void zBuddy_ForgetTarget(zNPCCommon* target);
 void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius);
 void zBuddy_HitBySphere(const xVec3* sphere_center, F32 radius);
+void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius);
 S32 zBuddy_IsAvailable();
 S32 zBuddy_IsSleepyAlerting();
 const xVec3* zBuddy_GetPosition();
