@@ -9,6 +9,7 @@
 #include "zGlobals.h"
 #include "zNPCMgr.h"
 #include "zNPCTypeCommon.h"
+#include "zNPCTypeRobot.h"
 
 #include <rwcore.h>
 #include <string.h>
@@ -54,6 +55,126 @@ F32 death_alpha;
 F32 death_velocity;
 F32 robot_hit_cooldown;
 F32 damage_cooldown;
+const F32 buddy_sneak_speed = 0.35f;
+const F32 buddy_sleepy_escape_margin = 1.0f;
+S32 buddy_sleepy_count = 0;
+bool buddy_sneaking_sleepy = false;
+bool buddy_moving = false;
+
+bool buddy_has_sleepy_hazard(const xVec3* test_position, S32* sleepy_count = NULL)
+{
+    S32 count = 0;
+    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+
+    if (test_position == NULL || npclist == NULL)
+    {
+        if (sleepy_count != NULL)
+        {
+            *sleepy_count = 0;
+        }
+        return false;
+    }
+
+    for (S32 i = 0; i < npclist->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+        if (npc == NULL || npc->SelfType() != NPC_TYPE_SLEEPY || !npc->frame ||
+            !npc->IsAlive() || !npc->IsHealthy())
+        {
+            continue;
+        }
+
+        if (zNPCSleepy_IsAsleep(npc) && zNPCSleepy_IsInDetectionRange(npc, test_position))
+        {
+            count++;
+        }
+    }
+
+    if (sleepy_count != NULL)
+    {
+        *sleepy_count = count;
+    }
+
+    return count > 0;
+}
+
+bool buddy_sleepy_destination_safe(const xVec3* destination)
+{
+    return !buddy_has_sleepy_hazard(destination);
+}
+
+bool buddy_escape_active_sleepy(F32 dt)
+{
+    if (health > 2)
+    {
+        return false;
+    }
+
+    st_XORDEREDARRAY* sleepy_list = zNPCMgr_GetNPCList();
+    if (sleepy_list == NULL)
+    {
+        return false;
+    }
+
+    xVec3 away_sum = xVec3{ 0.0f, 0.0f, 0.0f };
+    S32 threat_count = 0;
+
+    for (S32 i = 0; i < sleepy_list->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)sleepy_list->list[i];
+        if (npc == NULL || npc->SelfType() != NPC_TYPE_SLEEPY || !npc->frame ||
+            !npc->IsAlive() || !npc->IsHealthy() || zNPCSleepy_IsAsleep(npc) ||
+            !zNPCSleepy_IsInDetectionRange(npc, zBuddy_GetTargetPosition()))
+        {
+            continue;
+        }
+
+        zNPCSleepy* sleepy = (zNPCSleepy*)npc;
+        if (!sleepy->alert_buddy)
+        {
+            continue;
+        }
+
+        xVec3 away;
+        xVec3Sub(&away, &position, npc->Pos());
+        away.y = 0.0f;
+        F32 len2 = xVec3Length2(&away);
+        if (len2 > 0.001f)
+        {
+            F32 inv_len = 1.0f / sqrtf(len2);
+            away_sum.x += away.x * inv_len;
+            away_sum.z += away.z * inv_len;
+            threat_count++;
+        }
+    }
+
+    if (threat_count == 0)
+    {
+        return false;
+    }
+
+    state = BUDDY_STATE_FOLLOW;
+    attack_target = NULL;
+    attack_timer = 0.0f;
+    attack_count = 0;
+    frame_index = 0;
+    frame_timer = 0.0f;
+    buddy_sneaking_sleepy = false;
+
+    F32 away_len2 = xVec3Length2(&away_sum);
+    if (away_len2 > 0.001f)
+    {
+        F32 inv_len = 1.0f / sqrtf(away_len2);
+        F32 escape_distance = 2.0f + buddy_sleepy_escape_margin;
+        position.x += away_sum.x * inv_len * escape_distance *
+                      (1.0f - expf(-8.0f * dt));
+        position.z += away_sum.z * inv_len * escape_distance *
+                      (1.0f - expf(-8.0f * dt));
+    }
+
+    return true;
+}
+
 
 struct buddy_frame
 {
@@ -102,6 +223,8 @@ void reset_position()
     death_velocity = 0.0f;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
+    buddy_sneaking_sleepy = false;
+    buddy_moving = false;
 }
 }
 
@@ -245,9 +368,52 @@ void zBuddy_HitByRobot(const xVec3* robot_position, F32 radius)
     zBuddy_HitBySphere(robot_position, radius);
 }
 
+void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius)
+{
+    if (!enabled || selected == BUDDY_NONE || state == BUDDY_STATE_DEAD ||
+        sphere_center == NULL || robot_hit_cooldown > 0.0f)
+    {
+        return;
+    }
+
+    /*
+     * Glove's hand sweep has small gaps between its individual bone spheres.
+     * Give Buddy the extra reach needed to avoid a dead center blind spot
+     * without changing the hitboxes used by other robots.
+     */
+    F32 buddy_radius = 0.5f * buddy_width;
+    F32 min_y = position.y;
+    F32 max_y = position.y + buddy_height;
+    F32 closest_y = MAX(min_y, MIN(max_y, sphere_center->y));
+
+    F32 dx = sphere_center->x - position.x;
+    F32 dy = sphere_center->y - closest_y;
+    F32 dz = sphere_center->z - position.z;
+    F32 hit_radius = buddy_radius + MAX(0.0f, radius) + 0.5f * buddy_width;
+
+    if (dx * dx + dy * dy + dz * dz <= hit_radius * hit_radius)
+    {
+        zBuddy_Damage(1);
+        robot_hit_cooldown = 0.5f;
+    }
+}
+
 S32 zBuddy_IsAvailable()
 {
     return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
+}
+
+S32 zBuddy_IsSleepyAlerting()
+{
+    if (!zBuddy_IsAvailable())
+    {
+        return 0;
+    }
+
+    // These are the Buddy equivalents of the player's alerting movement:
+    // actively attacking something, or moving at normal/run speed instead
+    // of sneaking around a sleeping Sleepy.
+    return state == BUDDY_STATE_STRIKE || (buddy_moving && !buddy_sneaking_sleepy);
 }
 
 const xVec3* zBuddy_GetPosition()
@@ -308,6 +474,8 @@ void zBuddy_SceneUpdate(F32 dt)
     robot_hit_cooldown = MAX(0.0f, robot_hit_cooldown - dt);
     damage_cooldown = MAX(0.0f, damage_cooldown - dt);
 
+    buddy_moving = false;
+
     if (state == BUDDY_STATE_DEAD)
     {
         death_timer -= dt;
@@ -325,6 +493,11 @@ void zBuddy_SceneUpdate(F32 dt)
             frame_index = 0;
             frame_timer = 0.0f;
         }
+        return;
+    }
+
+    if (buddy_escape_active_sleepy(dt))
+    {
         return;
     }
 
@@ -348,10 +521,19 @@ void zBuddy_SceneUpdate(F32 dt)
 
         if (npclist != NULL)
         {
+            /*
+             * Arf's kennel dogs are reusable NPC objects. Prefer a live,
+             * healthy ARFDOG in range so a respawned kennel dog is reacquired
+             * regardless of the level-specific asset/name used for it.
+             */
+            zNPCCommon* nearest_arf_dog = NULL;
+            F32 nearest_arf_distance = nearest_distance;
+
             for (S32 i = 0; i < npclist->cnt; i++)
             {
                 zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
-                if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy())
+                if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy() ||
+                    npc->SelfType() != NPC_TYPE_ARFDOG)
                 {
                     continue;
                 }
@@ -361,10 +543,38 @@ void zBuddy_SceneUpdate(F32 dt)
                 delta.y = 0.0f;
                 delta.z -= position.z;
                 F32 distance = xVec3Length2(&delta);
-                if (distance < nearest_distance)
+                if (distance < nearest_arf_distance)
                 {
-                    nearest = npc;
-                    nearest_distance = distance;
+                    nearest_arf_dog = npc;
+                    nearest_arf_distance = distance;
+                }
+            }
+
+            if (nearest_arf_dog != NULL)
+            {
+                nearest = nearest_arf_dog;
+                nearest_distance = nearest_arf_distance;
+            }
+            else
+            {
+                for (S32 i = 0; i < npclist->cnt; i++)
+                {
+                    zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+                    if (!npc || !npc->frame || !npc->IsAlive() || !npc->IsHealthy())
+                    {
+                        continue;
+                    }
+
+                    xVec3 delta = *xEntGetCenter(npc);
+                    delta.x -= position.x;
+                    delta.y = 0.0f;
+                    delta.z -= position.z;
+                    F32 distance = xVec3Length2(&delta);
+                    if (distance < nearest_distance)
+                    {
+                        nearest = npc;
+                        nearest_distance = distance;
+                    }
                 }
             }
         }
@@ -400,6 +610,17 @@ void zBuddy_SceneUpdate(F32 dt)
             xVec3 delta;
             xVec3Sub(&delta, &position, &target);
             delta.y = 0.0f;
+            xVec3 old_position = position;
+
+            bool target_is_sleepy = attack_target->SelfType() == NPC_TYPE_SLEEPY;
+            bool low_health = health <= 2;
+
+            /*
+             * Health does not prevent a stealth attack. A sleeping Sleepy
+             * can be approached and attacked at any health value. If that
+             * attack wakes it while Buddy is low-health, the top-level
+             * active-Sleepy escape check takes over on the next update.
+             */
             if (xVec3Length2(&delta) <= 1.0f)
             {
                 state = BUDDY_STATE_STRIKE;
@@ -411,14 +632,122 @@ void zBuddy_SceneUpdate(F32 dt)
             }
             else
             {
-                F32 follow = 1.0f - expf(-8.0f * dt);
-                position.x += (target.x - position.x) * follow;
-                position.y += (target.y - position.y) * follow;
-                position.z += (target.z - position.z) * follow;
-                frame_timer += dt;
-                if (frame_timer >= 0.10f)
+                S32 sleepy_count = 0;
+                bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &sleepy_count);
+                bool target_in_sleepy_range = buddy_has_sleepy_hazard(&target);
+                // target_is_sleepy and low_health were evaluated above so the
+                // low-health Sleepy case can bail out before STRIKE.
+                bool active_sleepy_range = false;
+                xVec3 active_sleepy_away = xVec3{ 0.0f, 0.0f, 0.0f };
+                buddy_sneaking_sleepy = in_sleepy_range || target_in_sleepy_range;
+
+                /*
+                 * Once Sleepy is awake, use every active Sleepy in range as
+                 * an escape source. This is deliberately accumulated rather
+                 * than choosing one NPC, so two overlapping Sleepies cannot
+                 * make the Buddy escape directly into the other one's range.
+                 */
+                st_XORDEREDARRAY* sleepy_list = zNPCMgr_GetNPCList();
+                if (sleepy_list != NULL && low_health)
                 {
-                    frame_timer -= 0.10f;
+                    for (S32 i = 0; i < sleepy_list->cnt; i++)
+                    {
+                        zNPCCommon* npc = (zNPCCommon*)sleepy_list->list[i];
+                        if (npc == NULL || npc->SelfType() != NPC_TYPE_SLEEPY || !npc->frame ||
+                            !npc->IsAlive() || !npc->IsHealthy() ||
+                            zNPCSleepy_IsAsleep(npc) ||
+                            !zNPCSleepy_IsInDetectionRange(npc, &position))
+                        {
+                            continue;
+                        }
+
+                        active_sleepy_range = true;
+                        xVec3 away;
+                        xVec3Sub(&away, &position, npc->Pos());
+                        away.y = 0.0f;
+                        F32 len2 = xVec3Length2(&away);
+                        if (len2 > 0.001f)
+                        {
+                            F32 inv_len = 1.0f / sqrtf(len2);
+                            active_sleepy_away.x += away.x * inv_len;
+                            active_sleepy_away.z += away.z * inv_len;
+                        }
+                    }
+                }
+
+                /*
+                 * A sleeping Sleepy is a movement hazard, not a target lock.
+                 * We slow down while sneaking through its range, but still
+                 * allow a direct attack on another enemy. If the target itself
+                 * is Sleepy, approach it slowly; attacking it is what wakes it.
+                 */
+                if (in_sleepy_range && !target_is_sleepy && !low_health)
+                {
+                    F32 follow = 1.0f - expf(-8.0f * buddy_sneak_speed * dt);
+                    position.x += (target.x - position.x) * follow;
+                    position.y += (target.y - position.y) * follow;
+                    position.z += (target.z - position.z) * follow;
+                }
+                else if (active_sleepy_range)
+                {
+                    buddy_sneaking_sleepy = false;
+                    xVec3 escape = position;
+                    F32 escape_len2 = xVec3Length2(&active_sleepy_away);
+
+                    if (escape_len2 > 0.001f)
+                    {
+                        F32 inv_len = 1.0f / sqrtf(escape_len2);
+                        escape.x += active_sleepy_away.x * inv_len *
+                                     (2.0f + buddy_sleepy_escape_margin);
+                        escape.z += active_sleepy_away.z * inv_len *
+                                     (2.0f + buddy_sleepy_escape_margin);
+                    }
+
+                    if (buddy_sleepy_destination_safe(&escape))
+                    {
+                        F32 follow = 1.0f - expf(-8.0f * dt);
+                        position.x += (escape.x - position.x) * follow;
+                        position.y += (escape.y - position.y) * follow;
+                        position.z += (escape.z - position.z) * follow;
+                    }
+                }
+                else if (in_sleepy_range && low_health)
+                {
+                    /*
+                     * If the Sleepy is still asleep, low-health stealth should
+                     * not turn into an immediate sprint. Keep the Buddy moving
+                     * cautiously unless an active Sleepy actually threatens it.
+                     */
+                    F32 follow = 1.0f - expf(-8.0f * buddy_sneak_speed * dt);
+                    position.x += (target.x - position.x) * follow;
+                    position.y += (target.y - position.y) * follow;
+                    position.z += (target.z - position.z) * follow;
+                }
+                else if (target_in_sleepy_range || target_is_sleepy)
+                {
+                    F32 follow = 1.0f - expf(-8.0f * buddy_sneak_speed * dt);
+                    position.x += (target.x - position.x) * follow;
+                    position.y += (target.y - position.y) * follow;
+                    position.z += (target.z - position.z) * follow;
+                }
+                else
+                {
+                    buddy_sneaking_sleepy = false;
+                    F32 follow = 1.0f - expf(-8.0f * dt);
+                    position.x += (target.x - position.x) * follow;
+                    position.y += (target.y - position.y) * follow;
+                    position.z += (target.z - position.z) * follow;
+                }
+
+                if (xVec3Dist2(&old_position, &position) >= 0.0001f)
+                {
+                    buddy_moving = true;
+                }
+
+                frame_timer += dt;
+                if (frame_timer >= (in_sleepy_range ? 0.14f : 0.10f))
+                {
+                    frame_timer -= (in_sleepy_range ? 0.14f : 0.10f);
                     frame_index = (frame_index + 1) % (S32)(sizeof(run_frames) / sizeof(run_frames[0]));
                 }
                 return;
@@ -435,6 +764,10 @@ void zBuddy_SceneUpdate(F32 dt)
             frame_index = xrand() & 1;
             if (attack_target != NULL && attack_target->IsAlive() && attack_target->IsHealthy())
             {
+                if (attack_target->SelfType() == NPC_TYPE_SLEEPY)
+                {
+                    zNPCSleepy_BuddyAttack(attack_target);
+                }
                 attack_target->Damage(DMGTYP_SIDE, NULL, &position);
             }
             attack_count++;
@@ -459,10 +792,28 @@ void zBuddy_SceneUpdate(F32 dt)
         frame_index = 0;
         frame_timer = 0.0f;
     }
-    F32 follow = 1.0f - expf(-8.0f * dt);
+    bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &buddy_sleepy_count);
+    buddy_sneaking_sleepy = in_sleepy_range;
+    F32 follow_speed = in_sleepy_range ? buddy_sneak_speed : 1.0f;
+    F32 follow = 1.0f - expf(-8.0f * follow_speed * dt);
+    xVec3 old_position = position;
     position.x += (target.x - position.x) * follow;
     position.y += (target.y - position.y) * follow;
     position.z += (target.z - position.z) * follow;
+
+    /*
+     * Being inside Sleepy's detection range is not itself movement. If Buddy
+     * is standing still, keep the idle animation rather than showing the
+     * sneak/walk cycle indefinitely.
+     */
+    F32 moved2 = xVec3Dist2(&old_position, &position);
+    buddy_moving = moved2 >= 0.0001f;
+    if (in_sleepy_range && !buddy_moving)
+    {
+        follow_running = false;
+        buddy_sneaking_sleepy = false;
+    }
+
     frame_timer += dt;
     F32 frame_duration = follow_running ? 0.10f : 0.18f;
     if (frame_timer >= frame_duration)
@@ -487,8 +838,12 @@ void zBuddy_Render()
             : state == BUDDY_STATE_STRIKE || state == BUDDY_STATE_RECOVER
             ? &attack_frames[frame_index]
             : state == BUDDY_STATE_CHASE
-                ? &approach_frame
-                : follow_running ? &run_frames[frame_index] : &idle_frames[frame_index];
+                ? (buddy_sneaking_sleepy && buddy_moving)
+                    ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
+                    : &approach_frame
+                : buddy_sneaking_sleepy
+                    ? &run_frames[frame_index % (S32)(sizeof(run_frames) / sizeof(run_frames[0]))]
+                    : follow_running ? &run_frames[frame_index] : &idle_frames[frame_index];
     F32 frame_aspect = (F32)frame->width / (F32)frame->height;
     F32 half_width = buddy_width * frame_aspect * 0.5f;
     F32 half_height = buddy_height * 0.5f;

@@ -369,6 +369,8 @@ struct zNPCSleepy : zNPCRobot
     F32 tmr_angry;
     F32 tmr_emitzeez;
     F32 cnt_grpzeez;
+    S32 alert_player;
+    S32 alert_buddy;
 
     zNPCSleepy(S32 myType) : zNPCRobot(myType)
     {
@@ -697,6 +699,10 @@ void ROBO_KillEffects();
 void zNPCFodBzzt_ResetDanceParty();
 void ROBO_InitEffects();
 void zNPCRobot_Timestep(xScene* xscn, F32 dt);
+S32 zNPCSleepy_IsAsleep(zNPCCommon* npc);
+S32 zNPCSleepy_BuddyAttack(zNPCCommon* npc);
+S32 zNPCSleepy_GetAlertTarget(zNPCCommon* npc, xVec3* target);
+S32 zNPCSleepy_IsInDetectionRange(zNPCCommon* npc, const xVec3* pos);
 xAnimTable* ZNPC_AnimTable_ArfArf();
 xAnimTable* ZNPC_AnimTable_ArfDog();
 xAnimTable* ZNPC_AnimTable_Chuck();
