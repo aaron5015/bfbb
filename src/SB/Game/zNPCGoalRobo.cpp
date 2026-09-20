@@ -2835,7 +2835,7 @@ S32 zNPCGoalAlertGlove::CheckHandBones()
 
         if (zBuddy_IsAvailable())
         {
-            zBuddy_HitBySphere(&pos, bnd.sph.r);
+            zBuddy_HitByGlove(&pos, bnd.sph.r);
         }
 
         if (doball != 0)
