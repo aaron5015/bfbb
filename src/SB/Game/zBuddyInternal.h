@@ -79,6 +79,37 @@ extern S32 max_health;
 extern S32 skill_kills;
 extern S32 skill_kill_cost;
 extern F32 skill_sweep_timer;
+extern F32 idle_follow_radius;
+extern F32 combat_follow_radius;
+extern F32 combat_return_radius;
+extern F32 stuck_timeout;
+extern F32 wander_radius;
+extern F32 wander_pause_min;
+extern F32 wander_pause_max;
+extern F32 wander_idle_short_min;
+extern F32 wander_idle_short_max;
+extern F32 wander_idle_long_min;
+extern F32 wander_idle_long_max;
+extern F32 wander_idle_long_chance;
+extern F32 wander_speed;
+extern F32 wander_curve_radius;
+extern F32 move_speed;
+extern F32 run_speed;
+extern F32 catch_up_speed;
+extern F32 gravity;
+extern F32 collision_radius;
+extern F32 vertical_velocity;
+extern F32 stuck_timer;
+extern F32 wander_timer;
+extern F32 wander_pause;
+extern F32 wander_idle_timer;
+extern F32 wander_progress;
+extern F32 wander_path_length;
+extern bool wander_active;
+extern bool catch_up_active;
+extern xVec3 wander_target;
+extern xVec3 wander_start;
+extern xVec3 wander_control;
 }
 
 #endif

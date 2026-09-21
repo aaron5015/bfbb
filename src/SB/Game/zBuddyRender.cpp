@@ -21,9 +21,9 @@ void zBuddy_Render()
             : state == BUDDY_STATE_STRIKE || state == BUDDY_STATE_RECOVER
             ? &attack_frames[frame_index]
             : state == BUDDY_STATE_CHASE
-                ? (buddy_sneaking_sleepy && buddy_moving)
-                    ? &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
-                    : &approach_frame
+                ? buddy_moving
+                    ? &run_frames[frame_index % (S32)(sizeof(run_frames) / sizeof(run_frames[0]))]
+                    : &idle_frames[frame_index % (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]))]
                 : buddy_sneaking_sleepy
                     ? &run_frames[frame_index % (S32)(sizeof(run_frames) / sizeof(run_frames[0]))]
                     : follow_running ? &run_frames[frame_index] : &idle_frames[frame_index];

@@ -2962,6 +2962,7 @@ void zSceneUpdate(F32 elapsedSec)
 
     if (!isPaused)
     {
+        zBuddy_SceneUpdate(elapsedSec);
         zNPCMgr_sceneTimestep(s, elapsedSec);
     }
     else if (s->sceneID == 'B101')
