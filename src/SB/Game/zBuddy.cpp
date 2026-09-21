@@ -1,4 +1,5 @@
 #include "zBuddy.h"
+#include "zBuddyInternal.h"
 
 #include "iCamera.h"
 #include "xIni.h"
@@ -16,25 +17,8 @@
 
 extern U32 g_hash_dupoanim[5];
 
-namespace
+namespace zBuddyInternal
 {
-enum buddy_type
-{
-    BUDDY_NONE,
-    BUDDY_CHERRY_COLA
-};
-
-enum buddy_state
-{
-    BUDDY_STATE_FOLLOW,
-    BUDDY_STATE_CHASE,
-    BUDDY_STATE_STRIKE,
-    BUDDY_STATE_SKILL,
-    BUDDY_STATE_SKILL_RECOVER,
-    BUDDY_STATE_RECOVER,
-    BUDDY_STATE_DEAD
-};
-
 S32 enabled;
 buddy_type selected = BUDDY_NONE;
 xVec3 position;
@@ -189,45 +173,6 @@ bool buddy_escape_active_sleepy(F32 dt)
 }
 
 
-struct buddy_frame
-{
-    U16 x;
-    U16 y;
-    U16 width;
-    U16 height;
-};
-
-static const buddy_frame idle_frames[] = {
-    { 785, 120, 143, 129 },
-    { 0, 221, 139, 129 },
-    { 261, 238, 139, 132 },
-};
-
-static const buddy_frame run_frames[] = {
-    { 209, 111, 118, 124 },
-    { 327, 112, 120, 126 },
-    { 663, 114, 122, 126 },
-    { 139, 235, 122, 131 },
-};
-
-static const buddy_frame approach_frame = { 499, 0, 140, 114 };
-static const buddy_frame death_frame = { 232, 0, 124, 111 };
-
-static const buddy_frame attack_frames[] = {
-    // skill0_01 and skill1_00 are the two strike frames.
-    { 841, 0, 164, 120 },
-    { 520, 240, 145, 159 },
-};
-
-static const buddy_frame skill_frames[] = {
-    { 639, 0, 202, 114 },
-    { 400, 238, 120, 133 },
-    { 0, 103, 209, 118 },
-    { 356, 0, 143, 112 },
-    { 447, 114, 216, 124 },
-    { 0, 0, 232, 103 },
-};
-
 void reset_position()
 {
     position = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -257,6 +202,8 @@ void reset_position()
     buddy_moving = false;
 }
 }
+
+using namespace zBuddyInternal;
 
 void zBuddy_ParseINI(xIniFile* ini)
 {
@@ -377,9 +324,6 @@ static S32 buddy_target_is_valid(zNPCCommon* target)
 
     if (target->SelfType() == NPC_TYPE_ARFDOG)
     {
-        // Do not force-cast to zNPCRobot here. Reused kennel dogs can be
-        // temporarily in a respawn/owner-transition state, and the generic
-        // alive+healthy checks are the safe gate for this Buddy target pass.
     }
 
     if (!target->IsHealthy())
@@ -476,11 +420,6 @@ void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius)
         return;
     }
 
-    /*
-     * Glove's hand sweep has small gaps between its individual bone spheres.
-     * Give Buddy the extra reach needed to avoid a dead center blind spot
-     * without changing the hitboxes used by other robots.
-     */
     F32 buddy_radius = 0.5f * buddy_width;
     F32 min_y = position.y;
     F32 max_y = position.y + buddy_height;
@@ -496,71 +435,6 @@ void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius)
         zBuddy_Damage(1);
         robot_hit_cooldown = 0.5f;
     }
-}
-
-S32 zBuddy_IsAvailable()
-{
-    return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
-}
-
-S32 zBuddy_IsSleepyAlerting()
-{
-    if (!zBuddy_IsAvailable())
-    {
-        return 0;
-    }
-
-    // These are the Buddy equivalents of the player's alerting movement:
-    // actively attacking something, or moving at normal/run speed instead
-    // of sneaking around a sleeping Sleepy.
-    return state == BUDDY_STATE_STRIKE || (buddy_moving && !buddy_sneaking_sleepy);
-}
-
-const xVec3* zBuddy_GetPosition()
-{
-    return zBuddy_IsAvailable() ? &position : NULL;
-}
-
-const xVec3* zBuddy_GetTargetPosition()
-{
-    static xVec3 target;
-    if (!zBuddy_IsAvailable())
-    {
-        return NULL;
-    }
-
-    target = position;
-    target.y += 0.5f * buddy_height;
-    return &target;
-}
-
-S32 zBuddy_IsCloserTarget(const xVec3* source_position)
-{
-    if (!zBuddy_IsAvailable() || source_position == NULL || globals.player.Health < 1)
-    {
-        return 0;
-    }
-
-    F32 buddy_distance = xVec3Dist2(source_position, &position);
-    F32 player_distance = xVec3Dist2(source_position, xEntGetPos(&globals.player.ent));
-    return buddy_distance < player_distance;
-}
-
-S32 zBuddy_GetPreferredTarget(const xVec3* source_position, xVec3* target_position)
-{
-    if (source_position == NULL || target_position == NULL)
-    {
-        return 0;
-    }
-
-    if (zBuddy_IsCloserTarget(source_position))
-    {
-        *target_position = position;
-        return 1;
-    }
-
-    *target_position = *xEntGetPos(&globals.player.ent);
-    return 0;
 }
 
 void zBuddy_SceneUpdate(F32 dt)
