@@ -882,6 +882,7 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iPadGlyph.cpp
   ${PC_DIR}/iPadStick.cpp
   ${PC_DIR}/iSystem.cpp
+  ${PC_DIR}/iGCSwap.cpp
   ${PC_DIR}/iTextPatch.cpp
   ${PC_DIR}/iTour.cpp
   ${PC_DIR}/iScreenBleed.cpp
@@ -1702,6 +1703,7 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
 
   ${PC_DIR}/iDrawDist.cpp
   ${PC_DIR}/iFile.cpp
+  ${PC_DIR}/iGCSwap.cpp
   ${PC_DIR}/iScreen.cpp
   ${PC_DIR}/iTextPatch.cpp
   ${PC_DIR}/intrin.cpp
