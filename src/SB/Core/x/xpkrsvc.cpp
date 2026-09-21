@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "xhipio.h"
+#include "iFile.h"
 #include "xutil.h"
 #include "xMath.h"
 #include "xMemMgr.h"
@@ -808,6 +809,8 @@ void PKR_xformLayerAssets(st_PACKER_LTOC_NODE* laynode)
 
 void PKR_xform_asset(st_PACKER_ATOC_NODE* assnode, S32 dumpable_layer)
 {
+    iFileAssetRead(assnode->ownpr, assnode->asstype, assnode->memloc, assnode->d_size);
+
     if (!(assnode->infoflag & 4))
     {
 #if defined(PS2)
@@ -1545,6 +1548,7 @@ S32 LOD_r_PLAT(st_HIPLOADDATA* pkg, st_PACKER_READ_DATA* pr)
     {
         strcpy(titlename, "<Unknown>");
     }
+    iFilePackagePlatform(pr, platname);
     if (ValidatePlatform(pkg, pr, plattag, platname, vidname, langname, titlename) == 0)
     {
         result = 0;

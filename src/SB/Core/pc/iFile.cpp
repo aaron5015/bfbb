@@ -1,5 +1,6 @@
 #include "iFile.h"
 #include "iConfig.h"
+#include "iGCSwap.h"
 #include "iHost.h"
 #include "iModFolder.h"
 #include "iSaveFile.h"
@@ -628,8 +629,13 @@ static bool iModOverride(char* path, size_t pathsize)
         {
             char id[8];
             char longName[32];
+            // A GameCube .HIP is game data, which iGCSwap turns around as it
+            // loads. A GameCube .HOP carries the models, world geometry and
+            // sound, which it does not.
+            size_t n = strlen(candidate);
+            bool hip = n >= 4 && iHostStrCaseCmp(candidate + n - 4, ".HIP") == 0;
             if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
-                strcmp(id, "XB") != 0)
+                strcmp(id, "XB") != 0 && !(hip && strcmp(longName, "GameCube") == 0))
             {
                 if (iModFirstReport(rel))
                 {
@@ -799,6 +805,108 @@ static void reportMissingFile(const char* name, const char* path)
     }
 
     fflush(stdout);
+}
+
+// Which packages are the GameCube's, keyed by the packer's read data, which
+// lives as long as its package. Every package's PLAT chunk sets or clears its
+// own entry, so a read-data address reused by a later package is corrected
+// before any of that package's assets arrive.
+static st_PACKER_READ_DATA* sGCPackages[64];
+
+void iFilePackagePlatform(st_PACKER_READ_DATA* pr, const char* platname)
+{
+    const S32 kSlots = (S32)(sizeof(sGCPackages) / sizeof(sGCPackages[0]));
+    bool gc = platname != NULL && strcmp(platname, "GameCube") == 0;
+
+    S32 free = -1;
+    for (S32 i = 0; i < kSlots; i++)
+    {
+        if (sGCPackages[i] == pr)
+        {
+            if (!gc)
+            {
+                sGCPackages[i] = NULL;
+            }
+            return;
+        }
+        if (sGCPackages[i] == NULL && free < 0)
+        {
+            free = i;
+        }
+    }
+
+    if (gc && free >= 0)
+    {
+        sGCPackages[free] = pr;
+    }
+}
+
+// Once per type, what could not be swapped. RenderWare streams and audio are
+// not byte-swapped by design and are not reported.
+static void iFileReportGCType(U32 type, const char* what)
+{
+    static U32 sReported[32];
+    static S32 sCount;
+
+    for (S32 i = 0; i < sCount; i++)
+    {
+        if (sReported[i] == type)
+        {
+            return;
+        }
+    }
+    if (sCount < (S32)(sizeof(sReported) / sizeof(sReported[0])))
+    {
+        sReported[sCount++] = type;
+    }
+
+    printf("bfbb: GameCube asset type '%c%c%c%c' %s\n", (char)(type >> 24), (char)(type >> 16),
+           (char)(type >> 8), (char)type, what);
+    fflush(stdout);
+}
+
+void iFileAssetRead(st_PACKER_READ_DATA* pr, U32 type, void* data, S32 size)
+{
+    if (data == NULL || size <= 0 || pr == NULL)
+    {
+        return;
+    }
+
+    bool gc = false;
+    for (size_t i = 0; i < sizeof(sGCPackages) / sizeof(sGCPackages[0]); i++)
+    {
+        gc = gc || sGCPackages[i] == pr;
+    }
+    if (!gc)
+    {
+        return;
+    }
+
+    switch (iGCSwapAsset(type, data, (U32)size))
+    {
+    case IGCSWAP_DONE:
+        break;
+    case IGCSWAP_MALFORMED:
+        iFileReportGCType(type, "was shorter than its layout; partly swapped");
+        break;
+    case IGCSWAP_UNKNOWN:
+        switch (type)
+        {
+        case 'MODL':
+        case 'RWTX':
+        case 'JSP ':
+        case 'BSP ':
+        case 'SND ':
+        case 'SNDS':
+        case 'CSN ':
+        case 'RAW ':
+            break;
+        default:
+            iFileReportGCType(type, "has no swap rule; left as it is");
+            break;
+        }
+        break;
+    }
 }
 
 U32 iFileOpen(const char* name, S32 flags, tag_xFile* file)

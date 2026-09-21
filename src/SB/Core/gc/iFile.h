@@ -71,4 +71,9 @@ void iFileAsyncService();
 // The PC port wraps the packer's read functions; see pc/iFile.h.
 #define iFilePackageReadFuncs(funcs) (funcs)
 
+// The PC port reads packages from another console's release through these; on
+// the console a package is always its own platform's, so both are nothing.
+#define iFilePackagePlatform(pr, platname)
+#define iFileAssetRead(pr, type, data, size)
+
 #endif

@@ -26,6 +26,7 @@
 #include "iConfigTable.h"
 #include "iDrawDist.h"
 #include "iFile.h"
+#include "iGCSwap.h"
 #include "iHost.h"
 #include "iSnd.h"
 #include "iSndData.h"
@@ -1922,6 +1923,115 @@ static void read_through_ifile(const char* name, char* out, size_t size)
 // The mod folder: a file there is read in place of the asset root's file at
 // the same relative path, whatever the case, and a package from another
 // console's release is passed over for the original.
+static void putBE32(U8* p, U32 v)
+{
+    p[0] = (U8)(v >> 24);
+    p[1] = (U8)(v >> 16);
+    p[2] = (U8)(v >> 8);
+    p[3] = (U8)v;
+}
+
+static void putBE16(U8* p, U32 v)
+{
+    p[0] = (U8)(v >> 8);
+    p[1] = (U8)v;
+}
+
+static U32 getLE32(const U8* p)
+{
+    return (U32)p[0] | ((U32)p[1] << 8) | ((U32)p[2] << 16) | ((U32)p[3] << 24);
+}
+
+static U32 getLE16(const U8* p)
+{
+    return (U32)p[0] | ((U32)p[1] << 8);
+}
+
+// GameCube assets turned around in place. The whole-disc check is
+// tools/gcswap/check.py, against the Xbox copy of every asset; these are the
+// shapes it depends on, built by hand.
+static void test_gcswap()
+{
+    printf("iGCSwap\n");
+
+    // A TIMR -- xTimerAsset, seconds and randomRange -- with one link after
+    // it. baseFlags is 16-bit and linkCount a byte; the link's two event
+    // numbers are 16-bit too.
+    U8 timr[0x10 + 0x20];
+    memset(timr, 0, sizeof(timr));
+    putBE32(timr + 0x0, 0x11223344);  // id
+    timr[4] = 0x0D;                   // baseType
+    timr[5] = 1;                      // linkCount
+    putBE16(timr + 0x6, 0x0102);      // baseFlags
+    putBE32(timr + 0x8, 0x41100000);  // seconds, 9.0
+    putBE32(timr + 0xC, 0x3F000000);  // randomRange, 0.5
+    putBE16(timr + 0x10, 0x0203);     // srcEvent
+    putBE16(timr + 0x12, 0x0405);     // dstEvent
+    putBE32(timr + 0x14, 0xAABBCCDD); // dstAssetID
+
+    check(iGCSwapKnowsType('TIMR'), "iGCSwap has a rule for TIMR");
+    check(iGCSwapAsset('TIMR', timr, sizeof(timr)) == IGCSWAP_DONE, "a TIMR swaps");
+    check(getLE32(timr + 0x0) == 0x11223344 && getLE16(timr + 0x6) == 0x0102,
+          "its id and 16-bit baseFlags come out little-endian");
+    check(timr[4] == 0x0D && timr[5] == 1, "and the bytes stay where they were");
+    check(getLE32(timr + 0x8) == 0x41100000 && getLE32(timr + 0xC) == 0x3F000000,
+          "and so do both floats");
+    check(getLE16(timr + 0x10) == 0x0203 && getLE16(timr + 0x12) == 0x0405 &&
+              getLE32(timr + 0x14) == 0xAABBCCDD,
+          "the link at the end is swapped field by field");
+
+    // randomRange is little-endian on the disc in some GameCube timers: the
+    // packer never swapped it. A value that only makes sense as is stays.
+    memset(timr, 0, sizeof(timr));
+    putBE32(timr + 0x8, 0x41100000);
+    timr[0xC] = 0x00; // 0.5, little-endian
+    timr[0xD] = 0x00;
+    timr[0xE] = 0x00;
+    timr[0xF] = 0x3F;
+    iGCSwapAsset('TIMR', timr, 0x10);
+    check(getLE32(timr + 0xC) == 0x3F000000, "a randomRange left little-endian is kept");
+
+    // An older, shorter TIMR without randomRange: what is there is swapped.
+    memset(timr, 0, sizeof(timr));
+    putBE32(timr + 0x8, 0x41100000);
+    check(iGCSwapAsset('TIMR', timr, 0xC) == IGCSWAP_DONE && getLE32(timr + 0x8) == 0x41100000,
+          "an asset older and shorter than its struct swaps the fields it has");
+
+    // An SKB1 animation: header, one key of eight 16-bit fields, two times,
+    // then 16-bit offsets.
+    U8 anim[0x1C + 0x10 + 8 + 4];
+    memset(anim, 0, sizeof(anim));
+    putBE32(anim + 0x0, 0x534B4231); // 'SKB1'
+    putBE16(anim + 0x8, 1);          // BoneCount
+    putBE16(anim + 0xA, 2);          // TimeCount
+    putBE32(anim + 0xC, 1);          // KeyCount
+    putBE32(anim + 0x10, 0x3F800000);
+    for (U32 k = 0; k < 8; k++)
+    {
+        putBE16(anim + 0x1C + k * 2, 0x0100 + k);
+    }
+    putBE32(anim + 0x2C, 0x3F800000);
+    putBE32(anim + 0x30, 0x40000000);
+    putBE16(anim + 0x34, 0x0007);
+    putBE16(anim + 0x36, 0x0009);
+
+    check(iGCSwapAsset('ANIM', anim, sizeof(anim)) == IGCSWAP_DONE, "an SKB1 animation swaps");
+    check(getLE32(anim) == 0x534B4231 && getLE16(anim + 0x8) == 1 && getLE16(anim + 0xA) == 2 &&
+              getLE32(anim + 0xC) == 1,
+          "its header's counts are 16- and 32-bit where they should be");
+    check(getLE16(anim + 0x1C) == 0x0100 && getLE16(anim + 0x2A) == 0x0107,
+          "every key field is 16-bit");
+    check(getLE32(anim + 0x2C) == 0x3F800000 && getLE32(anim + 0x30) == 0x40000000,
+          "the times are floats");
+    check(getLE16(anim + 0x34) == 7 && getLE16(anim + 0x36) == 9, "and the offsets 16-bit");
+
+    U8 junk[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    check(iGCSwapAsset('ZZZZ', junk, sizeof(junk)) == IGCSWAP_UNKNOWN && junk[0] == 1,
+          "a type with no rule is left as it was");
+    check(iGCSwapAsset('ANIM', junk, sizeof(junk)) == IGCSWAP_MALFORMED,
+          "and an animation too short for its header says so");
+}
+
 static void test_file_mod()
 {
     printf("iFile mod folder\n");
@@ -1950,8 +2060,10 @@ static void test_file_mod()
     bool made = write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
                 write_scratch(base, "ONLY.HIP", "BASE", 4) &&
                 write_scratch(base, "GC.HIP", "BASE", 4) &&
+                write_scratch(base, "GC.HOP", "BASE", 4) &&
                 write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
-                write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip));
+                write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip)) &&
+                write_scratch(mod, "gc.hop", gcHip, sizeof(gcHip));
     check(made, "the scratch asset and mod folders can be written");
 
     iHostSetEnv("BFBB_ASSETS", base);
@@ -1968,8 +2080,12 @@ static void test_file_mod()
     read_through_ifile("ONLY.HIP", got, sizeof(got));
     check(strcmp(got, "BASE") == 0, "a file the mod does not have comes from the asset root");
 
+    // A GameCube .HIP is game data, which iGCSwap turns around as it loads; a
+    // .HOP carries models, worlds and sound, which it does not.
     read_through_ifile("GC.HIP", got, sizeof(got));
-    check(strcmp(got, "BASE") == 0, "a GameCube package in the mod folder is passed over");
+    check(memcmp(got, "HIPA", 4) == 0, "a GameCube .HIP in the mod folder is read");
+    read_through_ifile("GC.HOP", got, sizeof(got));
+    check(strcmp(got, "BASE") == 0, "and a GameCube .HOP is passed over");
 
     char loaded[16];
     char path[512];
@@ -2030,7 +2146,8 @@ static void test_file_mod()
     iFileExit();
 
     const char* files[][2] = { { baseGl, "gl01.HIP" }, { base, "ONLY.HIP" }, { base, "GC.HIP" },
-                               { modGl, "GL01.hip" },  { mod, "gc.hip" } };
+                               { base, "GC.HOP" },     { modGl, "GL01.hip" },
+                               { mod, "gc.hip" },      { mod, "gc.hop" } };
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
     {
         snprintf(path, sizeof(path), "%s/%s", files[i][0], files[i][1]);
@@ -5944,6 +6061,7 @@ int main()
     test_mods_model();
     test_save_file();
     test_saves_model();
+    test_gcswap();
     test_idtag();
     test_pad();
     test_savegame();

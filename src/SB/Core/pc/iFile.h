@@ -96,6 +96,16 @@ void iFileMissingPackage(const char* subdirPath, const char* rootPath);
 struct st_PACKER_READ_FUNCS;
 st_PACKER_READ_FUNCS* iFilePackageReadFuncs(st_PACKER_READ_FUNCS* funcs);
 
+// PC-only. The packer's hooks for packages from another console's release.
+// xpkrsvc.cpp calls iFilePackagePlatform with each package's PLAT name as it
+// reads the header, and iFileAssetRead with every asset before it is
+// transformed or used. An asset from a "GameCube" package is byte-swapped in
+// place there; see iGCSwap.h. Macros on the GameCube, where there is nothing
+// to do.
+struct st_PACKER_READ_DATA;
+void iFilePackagePlatform(st_PACKER_READ_DATA* pr, const char* platname);
+void iFileAssetRead(st_PACKER_READ_DATA* pr, U32 type, void* data, S32 size);
+
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);
 U32 iFileRead(tag_xFile* file, void* buf, U32 size);
 S32 iFileReadAsync(tag_xFile* file, void* buf, U32 aSize, void (*callback)(tag_xFile*),
