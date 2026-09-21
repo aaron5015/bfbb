@@ -838,6 +838,8 @@ void iFilePackagePlatform(st_PACKER_READ_DATA* pr, const char* platname)
     if (gc && free >= 0)
     {
         sGCPackages[free] = pr;
+        printf("bfbb: a GameCube package: its assets are byte-swapped as they load\n");
+        fflush(stdout);
     }
 }
 
