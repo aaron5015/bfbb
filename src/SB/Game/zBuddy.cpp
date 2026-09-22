@@ -71,6 +71,15 @@ F32 wander_curve_radius = 0.8f;
 F32 move_speed = 3.5f;
 F32 run_speed = 6.0f;
 F32 catch_up_speed = 9.0f;
+F32 catch_up_release_radius = 4.0f;
+F32 catch_up_transition_time = 0.75f;
+F32 catch_up_momentum_decay_time = 0.18f;
+F32 catch_up_timeout = 5.0f;
+F32 catch_up_combat_grace = 5.0f;
+F32 catch_up_point_radius = 0.9f;
+F32 catch_up_acceleration = 28.0f;
+F32 catch_up_deceleration = 5.0f;
+F32 catch_up_min_speed = 1.0f;
 F32 gravity = 24.0f;
 F32 collision_radius = 0.35f;
 F32 vertical_velocity;
@@ -82,6 +91,11 @@ F32 wander_progress;
 F32 wander_path_length;
 bool wander_active;
 bool catch_up_active;
+bool catch_up_approach;
+F32 catch_up_blend;
+F32 catch_up_momentum;
+F32 catch_up_timer;
+xVec3 catch_up_target;
 xVec3 wander_target;
 xVec3 wander_start;
 xVec3 wander_control;
@@ -90,6 +104,8 @@ const F32 buddy_sleepy_escape_margin = 1.0f;
 S32 buddy_sleepy_count = 0;
 bool buddy_sneaking_sleepy = false;
 bool buddy_moving = false;
+xVec3 safe_ground_position;
+bool safe_ground_valid;
 
 static void buddy_cancel_wander()
 {
@@ -99,7 +115,6 @@ static void buddy_cancel_wander()
     wander_progress = 0.0f;
     wander_path_length = 0.0f;
     wander_active = false;
-    catch_up_active = false;
 }
 
 bool buddy_has_sleepy_hazard(const xVec3* test_position, S32* sleepy_count = NULL)
@@ -245,6 +260,8 @@ void reset_position()
     skill_sweep_timer = 0.0f;
     buddy_sneaking_sleepy = false;
     buddy_moving = false;
+    safe_ground_position = xVec3{ 0.0f, 0.0f, 0.0f };
+    safe_ground_valid = false;
     stuck_timer = 0.0f;
     wander_timer = 0.0f;
     wander_pause = 0.0f;
@@ -252,6 +269,12 @@ void reset_position()
     wander_progress = 0.0f;
     wander_path_length = 0.0f;
     wander_active = false;
+    catch_up_active = false;
+    catch_up_blend = 0.0f;
+    catch_up_momentum = 0.0f;
+    catch_up_timer = 0.0f;
+    catch_up_approach = false;
+    catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_start = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_control = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -301,6 +324,22 @@ void zBuddy_ParseINI(xIniFile* ini)
     move_speed = MAX(0.1f, xIniGetFloat(ini, "Buddy.MoveSpeed", 3.5f));
     run_speed = MAX(move_speed, xIniGetFloat(ini, "Buddy.RunSpeed", 6.0f));
     catch_up_speed = MAX(run_speed, xIniGetFloat(ini, "Buddy.CatchUpSpeed", 9.0f));
+    catch_up_release_radius = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpReleaseRadius", 4.0f));
+    catch_up_transition_time = MAX(0.1f,
+                                   xIniGetFloat(ini, "Buddy.CatchUpTransitionTime", 0.75f));
+    catch_up_momentum_decay_time = MAX(0.05f,
+                                       xIniGetFloat(ini, "Buddy.CatchUpMomentumDecayTime", 0.18f));
+    catch_up_timeout = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpTimeout", 5.0f));
+    catch_up_combat_grace = MAX(0.1f,
+                                xIniGetFloat(ini, "Buddy.CatchUpCombatGrace", 5.0f));
+    catch_up_point_radius = MAX(0.1f,
+                                xIniGetFloat(ini, "Buddy.CatchUpPointRadius", 0.9f));
+    catch_up_acceleration = MAX(0.1f,
+                               xIniGetFloat(ini, "Buddy.CatchUpAcceleration", 28.0f));
+    catch_up_deceleration = MAX(0.1f,
+                                xIniGetFloat(ini, "Buddy.CatchUpDeceleration", 5.0f));
+    catch_up_min_speed = MAX(0.0f,
+                             xIniGetFloat(ini, "Buddy.CatchUpMinSpeed", 1.0f));
     gravity = MAX(0.0f, xIniGetFloat(ini, "Buddy.Gravity", 24.0f));
     collision_radius = MAX(0.05f, xIniGetFloat(ini, "Buddy.CollisionRadius", 0.35f));
     max_health = MAX(1, xIniGetInt(ini, "Buddy.MaxHealth", 3));
@@ -316,6 +355,8 @@ void zBuddy_SceneInit()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
+        safe_ground_position = position;
+        safe_ground_valid = true;
     }
     buddy_raster = NULL;
 
@@ -337,6 +378,8 @@ void zBuddy_SceneReset()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
+        safe_ground_position = position;
+        safe_ground_valid = true;
     }
 }
 
@@ -682,6 +725,10 @@ void zBuddy_SceneUpdate(F32 dt)
 
     if (state == BUDDY_STATE_CHASE)
     {
+        catch_up_active = false;
+        catch_up_approach = false;
+        catch_up_timer = 0.0f;
+        catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
         if (!buddy_target_is_valid(attack_target))
         {
             state = BUDDY_STATE_FOLLOW;
@@ -1004,16 +1051,109 @@ void zBuddy_SceneUpdate(F32 dt)
         follow_radius = idle_follow_radius;
     }
 
-    if (player_distance > idle_follow_radius)
+    if (!catch_up_active && player_distance > idle_follow_radius)
     {
         catch_up_active = true;
+        catch_up_approach = true;
+        catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+        catch_up_timer += dt;
     }
-    else if (catch_up_active && player_distance <= idle_follow_radius * 0.55f)
+    else if (catch_up_active)
     {
+        catch_up_timer += dt;
+    }
+    else if (!catch_up_active)
+    {
+        catch_up_timer = 0.0f;
+    }
+
+    if (catch_up_approach && catch_up_target.x == 0.0f && catch_up_target.z == 0.0f)
+    {
+        xVec3 offset = position - player;
+        offset.y = 0.0f;
+        F32 offset_length = xVec3Length(&offset);
+        if (offset_length > 0.001f)
+        {
+            xVec3SMulBy(&offset, catch_up_point_radius / offset_length);
+        }
+        else
+        {
+            offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
+        }
+        catch_up_target = player + offset;
+    }
+
+    F32 catch_up_limit = in_combat ? catch_up_combat_grace : catch_up_timeout;
+    if (catch_up_active && catch_up_timer >= catch_up_limit)
+    {
+        buddy_cancel_wander();
+        position = player;
+        position.x -= 0.8f;
+        position.z -= 0.8f;
+        vertical_velocity = 0.0f;
         catch_up_active = false;
+        catch_up_approach = false;
+        catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+        catch_up_timer = 0.0f;
+        catch_up_blend = 0.0f;
+        catch_up_momentum = 0.0f;
+        state = BUDDY_STATE_FOLLOW;
+        attack_target = NULL;
+        attack_timer = 0.0f;
+        attack_count = 0;
+        follow_running = false;
+        frame_index = 0;
+        frame_timer = 0.0f;
+        in_combat = false;
+    }
+
+    if (catch_up_active && catch_up_approach)
+    {
+        target = catch_up_target;
+    }
+
+    if (catch_up_active)
+    {
+        F32 catch_up_distance = xVec3Dist(&position, &catch_up_target);
+        F32 target_speed = catch_up_speed;
+        if (catch_up_approach)
+        {
+            F32 braking_speed = sqrtf(2.0f * catch_up_deceleration *
+                                      MAX(0.0f, catch_up_distance));
+            target_speed = MIN(catch_up_speed, MAX(catch_up_min_speed, braking_speed));
+        }
+
+        if (catch_up_momentum < target_speed)
+        {
+            catch_up_momentum = MIN(target_speed,
+                                    catch_up_momentum + catch_up_acceleration * dt);
+        }
+        else
+        {
+            catch_up_momentum = MAX(target_speed,
+                                    catch_up_momentum - catch_up_deceleration * dt);
+        }
+    }
+    else
+    {
+        catch_up_momentum = MAX(0.0f, catch_up_momentum -
+                                         catch_up_speed * dt / catch_up_momentum_decay_time);
+    }
+
+    F32 catch_up_blend_target = catch_up_active ? 1.0f : 0.0f;
+    F32 catch_up_blend_step = dt / catch_up_transition_time;
+    if (catch_up_blend < catch_up_blend_target)
+    {
+        catch_up_blend = MIN(catch_up_blend_target, catch_up_blend + catch_up_blend_step);
+    }
+    else
+    {
+        catch_up_blend = MAX(catch_up_blend_target, catch_up_blend - catch_up_blend_step);
     }
 
     bool must_catch_up = catch_up_active;
+    bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &buddy_sleepy_count);
+    bool wander_finishing = false;
     if (!in_combat && !must_catch_up && player_distance <= follow_radius && wander_radius > 0.0f)
     {
         if (wander_idle_timer > 0.0f)
@@ -1040,7 +1180,10 @@ void zBuddy_SceneUpdate(F32 dt)
 
         if (wander_active)
         {
-            wander_progress = MIN(1.0f, wander_progress + wander_speed * dt /
+            F32 wander_step_speed = in_sleepy_range
+                                        ? buddy_sneak_speed
+                                        : MAX(wander_speed, catch_up_momentum);
+            wander_progress = MIN(1.0f, wander_progress + wander_step_speed * dt /
                                                        wander_path_length);
             F32 eased = wander_progress * wander_progress *
                         (3.0f - 2.0f * wander_progress);
@@ -1053,27 +1196,34 @@ void zBuddy_SceneUpdate(F32 dt)
 
             if (wander_progress >= 1.0f)
             {
-                position.x = wander_target.x;
-                position.z = wander_target.z;
+                wander_finishing = true;
                 wander_active = false;
                 wander_idle_timer = (xurand() < wander_idle_long_chance
                                          ? wander_idle_long_min +
                                                (wander_idle_long_max - wander_idle_long_min) * xurand()
                                          : wander_idle_short_min +
                                                (wander_idle_short_max - wander_idle_short_min) * xurand());
-                target = position;
+                    target = wander_target;
             }
         }
     }
     else
     {
-        buddy_cancel_wander();
+        if (wander_active || wander_idle_timer > 0.0f)
+        {
+            buddy_cancel_wander();
+        }
         target = player;
         if (!must_catch_up)
         {
             target.x -= 0.8f;
             target.z -= 0.8f;
         }
+    }
+
+    if (catch_up_active && catch_up_approach)
+    {
+        target = catch_up_target;
     }
 
     target.y = position.y;
@@ -1085,17 +1235,16 @@ void zBuddy_SceneUpdate(F32 dt)
         frame_index = 0;
         frame_timer = 0.0f;
     }
-    bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &buddy_sleepy_count);
     buddy_sneaking_sleepy = in_sleepy_range;
-        F32 desired_speed = in_sleepy_range
-                    ? buddy_sneak_speed
-                    : (catch_up_active
-                        ? catch_up_speed
-                        : (player_distance > follow_radius
-                            ? run_speed
-                            : (in_combat
-                                ? move_speed
-                                : (wander_active ? wander_speed : 0.0f))));
+    F32 normal_speed = in_sleepy_range
+                           ? buddy_sneak_speed
+                           : player_distance > follow_radius ? run_speed
+                                                             : in_combat ? move_speed
+                                                                         : ((wander_active || wander_finishing)
+                                                                                ? wander_speed
+                                                                                : 0.0f);
+    F32 desired_speed = catch_up_active ? catch_up_momentum
+                                       : normal_speed;
     F32 distance_to_target = xVec3Dist(&position, &target);
     F32 follow = distance_to_target > 0.001f
                      ? MIN(1.0f, desired_speed * dt / distance_to_target)
@@ -1135,10 +1284,10 @@ void zBuddy_SceneUpdate(F32 dt)
     xRay3 ground_ray;
     xCollis ground_coll;
     ground_ray.origin = position;
-    ground_ray.origin.y += buddy_height + 0.25f;
+    ground_ray.origin.y += buddy_height + 0.5f;
     ground_ray.dir = xVec3{ 0.0f, -1.0f, 0.0f };
     ground_ray.min_t = 0.0f;
-    ground_ray.max_t = 3.0f;
+    ground_ray.max_t = 10.0f;
     ground_ray.flags = 0xc00;
     ground_coll.flags = 0;
     ground_coll.dist = 1e38f;
@@ -1154,12 +1303,44 @@ void zBuddy_SceneUpdate(F32 dt)
         {
             position.y = ground_y;
             vertical_velocity = 0.0f;
+            safe_ground_position = position;
+            safe_ground_valid = true;
         }
     }
     else
     {
-        vertical_velocity -= gravity * dt;
-        position.y += vertical_velocity * dt;
+        if (safe_ground_valid)
+        {
+            position.y = safe_ground_position.y;
+            vertical_velocity = 0.0f;
+        }
+        else
+        {
+            vertical_velocity -= gravity * dt;
+            position.y += vertical_velocity * dt;
+        }
+    }
+
+    if (catch_up_active && catch_up_approach && (ground_coll.flags & 1) &&
+        ground_coll.norm.y > 0.45f)
+    {
+        xVec3 point_delta = position - catch_up_target;
+        point_delta.y = 0.0f;
+        if (xVec3Length2(&point_delta) <= 0.35f * 0.35f)
+        {
+            catch_up_active = false;
+            catch_up_approach = false;
+            catch_up_timer = 0.0f;
+            catch_up_blend = 0.0f;
+            catch_up_momentum = 0.0f;
+            catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+            wander_idle_timer = wander_idle_short_min +
+                                (wander_idle_short_max - wander_idle_short_min) * xurand();
+            follow_running = false;
+            buddy_moving = false;
+            frame_index = 0;
+            frame_timer = 0.0f;
+        }
     }
 
     /*
