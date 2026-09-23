@@ -1416,7 +1416,7 @@ void zBuddy_SceneUpdate(F32 dt)
     static S32 buddy_ground_debug_frames = 0;
     if (buddy_ground_debug_frames < 30)
     {
-        printf("[BuddyGround] frame=%d pos=(%.3f, %.3f, %.3f) scene=%p hit=%d dist=%.3f norm=(%.3f, %.3f, %.3f) groundY=%.3f vy=%.3f spawnChecked=%d\n",
+        xprintf("[BuddyGround] frame=%d pos=(%.3f, %.3f, %.3f) scene=%p hit=%d dist=%.3f norm=(%.3f, %.3f, %.3f) groundY=%.3f vy=%.3f spawnChecked=%d\n",
                buddy_ground_debug_frames,
                position.x, position.y, position.z,
                (void*)globals.sceneCur,
