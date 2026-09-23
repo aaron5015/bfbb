@@ -1324,33 +1324,26 @@ void zBuddy_SceneUpdate(F32 dt)
     if ((ground_coll.flags & 1) && ground_coll.norm.y > 0.45f)
     {
         F32 ground_y = ground_ray.origin.y - ground_coll.dist;
-        if (vertical_velocity <= 0.0f && position.y <= ground_y + 0.2f)
+        if (vertical_velocity <= 0.0f || position.y <= ground_y + 0.2f)
         {
             position.y = ground_y;
             vertical_velocity = 0.0f;
             safe_ground_position = position;
             safe_ground_valid = true;
         }
-        else
-        {
-            /*
-             * We have valid ground below us, but are airborne. Let gravity
-             * bring Buddy down instead of pinning her to the last saved floor.
-             */
-            vertical_velocity -= gravity * dt;
-            position.y += vertical_velocity * dt;
-        }
     }
     else
     {
-        /*
-         * No ray hit means there is no current floor under Buddy. Do not
-         * restore the old safe-ground Y every frame; that was the source of
-         * the "stuck in the floor until teleport" behavior across elevation
-         * changes. Let the normal gravity simulation resolve it.
-         */
-        vertical_velocity -= gravity * dt;
-        position.y += vertical_velocity * dt;
+        if (safe_ground_valid)
+        {
+            position.y = safe_ground_position.y;
+            vertical_velocity = 0.0f;
+        }
+        else
+        {
+            vertical_velocity -= gravity * dt;
+            position.y += vertical_velocity * dt;
+        }
     }
 
     if (catch_up_active && catch_up_approach && catch_up_target_valid)
@@ -1393,21 +1386,10 @@ void zBuddy_SceneUpdate(F32 dt)
         stuck_timer += dt;
         if (stuck_timer >= stuck_timeout)
         {
-            /*
-             * Do not teleport as the generic response to a stalled frame.
-             * Clear the movement state and let the next update rebuild a
-             * normal follow/catch-up target. This preserves gravity and avoids
-             * snapping vertically when the player is on another elevation.
-             */
+            position = player;
+            position.x -= 0.8f;
+            position.z -= 0.8f;
             stuck_timer = 0.0f;
-            catch_up_active = false;
-            catch_up_approach = false;
-            catch_up_target_valid = false;
-            catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
-            catch_up_timer = 0.0f;
-            catch_up_momentum = 0.0f;
-            catch_up_cooldown = 0.5f;
-            follow_running = false;
         }
     }
     else
