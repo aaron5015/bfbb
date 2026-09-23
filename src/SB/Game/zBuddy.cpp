@@ -85,7 +85,6 @@ F32 catch_up_cooldown = 0.0f;
 F32 gravity = 24.0f;
 F32 collision_radius = 0.35f;
 F32 vertical_velocity;
-F32 ground_grace_timer;
 F32 stuck_timer;
 F32 wander_timer;
 F32 wander_pause;
@@ -253,7 +252,6 @@ void reset_position()
     death_alpha = 1.0f;
     death_velocity = 0.0f;
     vertical_velocity = 0.0f;
-    ground_grace_timer = 0.75f;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
     skill_kills = 0;
@@ -1339,28 +1337,20 @@ void zBuddy_SceneUpdate(F32 dt)
     }
     else
     {
-        ground_grace_timer = MAX(0.0f, ground_grace_timer - dt);
-
-        /*
-         * Safe ground is only a short spawn/reset guard. Once that grace
-         * period has elapsed, a missed ray must fall under normal gravity so
-         * Buddy can descend onto a lower platform instead of floating at the
-         * last floor she happened to touch.
-         */
-        if (safe_ground_valid && ground_grace_timer > 0.0f)
+        if (safe_ground_valid)
         {
             position.y = safe_ground_position.y;
             vertical_velocity = 0.0f;
         }
         else
         {
-            safe_ground_valid = false;
             vertical_velocity -= gravity * dt;
             position.y += vertical_velocity * dt;
         }
     }
 
-    if (catch_up_active && catch_up_approach && catch_up_target_valid)
+    if (catch_up_active && catch_up_approach && catch_up_target_valid &&
+        (ground_coll.flags & 1) && ground_coll.norm.y > 0.45f)
     {
         xVec3 point_delta = position - catch_up_target;
         point_delta.y = 0.0f;
