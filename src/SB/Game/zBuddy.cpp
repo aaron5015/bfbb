@@ -95,6 +95,7 @@ bool wander_active;
 bool catch_up_active;
 bool catch_up_approach;
 bool catch_up_target_valid;
+bool catch_up_waiting_at_point;
 F32 catch_up_blend;
 F32 catch_up_momentum;
 F32 catch_up_timer;
@@ -279,6 +280,7 @@ void reset_position()
     catch_up_timer = 0.0f;
     catch_up_approach = false;
     catch_up_target_valid = false;
+    catch_up_waiting_at_point = false;
     catch_up_cooldown = 0.0f;
     catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
     catch_up_target_player = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -1101,6 +1103,7 @@ void zBuddy_SceneUpdate(F32 dt)
         catch_up_target = player + offset;
         catch_up_target_player = player;
         catch_up_target_valid = true;
+        catch_up_waiting_at_point = false;
     }
 
     F32 catch_up_limit = in_combat ? catch_up_combat_grace : catch_up_timeout;
@@ -1271,8 +1274,35 @@ void zBuddy_SceneUpdate(F32 dt)
                                                                          : ((wander_active || wander_finishing)
                                                                                 ? wander_speed
                                                                                 : 0.0f);
-    F32 desired_speed = catch_up_active ? catch_up_momentum
-                                       : normal_speed;
+    if (catch_up_waiting_at_point && catch_up_target_valid)
+    {
+        xVec3 wait_delta = player - catch_up_target_player;
+        wait_delta.y = 0.0f;
+        if (xVec3Length(&wait_delta) > 0.35f)
+        {
+            xVec3 offset = position - player;
+            offset.y = 0.0f;
+            F32 offset_length = xVec3Length(&offset);
+            if (offset_length > 0.001f)
+            {
+                xVec3SMulBy(&offset, catch_up_point_radius / offset_length);
+            }
+            else
+            {
+                offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
+            }
+
+            catch_up_target = player + offset;
+            catch_up_target_player = player;
+            catch_up_waiting_at_point = false;
+            catch_up_target_valid = true;
+            catch_up_timer = 0.0f;
+        }
+    }
+
+    F32 desired_speed = catch_up_active && !catch_up_waiting_at_point
+                           ? catch_up_momentum
+                           : normal_speed;
     F32 distance_to_target = xVec3Dist(&position, &target);
     F32 follow = distance_to_target > 0.001f
                      ? MIN(1.0f, desired_speed * dt / distance_to_target)
@@ -1321,6 +1351,21 @@ void zBuddy_SceneUpdate(F32 dt)
     ground_coll.dist = 1e38f;
     if (globals.sceneCur != NULL)
     {
+        xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
+    }
+
+    /*
+     * If the normal ray misses while Buddy is moving between elevations,
+     * give her a taller downward probe before falling back to safe_ground.
+     * This lets her land on a lower platform instead of preserving the old
+     * elevation indefinitely.
+     */
+    if (!(ground_coll.flags & 1) && globals.sceneCur != NULL)
+    {
+        ground_ray.origin.y += 4.0f;
+        ground_ray.max_t = 20.0f;
+        ground_coll.flags = 0;
+        ground_coll.dist = 1e38f;
         xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
     }
 
@@ -1385,6 +1430,7 @@ void zBuddy_SceneUpdate(F32 dt)
                 catch_up_target = player + offset;
                 catch_up_target_player = player;
                 catch_up_target_valid = true;
+                catch_up_waiting_at_point = false;
                 catch_up_timer = 0.0f;
                 /* Keep the current momentum so there is no stop/start pulse. */
                 follow_running = true;
@@ -1394,19 +1440,15 @@ void zBuddy_SceneUpdate(F32 dt)
             }
             else
             {
-                catch_up_active = false;
-                catch_up_approach = false;
-                catch_up_target_valid = false;
-                catch_up_timer = 0.0f;
-                catch_up_blend = 0.0f;
+                /*
+                 * Do not end catch-up here. Stay parked at this captured B
+                 * and wait for the player to move. This prevents the old
+                 * "reach B -> deactivate -> wait until 8 units away" gap.
+                 */
+                catch_up_waiting_at_point = true;
                 catch_up_momentum = 0.0f;
-                catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
-                wander_idle_timer = wander_idle_short_min +
-                                    (wander_idle_short_max - wander_idle_short_min) * xurand();
                 follow_running = false;
                 buddy_moving = false;
-                frame_index = 0;
-                frame_timer = 0.0f;
             }
         }
     }
