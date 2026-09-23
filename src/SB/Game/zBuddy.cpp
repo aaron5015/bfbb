@@ -365,6 +365,9 @@ void zBuddy_SceneInit()
     if (globals.player.ent.frame != NULL)
     {
         position = globals.player.ent.frame->mat.pos;
+        // Original spawn Y: position.y = globals.player.ent.frame->mat.pos.y
+        // Temporary test: raise Cherry well above the player's spawn point.
+        position.y += 2.0f;
         position.x -= 0.8f;
         position.z -= 0.8f;
         ground_spawn_checked = false;
