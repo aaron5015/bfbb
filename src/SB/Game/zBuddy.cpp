@@ -96,6 +96,7 @@ bool catch_up_active;
 bool catch_up_approach;
 bool catch_up_target_valid;
 bool catch_up_waiting_at_point;
+bool catch_up_player_moving;
 F32 catch_up_blend;
 F32 catch_up_momentum;
 F32 catch_up_timer;
@@ -1068,6 +1069,7 @@ void zBuddy_SceneUpdate(F32 dt)
         catch_up_active = true;
         catch_up_approach = true;
         catch_up_target_valid = false;
+        catch_up_player_moving = false;
         catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
         catch_up_timer = 0.0f;
         catch_up_momentum = 0.0f;
@@ -1099,6 +1101,7 @@ void zBuddy_SceneUpdate(F32 dt)
         catch_up_goal_direction = xVec3{ 0.0f, 0.0f, 0.0f };
         catch_up_target_valid = true;
         catch_up_waiting_at_point = false;
+        catch_up_player_moving = false;
     }
 
     F32 catch_up_limit = in_combat ? catch_up_combat_grace : catch_up_timeout;
@@ -1127,22 +1130,23 @@ void zBuddy_SceneUpdate(F32 dt)
     if (catch_up_active && catch_up_approach)
     {
         /*
-         * Point B follows the player's movement direction, not Buddy's
-         * current position. Once the player stops, the last B remains fixed
-         * so Buddy can actually settle there instead of continuously moving
-         * the goal underneath herself.
+         * Point B is a rolling leash goal. Every time the player moves, the
+         * current goal is translated by that exact player movement. This
+         * effectively recycles B -> C -> B -> C without making Cherry stop
+         * at each intermediate point. When the player stops, the last goal is
+         * left exactly where it is so it becomes the final point she can
+         * settle on.
          */
         xVec3 player_step = player - catch_up_target_player;
         player_step.y = 0.0f;
         F32 player_step_length = xVec3Length(&player_step);
 
-        if (player_step_length > 0.01f)
+        catch_up_player_moving = player_step_length > 0.01f;
+        if (catch_up_player_moving)
         {
-            catch_up_goal_direction = player_step;
-            xVec3Normalize(&catch_up_goal_direction, &catch_up_goal_direction);
+            catch_up_target.x += player_step.x;
+            catch_up_target.z += player_step.z;
             catch_up_target_player = player;
-            catch_up_target = player -
-                              catch_up_goal_direction * catch_up_point_radius;
             catch_up_target_valid = true;
         }
 
@@ -1161,7 +1165,7 @@ void zBuddy_SceneUpdate(F32 dt)
          * The smoothstep curve makes the final approach progressively gentler
          * without leaving the buddy crawling for the entire catch-up.
          */
-        if (catch_up_approach && catch_up_distance < catch_up_brake_distance)
+        if (catch_up_approach && !catch_up_player_moving && catch_up_distance < catch_up_brake_distance)
         {
             F32 brake_t = CLAMP(catch_up_distance / catch_up_brake_distance, 0.0f, 1.0f);
             F32 eased = brake_t * brake_t * (3.0f - 2.0f * brake_t);
