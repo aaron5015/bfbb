@@ -85,8 +85,6 @@ F32 catch_up_cooldown = 0.0f;
 F32 gravity = 24.0f;
 F32 collision_radius = 0.35f;
 F32 vertical_velocity;
-F32 ground_init_timer;
-bool ground_initialized;
 F32 stuck_timer;
 F32 wander_timer;
 F32 wander_pause;
@@ -255,8 +253,6 @@ void reset_position()
     death_alpha = 1.0f;
     death_velocity = 0.0f;
     vertical_velocity = 0.0f;
-    ground_init_timer = 0.0f;
-    ground_initialized = false;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
     skill_kills = 0;
@@ -1342,7 +1338,7 @@ void zBuddy_SceneUpdate(F32 dt)
     ground_ray.origin.y += buddy_height + 0.25f;
     ground_ray.dir = xVec3{ 0.0f, -1.0f, 0.0f };
     ground_ray.min_t = 0.0f;
-    ground_ray.max_t = 3.0f;
+    ground_ray.max_t = 10.0f;
     ground_ray.flags = 0xc00;
     ground_coll.flags = 0;
     ground_coll.dist = 1e38f;
@@ -1351,30 +1347,26 @@ void zBuddy_SceneUpdate(F32 dt)
         xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
     }
 
-    if ((ground_coll.flags & 1) && ground_coll.norm.y > 0.45f)
+    if (globals.sceneCur == NULL)
+    {
+        /*
+         * Buddy can be initialized before the scene collision world is
+         * available. Do not treat that startup state as falling; wait until
+         * there is an actual scene to query.
+         */
+        vertical_velocity = 0.0f;
+    }
+    else if ((ground_coll.flags & 1) && ground_coll.norm.y > 0.45f)
     {
         F32 ground_y = ground_ray.origin.y - ground_coll.dist;
         if (vertical_velocity <= 0.0f || position.y <= ground_y + 0.2f)
         {
             position.y = ground_y;
             vertical_velocity = 0.0f;
-            ground_initialized = true;
-            ground_init_timer = 0.0f;
         }
-    }
-    else if (!ground_initialized && ground_init_timer < 0.5f)
-    {
-        /*
-         * SceneInit places Buddy directly beside the player. Give the scene
-         * collision system a few frames to become queryable before applying
-         * gravity for the first time. This is only a one-time spawn guard;
-         * once a real floor has been observed, a missed ray falls normally.
-         */
-        ground_init_timer += dt;
     }
     else
     {
-        ground_initialized = true;
         vertical_velocity -= gravity * dt;
         position.y += vertical_velocity * dt;
     }
