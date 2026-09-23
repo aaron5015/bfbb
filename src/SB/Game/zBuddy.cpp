@@ -1407,27 +1407,6 @@ void zBuddy_SceneUpdate(F32 dt)
         }
     }
 
-    /*
-     * TODO REMOVE: temporary Buddy spawn/ground diagnostics.
-     * These prints are intentionally kept together so the entire block can
-     * be deleted once we compare one successful boot against one failed boot.
-     */
-    static S32 buddy_ground_debug_frames = 0;
-    if (buddy_ground_debug_frames < 30)
-    {
-        printf("bfbb: [BuddyGround] frame=%d pos=(%.3f, %.3f, %.3f) scene=%p hit=%d dist=%.3f norm=(%.3f, %.3f, %.3f) groundY=%.3f vy=%.3f spawnChecked=%d\n",
-               buddy_ground_debug_frames,
-               position.x, position.y, position.z,
-               (void*)globals.sceneCur,
-               ground_hit ? 1 : 0,
-               ground_coll.dist,
-               0.0f, 0.0f, 0.0f,
-               ground_y,
-               vertical_velocity,
-               ground_spawn_checked ? 1 : 0);
-        ++buddy_ground_debug_frames;
-    }
-
     if (ground_hit)
     {
         /*
