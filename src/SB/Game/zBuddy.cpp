@@ -101,6 +101,7 @@ F32 catch_up_momentum;
 F32 catch_up_timer;
 xVec3 catch_up_target;
 xVec3 catch_up_target_player;
+xVec3 catch_up_goal_direction;
 xVec3 wander_target;
 xVec3 wander_start;
 xVec3 wander_control;
@@ -280,6 +281,7 @@ void reset_position()
     catch_up_cooldown = 0.0f;
     catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
     catch_up_target_player = xVec3{ 0.0f, 0.0f, 0.0f };
+    catch_up_goal_direction = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_start = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_control = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -1094,6 +1096,7 @@ void zBuddy_SceneUpdate(F32 dt)
         }
         catch_up_target = player + offset;
         catch_up_target_player = player;
+        catch_up_goal_direction = xVec3{ 0.0f, 0.0f, 0.0f };
         catch_up_target_valid = true;
         catch_up_waiting_at_point = false;
     }
@@ -1123,22 +1126,26 @@ void zBuddy_SceneUpdate(F32 dt)
 
     if (catch_up_active && catch_up_approach)
     {
-        xVec3 offset = position - player;
-        offset.y = 0.0f;
-        F32 offset_length = xVec3Length(&offset);
-        if (offset_length > 0.001f)
+        /*
+         * Point B follows the player's movement direction, not Buddy's
+         * current position. Once the player stops, the last B remains fixed
+         * so Buddy can actually settle there instead of continuously moving
+         * the goal underneath herself.
+         */
+        xVec3 player_step = player - catch_up_target_player;
+        player_step.y = 0.0f;
+        F32 player_step_length = xVec3Length(&player_step);
+
+        if (player_step_length > 0.01f)
         {
-            xVec3SMulBy(&offset, catch_up_point_radius / offset_length);
-        }
-        else
-        {
-            offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
+            catch_up_goal_direction = player_step;
+            xVec3Normalize(&catch_up_goal_direction, &catch_up_goal_direction);
+            catch_up_target_player = player;
+            catch_up_target = player -
+                              catch_up_goal_direction * catch_up_point_radius;
+            catch_up_target_valid = true;
         }
 
-        catch_up_target = player + offset;
-        catch_up_target_player = player;
-        catch_up_target_valid = true;
-        catch_up_waiting_at_point = false;
         target = catch_up_target;
     }
 
