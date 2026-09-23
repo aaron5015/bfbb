@@ -1151,6 +1151,37 @@ void zBuddy_SceneUpdate(F32 dt)
         }
 
         target = catch_up_target;
+
+        /*
+         * The rolling point only becomes a real destination when the player
+         * has stopped. While the player is moving, reaching the current
+         * recycled point must never release catch-up or start wandering.
+         * Once the player stops and Cherry reaches the final point, release
+         * catch-up here. The normal wander block above cannot run until the
+         * following frame, so there is no one-frame wander transition at the
+         * old point.
+         */
+        if (!catch_up_player_moving)
+        {
+            xVec3 final_delta = position - catch_up_target;
+            final_delta.y = 0.0f;
+            if (xVec3Length2(&final_delta) <= 0.35f * 0.35f)
+            {
+                catch_up_active = false;
+                catch_up_approach = false;
+                catch_up_target_valid = false;
+                catch_up_waiting_at_point = false;
+                catch_up_player_moving = false;
+                catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+                catch_up_timer = 0.0f;
+                catch_up_blend = 0.0f;
+                catch_up_momentum = 0.0f;
+                catch_up_cooldown = 0.25f;
+                follow_running = false;
+                frame_index = 0;
+                frame_timer = 0.0f;
+            }
+        }
     }
 
     if (catch_up_active)
