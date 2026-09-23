@@ -1375,21 +1375,26 @@ void zBuddy_SceneUpdate(F32 dt)
     }
 
     xRay3 ground_ray;
-    xCollis ground_coll;
+    xCollis ground_coll = {};
     ground_ray.origin = position;
     ground_ray.origin.y += 1.5f;
     ground_ray.dir = xVec3{ 0.0f, -1.0f, 0.0f };
     ground_ray.min_t = 0.0f;
     ground_ray.max_t = 3.0f;
-    ground_ray.flags = 0xc00;
+    ground_ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
     ground_coll.flags = 0;
-    ground_coll.dist = 1e38f;
+    ground_coll.dist = FLOAT_MAX;
     if (globals.sceneCur != NULL)
     {
         xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
     }
 
-    bool ground_hit = (ground_coll.flags & 1) && ground_coll.norm.y > 0.45f;
+    /*
+     * xRayHitsScene() only guarantees the hit flag and distance here; it does
+     * not copy the surface normal into ground_coll. Testing ground_coll.norm
+     * therefore reads undefined data and made grounding intermittent.
+     */
+    bool ground_hit = (ground_coll.flags & k_HIT_IT) != 0;
     F32 ground_y = ground_hit ? ground_ray.origin.y - ground_coll.dist : position.y;
 
     /*
@@ -1423,7 +1428,7 @@ void zBuddy_SceneUpdate(F32 dt)
                (void*)globals.sceneCur,
                ground_hit ? 1 : 0,
                ground_coll.dist,
-               ground_coll.norm.x, ground_coll.norm.y, ground_coll.norm.z,
+               0.0f, 0.0f, 0.0f,
                ground_y,
                vertical_velocity,
                ground_spawn_checked ? 1 : 0);
