@@ -85,6 +85,7 @@ F32 catch_up_cooldown = 0.0f;
 F32 gravity = 24.0f;
 F32 collision_radius = 0.35f;
 F32 vertical_velocity;
+F32 ground_grace_timer;
 F32 stuck_timer;
 F32 wander_timer;
 F32 wander_pause;
@@ -99,6 +100,7 @@ F32 catch_up_blend;
 F32 catch_up_momentum;
 F32 catch_up_timer;
 xVec3 catch_up_target;
+xVec3 catch_up_target_player;
 xVec3 wander_target;
 xVec3 wander_start;
 xVec3 wander_control;
@@ -251,6 +253,7 @@ void reset_position()
     death_alpha = 1.0f;
     death_velocity = 0.0f;
     vertical_velocity = 0.0f;
+    ground_grace_timer = 0.75f;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
     skill_kills = 0;
@@ -280,6 +283,7 @@ void reset_position()
     catch_up_target_valid = false;
     catch_up_cooldown = 0.0f;
     catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+    catch_up_target_player = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_start = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_control = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -328,7 +332,7 @@ void zBuddy_ParseINI(xIniFile* ini)
     wander_curve_radius = MAX(0.0f, xIniGetFloat(ini, "Buddy.WanderCurveRadius", 0.8f));
     move_speed = MAX(0.1f, xIniGetFloat(ini, "Buddy.MoveSpeed", 3.5f));
     run_speed = MAX(move_speed, xIniGetFloat(ini, "Buddy.RunSpeed", 6.0f));
-    catch_up_speed = MAX(run_speed, xIniGetFloat(ini, "Buddy.CatchUpSpeed", 9.0f));
+    catch_up_speed = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpSpeed", 9.0f));
     catch_up_release_radius = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpReleaseRadius", 4.0f));
     catch_up_transition_time = MAX(0.1f,
                                    xIniGetFloat(ini, "Buddy.CatchUpTransitionTime", 0.75f));
@@ -1097,6 +1101,7 @@ void zBuddy_SceneUpdate(F32 dt)
             offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
         }
         catch_up_target = player + offset;
+        catch_up_target_player = player;
         catch_up_target_valid = true;
     }
 
@@ -1334,13 +1339,22 @@ void zBuddy_SceneUpdate(F32 dt)
     }
     else
     {
-        if (safe_ground_valid)
+        ground_grace_timer = MAX(0.0f, ground_grace_timer - dt);
+
+        /*
+         * Safe ground is only a short spawn/reset guard. Once that grace
+         * period has elapsed, a missed ray must fall under normal gravity so
+         * Buddy can descend onto a lower platform instead of floating at the
+         * last floor she happened to touch.
+         */
+        if (safe_ground_valid && ground_grace_timer > 0.0f)
         {
             position.y = safe_ground_position.y;
             vertical_velocity = 0.0f;
         }
         else
         {
+            safe_ground_valid = false;
             vertical_velocity -= gravity * dt;
             position.y += vertical_velocity * dt;
         }
@@ -1360,11 +1374,11 @@ void zBuddy_SceneUpdate(F32 dt)
              * captured point. If the player has stopped close enough, then B
              * really is the end of this catch-up and Buddy can idle/wander.
              */
-            xVec3 player_delta_at_b = player - position;
-            player_delta_at_b.y = 0.0f;
-            F32 player_distance_at_b = xVec3Length(&player_delta_at_b);
+            xVec3 player_delta_since_b = player - catch_up_target_player;
+            player_delta_since_b.y = 0.0f;
+            F32 player_moved_since_b = xVec3Length(&player_delta_since_b);
 
-            if (player_distance_at_b > idle_follow_radius)
+            if (player_moved_since_b > 0.35f)
             {
                 xVec3 offset = position - player;
                 offset.y = 0.0f;
@@ -1379,6 +1393,7 @@ void zBuddy_SceneUpdate(F32 dt)
                 }
 
                 catch_up_target = player + offset;
+                catch_up_target_player = player;
                 catch_up_target_valid = true;
                 catch_up_timer = 0.0f;
                 /* Keep the current momentum so there is no stop/start pulse. */
