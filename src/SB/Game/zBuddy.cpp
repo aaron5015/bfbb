@@ -1331,16 +1331,32 @@ void zBuddy_SceneUpdate(F32 dt)
             safe_ground_position = position;
             safe_ground_valid = true;
         }
+        else
+        {
+            vertical_velocity -= gravity * dt;
+            position.y += vertical_velocity * dt;
+        }
     }
     else
     {
-        if (safe_ground_valid)
+        F32 safe_dx = position.x - safe_ground_position.x;
+        F32 safe_dz = position.z - safe_ground_position.z;
+        F32 safe_distance2 = safe_dx * safe_dx + safe_dz * safe_dz;
+
+        /*
+         * safe_ground_position exists primarily to keep Buddy attached during
+         * the first frames after spawning/resetting. Do not use it as a
+         * permanent vertical leash: once Buddy has moved away from that saved
+         * floor and the ray is missing, normal gravity must take over.
+         */
+        if (safe_ground_valid && safe_distance2 <= 0.25f * 0.25f)
         {
             position.y = safe_ground_position.y;
             vertical_velocity = 0.0f;
         }
         else
         {
+            safe_ground_valid = false;
             vertical_velocity -= gravity * dt;
             position.y += vertical_velocity * dt;
         }
@@ -1364,7 +1380,7 @@ void zBuddy_SceneUpdate(F32 dt)
             player_delta_at_b.y = 0.0f;
             F32 player_distance_at_b = xVec3Length(&player_delta_at_b);
 
-            if (player_distance_at_b > catch_up_point_radius + 0.25f)
+            if (player_distance_at_b > idle_follow_radius)
             {
                 xVec3 offset = position - player;
                 offset.y = 0.0f;
