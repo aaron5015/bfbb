@@ -13,6 +13,7 @@
 #include "zNPCTypeRobot.h"
 #include "xCollide.h"
 #include "xScene.h"
+#include "xDebug.h"
 
 #include <rwcore.h>
 #include <string.h>
