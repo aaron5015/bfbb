@@ -80,6 +80,8 @@ F32 catch_up_point_radius = 0.9f;
 F32 catch_up_acceleration = 28.0f;
 F32 catch_up_deceleration = 5.0f;
 F32 catch_up_min_speed = 1.0f;
+F32 catch_up_brake_distance = 2.5f;
+F32 catch_up_cooldown = 0.0f;
 F32 gravity = 24.0f;
 F32 collision_radius = 0.35f;
 F32 vertical_velocity;
@@ -274,6 +276,7 @@ void reset_position()
     catch_up_momentum = 0.0f;
     catch_up_timer = 0.0f;
     catch_up_approach = false;
+    catch_up_cooldown = 0.0f;
     catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_start = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -340,6 +343,8 @@ void zBuddy_ParseINI(xIniFile* ini)
                                 xIniGetFloat(ini, "Buddy.CatchUpDeceleration", 5.0f));
     catch_up_min_speed = MAX(0.0f,
                              xIniGetFloat(ini, "Buddy.CatchUpMinSpeed", 1.0f));
+    catch_up_brake_distance = MAX(0.1f,
+                                  xIniGetFloat(ini, "Buddy.CatchUpBrakeDistance", 2.5f));
     gravity = MAX(0.0f, xIniGetFloat(ini, "Buddy.Gravity", 24.0f));
     collision_radius = MAX(0.05f, xIniGetFloat(ini, "Buddy.CollisionRadius", 0.35f));
     max_health = MAX(1, xIniGetInt(ini, "Buddy.MaxHealth", 3));
@@ -1051,18 +1056,26 @@ void zBuddy_SceneUpdate(F32 dt)
         follow_radius = idle_follow_radius;
     }
 
-    if (!catch_up_active && player_distance > idle_follow_radius)
+    catch_up_cooldown = MAX(0.0f, catch_up_cooldown - dt);
+
+    /*
+     * Catch-up uses a captured point B rather than continuously steering at
+     * the player. This keeps the behavior as follow -> stop -> follow instead
+     * of turning it into a permanent leash/chase.
+     */
+    if (!catch_up_active && catch_up_cooldown <= 0.0f && player_distance > idle_follow_radius)
     {
         catch_up_active = true;
         catch_up_approach = true;
         catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
-        catch_up_timer += dt;
+        catch_up_timer = 0.0f;
+        catch_up_momentum = 0.0f;
     }
     else if (catch_up_active)
     {
         catch_up_timer += dt;
     }
-    else if (!catch_up_active)
+    else
     {
         catch_up_timer = 0.0f;
     }
@@ -1086,25 +1099,23 @@ void zBuddy_SceneUpdate(F32 dt)
     F32 catch_up_limit = in_combat ? catch_up_combat_grace : catch_up_timeout;
     if (catch_up_active && catch_up_timer >= catch_up_limit)
     {
-        buddy_cancel_wander();
-        position = player;
-        position.x -= 0.8f;
-        position.z -= 0.8f;
-        vertical_velocity = 0.0f;
+        /*
+         * A timeout is only a movement failsafe. Never teleport Buddy to the
+         * player here: doing so hides failed ground/movement resolution and
+         * creates the large vertical snaps seen when the player changes
+         * elevation. Drop back to ordinary follow movement and give that
+         * movement a short chance to close the gap naturally.
+         */
         catch_up_active = false;
         catch_up_approach = false;
         catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
         catch_up_timer = 0.0f;
         catch_up_blend = 0.0f;
         catch_up_momentum = 0.0f;
-        state = BUDDY_STATE_FOLLOW;
-        attack_target = NULL;
-        attack_timer = 0.0f;
-        attack_count = 0;
+        catch_up_cooldown = 0.75f;
         follow_running = false;
         frame_index = 0;
         frame_timer = 0.0f;
-        in_combat = false;
     }
 
     if (catch_up_active && catch_up_approach)
@@ -1116,11 +1127,20 @@ void zBuddy_SceneUpdate(F32 dt)
     {
         F32 catch_up_distance = xVec3Dist(&position, &catch_up_target);
         F32 target_speed = catch_up_speed;
-        if (catch_up_approach)
+
+        /*
+         * Fast ease-in: get to the capped catch-up speed quickly and keep it
+         * capped while the captured point B is still far away. Only once the
+         * buddy is actually close to B do we ease the requested speed down.
+         * The smoothstep curve makes the final approach progressively gentler
+         * without leaving the buddy crawling for the entire catch-up.
+         */
+        if (catch_up_approach && catch_up_distance < catch_up_brake_distance)
         {
-            F32 braking_speed = sqrtf(2.0f * catch_up_deceleration *
-                                      MAX(0.0f, catch_up_distance));
-            target_speed = MIN(catch_up_speed, MAX(catch_up_min_speed, braking_speed));
+            F32 brake_t = CLAMP(catch_up_distance / catch_up_brake_distance, 0.0f, 1.0f);
+            F32 eased = brake_t * brake_t * (3.0f - 2.0f * brake_t);
+            target_speed = catch_up_min_speed +
+                           (catch_up_speed - catch_up_min_speed) * eased;
         }
 
         if (catch_up_momentum < target_speed)
@@ -1299,26 +1319,33 @@ void zBuddy_SceneUpdate(F32 dt)
     if ((ground_coll.flags & 1) && ground_coll.norm.y > 0.45f)
     {
         F32 ground_y = ground_ray.origin.y - ground_coll.dist;
-        if (vertical_velocity <= 0.0f || position.y <= ground_y + 0.2f)
+        if (vertical_velocity <= 0.0f && position.y <= ground_y + 0.2f)
         {
             position.y = ground_y;
             vertical_velocity = 0.0f;
             safe_ground_position = position;
             safe_ground_valid = true;
         }
-    }
-    else
-    {
-        if (safe_ground_valid)
-        {
-            position.y = safe_ground_position.y;
-            vertical_velocity = 0.0f;
-        }
         else
         {
+            /*
+             * We have valid ground below us, but are airborne. Let gravity
+             * bring Buddy down instead of pinning her to the last saved floor.
+             */
             vertical_velocity -= gravity * dt;
             position.y += vertical_velocity * dt;
         }
+    }
+    else
+    {
+        /*
+         * No ray hit means there is no current floor under Buddy. Do not
+         * restore the old safe-ground Y every frame; that was the source of
+         * the "stuck in the floor until teleport" behavior across elevation
+         * changes. Let the normal gravity simulation resolve it.
+         */
+        vertical_velocity -= gravity * dt;
+        position.y += vertical_velocity * dt;
     }
 
     if (catch_up_active && catch_up_approach && (ground_coll.flags & 1) &&
@@ -1355,10 +1382,20 @@ void zBuddy_SceneUpdate(F32 dt)
         stuck_timer += dt;
         if (stuck_timer >= stuck_timeout)
         {
-            position = player;
-            position.x -= 0.8f;
-            position.z -= 0.8f;
+            /*
+             * Do not teleport as the generic response to a stalled frame.
+             * Clear the movement state and let the next update rebuild a
+             * normal follow/catch-up target. This preserves gravity and avoids
+             * snapping vertically when the player is on another elevation.
+             */
             stuck_timer = 0.0f;
+            catch_up_active = false;
+            catch_up_approach = false;
+            catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+            catch_up_timer = 0.0f;
+            catch_up_momentum = 0.0f;
+            catch_up_cooldown = 0.5f;
+            follow_running = false;
         }
     }
     else
