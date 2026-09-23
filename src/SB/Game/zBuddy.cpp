@@ -1353,24 +1353,56 @@ void zBuddy_SceneUpdate(F32 dt)
         if (xVec3Length2(&point_delta) <= 0.35f * 0.35f)
         {
             /*
-             * Point B is a horizontal follow anchor. Once Buddy reaches it,
-             * stop the catch-up immediately and enter the normal wander/idle
-             * phase. Gravity remains independent, so reaching B never forces
-             * an artificial vertical snap.
+             * Point B is a captured anchor, not a continuously moving target.
+             * When Buddy reaches B, immediately capture the next B if the
+             * player has continued moving away. This keeps the catch-up motion
+             * continuous instead of producing a visible stop/start at every
+             * captured point. If the player has stopped close enough, then B
+             * really is the end of this catch-up and Buddy can idle/wander.
              */
-            catch_up_active = false;
-            catch_up_approach = false;
-            catch_up_target_valid = false;
-            catch_up_timer = 0.0f;
-            catch_up_blend = 0.0f;
-            catch_up_momentum = 0.0f;
-            catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
-            wander_idle_timer = wander_idle_short_min +
-                                (wander_idle_short_max - wander_idle_short_min) * xurand();
-            follow_running = false;
-            buddy_moving = false;
-            frame_index = 0;
-            frame_timer = 0.0f;
+            xVec3 player_delta_at_b = player - position;
+            player_delta_at_b.y = 0.0f;
+            F32 player_distance_at_b = xVec3Length(&player_delta_at_b);
+
+            if (player_distance_at_b > catch_up_point_radius + 0.25f)
+            {
+                xVec3 offset = position - player;
+                offset.y = 0.0f;
+                F32 offset_length = xVec3Length(&offset);
+                if (offset_length > 0.001f)
+                {
+                    xVec3SMulBy(&offset, catch_up_point_radius / offset_length);
+                }
+                else
+                {
+                    offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
+                }
+
+                catch_up_target = player + offset;
+                catch_up_target_valid = true;
+                catch_up_timer = 0.0f;
+                /* Keep the current momentum so there is no stop/start pulse. */
+                follow_running = true;
+                buddy_moving = true;
+                frame_index = 0;
+                frame_timer = 0.0f;
+            }
+            else
+            {
+                catch_up_active = false;
+                catch_up_approach = false;
+                catch_up_target_valid = false;
+                catch_up_timer = 0.0f;
+                catch_up_blend = 0.0f;
+                catch_up_momentum = 0.0f;
+                catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+                wander_idle_timer = wander_idle_short_min +
+                                    (wander_idle_short_max - wander_idle_short_min) * xurand();
+                follow_running = false;
+                buddy_moving = false;
+                frame_index = 0;
+                frame_timer = 0.0f;
+            }
         }
     }
 
