@@ -389,9 +389,7 @@ void zBuddy_SceneReset()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
-        ground_spawn_y = position.y;
-        ground_spawn_timer = 0.0f;
-        ground_spawn_valid = false;
+        ground_spawn_checked = false;
     }
 }
 
