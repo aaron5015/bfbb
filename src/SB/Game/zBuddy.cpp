@@ -85,9 +85,7 @@ F32 catch_up_cooldown = 0.0f;
 F32 gravity = 24.0f;
 F32 collision_radius = 0.35f;
 F32 vertical_velocity;
-F32 ground_spawn_timer;
-F32 ground_spawn_y;
-bool ground_spawn_valid;
+bool ground_spawn_checked;
 F32 stuck_timer;
 F32 wander_timer;
 F32 wander_pause;
@@ -256,9 +254,7 @@ void reset_position()
     death_alpha = 1.0f;
     death_velocity = 0.0f;
     vertical_velocity = 0.0f;
-    ground_spawn_timer = 0.0f;
-    ground_spawn_y = 0.0f;
-    ground_spawn_valid = false;
+    ground_spawn_checked = false;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
     skill_kills = 0;
@@ -371,9 +367,7 @@ void zBuddy_SceneInit()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
-        ground_spawn_y = position.y;
-        ground_spawn_timer = 0.0f;
-        ground_spawn_valid = false;
+        ground_spawn_checked = false;
     }
     buddy_raster = NULL;
 
@@ -1378,10 +1372,10 @@ void zBuddy_SceneUpdate(F32 dt)
     xRay3 ground_ray;
     xCollis ground_coll;
     ground_ray.origin = position;
-    ground_ray.origin.y += buddy_height + 2.0f;
+    ground_ray.origin.y += 1.5f;
     ground_ray.dir = xVec3{ 0.0f, -1.0f, 0.0f };
     ground_ray.min_t = 0.0f;
-    ground_ray.max_t = 20.0f;
+    ground_ray.max_t = 3.0f;
     ground_ray.flags = 0xc00;
     ground_coll.flags = 0;
     ground_coll.dist = 1e38f;
@@ -1393,45 +1387,34 @@ void zBuddy_SceneUpdate(F32 dt)
     bool ground_hit = (ground_coll.flags & 1) && ground_coll.norm.y > 0.45f;
     F32 ground_y = ground_hit ? ground_ray.origin.y - ground_coll.dist : position.y;
 
-    if (!ground_spawn_valid && ground_spawn_timer < 1.0f)
+    /*
+     * Do one short, spawn-only floor correction after the scene collision
+     * world exists. SceneInit already places Buddy beside the player, but
+     * that transform can be a fraction below the actual floor on some
+     * scene starts. The ray begins above Buddy and only accepts a nearby
+     * surface, so it cannot intentionally lift her onto a distant platform.
+     */
+    if (!ground_spawn_checked && globals.sceneCur != NULL)
     {
-        /*
-         * SceneInit can place Buddy before the collision world is ready.
-         * Hold her at the known player spawn height until a real floor is
-         * observed, instead of allowing one missed startup ray to send her
-         * into the void.
-         */
-        ground_spawn_timer += dt;
-        if (ground_hit)
+        ground_spawn_checked = true;
+        if (ground_hit && ground_y >= position.y - 1.0f && ground_y <= position.y + 1.0f)
         {
             position.y = ground_y;
-            ground_spawn_valid = true;
-            vertical_velocity = 0.0f;
-        }
-        else
-        {
-            position.y = ground_spawn_y;
             vertical_velocity = 0.0f;
         }
     }
-    else if (ground_hit)
+
+    if (ground_hit)
     {
         /*
-         * Cast from above Buddy so moving onto a lower JSP/BSP/plat/simp
-         * still finds the new surface even if the previous frame's Y was
-         * slightly above or below it. Only snap to a floor that is close
-         * enough to be the surface Buddy is traversing; larger elevation
-         * changes are handled by normal gravity.
+         * Normal runtime grounding. Keep this separate from the one-shot
+         * spawn correction so initialization cannot repeatedly overwrite
+         * Buddy's elevation.
          */
-        if (ground_y <= position.y + 1.5f && ground_y >= position.y - 20.0f)
+        if (vertical_velocity <= 0.0f || position.y <= ground_y + 0.2f)
         {
             position.y = ground_y;
             vertical_velocity = 0.0f;
-        }
-        else
-        {
-            vertical_velocity -= gravity * dt;
-            position.y += vertical_velocity * dt;
         }
     }
     else
