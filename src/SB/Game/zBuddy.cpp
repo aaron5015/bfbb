@@ -263,8 +263,6 @@ void reset_position()
     skill_sweep_timer = 0.0f;
     buddy_sneaking_sleepy = false;
     buddy_moving = false;
-    safe_ground_position = xVec3{ 0.0f, 0.0f, 0.0f };
-    safe_ground_valid = false;
     stuck_timer = 0.0f;
     wander_timer = 0.0f;
     wander_pause = 0.0f;
