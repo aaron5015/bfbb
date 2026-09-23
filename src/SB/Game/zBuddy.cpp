@@ -13,8 +13,6 @@
 #include "zNPCTypeRobot.h"
 #include "xCollide.h"
 #include "xScene.h"
-#include <cstdio>
-
 #include <rwcore.h>
 #include <string.h>
 
@@ -371,11 +369,6 @@ void zBuddy_SceneInit()
         position.z -= 0.8f;
         ground_spawn_checked = false;
     }
-    /*
-     * TODO REMOVE: reset temporary Buddy ground diagnostics per scene boot.
-     */
-    // Note: the counter itself is static in zBuddy_Update; this declaration
-    // is intentionally not reset here so a single log covers the first frames.
     buddy_raster = NULL;
 
     if (enabled && selected != BUDDY_NONE && texture_name[0] != '\0')
