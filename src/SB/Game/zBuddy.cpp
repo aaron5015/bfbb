@@ -109,8 +109,6 @@ const F32 buddy_sleepy_escape_margin = 1.0f;
 S32 buddy_sleepy_count = 0;
 bool buddy_sneaking_sleepy = false;
 bool buddy_moving = false;
-xVec3 safe_ground_position;
-bool safe_ground_valid;
 
 static void buddy_cancel_wander()
 {
@@ -366,8 +364,6 @@ void zBuddy_SceneInit()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
-        safe_ground_position = position;
-        safe_ground_valid = true;
     }
     buddy_raster = NULL;
 
@@ -389,8 +385,6 @@ void zBuddy_SceneReset()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
-        safe_ground_position = position;
-        safe_ground_valid = true;
     }
 }
 
@@ -1301,7 +1295,7 @@ void zBuddy_SceneUpdate(F32 dt)
     }
 
     F32 desired_speed = catch_up_active && !catch_up_waiting_at_point
-                           ? catch_up_momentum
+                           ? MIN(catch_up_momentum, catch_up_speed)
                            : normal_speed;
     F32 distance_to_target = xVec3Dist(&position, &target);
     F32 follow = distance_to_target > 0.001f
@@ -1342,30 +1336,15 @@ void zBuddy_SceneUpdate(F32 dt)
     xRay3 ground_ray;
     xCollis ground_coll;
     ground_ray.origin = position;
-    ground_ray.origin.y += buddy_height + 0.5f;
+    ground_ray.origin.y += buddy_height + 0.25f;
     ground_ray.dir = xVec3{ 0.0f, -1.0f, 0.0f };
     ground_ray.min_t = 0.0f;
-    ground_ray.max_t = 10.0f;
+    ground_ray.max_t = 3.0f;
     ground_ray.flags = 0xc00;
     ground_coll.flags = 0;
     ground_coll.dist = 1e38f;
     if (globals.sceneCur != NULL)
     {
-        xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
-    }
-
-    /*
-     * If the normal ray misses while Buddy is moving between elevations,
-     * give her a taller downward probe before falling back to safe_ground.
-     * This lets her land on a lower platform instead of preserving the old
-     * elevation indefinitely.
-     */
-    if (!(ground_coll.flags & 1) && globals.sceneCur != NULL)
-    {
-        ground_ray.origin.y += 4.0f;
-        ground_ray.max_t = 20.0f;
-        ground_coll.flags = 0;
-        ground_coll.dist = 1e38f;
         xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
     }
 
@@ -1376,22 +1355,12 @@ void zBuddy_SceneUpdate(F32 dt)
         {
             position.y = ground_y;
             vertical_velocity = 0.0f;
-            safe_ground_position = position;
-            safe_ground_valid = true;
         }
     }
     else
     {
-        if (safe_ground_valid)
-        {
-            position.y = safe_ground_position.y;
-            vertical_velocity = 0.0f;
-        }
-        else
-        {
-            vertical_velocity -= gravity * dt;
-            position.y += vertical_velocity * dt;
-        }
+        vertical_velocity -= gravity * dt;
+        position.y += vertical_velocity * dt;
     }
 
     if (catch_up_active && catch_up_approach && catch_up_target_valid &&
