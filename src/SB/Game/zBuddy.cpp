@@ -94,6 +94,7 @@ F32 wander_path_length;
 bool wander_active;
 bool catch_up_active;
 bool catch_up_approach;
+bool catch_up_target_valid;
 F32 catch_up_blend;
 F32 catch_up_momentum;
 F32 catch_up_timer;
@@ -276,6 +277,7 @@ void reset_position()
     catch_up_momentum = 0.0f;
     catch_up_timer = 0.0f;
     catch_up_approach = false;
+    catch_up_target_valid = false;
     catch_up_cooldown = 0.0f;
     catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
     wander_target = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -1067,6 +1069,7 @@ void zBuddy_SceneUpdate(F32 dt)
     {
         catch_up_active = true;
         catch_up_approach = true;
+        catch_up_target_valid = false;
         catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
         catch_up_timer = 0.0f;
         catch_up_momentum = 0.0f;
@@ -1080,7 +1083,7 @@ void zBuddy_SceneUpdate(F32 dt)
         catch_up_timer = 0.0f;
     }
 
-    if (catch_up_approach && catch_up_target.x == 0.0f && catch_up_target.z == 0.0f)
+    if (catch_up_approach && !catch_up_target_valid)
     {
         xVec3 offset = position - player;
         offset.y = 0.0f;
@@ -1094,6 +1097,7 @@ void zBuddy_SceneUpdate(F32 dt)
             offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
         }
         catch_up_target = player + offset;
+        catch_up_target_valid = true;
     }
 
     F32 catch_up_limit = in_combat ? catch_up_combat_grace : catch_up_timeout;
@@ -1108,6 +1112,7 @@ void zBuddy_SceneUpdate(F32 dt)
          */
         catch_up_active = false;
         catch_up_approach = false;
+        catch_up_target_valid = false;
         catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
         catch_up_timer = 0.0f;
         catch_up_blend = 0.0f;
@@ -1348,15 +1353,21 @@ void zBuddy_SceneUpdate(F32 dt)
         position.y += vertical_velocity * dt;
     }
 
-    if (catch_up_active && catch_up_approach && (ground_coll.flags & 1) &&
-        ground_coll.norm.y > 0.45f)
+    if (catch_up_active && catch_up_approach && catch_up_target_valid)
     {
         xVec3 point_delta = position - catch_up_target;
         point_delta.y = 0.0f;
         if (xVec3Length2(&point_delta) <= 0.35f * 0.35f)
         {
+            /*
+             * Point B is a horizontal follow anchor. Once Buddy reaches it,
+             * stop the catch-up immediately and enter the normal wander/idle
+             * phase. Gravity remains independent, so reaching B never forces
+             * an artificial vertical snap.
+             */
             catch_up_active = false;
             catch_up_approach = false;
+            catch_up_target_valid = false;
             catch_up_timer = 0.0f;
             catch_up_blend = 0.0f;
             catch_up_momentum = 0.0f;
@@ -1391,6 +1402,7 @@ void zBuddy_SceneUpdate(F32 dt)
             stuck_timer = 0.0f;
             catch_up_active = false;
             catch_up_approach = false;
+            catch_up_target_valid = false;
             catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
             catch_up_timer = 0.0f;
             catch_up_momentum = 0.0f;
