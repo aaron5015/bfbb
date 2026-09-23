@@ -370,6 +370,11 @@ void zBuddy_SceneInit()
         position.z -= 0.8f;
         ground_spawn_checked = false;
     }
+    /*
+     * TODO REMOVE: reset temporary Buddy ground diagnostics per scene boot.
+     */
+    // Note: the counter itself is static in zBuddy_Update; this declaration
+    // is intentionally not reset here so a single log covers the first frames.
     buddy_raster = NULL;
 
     if (enabled && selected != BUDDY_NONE && texture_name[0] != '\0')
@@ -1401,6 +1406,27 @@ void zBuddy_SceneUpdate(F32 dt)
             position.y = ground_y;
             vertical_velocity = 0.0f;
         }
+    }
+
+    /*
+     * TODO REMOVE: temporary Buddy spawn/ground diagnostics.
+     * These prints are intentionally kept together so the entire block can
+     * be deleted once we compare one successful boot against one failed boot.
+     */
+    static S32 buddy_ground_debug_frames = 0;
+    if (buddy_ground_debug_frames < 30)
+    {
+        printf("[BuddyGround] frame=%d pos=(%.3f, %.3f, %.3f) scene=%p hit=%d dist=%.3f norm=(%.3f, %.3f, %.3f) groundY=%.3f vy=%.3f spawnChecked=%d\n",
+               buddy_ground_debug_frames,
+               position.x, position.y, position.z,
+               (void*)globals.sceneCur,
+               ground_hit ? 1 : 0,
+               ground_coll.dist,
+               ground_coll.norm.x, ground_coll.norm.y, ground_coll.norm.z,
+               ground_y,
+               vertical_velocity,
+               ground_spawn_checked ? 1 : 0);
+        ++buddy_ground_debug_frames;
     }
 
     if (ground_hit)
