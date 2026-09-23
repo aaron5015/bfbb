@@ -1,4 +1,5 @@
 #include "zBuddy.h"
+#include "zBuddyInternal.h"
 
 #include "iCamera.h"
 #include "xIni.h"
@@ -10,29 +11,15 @@
 #include "zNPCMgr.h"
 #include "zNPCTypeCommon.h"
 #include "zNPCTypeRobot.h"
-
+#include "xCollide.h"
+#include "xScene.h"
 #include <rwcore.h>
 #include <string.h>
 
 extern U32 g_hash_dupoanim[5];
 
-namespace
+namespace zBuddyInternal
 {
-enum buddy_type
-{
-    BUDDY_NONE,
-    BUDDY_CHERRY_COLA
-};
-
-enum buddy_state
-{
-    BUDDY_STATE_FOLLOW,
-    BUDDY_STATE_CHASE,
-    BUDDY_STATE_STRIKE,
-    BUDDY_STATE_RECOVER,
-    BUDDY_STATE_DEAD
-};
-
 S32 enabled;
 buddy_type selected = BUDDY_NONE;
 xVec3 position;
@@ -57,11 +44,83 @@ F32 death_alpha;
 F32 death_velocity;
 F32 robot_hit_cooldown;
 F32 damage_cooldown;
+S32 skill_kills;
+zNPCCommon* skill_target;
+zNPCCommon* pending_kill_target;
+F32 pending_kill_timer;
+xVec3 skill_start_position;
+xVec3 skill_target_position;
+bool skill_damage_applied;
+S32 skill_kill_cost = 9;
+F32 skill_sweep_timer;
+F32 idle_follow_radius = 8.0f;
+F32 combat_follow_radius = 16.0f;
+F32 combat_return_radius = 20.0f;
+F32 stuck_timeout = 8.0f;
+F32 wander_radius = 3.0f;
+F32 wander_pause_min = 0.8f;
+F32 wander_pause_max = 2.5f;
+F32 wander_idle_short_min = 3.0f;
+F32 wander_idle_short_max = 5.0f;
+F32 wander_idle_long_min = 10.0f;
+F32 wander_idle_long_max = 15.0f;
+F32 wander_idle_long_chance = 0.25f;
+F32 wander_speed = 1.4f;
+F32 wander_curve_radius = 0.8f;
+F32 move_speed = 3.5f;
+F32 run_speed = 6.0f;
+F32 catch_up_speed = 9.0f;
+F32 catch_up_release_radius = 4.0f;
+F32 catch_up_transition_time = 0.75f;
+F32 catch_up_momentum_decay_time = 0.18f;
+F32 catch_up_timeout = 5.0f;
+F32 catch_up_combat_grace = 5.0f;
+F32 catch_up_point_radius = 0.9f;
+F32 catch_up_acceleration = 28.0f;
+F32 catch_up_deceleration = 5.0f;
+F32 catch_up_min_speed = 1.0f;
+F32 catch_up_brake_distance = 2.5f;
+F32 catch_up_cooldown = 0.0f;
+F32 gravity = 24.0f;
+F32 collision_radius = 0.35f;
+F32 vertical_velocity;
+bool ground_spawn_checked;
+F32 stuck_timer;
+F32 wander_timer;
+F32 wander_pause;
+F32 wander_idle_timer;
+F32 wander_progress;
+F32 wander_path_length;
+bool wander_active;
+bool catch_up_active;
+bool catch_up_approach;
+bool catch_up_target_valid;
+bool catch_up_waiting_at_point;
+bool catch_up_player_moving;
+F32 catch_up_blend;
+F32 catch_up_momentum;
+F32 catch_up_timer;
+xVec3 catch_up_target;
+xVec3 catch_up_target_player;
+xVec3 catch_up_goal_direction;
+xVec3 wander_target;
+xVec3 wander_start;
+xVec3 wander_control;
 const F32 buddy_sneak_speed = 0.35f;
 const F32 buddy_sleepy_escape_margin = 1.0f;
 S32 buddy_sleepy_count = 0;
 bool buddy_sneaking_sleepy = false;
 bool buddy_moving = false;
+
+static void buddy_cancel_wander()
+{
+    wander_timer = 0.0f;
+    wander_pause = 0.0f;
+    wander_idle_timer = 0.0f;
+    wander_progress = 0.0f;
+    wander_path_length = 0.0f;
+    wander_active = false;
+}
 
 bool buddy_has_sleepy_hazard(const xVec3* test_position, S32* sleepy_count = NULL)
 {
@@ -178,36 +237,6 @@ bool buddy_escape_active_sleepy(F32 dt)
 }
 
 
-struct buddy_frame
-{
-    U16 x;
-    U16 y;
-    U16 width;
-    U16 height;
-};
-
-static const buddy_frame idle_frames[] = {
-    { 785, 120, 143, 129 },
-    { 0, 221, 139, 129 },
-    { 261, 238, 139, 132 },
-};
-
-static const buddy_frame run_frames[] = {
-    { 209, 111, 118, 124 },
-    { 327, 112, 120, 126 },
-    { 663, 114, 122, 126 },
-    { 139, 235, 122, 131 },
-};
-
-static const buddy_frame approach_frame = { 499, 0, 140, 114 };
-static const buddy_frame death_frame = { 232, 0, 124, 111 };
-
-static const buddy_frame attack_frames[] = {
-    // skill0_01 and skill1_00 are the two strike frames.
-    { 841, 0, 164, 120 },
-    { 520, 240, 145, 159 },
-};
-
 void reset_position()
 {
     position = xVec3{ 0.0f, 0.0f, 0.0f };
@@ -223,12 +252,45 @@ void reset_position()
     death_timer = 0.0f;
     death_alpha = 1.0f;
     death_velocity = 0.0f;
+    vertical_velocity = 0.0f;
+    ground_spawn_checked = false;
     robot_hit_cooldown = 0.0f;
     damage_cooldown = 0.0f;
+    skill_kills = 0;
+    skill_target = NULL;
+    pending_kill_target = NULL;
+    pending_kill_timer = 0.0f;
+    skill_start_position = xVec3{ 0.0f, 0.0f, 0.0f };
+    skill_target_position = xVec3{ 0.0f, 0.0f, 0.0f };
+    skill_damage_applied = false;
+    skill_sweep_timer = 0.0f;
     buddy_sneaking_sleepy = false;
     buddy_moving = false;
+    stuck_timer = 0.0f;
+    wander_timer = 0.0f;
+    wander_pause = 0.0f;
+    wander_idle_timer = 0.0f;
+    wander_progress = 0.0f;
+    wander_path_length = 0.0f;
+    wander_active = false;
+    catch_up_active = false;
+    catch_up_blend = 0.0f;
+    catch_up_momentum = 0.0f;
+    catch_up_timer = 0.0f;
+    catch_up_approach = false;
+    catch_up_target_valid = false;
+    catch_up_waiting_at_point = false;
+    catch_up_cooldown = 0.0f;
+    catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+    catch_up_target_player = xVec3{ 0.0f, 0.0f, 0.0f };
+    catch_up_goal_direction = xVec3{ 0.0f, 0.0f, 0.0f };
+    wander_target = xVec3{ 0.0f, 0.0f, 0.0f };
+    wander_start = xVec3{ 0.0f, 0.0f, 0.0f };
+    wander_control = xVec3{ 0.0f, 0.0f, 0.0f };
 }
 }
+
+using namespace zBuddyInternal;
 
 void zBuddy_ParseINI(xIniFile* ini)
 {
@@ -247,8 +309,53 @@ void zBuddy_ParseINI(xIniFile* ini)
     buddy_width = xIniGetFloat(ini, "Buddy.Width", 0.65f);
     buddy_height = xIniGetFloat(ini, "Buddy.Height", 1.0f);
     attack_radius = xIniGetFloat(ini, "Buddy.AttackRadius", 6.0f);
+    idle_follow_radius = MAX(0.1f, xIniGetFloat(ini, "Buddy.IdleFollowRadius", 8.0f));
+    combat_follow_radius = MAX(idle_follow_radius,
+                               xIniGetFloat(ini, "Buddy.CombatFollowRadius", 16.0f));
+    combat_return_radius = MAX(combat_follow_radius,
+                               xIniGetFloat(ini, "Buddy.CombatReturnRadius", 20.0f));
+    stuck_timeout = MAX(0.1f, xIniGetFloat(ini, "Buddy.StuckTimeout", 8.0f));
+    wander_radius = MAX(0.0f, xIniGetFloat(ini, "Buddy.WanderRadius", 3.0f));
+    wander_pause_min = MAX(0.0f, xIniGetFloat(ini, "Buddy.WanderPauseMin", 0.8f));
+    wander_pause_max = MAX(wander_pause_min,
+                           xIniGetFloat(ini, "Buddy.WanderPauseMax", 2.5f));
+    wander_idle_short_min = MAX(0.0f, xIniGetFloat(ini, "Buddy.WanderIdleShortMin", 3.0f));
+    wander_idle_short_max = MAX(wander_idle_short_min,
+                                xIniGetFloat(ini, "Buddy.WanderIdleShortMax", 5.0f));
+    wander_idle_long_min = MAX(wander_idle_short_max,
+                               xIniGetFloat(ini, "Buddy.WanderIdleLongMin", 10.0f));
+    wander_idle_long_max = MAX(wander_idle_long_min,
+                               xIniGetFloat(ini, "Buddy.WanderIdleLongMax", 15.0f));
+    wander_idle_long_chance = CLAMP(xIniGetFloat(ini, "Buddy.WanderIdleLongChance", 0.25f),
+                                    0.0f, 1.0f);
+    wander_speed = MAX(0.1f, xIniGetFloat(ini, "Buddy.WanderSpeed", 1.4f));
+    wander_curve_radius = MAX(0.0f, xIniGetFloat(ini, "Buddy.WanderCurveRadius", 0.8f));
+    move_speed = MAX(0.1f, xIniGetFloat(ini, "Buddy.MoveSpeed", 3.5f));
+    run_speed = MAX(move_speed, xIniGetFloat(ini, "Buddy.RunSpeed", 6.0f));
+    catch_up_speed = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpSpeed", 9.0f));
+    catch_up_release_radius = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpReleaseRadius", 4.0f));
+    catch_up_transition_time = MAX(0.1f,
+                                   xIniGetFloat(ini, "Buddy.CatchUpTransitionTime", 0.75f));
+    catch_up_momentum_decay_time = MAX(0.05f,
+                                       xIniGetFloat(ini, "Buddy.CatchUpMomentumDecayTime", 0.18f));
+    catch_up_timeout = MAX(0.1f, xIniGetFloat(ini, "Buddy.CatchUpTimeout", 5.0f));
+    catch_up_combat_grace = MAX(0.1f,
+                                xIniGetFloat(ini, "Buddy.CatchUpCombatGrace", 5.0f));
+    catch_up_point_radius = MAX(0.1f,
+                                xIniGetFloat(ini, "Buddy.CatchUpPointRadius", 0.9f));
+    catch_up_acceleration = MAX(0.1f,
+                               xIniGetFloat(ini, "Buddy.CatchUpAcceleration", 28.0f));
+    catch_up_deceleration = MAX(0.1f,
+                                xIniGetFloat(ini, "Buddy.CatchUpDeceleration", 5.0f));
+    catch_up_min_speed = MAX(0.0f,
+                             xIniGetFloat(ini, "Buddy.CatchUpMinSpeed", 1.0f));
+    catch_up_brake_distance = MAX(0.1f,
+                                  xIniGetFloat(ini, "Buddy.CatchUpBrakeDistance", 2.5f));
+    gravity = MAX(0.0f, xIniGetFloat(ini, "Buddy.Gravity", 24.0f));
+    collision_radius = MAX(0.05f, xIniGetFloat(ini, "Buddy.CollisionRadius", 0.35f));
     max_health = MAX(1, xIniGetInt(ini, "Buddy.MaxHealth", 3));
     respawn_time = MAX(0.1f, xIniGetFloat(ini, "Buddy.RespawnTime", 5.0f));
+    skill_kill_cost = MAX(1, xIniGetInt(ini, "Buddy.SkillKillCost", 9));
 }
 
 void zBuddy_SceneInit()
@@ -257,8 +364,10 @@ void zBuddy_SceneInit()
     if (globals.player.ent.frame != NULL)
     {
         position = globals.player.ent.frame->mat.pos;
+        // Spawn at the player's Y, as before.
         position.x -= 0.8f;
         position.z -= 0.8f;
+        ground_spawn_checked = false;
     }
     buddy_raster = NULL;
 
@@ -280,6 +389,7 @@ void zBuddy_SceneReset()
         position = globals.player.ent.frame->mat.pos;
         position.x -= 0.8f;
         position.z -= 0.8f;
+        ground_spawn_checked = false;
     }
 }
 
@@ -292,6 +402,7 @@ void zBuddy_SceneExit()
 void zBuddy_Damage(S32 amount)
 {
     if (!enabled || selected == BUDDY_NONE || state == BUDDY_STATE_DEAD || amount <= 0 ||
+        state == BUDDY_STATE_SKILL || state == BUDDY_STATE_SKILL_RECOVER ||
         damage_cooldown > 0.0f)
     {
         return;
@@ -303,6 +414,10 @@ void zBuddy_Damage(S32 amount)
     {
         state = BUDDY_STATE_DEAD;
         attack_target = NULL;
+        skill_target = NULL;
+        pending_kill_target = NULL;
+        pending_kill_timer = 0.0f;
+        skill_kills = 0;
         death_timer = respawn_time;
         death_alpha = 1.0f;
         death_velocity = 5.0f;
@@ -319,6 +434,10 @@ void zBuddy_PlayerDeath()
     health = 0;
     state = BUDDY_STATE_DEAD;
     attack_target = NULL;
+    skill_target = NULL;
+    pending_kill_target = NULL;
+    pending_kill_timer = 0.0f;
+    skill_kills = 0;
     death_timer = respawn_time;
     death_alpha = 1.0f;
     death_velocity = 5.0f;
@@ -339,9 +458,6 @@ static S32 buddy_target_is_valid(zNPCCommon* target)
 
     if (target->SelfType() == NPC_TYPE_ARFDOG)
     {
-        // Do not force-cast to zNPCRobot here. Reused kennel dogs can be
-        // temporarily in a respawn/owner-transition state, and the generic
-        // alive+healthy checks are the safe gate for this Buddy target pass.
     }
 
     if (!target->IsHealthy())
@@ -352,8 +468,34 @@ static S32 buddy_target_is_valid(zNPCCommon* target)
     return 1;
 }
 
+static bool buddy_begin_skill(zNPCCommon* target)
+{
+    if (skill_kills < skill_kill_cost || !buddy_target_is_valid(target))
+    {
+        return false;
+    }
+
+    state = BUDDY_STATE_SKILL;
+    buddy_cancel_wander();
+    attack_target = NULL;
+    skill_target = target;
+    skill_start_position = position;
+    skill_target_position = *xEntGetCenter(target);
+    skill_target_position.y = target->frame->mat.pos.y;
+    frame_index = 0;
+    attack_timer = 0.0f;
+    skill_damage_applied = false;
+    skill_kills -= skill_kill_cost;
+    return true;
+}
+
 void zBuddy_ForgetTarget(zNPCCommon* target)
 {
+    if (skill_target == target)
+    {
+        skill_target = NULL;
+    }
+
     if (attack_target == NULL)
     {
         return;
@@ -413,11 +555,6 @@ void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius)
         return;
     }
 
-    /*
-     * Glove's hand sweep has small gaps between its individual bone spheres.
-     * Give Buddy the extra reach needed to avoid a dead center blind spot
-     * without changing the hitboxes used by other robots.
-     */
     F32 buddy_radius = 0.5f * buddy_width;
     F32 min_y = position.y;
     F32 max_y = position.y + buddy_height;
@@ -435,71 +572,6 @@ void zBuddy_HitByGlove(const xVec3* sphere_center, F32 radius)
     }
 }
 
-S32 zBuddy_IsAvailable()
-{
-    return enabled && selected != BUDDY_NONE && state != BUDDY_STATE_DEAD;
-}
-
-S32 zBuddy_IsSleepyAlerting()
-{
-    if (!zBuddy_IsAvailable())
-    {
-        return 0;
-    }
-
-    // These are the Buddy equivalents of the player's alerting movement:
-    // actively attacking something, or moving at normal/run speed instead
-    // of sneaking around a sleeping Sleepy.
-    return state == BUDDY_STATE_STRIKE || (buddy_moving && !buddy_sneaking_sleepy);
-}
-
-const xVec3* zBuddy_GetPosition()
-{
-    return zBuddy_IsAvailable() ? &position : NULL;
-}
-
-const xVec3* zBuddy_GetTargetPosition()
-{
-    static xVec3 target;
-    if (!zBuddy_IsAvailable())
-    {
-        return NULL;
-    }
-
-    target = position;
-    target.y += 0.5f * buddy_height;
-    return &target;
-}
-
-S32 zBuddy_IsCloserTarget(const xVec3* source_position)
-{
-    if (!zBuddy_IsAvailable() || source_position == NULL || globals.player.Health < 1)
-    {
-        return 0;
-    }
-
-    F32 buddy_distance = xVec3Dist2(source_position, &position);
-    F32 player_distance = xVec3Dist2(source_position, xEntGetPos(&globals.player.ent));
-    return buddy_distance < player_distance;
-}
-
-S32 zBuddy_GetPreferredTarget(const xVec3* source_position, xVec3* target_position)
-{
-    if (source_position == NULL || target_position == NULL)
-    {
-        return 0;
-    }
-
-    if (zBuddy_IsCloserTarget(source_position))
-    {
-        *target_position = position;
-        return 1;
-    }
-
-    *target_position = *xEntGetPos(&globals.player.ent);
-    return 0;
-}
-
 void zBuddy_SceneUpdate(F32 dt)
 {
     if (!enabled || selected == BUDDY_NONE || !globals.player.ent.frame || dt <= 0.0f)
@@ -510,6 +582,21 @@ void zBuddy_SceneUpdate(F32 dt)
     const xVec3& player = globals.player.ent.frame->mat.pos;
     robot_hit_cooldown = MAX(0.0f, robot_hit_cooldown - dt);
     damage_cooldown = MAX(0.0f, damage_cooldown - dt);
+    skill_sweep_timer += dt;
+
+    if (pending_kill_target != NULL)
+    {
+        if (!pending_kill_target->IsAlive())
+        {
+            skill_kills = MIN(skill_kill_cost, skill_kills + 1);
+            pending_kill_target = NULL;
+            pending_kill_timer = 0.0f;
+        }
+        else if ((pending_kill_timer -= dt) <= 0.0f)
+        {
+            pending_kill_target = NULL;
+        }
+    }
 
     buddy_moving = false;
 
@@ -541,6 +628,25 @@ void zBuddy_SceneUpdate(F32 dt)
     if (state == BUDDY_STATE_RECOVER)
     {
         attack_timer -= dt;
+        if (attack_timer <= 0.0f)
+        {
+            state = BUDDY_STATE_FOLLOW;
+            frame_index = 0;
+            frame_timer = 0.0f;
+        }
+        return;
+    }
+
+    if (state == BUDDY_STATE_SKILL_RECOVER)
+    {
+        attack_timer -= dt;
+        frame_timer += dt;
+        if (frame_timer >= 0.18f)
+        {
+            frame_timer -= 0.18f;
+            frame_index = (frame_index + 1) %
+                          (S32)(sizeof(idle_frames) / sizeof(idle_frames[0]));
+        }
         if (attack_timer <= 0.0f)
         {
             state = BUDDY_STATE_FOLLOW;
@@ -618,13 +724,21 @@ void zBuddy_SceneUpdate(F32 dt)
 
         if (nearest != NULL)
         {
-            state = BUDDY_STATE_CHASE;
-            attack_target = nearest;
+            if (!buddy_begin_skill(nearest))
+            {
+                buddy_cancel_wander();
+                state = BUDDY_STATE_CHASE;
+                attack_target = nearest;
+            }
         }
     }
 
     if (state == BUDDY_STATE_CHASE)
     {
+        catch_up_active = false;
+        catch_up_approach = false;
+        catch_up_timer = 0.0f;
+        catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
         if (!buddy_target_is_valid(attack_target))
         {
             state = BUDDY_STATE_FOLLOW;
@@ -632,6 +746,11 @@ void zBuddy_SceneUpdate(F32 dt)
         }
         else
         {
+            if (buddy_begin_skill(attack_target))
+            {
+                return;
+            }
+
             xVec3 target = *xEntGetCenter(attack_target);
             xVec3 from_target;
             xVec3Sub(&from_target, &player, &target);
@@ -660,6 +779,7 @@ void zBuddy_SceneUpdate(F32 dt)
              */
             if (xVec3Length2(&delta) <= 1.0f)
             {
+                buddy_cancel_wander();
                 state = BUDDY_STATE_STRIKE;
                 attack_position = position;
                 attack_position.y = target.y;
@@ -806,6 +926,8 @@ void zBuddy_SceneUpdate(F32 dt)
                     zNPCSleepy_BuddyAttack(attack_target);
                 }
                 attack_target->Damage(DMGTYP_SIDE, NULL, &position);
+                pending_kill_target = attack_target;
+                pending_kill_timer = 1.0f;
             }
             attack_count++;
             attack_timer += 0.2f;
@@ -819,24 +941,490 @@ void zBuddy_SceneUpdate(F32 dt)
         return;
     }
 
+    if (state == BUDDY_STATE_SKILL)
+    {
+        attack_timer += dt;
+        const F32 frame_one_time = 0.10f;
+        const F32 frame_two_time = 0.25f;
+        const F32 frame_three_time = 0.20f;
+        const F32 frame_four_time = 0.10f;
+        const F32 frame_five_time = 0.10f;
+        const F32 frame_six_time = 0.15f;
+        const F32 frame_two_start = frame_one_time;
+        const F32 frame_three_start = frame_two_start + frame_two_time;
+        const F32 frame_four_start = frame_three_start + frame_three_time;
+        const F32 frame_five_start = frame_four_start + frame_four_time;
+        const F32 frame_six_start = frame_five_start + frame_five_time;
+        const F32 skill_total_time = frame_six_start + frame_six_time;
+
+        if (attack_timer >= skill_total_time)
+        {
+            state = BUDDY_STATE_SKILL_RECOVER;
+            attack_timer = 0.5f;
+            frame_index = 0;
+            frame_timer = 0.0f;
+            skill_target = NULL;
+            skill_damage_applied = false;
+            return;
+        }
+
+        if (attack_timer < frame_two_start)
+        {
+            frame_index = 0;
+        }
+        else if (attack_timer < frame_three_start)
+        {
+            frame_index = 1;
+        }
+        else if (attack_timer < frame_four_start)
+        {
+            frame_index = 2;
+        }
+        else if (attack_timer < frame_five_start)
+        {
+            frame_index = 3;
+        }
+        else if (attack_timer < frame_six_start)
+        {
+            frame_index = 4;
+        }
+        else
+        {
+            frame_index = 5;
+        }
+
+        if (frame_index == 0)
+        {
+            position = skill_start_position;
+        }
+        else if (frame_index == 1)
+        {
+            F32 progress = (attack_timer - frame_two_start) / frame_two_time;
+            progress = progress * progress * (3.0f - 2.0f * progress);
+            position.x = skill_start_position.x +
+                         (skill_target_position.x - skill_start_position.x) * progress;
+            position.y = skill_start_position.y +
+                         (skill_target_position.y + 3.0f - skill_start_position.y) * progress;
+            position.z = skill_start_position.z +
+                         (skill_target_position.z - skill_start_position.z) * progress;
+        }
+        else if (frame_index == 2)
+        {
+            position = skill_target_position;
+            position.y += 3.0f;
+        }
+        else if (frame_index == 3)
+        {
+            F32 progress = (attack_timer - frame_four_start) / frame_four_time;
+            progress = 1.0f - (1.0f - progress) * (1.0f - progress);
+            position = skill_target_position;
+            position.y += 3.0f * (1.0f - progress);
+        }
+        else
+        {
+            position = skill_target_position;
+            if (!skill_damage_applied)
+            {
+                if (skill_target != NULL && buddy_target_is_valid(skill_target))
+                {
+                    if (skill_target->SelfType() == NPC_TYPE_SLICK &&
+                        ((zNPCSlick*)skill_target)->IsShield())
+                    {
+                        skill_target->Damage(DMGTYP_SIDE, NULL, &position);
+                    }
+                    else
+                    {
+                        skill_target->Damage(DMGTYP_INSTAKILL, NULL, &position);
+                    }
+                }
+                skill_damage_applied = true;
+            }
+        }
+        return;
+    }
+
     xVec3 target = player;
-    target.x -= 0.8f;
-    target.z -= 0.8f;
-    bool next_running = globals.player.Speed != 0;
+    bool in_combat = state == BUDDY_STATE_CHASE || state == BUDDY_STATE_STRIKE;
+    F32 player_distance = xVec3Dist(&position, &player);
+    F32 follow_radius = in_combat ? combat_follow_radius : idle_follow_radius;
+
+    if (in_combat && player_distance > combat_return_radius)
+    {
+        buddy_cancel_wander();
+        state = BUDDY_STATE_FOLLOW;
+        attack_target = NULL;
+        attack_timer = 0.0f;
+        attack_count = 0;
+        frame_index = 0;
+        frame_timer = 0.0f;
+        in_combat = false;
+        follow_radius = idle_follow_radius;
+    }
+
+    catch_up_cooldown = MAX(0.0f, catch_up_cooldown - dt);
+
+    /*
+     * Catch-up uses a captured point B rather than continuously steering at
+     * the player. This keeps the behavior as follow -> stop -> follow instead
+     * of turning it into a permanent leash/chase.
+     */
+    if (!catch_up_active && catch_up_cooldown <= 0.0f && player_distance > idle_follow_radius)
+    {
+        catch_up_active = true;
+        catch_up_approach = true;
+        catch_up_target_valid = false;
+        catch_up_player_moving = false;
+        catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+        catch_up_timer = 0.0f;
+        catch_up_momentum = 0.0f;
+    }
+    else if (catch_up_active)
+    {
+        catch_up_timer += dt;
+    }
+    else
+    {
+        catch_up_timer = 0.0f;
+    }
+
+    if (catch_up_approach && !catch_up_target_valid)
+    {
+        xVec3 offset = position - player;
+        offset.y = 0.0f;
+        F32 offset_length = xVec3Length(&offset);
+        if (offset_length > 0.001f)
+        {
+            xVec3SMulBy(&offset, catch_up_point_radius / offset_length);
+        }
+        else
+        {
+            offset = xVec3{ -catch_up_point_radius, 0.0f, 0.0f };
+        }
+        catch_up_target = player + offset;
+        catch_up_target_player = player;
+        catch_up_goal_direction = xVec3{ 0.0f, 0.0f, 0.0f };
+        catch_up_target_valid = true;
+        catch_up_waiting_at_point = false;
+        catch_up_player_moving = false;
+    }
+
+    F32 catch_up_limit = in_combat ? catch_up_combat_grace : catch_up_timeout;
+    if (catch_up_active && catch_up_timer >= catch_up_limit)
+    {
+        /*
+         * A timeout is only a movement failsafe. Never teleport Buddy to the
+         * player here: doing so hides failed ground/movement resolution and
+         * creates the large vertical snaps seen when the player changes
+         * elevation. Drop back to ordinary follow movement and give that
+         * movement a short chance to close the gap naturally.
+         */
+        catch_up_active = false;
+        catch_up_approach = false;
+        catch_up_target_valid = false;
+        catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+        catch_up_timer = 0.0f;
+        catch_up_blend = 0.0f;
+        catch_up_momentum = 0.0f;
+        catch_up_cooldown = 0.75f;
+        follow_running = false;
+        frame_index = 0;
+        frame_timer = 0.0f;
+    }
+
+    if (catch_up_active && catch_up_approach)
+    {
+        /*
+         * Point B is a rolling leash goal. Every time the player moves, the
+         * current goal is translated by that exact player movement. This
+         * effectively recycles B -> C -> B -> C without making Cherry stop
+         * at each intermediate point. When the player stops, the last goal is
+         * left exactly where it is so it becomes the final point she can
+         * settle on.
+         */
+        xVec3 player_step = player - catch_up_target_player;
+        player_step.y = 0.0f;
+        F32 player_step_length = xVec3Length(&player_step);
+
+        catch_up_player_moving = player_step_length > 0.01f;
+        if (catch_up_player_moving)
+        {
+            catch_up_target.x += player_step.x;
+            catch_up_target.z += player_step.z;
+            catch_up_target_player = player;
+            catch_up_target_valid = true;
+        }
+
+        target = catch_up_target;
+
+        /*
+         * The rolling point only becomes a real destination when the player
+         * has stopped. While the player is moving, reaching the current
+         * recycled point must never release catch-up or start wandering.
+         * Once the player stops and Cherry reaches the final point, release
+         * catch-up here. The normal wander block above cannot run until the
+         * following frame, so there is no one-frame wander transition at the
+         * old point.
+         */
+        if (!catch_up_player_moving)
+        {
+            xVec3 final_delta = position - catch_up_target;
+            final_delta.y = 0.0f;
+            if (xVec3Length2(&final_delta) <= 0.35f * 0.35f)
+            {
+                catch_up_active = false;
+                catch_up_approach = false;
+                catch_up_target_valid = false;
+                catch_up_waiting_at_point = false;
+                catch_up_player_moving = false;
+                catch_up_target = xVec3{ 0.0f, 0.0f, 0.0f };
+                catch_up_timer = 0.0f;
+                catch_up_blend = 0.0f;
+                catch_up_momentum = 0.0f;
+                catch_up_cooldown = 0.25f;
+                follow_running = false;
+                frame_index = 0;
+                frame_timer = 0.0f;
+            }
+        }
+    }
+
+    if (catch_up_active)
+    {
+        F32 catch_up_distance = xVec3Dist(&position, &catch_up_target);
+        F32 target_speed = catch_up_speed;
+
+        /*
+         * Fast ease-in: get to the capped catch-up speed quickly and keep it
+         * capped while the captured point B is still far away. Only once the
+         * buddy is actually close to B do we ease the requested speed down.
+         * The smoothstep curve makes the final approach progressively gentler
+         * without leaving the buddy crawling for the entire catch-up.
+         */
+        if (catch_up_approach && !catch_up_player_moving && catch_up_distance < catch_up_brake_distance)
+        {
+            F32 brake_t = CLAMP(catch_up_distance / catch_up_brake_distance, 0.0f, 1.0f);
+            F32 eased = brake_t * brake_t * (3.0f - 2.0f * brake_t);
+            target_speed = catch_up_min_speed +
+                           (catch_up_speed - catch_up_min_speed) * eased;
+        }
+
+        if (catch_up_momentum < target_speed)
+        {
+            catch_up_momentum = MIN(target_speed,
+                                    catch_up_momentum + catch_up_acceleration * dt);
+        }
+        else
+        {
+            catch_up_momentum = MAX(target_speed,
+                                    catch_up_momentum - catch_up_deceleration * dt);
+        }
+    }
+    else
+    {
+        catch_up_momentum = MAX(0.0f, catch_up_momentum -
+                                         catch_up_speed * dt / catch_up_momentum_decay_time);
+    }
+
+    F32 catch_up_blend_target = catch_up_active ? 1.0f : 0.0f;
+    F32 catch_up_blend_step = dt / catch_up_transition_time;
+    if (catch_up_blend < catch_up_blend_target)
+    {
+        catch_up_blend = MIN(catch_up_blend_target, catch_up_blend + catch_up_blend_step);
+    }
+    else
+    {
+        catch_up_blend = MAX(catch_up_blend_target, catch_up_blend - catch_up_blend_step);
+    }
+
+    bool must_catch_up = catch_up_active;
+    bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &buddy_sleepy_count);
+    bool wander_finishing = false;
+    if (!in_combat && !must_catch_up && player_distance <= follow_radius && wander_radius > 0.0f)
+    {
+        if (wander_idle_timer > 0.0f)
+        {
+            wander_idle_timer = MAX(0.0f, wander_idle_timer - dt);
+            target = position;
+        }
+        else if (!wander_active)
+        {
+            F32 angle = xurand() * 6.28318530718f;
+            F32 distance = wander_radius * (0.35f + 0.65f * xurand());
+            F32 side = (xurand() * 2.0f) - 1.0f;
+            wander_target = player;
+            wander_target.x += cosf(angle) * distance;
+            wander_target.z += sinf(angle) * distance;
+            wander_start = position;
+            wander_control = (wander_start + wander_target) * 0.5f;
+            wander_control.x += -sinf(angle) * side * wander_curve_radius;
+            wander_control.z += cosf(angle) * side * wander_curve_radius;
+            wander_progress = 0.0f;
+            wander_path_length = MAX(0.25f, xVec3Dist(&wander_start, &wander_target));
+            wander_active = true;
+        }
+
+        if (wander_active)
+        {
+            F32 wander_step_speed = in_sleepy_range
+                                        ? buddy_sneak_speed
+                                        : MAX(wander_speed, catch_up_momentum);
+            wander_progress = MIN(1.0f, wander_progress + wander_step_speed * dt /
+                                                       wander_path_length);
+            F32 eased = wander_progress * wander_progress *
+                        (3.0f - 2.0f * wander_progress);
+            F32 inverse = 1.0f - eased;
+            target.x = inverse * inverse * wander_start.x +
+                       2.0f * inverse * eased * wander_control.x + eased * eased * wander_target.x;
+            target.y = position.y;
+            target.z = inverse * inverse * wander_start.z +
+                       2.0f * inverse * eased * wander_control.z + eased * eased * wander_target.z;
+
+            if (wander_progress >= 1.0f)
+            {
+                wander_finishing = true;
+                wander_active = false;
+                wander_idle_timer = (xurand() < wander_idle_long_chance
+                                         ? wander_idle_long_min +
+                                               (wander_idle_long_max - wander_idle_long_min) * xurand()
+                                         : wander_idle_short_min +
+                                               (wander_idle_short_max - wander_idle_short_min) * xurand());
+                    target = wander_target;
+            }
+        }
+    }
+    else
+    {
+        if (wander_active || wander_idle_timer > 0.0f)
+        {
+            buddy_cancel_wander();
+        }
+        target = player;
+        if (!must_catch_up)
+        {
+            target.x -= 0.8f;
+            target.z -= 0.8f;
+        }
+    }
+
+    if (catch_up_active && catch_up_approach)
+    {
+        target = catch_up_target;
+    }
+
+    target.y = position.y;
+    bool path_moving = wander_active && wander_progress < 1.0f;
+    bool next_running = path_moving || xVec3Dist2(&position, &target) > 0.25f;
     if (next_running != follow_running)
     {
         follow_running = next_running;
         frame_index = 0;
         frame_timer = 0.0f;
     }
-    bool in_sleepy_range = buddy_has_sleepy_hazard(&position, &buddy_sleepy_count);
     buddy_sneaking_sleepy = in_sleepy_range;
-    F32 follow_speed = in_sleepy_range ? buddy_sneak_speed : 1.0f;
-    F32 follow = 1.0f - expf(-8.0f * follow_speed * dt);
+    F32 normal_speed = in_sleepy_range
+                           ? buddy_sneak_speed
+                           : player_distance > follow_radius ? run_speed
+                                                             : in_combat ? move_speed
+                                                                         : ((wander_active || wander_finishing)
+                                                                                ? wander_speed
+                                                                                : 0.0f);
+    F32 desired_speed = catch_up_active
+                           ? MIN(catch_up_momentum, catch_up_speed)
+                           : normal_speed;
+    F32 distance_to_target = xVec3Dist(&position, &target);
+    F32 follow = distance_to_target > 0.001f
+                     ? MIN(1.0f, desired_speed * dt / distance_to_target)
+                     : 0.0f;
     xVec3 old_position = position;
-    position.x += (target.x - position.x) * follow;
-    position.y += (target.y - position.y) * follow;
-    position.z += (target.z - position.z) * follow;
+    if (wander_active && !in_sleepy_range)
+    {
+        position.x = target.x;
+        position.z = target.z;
+    }
+    else
+    {
+        position.x += (target.x - position.x) * follow;
+        position.z += (target.z - position.z) * follow;
+    }
+
+    xVec3 player_delta = position - player;
+    player_delta.y = 0.0f;
+    F32 player_distance2 = xVec3Length2(&player_delta);
+    F32 separation_radius = collision_radius + 0.5f;
+    if (player_distance2 < separation_radius * separation_radius)
+    {
+        if (player_distance2 > 0.0001f)
+        {
+            F32 inv_distance = 1.0f / sqrtf(player_distance2);
+            F32 separation = separation_radius - sqrtf(player_distance2);
+            separation = MIN(separation, move_speed * dt);
+            position.x += player_delta.x * inv_distance * separation;
+            position.z += player_delta.z * inv_distance * separation;
+        }
+        else
+        {
+            position.x += MIN(separation_radius, move_speed * dt);
+        }
+    }
+
+    xRay3 ground_ray;
+    xCollis ground_coll = {};
+    ground_ray.origin = position;
+    ground_ray.origin.y += 1.5f;
+    ground_ray.dir = xVec3{ 0.0f, -1.0f, 0.0f };
+    ground_ray.min_t = 0.0f;
+    ground_ray.max_t = 3.0f;
+    ground_ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+    ground_coll.flags = 0;
+    ground_coll.dist = FLOAT_MAX;
+    if (globals.sceneCur != NULL)
+    {
+        xRayHitsScene(globals.sceneCur, &ground_ray, &ground_coll);
+    }
+
+    /*
+     * xRayHitsScene() only guarantees the hit flag and distance here; it does
+     * not copy the surface normal into ground_coll. Testing ground_coll.norm
+     * therefore reads undefined data and made grounding intermittent.
+     */
+    bool ground_hit = (ground_coll.flags & k_HIT_IT) != 0;
+    F32 ground_y = ground_hit ? ground_ray.origin.y - ground_coll.dist : position.y;
+
+    /*
+     * Do one short, spawn-only floor correction after the scene collision
+     * world exists. SceneInit already places Buddy beside the player, but
+     * that transform can be a fraction below the actual floor on some
+     * scene starts. The ray begins above Buddy and only accepts a nearby
+     * surface, so it cannot intentionally lift her onto a distant platform.
+     */
+    if (!ground_spawn_checked && globals.sceneCur != NULL)
+    {
+        ground_spawn_checked = true;
+        if (ground_hit && ground_y >= position.y - 1.0f && ground_y <= position.y + 1.0f)
+        {
+            position.y = ground_y;
+            vertical_velocity = 0.0f;
+        }
+    }
+
+    if (ground_hit)
+    {
+        /*
+         * Normal runtime grounding. Keep this separate from the one-shot
+         * spawn correction so initialization cannot repeatedly overwrite
+         * Buddy's elevation.
+         */
+        if (vertical_velocity <= 0.0f || position.y <= ground_y + 0.2f)
+        {
+            position.y = ground_y;
+            vertical_velocity = 0.0f;
+        }
+    }
+    else
+    {
+        vertical_velocity -= gravity * dt;
+        position.y += vertical_velocity * dt;
+    }
 
     /*
      * Being inside Sleepy's detection range is not itself movement. If Buddy
@@ -844,11 +1432,27 @@ void zBuddy_SceneUpdate(F32 dt)
      * sneak/walk cycle indefinitely.
      */
     F32 moved2 = xVec3Dist2(&old_position, &position);
-    buddy_moving = moved2 >= 0.0001f;
+    buddy_moving = path_moving || moved2 >= 0.0001f;
+    if (next_running && !buddy_moving)
+    {
+        stuck_timer += dt;
+        if (stuck_timer >= stuck_timeout)
+        {
+            position = player;
+            position.x -= 0.8f;
+            position.z -= 0.8f;
+            stuck_timer = 0.0f;
+        }
+    }
+    else
+    {
+        stuck_timer = 0.0f;
+    }
     if (in_sleepy_range && !buddy_moving)
     {
         follow_running = false;
         buddy_sneaking_sleepy = false;
+        wander_pause = wander_pause_min + (wander_pause_max - wander_pause_min) * xurand();
     }
 
     frame_timer += dt;
@@ -872,6 +1476,10 @@ void zBuddy_Render()
     const buddy_frame* frame =
         state == BUDDY_STATE_DEAD
             ? &death_frame
+            : state == BUDDY_STATE_SKILL
+            ? &skill_frames[frame_index]
+            : state == BUDDY_STATE_SKILL_RECOVER
+            ? &idle_frames[frame_index]
             : state == BUDDY_STATE_STRIKE || state == BUDDY_STATE_RECOVER
             ? &attack_frames[frame_index]
             : state == BUDDY_STATE_CHASE
@@ -931,6 +1539,75 @@ void zBuddy_Render()
 
     if (state != BUDDY_STATE_DEAD)
     {
+        F32 skill_ratio = (F32)skill_kills / (F32)skill_kill_cost;
+        F32 skill_bar_width = buddy_width * 0.9f;
+        F32 skill_bar_height = 0.045f;
+        F32 skill_bar_center_y = position.y + buddy_height + 0.20f;
+        F32 skill_bar_left_x = position.x - camera_matrix->right.x * skill_bar_width * 0.5f;
+        F32 skill_bar_left_y = skill_bar_center_y - camera_matrix->right.y * skill_bar_width * 0.5f;
+        F32 skill_bar_left_z = position.z - camera_matrix->right.z * skill_bar_width * 0.5f;
+        F32 skill_bar_right_x = position.x + camera_matrix->right.x * skill_bar_width * 0.5f;
+        F32 skill_bar_right_y = skill_bar_center_y + camera_matrix->right.y * skill_bar_width * 0.5f;
+        F32 skill_bar_right_z = position.z + camera_matrix->right.z * skill_bar_width * 0.5f;
+        F32 skill_bar_top_x = camera_matrix->up.x * skill_bar_height * 0.5f;
+        F32 skill_bar_top_y = camera_matrix->up.y * skill_bar_height * 0.5f;
+        F32 skill_bar_top_z = camera_matrix->up.z * skill_bar_height * 0.5f;
+        RwIm3DVertex skill_bar[4];
+
+        RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+        RwIm3DVertexSetPos(&skill_bar[0], skill_bar_left_x, skill_bar_left_y, skill_bar_left_z);
+        RwIm3DVertexSetPos(&skill_bar[1], skill_bar_left_x + skill_bar_top_x,
+                           skill_bar_left_y + skill_bar_top_y,
+                           skill_bar_left_z + skill_bar_top_z);
+        RwIm3DVertexSetPos(&skill_bar[2], skill_bar_right_x, skill_bar_right_y, skill_bar_right_z);
+        RwIm3DVertexSetPos(&skill_bar[3], skill_bar_right_x + skill_bar_top_x,
+                           skill_bar_right_y + skill_bar_top_y,
+                           skill_bar_right_z + skill_bar_top_z);
+        for (S32 i = 0; i < 4; i++)
+        {
+            RwIm3DVertexSetRGBA(&skill_bar[i], 35, 35, 40, 225);
+        }
+        if (RwIm3DTransform(skill_bar, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+        {
+            RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        }
+
+        F32 skill_fill_width = skill_bar_width * skill_ratio;
+        skill_bar_right_x = skill_bar_left_x + camera_matrix->right.x * skill_fill_width;
+        skill_bar_right_y = skill_bar_left_y + camera_matrix->right.y * skill_fill_width;
+        skill_bar_right_z = skill_bar_left_z + camera_matrix->right.z * skill_fill_width;
+        RwIm3DVertexSetPos(&skill_bar[2], skill_bar_right_x, skill_bar_right_y, skill_bar_right_z);
+        RwIm3DVertexSetPos(&skill_bar[3], skill_bar_right_x + skill_bar_top_x,
+                           skill_bar_right_y + skill_bar_top_y,
+                           skill_bar_right_z + skill_bar_top_z);
+
+        U8 skill_left_red = 255;
+        U8 skill_left_green = 55;
+        U8 skill_left_blue = 55;
+        U8 skill_right_red = (U8)(255.0f * (1.0f - skill_ratio));
+        U8 skill_right_green = (U8)(55.0f + 200.0f * skill_ratio);
+        U8 skill_right_blue = (U8)(55.0f + 200.0f * skill_ratio);
+        if (skill_kills >= skill_kill_cost)
+        {
+            F32 sweep = skill_sweep_timer * 3.0f;
+            skill_left_red = (U8)(80.0f + 100.0f * (0.5f + 0.5f * sinf(sweep - 2.1f)));
+            skill_left_green = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep)));
+            skill_left_blue = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep + 2.1f)));
+            skill_right_red = (U8)(80.0f + 100.0f * (0.5f + 0.5f * sinf(sweep + 1.0f)));
+            skill_right_green = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep + 3.1f)));
+            skill_right_blue = (U8)(150.0f + 105.0f * (0.5f + 0.5f * sinf(sweep + 5.2f)));
+        }
+        RwIm3DVertexSetRGBA(&skill_bar[0], skill_left_red, skill_left_green, skill_left_blue, 255);
+        RwIm3DVertexSetRGBA(&skill_bar[1], skill_left_red, skill_left_green, skill_left_blue, 255);
+        RwIm3DVertexSetRGBA(&skill_bar[2], skill_right_red, skill_right_green, skill_right_blue,
+                            255);
+        RwIm3DVertexSetRGBA(&skill_bar[3], skill_right_red, skill_right_green, skill_right_blue,
+                            255);
+        if (RwIm3DTransform(skill_bar, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+        {
+            RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        }
+
         F32 health_ratio = (F32)health / (F32)max_health;
         F32 bar_width = buddy_width * 0.9f;
         F32 bar_height = 0.06f;
