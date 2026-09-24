@@ -77,6 +77,11 @@ S32 iWindowGetDisplayRefreshRate()
     return 0;
 }
 
+S32 iWindowGetDisplaySize(S32*, S32*)
+{
+    return FALSE;
+}
+
 void iWindowSetVSync(S32 on)
 {
     sVSync = on;

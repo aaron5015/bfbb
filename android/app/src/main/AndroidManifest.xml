@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:installLocation="auto">
+
+    <!-- GLES 2.0 is the floor librw's GLES arm falls back to; 3.1 is what it
+         asks for first. Declared as 2.0 so a device that can only do that is
+         not filtered out of the store listing before the fallback is even
+         tried. -->
+    <uses-feature android:glEsVersion="0x00020000" />
+
+    <!-- None of these are required, and that is the point of listing them: a
+         device without a gamepad still installs, and a device WITH one gets
+         the game working through SDL with nothing written for it. -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.gamepad"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
+    <!-- The rumble the game already asks for, through xPadRumbleEnable. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Only for using a game folder where it is instead of copying it in
+         (ImportActivity). Copying needs neither: the copy lives in the app's
+         own directory under Android/data. MANAGE_EXTERNAL_STORAGE is what
+         Android 11 and later grant as All files access; the older permission
+         covers Android 10 and below. -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
+        android:theme="@style/AppTheme"
+        android:enableOnBackInvokedCallback="false"
+        android:hardwareAccelerated="true"
+        android:isGame="true">
+
+        <!-- The launcher entry. It asks for the video profile once, then starts
+             BfbbActivity; the icon's long-press shortcuts come back through it
+             to change the answer. -->
+        <activity
+            android:name=".ProfileActivity"
+            android:label="@string/app_name"
+            android:theme="@style/ProfileTheme"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Copies the game's files in from a folder the player picks. Handles
+             its own configuration changes so a copy in progress keeps its
+             screen. -->
+        <activity
+            android:name=".ImportActivity"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode" />
+
+        <!-- configChanges below lists every configuration change the
+             activity handles itself rather than being destroyed and recreated
+             for. That is not a nicety: an activity restart destroys the EGL
+             context, and librw has no path that rebuilds its rasters and
+             shaders, so a rotation or a keyboard appearing would take the
+             renderer out from under the game. See docs/ANDROID.md, "GL
+             context and surface loss". -->
+        <activity
+            android:name=".BfbbActivity"
+            android:label="@string/app_name"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleInstance"
+            android:screenOrientation="sensorLandscape"
+            android:exported="true"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:preferMinimalPostProcessing="true">
+
+            <!-- So a controller plugged in over USB reaches this activity. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

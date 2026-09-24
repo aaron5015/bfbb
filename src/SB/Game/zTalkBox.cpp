@@ -90,87 +90,64 @@ namespace
 
     void trigger_pads(U32 pressed)
     {
-        if ((pressed & 0x10) != 0)
+        if ((pressed & XPAD_BUTTON_UP) != 0)
         {
-            trigger(73);
+            trigger(eEventPadPressUp);
         }
-        if ((pressed & 0x40) != 0)
+        if ((pressed & XPAD_BUTTON_DOWN) != 0)
         {
-            trigger(74);
+            trigger(eEventPadPressDown);
         }
-        if ((pressed & 0x80) != 0)
+        if ((pressed & XPAD_BUTTON_LEFT) != 0)
         {
-            trigger(76);
+            trigger(eEventPadPressLeft);
         }
-        if ((pressed & 0x20) != 0)
+        if ((pressed & XPAD_BUTTON_RIGHT) != 0)
         {
-            trigger(75);
+            trigger(eEventPadPressRight);
         }
-        if ((pressed & 1) != 0)
+        if ((pressed & XPAD_BUTTON_START) != 0)
         {
-            trigger(71);
+            trigger(eEventPadPressStart);
         }
-        if ((pressed & 2) != 0)
+        if ((pressed & XPAD_BUTTON_SELECT) != 0)
         {
-            trigger(72);
+            trigger(eEventPadPressSelect);
         }
-        if ((pressed & 0x1000) != 0)
+        if ((pressed & XPAD_BUTTON_R1) != 0)
         {
-            trigger(69);
+            trigger(eEventPadPressR1);
         }
-        if ((pressed & 0x2000) != 0)
+        if ((pressed & XPAD_BUTTON_R2) != 0)
         {
-            trigger(70);
+            trigger(eEventPadPressR2);
         }
-        if ((pressed & 0x100) != 0)
+        if ((pressed & XPAD_BUTTON_L1) != 0)
         {
-            trigger(67);
+            trigger(eEventPadPressL1);
         }
-        if ((pressed & 0x200) != 0)
+        if ((pressed & XPAD_BUTTON_L2) != 0)
         {
-            trigger(68);
+            trigger(eEventPadPressL2);
         }
-        if ((pressed & 0x10000) != 0)
+        if ((pressed & XPAD_BUTTON_X) != 0)
         {
-            trigger(63);
+            trigger(eEventPadPressX);
         }
-        if ((pressed & 0x40000) != 0)
+        if ((pressed & XPAD_BUTTON_O) != 0)
         {
-            trigger(66);
+            trigger(eEventPadPressO);
         }
-#ifdef PLATFORM_PC
-        // **The two the Xbox archives moved, swapped back.**
-        //
-        // A talkbox link names an event and the text beside it names a picture,
-        // and on these archives the two disagree: the exit prompt in the three
-        // ambush levels reads {i:button_picture_03}, which is the cancel
-        // picture and the button printed B, while the link that exits is on the
-        // circle event, which is the button printed X. Retail Xbox draws a B
-        // and answers to it, so its own trigger_pads cannot have been this one.
-        //
-        // Swapping the pair here puts the event under the button its picture
-        // names, on every preset -- the picture is drawn from the player's own
-        // glyph set and both halves move together. Same fault and same answer as
-        // the bungee exit, one layer down: there the code named the button, here
-        // the archive does.
-        if ((pressed & 0x20000) != 0)
+        // The SQUARE and TRIANGLE bits raise each other's events. That is
+        // retail; the bit names are the decomp's.
+        if ((pressed & XPAD_BUTTON_SQUARE) != 0)
         {
-            trigger(64);
+            trigger(eEventPadPressTriangle);
         }
-        if ((pressed & 0x80000) != 0)
+        if ((pressed & XPAD_BUTTON_TRIANGLE) != 0)
         {
-            trigger(65);
+            trigger(eEventPadPressSquare);
         }
-#else
-        if ((pressed & 0x20000) != 0)
-        {
-            trigger(65);
-        }
-        if ((pressed & 0x80000) != 0)
-        {
-            trigger(64);
-        }
-#endif
     }
 
     static void flush_triggered()
@@ -1725,7 +1702,7 @@ void ztalkbox::update_all(xScene& s, F32 dt)
         if ((tp == TP_ACTIVE && !globals.player.ControlOff) ||
             (tp == TP_TRAPPED && globals.player.ControlOff))
         {
-            trigger_pads(*pad_pressed());
+            trigger_pads(iPadTalkBoxButtons(*pad_pressed()));
         }
     }
 

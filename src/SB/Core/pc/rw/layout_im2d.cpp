@@ -50,9 +50,10 @@ static_assert(offsetof(RwIm2DVertexRGBA, alpha) == 3, "the colour wants alpha in
 
 // One block per LINKED backend, and they are separate #ifs rather than arms of
 // one #if/#elif: a Windows build carries D3D9, D3D11 and GL3 at once and every
-// one of them has to agree with the same RwIm2DVertex.
+// one of them has to agree with the same RwIm2DVertex. RW_D3D_ANY is every
+// backend that uses rw::d3d's vertices, Vulkan included.
 
-#if defined(RW_D3D9) || defined(RW_D3D8) || defined(RW_D3D11)
+#if defined(RW_D3D_ANY) || defined(RW_D3D8)
 
 SAME_SIZE(RwIm2DVertex, rw::d3d::Im2DVertex);
 SAME_OFFSET(RwIm2DVertex, x, rw::d3d::Im2DVertex, x);

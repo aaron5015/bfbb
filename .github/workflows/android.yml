@@ -1,0 +1,168 @@
+# The Android port: does it compile.
+#
+# That is the whole claim, and it is deliberately a small one. A green run here
+# means an APK came out of the NDK. It does NOT mean the game starts, finds its
+# assets, gets its arena below 4 GB or draws anything -- the first of those is
+# not knowable without a device and the rest follow from it. See
+# docs/ANDROID.md.
+#
+# Nothing in this job RUNS. The self-tests are host executables and a cross
+# build produces binaries this runner cannot execute, so CMakeLists.txt does
+# not build them for Android (BFBB_HOST_TOOLS) and ctest has nothing to do
+# here. gcgate.py, pclink.py and --drift all stay on the desktop runners in
+# pc-port.yml and build.yml, which is where the port is actually gated.
+#
+# A paths filter, unlike pc-port.yml, which deliberately has none. The reason
+# that one has no filter is that bfbb.exe links the game code, so a change
+# anywhere under src/ can break it. That is just as true here -- but this job
+# adds nothing the desktop builds do not already catch for a change in shared
+# code, and what it uniquely covers is the Android arms and the Gradle shell.
+# Running it on every commit to the decomp would be paying for the NDK to
+# confirm what four other jobs already said.
+name: Android
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'CMakeLists.txt'
+      - 'src/SB/Core/pc/android/**'
+      - 'src/SB/Core/pc/iHostPosix.cpp'
+      - 'src/SB/Core/pc/bfbb_main.cpp'
+      - 'src/SB/Core/pc/compat/intrin.h'
+      - 'tools/android/**'
+      - '.github/workflows/android.yml'
+      - '.gitmodules'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'CMakeLists.txt'
+      - 'src/SB/Core/pc/android/**'
+      - 'src/SB/Core/pc/iHostPosix.cpp'
+      - 'src/SB/Core/pc/bfbb_main.cpp'
+      - 'src/SB/Core/pc/compat/intrin.h'
+      - 'tools/android/**'
+      - '.github/workflows/android.yml'
+      - '.gitmodules'
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    name: assembleDebug (arm64-v8a)
+
+    # To create the rolling prerelease below. Everything else this job does is
+    # a read; naming the two explicitly is what keeps the token from carrying
+    # anything it does not need.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Two of the three, as in pc-port.yml: wxWidgets is 300 MB of working
+      # tree for a configurator this build switches off anyway.
+      - name: Submodules
+        run: git submodule update --init --recursive third_party/librw third_party/SDL
+
+      - name: Check the submodules came down
+        run: |
+          test -f third_party/librw/CMakeLists.txt || { echo "third_party/librw is empty"; exit 1; }
+          test -f third_party/SDL/CMakeLists.txt || { echo "third_party/SDL is empty"; exit 1; }
+          test -f third_party/SDL/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java \
+            || { echo "third_party/SDL has no android-project; the Java half is compiled from there"; exit 1; }
+
+      # The Android Gradle plugin pinned in android/build.gradle needs a 17.
+      - name: JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The runner image ships an SDK and at least one NDK; android/app/build.
+      # gradle pins the NDK version it wants and Gradle installs it if the
+      # image's is not that one.
+      - name: Build the APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      # The job's actual assertion, and it is stronger than "gradle exited 0":
+      # that an APK came out and that the game is INSIDE it. A misconfigured
+      # externalNativeBuild produces a perfectly valid APK with no native
+      # library in it and a build that looks green, which is the one way this
+      # job could lie about the only thing it claims.
+      - name: Check the APK came out, with the game in it
+        working-directory: android
+        run: |
+          apk=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          echo "APK: $apk"
+          ls -l "$apk"
+          unzip -l "$apk" | grep '\.so$' || { echo "the APK contains no native libraries at all"; exit 1; }
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmain\.so' \
+            || { echo "the APK has no lib/arm64-v8a/libmain.so -- the native build did not reach it"; exit 1; }
+
+      # So someone can install the thing and find out what it does on a device,
+      # which is the only way the questions in docs/ANDROID.md get answered.
+      #
+      # NOT allowed to fail the job. Artifact storage is an account-wide quota
+      # that fills up from every workflow in every repository, and a build that
+      # compiled and packaged correctly should not go red because there was
+      # nowhere to put a copy of it -- the step above is what decides whether
+      # the APK is good. If this step is skipped, clear some artifacts or wait
+      # for the usage recalculation and re-run.
+      # A RELEASE asset, not an Actions artifact.
+      #
+      # Artifacts are billed against an account-wide shared storage quota that
+      # every workflow in every repository draws on, and this one was full --
+      # so the APK was built correctly and had nowhere to go, on every run,
+      # for reasons with nothing to do with the port. Release assets are
+      # repository storage instead, which is not that quota.
+      #
+      # One ROLLING prerelease rather than one per push. The asset name is
+      # fixed, so the download URL is stable and can be pasted anywhere:
+      #
+      #   .../releases/download/android-latest/bfbb-arm64-v8a.apk
+      #
+      # and exactly one 8 MB file exists at a time instead of one per commit.
+      # Deleted and recreated rather than uploaded over, so the tag points at
+      # the commit that was actually built -- a fixed tag left where it was
+      # first created is a download that quietly stops matching its label.
+      #
+      # Pushes only. A pull request from a fork gets a read-only token and
+      # could not publish this anyway.
+      - name: Publish the APK as a rolling prerelease
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
+          cp "$apk" bfbb-arm64-v8a.apk
+
+          cat > notes.md <<'NOTES'
+          The Android port, built by CI. **This is a build, not a release** --
+          see `docs/ANDROID.md` for what does and does not work yet.
+
+          * arm64-v8a, minSdk 24, debug-signed.
+          * It ships NO game data. The assets go in
+            `Android/data/io.github.joeyballentine.bfbb/files/assets`, which the
+            app creates on first run.
+          * Whether it starts at all turns on the game arena landing below 4 GB
+            on your device -- `tools/android/arena_probe.c` is what answers
+            that, and it can be built and run on the phone under Termux.
+          NOTES
+          {
+            echo ""
+            echo "Built from \`$GITHUB_REF_NAME\` at \`$GITHUB_SHA\`."
+          } >> notes.md
+
+          # `|| true` for the first run, when there is no release to delete.
+          gh release delete android-latest --yes --cleanup-tag || true
+
+          gh release create android-latest bfbb-arm64-v8a.apk \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Android build (arm64-v8a)" \
+            --notes-file notes.md
+
+          echo "::notice::APK published: $(gh release view android-latest --json url --jq .url)"

@@ -4088,11 +4088,11 @@ void zNPCGoalAlertTubelet::EmitSteam(F32 dt)
 
     tmr_nextlos -= nlos * (1.0f / 60.0f);
     cnt_nextlos -= nlos;
-#else
-    cnt_nextlos--;
-#endif
 
     if (cnt_nextlos < 0)
+#else
+    if (--cnt_nextlos < 0)
+#endif
     {
         memset(&g_SharedCollisRecord, 0, sizeof(g_SharedCollisRecord));
         g_SharedCollisRecord.flags = k_HIT_0xF00 | k_HIT_CALC_HDNG;

@@ -45,6 +45,11 @@ static S32 sOpenedAny;
 // what it means on the console, and an absolute one is honoured as given.
 static char sAssetRoot[512];
 
+// The mod folder, with a trailing slash, or "" when there is none. A file here
+// is read in place of the asset root's file of the same relative name. See
+// iModOverride.
+static char sModRoot[512];
+
 // Where the game's files are. No trailing slash is added -- the callers that
 // print it want the folder someone named and not a decorated version of it,
 // and the ones that build paths with it fix the tail themselves.
@@ -59,40 +64,65 @@ static char sAssetRoot[512];
 // assets gets used without editing the file -- which is what a bisect over two
 // extractions, or a build run against a stripped-down set, actually needs.
 //
-// Resolved once and cached: iConfigGetString hands back a pointer into the
-// settings table, and this is read from several places at startup.
+// Copied out rather than returned as iConfigGetString's pointer into the
+// settings table, and read afresh on every call so that a test can change the
+// environment between iFileInit calls.
 //
 // Backslashes become slashes on the way through. A path typed into a settings
 // file on Windows is `D:\games\bfbb`, and everything downstream here splits
 // paths on '/' -- iResolveCaseInsensitive would take a backslash path for a
 // bare leaf name and look for it in the working directory.
+static void iReadFolderSetting(const char* env, const char* key, char* out, size_t outsize)
+{
+    const char* value = getenv(env);
+    if (value == NULL || value[0] == '\0')
+    {
+        value = iConfigGetString(key, "");
+    }
+
+    snprintf(out, outsize, "%s", value);
+
+    for (char* c = out; *c != '\0'; c++)
+    {
+        if (*c == '\\')
+        {
+            *c = '/';
+        }
+    }
+}
+
 const char* iFileAssetRoot()
 {
     static char sRoot[512];
-    static S32 sResolved;
+    iReadFolderSetting("BFBB_ASSETS", "assets.path", sRoot, sizeof(sRoot));
+    return sRoot;
+}
 
-    if (!sResolved)
+const char* iFileModRoot()
+{
+    static char sRoot[512];
+    iReadFolderSetting("BFBB_MOD", "assets.mod", sRoot, sizeof(sRoot));
+    return sRoot;
+}
+
+const char* iFileModName()
+{
+    static char sName[256];
+
+    size_t n = strlen(sModRoot);
+    while (n > 0 && sModRoot[n - 1] == '/')
     {
-        sResolved = 1;
-
-        const char* root = getenv("BFBB_ASSETS");
-        if (root == NULL || root[0] == '\0')
-        {
-            root = iConfigGetString("assets.path", "");
-        }
-
-        snprintf(sRoot, sizeof(sRoot), "%s", root);
-
-        for (char* c = sRoot; *c != '\0'; c++)
-        {
-            if (*c == '\\')
-            {
-                *c = '/';
-            }
-        }
+        n--;
     }
 
-    return sRoot;
+    size_t start = n;
+    while (start > 0 && sModRoot[start - 1] != '/' && sModRoot[start - 1] != ':')
+    {
+        start--;
+    }
+
+    snprintf(sName, sizeof(sName), "%.*s", (int)(n - start), sModRoot + start);
+    return sName;
 }
 
 static bool iPathIsAbsolute(const char* path)
@@ -143,6 +173,25 @@ void iFileInit()
         }
 
         iFileSetPath((char*)assets);
+    }
+
+    sModRoot[0] = 0;
+
+    const char* mod = iFileModRoot();
+    if (mod[0] != 0)
+    {
+        if (!iHostPathExists(mod))
+        {
+            printf("bfbb: mod folder not found, ignored: %s\n", mod);
+            fflush(stdout);
+        }
+        else
+        {
+            size_t n = strlen(mod);
+            snprintf(sModRoot, sizeof(sModRoot), "%s%s", mod, mod[n - 1] == '/' ? "" : "/");
+            printf("bfbb: mod folder: %s\n", mod);
+            fflush(stdout);
+        }
     }
 
     for (S32 i = 0; i < 4; i++)
@@ -196,52 +245,24 @@ void iFileFullPath(const char* relname, char* fullname)
     snprintf(fullname, sizeof(((tag_iFile*)0)->path), "%s%s", sBasePath, relname);
 }
 
-// The disc filesystem is case-insensitive and the asset names in the game data
-// do not agree with each other on case; a host filesystem usually does not
-// forgive that. Only used when the exact name misses, so a correctly-cased
-// tree costs nothing.
-static bool iResolveCaseInsensitive(char* path, size_t pathsize)
+// One component of a path, matched against a directory without regard to case.
+// Writes the directory's own spelling into `name` -- which is safe in place,
+// because a case-insensitive match is the same length -- and says whether it
+// found one.
+static bool iResolveComponent(const char* dir, char* name)
 {
-    if (iHostPathExists(path))
-    {
-        return true;
-    }
-
-    char* slash = strrchr(path, '/');
-    char* leaf = slash ? slash + 1 : path;
-
-    char dirbuf[512];
-    if (slash)
-    {
-        size_t n = (size_t)(slash - path);
-        if (n >= sizeof(dirbuf))
-        {
-            return false;
-        }
-        memcpy(dirbuf, path, n);
-        dirbuf[n] = '\0';
-    }
-    else
-    {
-        strcpy(dirbuf, ".");
-    }
-
-    iHostDir* d = iHostDirOpen(dirbuf);
+    iHostDir* d = iHostDirOpen(dir[0] != '\0' ? dir : ".");
     if (d == NULL)
     {
         return false;
     }
 
-    // The space left for the leaf, so a longer replacement cannot run off the
-    // end of the caller's buffer.
-    size_t leafroom = pathsize - (size_t)(leaf - path);
-
     bool found = false;
-    for (const char* name = iHostDirNext(d); name != NULL; name = iHostDirNext(d))
+    for (const char* entry = iHostDirNext(d); entry != NULL; entry = iHostDirNext(d))
     {
-        if (iHostStrCaseCmp(name, leaf) == 0)
+        if (iHostStrCaseCmp(entry, name) == 0)
         {
-            snprintf(leaf, leafroom, "%s", name);
+            memcpy(name, entry, strlen(name));
             found = true;
             break;
         }
@@ -249,6 +270,103 @@ static bool iResolveCaseInsensitive(char* path, size_t pathsize)
 
     iHostDirClose(d);
     return found;
+}
+
+// The disc filesystem is case-insensitive and the asset names in the game data
+// do not agree with each other on case; a host filesystem usually does not
+// forgive that. Only used when the exact name misses, so a correctly-cased
+// tree costs nothing.
+//
+// **Every component, not only the last one.** The asset system asks for
+// `GL/GL01.HIP`, because xUtil_idtag2string spells a scene tag the way the tag
+// is spelled and the tags are upper case, while an extraction has the
+// directory as `gl`. Resolving the leaf alone meant opening `<root>/GL` to
+// look in, which does not exist, so the function gave up before it ever
+// reached the name it was there to fix: the pack was invisible and
+// xSTPreLoadScene span on it forever. Windows never saw this -- its filesystem
+// answers for `GL` and `gl` alike -- and Android's does not.
+//
+// The walk starts after the root (`/`, or a Windows drive) and resolves each
+// component against the one above it. A component that already exists is left
+// alone, so the only directories ever scanned are the ones actually spelled
+// wrong.
+static bool iResolveCaseInsensitive(char* path, size_t pathsize)
+{
+    if (iHostPathExists(path))
+    {
+        return true;
+    }
+
+    char out[512];
+    size_t len = 0;
+    const char* p = path;
+
+    // The root, taken as given. Everything after it is what the game spells
+    // for itself and so what can disagree with the disk.
+    if (p[0] == '/')
+    {
+        out[len++] = *p++;
+    }
+    else if (p[0] != '\0' && p[1] == ':')
+    {
+        out[len++] = *p++;
+        out[len++] = *p++;
+        if (*p == '/')
+        {
+            out[len++] = *p++;
+        }
+    }
+    out[len] = '\0';
+
+    while (*p != '\0')
+    {
+        const char* end = strchr(p, '/');
+        size_t n = (end != NULL) ? (size_t)(end - p) : strlen(p);
+
+        if (n == 0)
+        {
+            p++; // a doubled separator
+            continue;
+        }
+
+        // The separator this component needs, unless the root already ended in
+        // one or nothing has been written yet.
+        size_t sep = (len > 0 && out[len - 1] != '/') ? 1 : 0;
+
+        if (len + sep + n + 1 > sizeof(out))
+        {
+            return false;
+        }
+
+        // Where the component goes, and the parent to look in if it is not
+        // there under this spelling.
+        char parent[512];
+        memcpy(parent, out, len);
+        parent[len] = '\0';
+        if (sep)
+        {
+            out[len++] = '/';
+        }
+        char* component = out + len;
+        memcpy(component, p, n);
+        len += n;
+        out[len] = '\0';
+
+        if (!iHostPathExists(out) && !iResolveComponent(parent, component))
+        {
+            return false;
+        }
+
+        p += n;
+    }
+
+    if (len >= pathsize)
+    {
+        return false;
+    }
+
+    memcpy(path, out, len + 1);
+    return true;
 }
 
 // Whether the asset root actually holds the game.
@@ -285,6 +403,306 @@ const char* iFileMissingAssetPath()
     }
 
     return NULL;
+}
+
+// Which console's packer wrote the assets, out of boot.HIP's own header.
+//
+// The port reads the Xbox release. A GameCube or PS2 set does not announce
+// itself -- it loads, and then fails somewhere far from the cause, because the
+// packer's container is the same on every platform and only what is inside it
+// differs. A GameCube boot.HIP gets as far as the animation tables before
+// zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a big-endian count of 74
+// as 1,241,513,984 and walks off the end of memory. That crash says nothing
+// about what is actually wrong.
+//
+// HIPA holds PACK, PACK holds PLAT, and PLAT is a run of NUL-terminated
+// strings: a two-letter id, then the long name, then the video standard, the
+// region and the project. Chunk sizes are big-endian on every platform -- the
+// container is the packer's, not the console's -- so this reads the same way
+// whatever wrote it. Every chunk here is at a known small offset, so a few
+// hundred bytes off the front of the file is enough.
+//
+// iHipPlatform reads any package's PLAT; iFileAssetPlatform asks it of the asset
+// root's boot.HIP. Writes "" to both outputs when there is no answer.
+static bool iHipPlatform(const char* path, char* id, size_t idsize, char* name, size_t namesize)
+{
+    id[0] = '\0';
+    name[0] = '\0';
+
+    FILE* fp = fopen(path, "rb");
+    if (fp == NULL)
+    {
+        return false;
+    }
+
+    U8 head[512];
+    size_t got = fread(head, 1, sizeof(head), fp);
+    fclose(fp);
+
+    if (got < 16 || memcmp(head, "HIPA", 4) != 0)
+    {
+        return false;
+    }
+
+    // HIPA's own payload is the rest of the file, so step into it and walk the
+    // top-level chunks; PACK's children are walked the same way.
+    size_t o = 8;
+    size_t end = got;
+
+    for (int depth = 0; depth < 2; depth++)
+    {
+        bool descended = false;
+
+        while (o + 8 <= end)
+        {
+            const U8* c = head + o;
+            U32 size = ((U32)c[4] << 24) | ((U32)c[5] << 16) | ((U32)c[6] << 8) | c[7];
+            size_t body = o + 8;
+
+            if (memcmp(c, "PACK", 4) == 0)
+            {
+                o = body;
+                end = (body + size < got) ? body + size : got;
+                descended = true;
+                break;
+            }
+
+            if (memcmp(c, "PLAT", 4) == 0)
+            {
+                size_t stop = (body + size < got) ? body + size : got;
+                snprintf(id, idsize, "%.*s", (int)(stop - body), (const char*)head + body);
+
+                // The long name is the string after it.
+                size_t n = body + strlen(id);
+                while (n < stop && head[n] == '\0')
+                {
+                    n++;
+                }
+                snprintf(name, namesize, "%.*s", (int)(stop - n), (const char*)head + n);
+                return id[0] != '\0';
+            }
+
+            if (size == 0)
+            {
+                break;
+            }
+            o = body + size;
+        }
+
+        if (!descended)
+        {
+            break;
+        }
+    }
+
+    return false;
+}
+
+const char* iFileAssetPlatform(const char** longName)
+{
+    static char sId[8];
+    static char sName[32];
+
+    if (longName != NULL)
+    {
+        *longName = NULL;
+    }
+
+    char path[512];
+    snprintf(path, sizeof(path), "%sboot.HIP", sBasePath);
+    if (!iResolveCaseInsensitive(path, sizeof(path)))
+    {
+        return NULL;
+    }
+
+    if (!iHipPlatform(path, sId, sizeof(sId), sName, sizeof(sName)))
+    {
+        return NULL;
+    }
+
+    if (longName != NULL && sName[0] != '\0')
+    {
+        *longName = sName;
+    }
+    return sId;
+}
+
+// Whether `name` has been reported yet, remembering it if not. Bounded: past
+// the table's size nothing more is reported.
+static bool iModFirstReport(const char* name)
+{
+    enum
+    {
+        kMaxReported = 256,
+        kMaxName = 64
+    };
+
+    static char sReported[kMaxReported][kMaxName];
+    static S32 sCount;
+
+    for (S32 i = 0; i < sCount; i++)
+    {
+        if (iHostStrCaseCmp(sReported[i], name) == 0)
+        {
+            return false;
+        }
+    }
+
+    if (sCount == kMaxReported)
+    {
+        return false;
+    }
+
+    snprintf(sReported[sCount++], kMaxName, "%s", name);
+    return true;
+}
+
+static bool iHasPackageExtension(const char* path)
+{
+    size_t n = strlen(path);
+    return n >= 4 &&
+           (iHostStrCaseCmp(path + n - 4, ".HIP") == 0 || iHostStrCaseCmp(path + n - 4, ".HOP") == 0);
+}
+
+// The mod folder's copy of a file under the asset root. When the mod has one,
+// its path is written over `path` and the result is true.
+//
+// Matched on the path relative to the asset root, so `gl/gl01.HIP` in the mod
+// folder replaces `gl/gl01.HIP` in the assets, and whatever SB.INI's PATH= did
+// to the base path applies to both. A path outside the asset root is left
+// alone.
+//
+// A package from another console's release is refused and the original is
+// read: the port only understands the Xbox layout, and a GameCube HIP loads
+// and then crashes far from the cause. See iFileAssetPlatform.
+static bool iModOverride(char* path, size_t pathsize)
+{
+    if (sModRoot[0] == 0)
+    {
+        return false;
+    }
+
+    const char* rel;
+    size_t rootlen = strlen(sAssetRoot);
+    if (rootlen > 0)
+    {
+        if (strncmp(path, sAssetRoot, rootlen) != 0)
+        {
+            return false;
+        }
+        rel = path + rootlen;
+    }
+    else
+    {
+        if (iPathIsAbsolute(path))
+        {
+            return false;
+        }
+        rel = path;
+    }
+
+    while (rel[0] == '.' && rel[1] == '/')
+    {
+        rel += 2;
+    }
+
+    char candidate[512];
+    if (snprintf(candidate, sizeof(candidate), "%s%s", sModRoot, rel) >= (int)sizeof(candidate))
+    {
+        return false;
+    }
+
+    if (!iResolveCaseInsensitive(candidate, sizeof(candidate)))
+    {
+        return false;
+    }
+
+    if (iHasPackageExtension(candidate))
+    {
+        char id[8];
+        char longName[32];
+        if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
+            strcmp(id, "XB") != 0)
+        {
+            if (iModFirstReport(rel))
+            {
+                printf("bfbb: mod: %s is from the %s release, not the Xbox one; using the "
+                       "original\n",
+                       rel, longName[0] != '\0' ? longName : id);
+                fflush(stdout);
+            }
+            return false;
+        }
+    }
+
+    // `rel` points into `path`, so it is reported before path is overwritten.
+    size_t len = strlen(candidate);
+    if (len >= pathsize)
+    {
+        return false;
+    }
+
+    if (iModFirstReport(rel))
+    {
+        printf("bfbb: mod: %s\n", rel);
+        fflush(stdout);
+    }
+
+    memcpy(path, candidate, len + 1);
+    return true;
+}
+
+// A package the game cannot open, and the end of the run.
+//
+// xSTPreLoadScene's HIP arm is `do { ... } while (i == 0)`: a failed open is
+// retried, forever, with no exit and no caller to fail to. On a disc that is
+// the right thing -- a failed read is a dirty lens or a drive still spinning
+// up, and the next attempt may well work. On a host the file is either there
+// or it is not, so the loop is a hang at a hundred percent of a core with
+// nothing said, which is exactly how a half-copied asset set presents itself.
+// It cost an afternoon and a debugger to find the first time.
+//
+// So: name the package, name both places it was looked for, and stop. This is
+// iSystemInit's treatment of a missing FONT.HIP, applied to the same failure
+// arriving later -- and it arrives later for every pack except the two that
+// are checked at startup.
+void iFileMissingPackage(const char* subdirPath, const char* rootPath)
+{
+    char tried[2][512];
+    S32 count = 0;
+
+    if (subdirPath != NULL && subdirPath[0] != '\0')
+    {
+        snprintf(tried[count++], sizeof(tried[0]), "%s%s", sBasePath, subdirPath);
+    }
+    if (rootPath != NULL && rootPath[0] != '\0')
+    {
+        snprintf(tried[count++], sizeof(tried[0]), "%s%s", sBasePath, rootPath);
+    }
+
+    const char* leaf = (rootPath != NULL) ? rootPath : subdirPath;
+
+    printf("bfbb: FATAL -- the game asked for a file that is not there: %s\n",
+           leaf != NULL ? leaf : "(unnamed)");
+    for (S32 i = 0; i < count; i++)
+    {
+        printf("bfbb:   looked for: %s\n", tried[i]);
+    }
+    printf("bfbb:   the asset set is incomplete. Every .HIP and .HOP from the disc has\n");
+    printf("bfbb:   to be there, in the folders it came in.\n");
+    fflush(stdout);
+
+    char message[1536];
+    snprintf(message, sizeof(message),
+             "The game asked for a file that is not there:\n\n%s\n\n"
+             "Looked for:\n%s%s%s\n\n"
+             "The asset set is incomplete. Every .HIP and .HOP from the disc has to "
+             "be there, in the folders it came in.",
+             leaf != NULL ? leaf : "(unnamed)", count > 0 ? tried[0] : "",
+             count > 1 ? "\n" : "", count > 1 ? tried[1] : "");
+
+    iHostErrorBox("SpongeBob SquarePants: Battle for Bikini Bottom", message);
+    exit(1);
 }
 
 // A file that is not there, said out loud.
@@ -378,11 +796,10 @@ U32 iFileOpen(const char* name, S32 flags, tag_xFile* file)
 
     const char* mode = (flags & IFILE_OPEN_WRITE) ? "wb" : "rb";
 
-    if (!(flags & IFILE_OPEN_WRITE))
+    if (!(flags & IFILE_OPEN_WRITE) && !iModOverride(ps->path, sizeof(ps->path)))
     {
         iResolveCaseInsensitive(ps->path, sizeof(ps->path));
     }
-
 
     FILE* fp = fopen(ps->path, mode);
     if (fp == NULL)

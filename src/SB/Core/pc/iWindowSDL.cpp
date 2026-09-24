@@ -183,7 +183,9 @@ S32 iWindowOpen(const iWindowParams* params)
     //
     // The rectangle is wanted as much as the size: a monitor left of the
     // primary has a negative origin.
-    SDL_WindowFlags flags = 0;
+    // Vulkan makes its surface on this window, and SDL refuses to make one on a
+    // window that was not created for it.
+    SDL_WindowFlags flags = iBackendIsVulkan() ? SDL_WINDOW_VULKAN : 0;
     S32 x = 0;
     S32 y = 0;
     S32 w = params->width;
@@ -232,6 +234,17 @@ S32 iWindowOpen(const iWindowParams* params)
     {
         SDL_SetWindowPosition(sWindow, x, y);
     }
+
+#ifdef __ANDROID__
+    // Android hides the status and navigation bars only for a fullscreen
+    // window, and a borderless one leaves them drawn over the game. GL3's window
+    // is made fullscreen in iWindowDeferredCreated.
+    if (sMode != iWINDOW_WINDOWED)
+    {
+        SDL_SetWindowFullscreen(sWindow, true);
+        SDL_SyncWindow(sWindow);
+    }
+#endif
 
     // What the window actually got, in pixels, which is what the back buffer is
     // sized in and what every other part of the port pairs with. Read rather
@@ -495,6 +508,27 @@ S32 iWindowGetDisplayRefreshRate()
     return (S32)(mode->refresh_rate + 0.5f);
 }
 
+S32 iWindowGetDisplaySize(S32* width, S32* height)
+{
+    // Refcounted, so this neither needs the window nor disturbs one.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+    {
+        return FALSE;
+    }
+
+    const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    S32 ok = mode != NULL && mode->w > 0 && mode->h > 0;
+
+    if (ok)
+    {
+        *width = mode->w;
+        *height = mode->h;
+    }
+
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return ok;
+}
+
 void iWindowPaceFrame()
 {
     if (sFrameRate <= 0)
@@ -556,11 +590,12 @@ void iWindowGetSize(S32* width, S32* height)
 
 // Whatever the running backend's EngineOpenParams wants, as iWindow.h says: an
 // SDL_Window* under GL3, which librw wrote into the slot itself, and the HWND
-// behind that window under D3D.
+// behind that window under D3D. Vulkan takes the SDL_Window* as well, one the
+// port made.
 void* iWindowNativeHandle()
 {
 #ifdef _WIN32
-    if (!iBackendIsGL3())
+    if (!iBackendIsGL3() && !iBackendIsVulkan())
     {
         if (sWindow == NULL)
         {

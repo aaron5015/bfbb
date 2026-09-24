@@ -596,16 +596,90 @@ static S32 WorldLightingFromConfig()
                                                                   IWORLDLIGHT_OFF;
 }
 
+// video.profile, resolved into the four settings it stands for.
+//
+// vanilla is the Xbox release: 640x480, the interface in a 4:3 box, the
+// console's culling and world clip. modern renders at the display's shape,
+// 1080 lines tall or the display's own height if that is less, with the HUD
+// out at the edges and nothing culled by distance. custom, the default off
+// Android, reads width, height, ui and draw_distance from their own lines.
+//
+// BFBB_PROFILE beats the file, as BFBB_ASSETS does: the Android launcher asks
+// the player once and passes the answer that way, since there is no settings
+// program to run on a phone.
+struct VideoProfile
+{
+    S32 width;
+    S32 height;
+    const char* ui;
+    S32 drawDistance;
+};
+
+static VideoProfile ResolveVideoProfile()
+{
+    VideoProfile p;
+    p.width = iConfigGetInt("video.width", 640);
+    p.height = iConfigGetInt("video.height", 480);
+    p.ui = iConfigGetString("video.ui", "pillarbox");
+    p.drawDistance = iConfigGetBool("video.draw_distance", TRUE);
+
+    const char* name = getenv("BFBB_PROFILE");
+    if (name == NULL || name[0] == '\0')
+    {
+        name = iConfigGetString("video.profile", "custom");
+    }
+
+    if (iHostStrCaseCmp(name, "vanilla") == 0)
+    {
+        p.width = 640;
+        p.height = 480;
+        p.ui = "pillarbox";
+        p.drawDistance = FALSE;
+    }
+    else if (iHostStrCaseCmp(name, "modern") == 0)
+    {
+        S32 dw = 0;
+        S32 dh = 0;
+        S32 longSide = 16;
+        S32 shortSide = 9;
+
+        // The long side across, whichever way up the display reports itself: a
+        // phone asks before its activity has turned to landscape.
+        if (iWindowGetDisplaySize(&dw, &dh))
+        {
+            longSide = dw > dh ? dw : dh;
+            shortSide = dw > dh ? dh : dw;
+        }
+
+        p.height = shortSide < 1080 && shortSide >= 480 ? shortSide : 1080;
+        p.width = (S32)((F64)p.height * longSide / shortSide + 0.5) & ~1;
+        p.ui = "native";
+        p.drawDistance = TRUE;
+    }
+    else if (iHostStrCaseCmp(name, "custom") != 0)
+    {
+        printf("bfbb: config: video.profile '%s' is not custom, vanilla or modern; using custom\n",
+               name);
+        name = "custom";
+    }
+
+    printf("bfbb: video profile %s -- %dx%d, HUD %s, draw distance %s\n", name, (int)p.width,
+           (int)p.height, p.ui, p.drawDistance ? "unlimited" : "console");
+    return p;
+}
+
 static void ApplyConfig()
 {
+    const VideoProfile profile = ResolveVideoProfile();
+
     sWindowMode = WindowModeFromConfig();
     sShadowResPinned = ShadowResolutionFromConfig();
 
     // The render size, before RenderWareInit opens the window at it. Pushed the
     // same way the three render features are, and for a stronger reason: iScreen
     // is read by game code, which must not learn what config.ini is.
-    iScreenSetSize(iConfigGetInt("video.width", 640), iConfigGetInt("video.height", 480));
-    iScreenSetMultiSample(iConfigGetInt("video.msaa", 4));
+    iScreenSetSize(profile.width, profile.height);
+    iScreenSetMultiSample(iConfigGetInt("video.msaa", 1));
     iScreenSetPerPixelLighting(iConfigGetBool("video.per_pixel_lighting", FALSE));
     iScreenSetWorldLighting(WorldLightingFromConfig());
     iScreenSetWorldLightContrast(iConfigGetFloat("experimental.world_light_contrast", 1.0f));
@@ -660,6 +734,10 @@ static void ApplyConfig()
     {
         iScreenSetBackend(iSCREENBACKEND_GL3);
     }
+    else if (iHostStrCaseCmp(backend, "vulkan") == 0)
+    {
+        iScreenSetBackend(iSCREENBACKEND_VULKAN);
+    }
     else
     {
         // No "null" here on purpose. iSCREENBACKEND_NULL is what a build with
@@ -669,7 +747,7 @@ static void ApplyConfig()
         // that HAS a device can usefully be told to run as.
         if (iHostStrCaseCmp(backend, "auto") != 0)
         {
-            printf("bfbb: config: video.backend is not auto, d3d9, d3d11 or gl3, "
+            printf("bfbb: config: video.backend is not auto, d3d9, d3d11, gl3 or vulkan, "
                    "using the default: %s\n",
                    backend);
         }
@@ -699,7 +777,7 @@ static void ApplyConfig()
 
     // How the interface sits on a screen that is not 4:3. Nothing to report
     // when it cannot matter, which is every 4:3 render size.
-    const char* uiMode = iConfigGetString("video.ui", "pillarbox");
+    const char* uiMode = profile.ui;
     if (iHostStrCaseCmp(uiMode, "native") == 0)
     {
         iScreenSetUIMode(iSCREENUI_NATIVE);
@@ -718,7 +796,7 @@ static void ApplyConfig()
     // into iCamera as well as into iDrawDist because the far clip is a value the
     // camera holds rather than one it asks for each frame; the wrapped distances
     // in zLOD and zEntSimpleObj read the switch itself, at scene setup.
-    S32 drawDistance = iConfigGetBool("video.draw_distance", TRUE);
+    S32 drawDistance = profile.drawDistance;
     iDrawDistSetUnlimited(drawDistance);
     iCameraSetNearFarClip(0.0f, iDrawDistFarClip());
 
@@ -906,7 +984,11 @@ static void ApplyConfig()
            drawDistance ? "unlimited" : "console", shadows, glow ? "on" : "off",
            distortion ? "on" : "off", snapshot ? "on" : "off", reverb ? "on" : "off",
            rolloff ? "on" : "off");
+#ifdef __ANDROID__
+    printf("bfbb: text rewritten for a device: %s\n", wording ? "on" : "off");
+#else
     printf("bfbb: text rewritten for a PC: %s\n", wording ? "on" : "off");
+#endif
     if (iScreenWorldLighting() != IWORLDLIGHT_OFF)
     {
         printf("bfbb: world lit at run time from %s, contrast %.2f\n",
@@ -996,6 +1078,55 @@ void iSystemInit(U32 options)
             printf("bfbb:   %s\n", where);
             printf("bfbb:   it must name the folder that DIRECTLY contains boot.HIP, "
                    "font.HIP and fmv/\n");
+            fflush(stdout);
+
+            iHostErrorBox("SpongeBob SquarePants: Battle for Bikini Bottom", message);
+            exit(1);
+        }
+    }
+
+    // **Whose assets these are.**
+    //
+    // The port reads the Xbox release, and a set from another console does not
+    // announce itself: the packer's container is the same everywhere and only
+    // what is inside it differs, so a GameCube set opens, reads, and then
+    // fails a long way from the cause. It gets as far as boot.HIP's animation
+    // tables, where zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a
+    // big-endian count of 74 as 1,241,513,984 and walks off the end of memory.
+    //
+    // Nothing about that crash says "these are the wrong assets", and it is
+    // the first thing anyone will try: the GameCube release is the one this
+    // code was decompiled from, so reaching for its files is the obvious move.
+    // Say what they are and what is missing instead.
+    //
+    // Only when the header actually names a platform. An unreadable or absent
+    // PLAT chunk is not an accusation, and the check above has already settled
+    // whether the files are there at all.
+    {
+        const char* longName = NULL;
+        const char* plat = iFileAssetPlatform(&longName);
+
+        if (plat != NULL && strcmp(plat, "XB") != 0)
+        {
+            const char* who = (longName != NULL) ? longName : plat;
+
+            char message[1536];
+            snprintf(message, sizeof(message),
+                     "These are %s assets, and the port reads the Xbox release's.\n\n"
+                     "The two differ in more than byte order. The %s packs store their "
+                     "textures in the console's own formats, their models and level "
+                     "geometry as display lists for its graphics hardware, and every "
+                     "number in an entity or animation asset the other way round from "
+                     "the way this build reads one.\n\n"
+                     "Extract the Xbox disc instead, and point [assets] path at the "
+                     "folder holding boot.HIP.",
+                     who, who);
+
+            printf("bfbb: FATAL -- these are %s assets; the port reads the Xbox release's.\n", who);
+            printf("bfbb:   textures, models and level geometry are in that console's own\n");
+            printf("bfbb:   formats, and the entity and animation assets are byte-swapped\n");
+            printf("bfbb:   against what this build reads.\n");
+            printf("bfbb:   [assets] path has to name an extracted Xbox disc.\n");
             fflush(stdout);
 
             iHostErrorBox("SpongeBob SquarePants: Battle for Bikini Bottom", message);

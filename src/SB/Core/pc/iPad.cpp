@@ -189,3 +189,25 @@ void iPadKill()
 {
     iPadHostExit();
 }
+
+// A talk box link names a pad event and the text beside it names a picture, and
+// on the Xbox archives the two disagree about O and TRIANGLE: the exit prompt in
+// the three ambush levels draws {i:button_picture_03}, the button printed B,
+// while the link that exits is on the event the O bit raises. Retail Xbox draws
+// a B and answers to it, so its pad reached talk boxes with the pair transposed.
+// The picture comes from the player's own glyph set, so the prompt and the
+// button move together on every preset.
+U32 iPadTalkBoxButtons(U32 pressed)
+{
+    U32 swapped = pressed & ~(XPAD_BUTTON_O | XPAD_BUTTON_TRIANGLE);
+
+    if (pressed & XPAD_BUTTON_O)
+    {
+        swapped |= XPAD_BUTTON_TRIANGLE;
+    }
+    if (pressed & XPAD_BUTTON_TRIANGLE)
+    {
+        swapped |= XPAD_BUTTON_O;
+    }
+    return swapped;
+}

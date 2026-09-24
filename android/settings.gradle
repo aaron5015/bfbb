@@ -1,0 +1,9 @@
+// The Android front end for the PC port. See docs/ANDROID.md.
+//
+// Deliberately its own Gradle build rather than something the CMake build
+// knows about: CMakeLists.txt is invoked BY Gradle here (externalNativeBuild
+// in app/build.gradle), the same way a desktop build invokes it directly, and
+// nothing above this directory has to learn that Android exists.
+rootProject.name = 'bfbb-android'
+
+include ':app'

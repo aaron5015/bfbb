@@ -22,4 +22,9 @@ void iPadStopRumble();
 void iPadStartRumble(_tagxPad* pad, _tagxRumble* rumble);
 void iPadKill();
 
+// The pad bits a talk box's links were authored against. The GameCube's
+// archives agree with its pad, so this is the identity -- a macro, because an
+// inline function still changes CodeWarrior's code for the caller.
+#define iPadTalkBoxButtons(pressed) (pressed)
+
 #endif

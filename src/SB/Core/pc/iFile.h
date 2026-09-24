@@ -47,11 +47,37 @@ U32 iFileOpen(const char* name, S32 flags, tag_xFile* file);
 // working directory. Separators are slashes whichever was typed.
 const char* iFileAssetRoot();
 
+// PC-only. The mod folder: `[assets] mod` from config.ini, or BFBB_MOD when
+// that is set. "" when there is none. A file under it is read in place of the
+// asset root's file at the same relative path; the asset root is never
+// written to.
+const char* iFileModRoot();
+
+// PC-only. The last component of the mod folder iFileInit accepted, like
+// "BFBBMix", or "" when no mod is in use. isavegame keeps a mod's saves apart
+// under this name.
+const char* iFileModName();
+
 // PC-only. The full path of the first file the game cannot run without that
 // is not under the asset root, or NULL when they are all there. Asked once by
 // iSystemInit, because the alternative is a hang: zMainLoadFontHIP spins on
 // `while (xSTLoadStep('FONT') < 1.0f)` with no exit and no caller to fail to.
 const char* iFileMissingAssetPath();
+
+// PC-only. Which console's packer wrote the assets. Returns the two-letter id
+// out of boot.HIP's PLAT chunk -- "XB", "GC", "PS2" -- and sets *longName to
+// the spelling beside it ("Xbox", "GameCube"). NULL when the file cannot be
+// read or carries no PLAT, which is not treated as an answer either way.
+const char* iFileAssetPlatform(const char** longName);
+
+// PC-only. A package the game asked for and could not open, said out loud,
+// and then the process stops. Either path may be NULL, for the scene tags
+// that are only ever looked for at the asset root.
+//
+// It does not return, because there is nothing to return to: xSTPreLoadScene
+// retries a failed HIP open forever. See the call site.
+void iFileMissingPackage(const char* subdirPath, const char* rootPath);
+
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);
 U32 iFileRead(tag_xFile* file, void* buf, U32 size);
 S32 iFileReadAsync(tag_xFile* file, void* buf, U32 aSize, void (*callback)(tag_xFile*),

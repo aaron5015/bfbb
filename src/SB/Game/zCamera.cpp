@@ -101,13 +101,90 @@ void xCameraRotate(xCamera* cam, const xVec3& v, F32 roll, F32 time, F32 accel, 
 // Declared in zCameraFly.h, which this TU does not include.
 U32 zCameraFlyProcessStopEvent();
 
-
 namespace
 {
     F32 GetCurrentPitch();
     F32 GetCurrentH();
     F32 GetCurrentD();
 } // namespace
+
+#ifdef PLATFORM_PC
+namespace
+{
+    // The free orbit a touchscreen drag steers. PC only.
+    //
+    // **Why the retail rig had to go, and what is kept.** zCameraUpdate builds
+    // the camera out of a distance, a height and a yaw, and every drag-facing
+    // problem was in how those three moved rather than in the rig itself:
+    //
+    //   - `pgoal = cam->pcur` every frame, so the yaw is wherever the camera
+    //     drifted to. Nobody owns it.
+    //   - pitch is not an angle at all. `pitch_s` is a blend weight between a
+    //     camera pinned above him and one pinned below, so "look up" walks the
+    //     camera along a fixed arc between two poses.
+    //   - the overrotation block swings the yaw around behind his direction of
+    //     travel on its own, seconds after you stop steering.
+    //
+    // So this owns the two angles instead, and rebuilds the three goals from
+    // them. Everything below the goals -- collision, the look-at, the near
+    // camera, lasso and wall framing -- is retail's and is untouched.
+    //
+    // **The aim point is derived, not fixed.** Retail does not point the camera
+    // at his feet: far is d=5, h=3, pitch=15 degrees, which lines up on a point
+    // about 1.65 up, and near, wall and lasso each frame him differently. So
+    // the height that framing implies is read back out of whatever goals this
+    // frame produced, and the orbit is built around THAT. Change the framing
+    // and this follows it.
+    F32 sOrbitYaw;
+    F32 sOrbitPitch;
+    S32 sOrbitOn;
+
+    // How far the camera may be swung above and below the aim point. Retail's
+    // own extremes measured about the same point are +70 and -67 degrees, so
+    // this is its arc, slightly opened up.
+    const F32 kOrbitPitchMin = -1.0471976f; // -60 degrees
+    const F32 kOrbitPitchMax = 1.3089969f; // 75 degrees
+
+    // Past this much disagreement between where the orbit thinks the camera is
+    // and where it actually is, something other than the player moved it -- a
+    // cutscene, a warp, a bus ride -- and the orbit takes the camera's word for
+    // it rather than yanking the view back.
+    const F32 kOrbitResync = 0.5f;
+
+    bool zCameraOrbit(xCamera* cam, F32& dgoal, F32& hgoal, F32& pgoal, F32& pitch_goal)
+    {
+        F32 aim = hgoal - dgoal * itan(pitch_goal);
+        F32 rise = hgoal - aim;
+        F32 radius = xsqrt(SQR(dgoal) + SQR(rise));
+
+        if (radius < 0.01f)
+        {
+            return false;
+        }
+
+        F32 yaw = iCameraLookYaw();
+        F32 pitch = iCameraLookPitch();
+
+        if (!sOrbitOn || (yaw == 0.0f && pitch == 0.0f &&
+                          xabs(xDangleClamp(sOrbitYaw - cam->pcur)) > kOrbitResync))
+        {
+            sOrbitOn = 1;
+            sOrbitYaw = cam->pcur;
+            sOrbitPitch = pitch_goal;
+        }
+
+        sOrbitYaw = xDangleClamp(sOrbitYaw + yaw);
+        sOrbitPitch = CLAMP(sOrbitPitch + pitch, kOrbitPitchMin, kOrbitPitchMax);
+
+        dgoal = radius * icos(sOrbitPitch);
+        hgoal = aim + radius * isin(sOrbitPitch);
+        pgoal = sOrbitYaw;
+        pitch_goal = sOrbitPitch;
+
+        return true;
+    }
+} // namespace
+#endif
 
 void zCameraReset(xCamera* cam)
 {
@@ -135,6 +212,12 @@ void zCameraReset(xCamera* cam)
     xCameraSetFOV(cam, 75.0f);
     zCameraTweakGlobal_Update(0.0f);
     xCameraReset(cam, ::GetCurrentD(), ::GetCurrentH(), ::GetCurrentPitch());
+
+#ifdef PLATFORM_PC
+    // A level load, so the orbit has nothing to hold on to. It re-reads the
+    // camera the next time it runs.
+    sOrbitOn = 0;
+#endif
 
     input_enabled = true;
     dMultiplier = 1.0f;
@@ -1031,10 +1114,8 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
     if (dt > 1e-5f && cam->tgt_mat != NULL && cam->tgt_omat != NULL && vertical_lerp < 0.9999f)
     {
-        F32 velx =
-            (cam->tgt_mat->pos.x - cam->tgt_omat->pos.x - tran_accum.x) / dt;
-        F32 velz =
-            (cam->tgt_mat->pos.z - cam->tgt_omat->pos.z - tran_accum.z) / dt;
+        F32 velx = (cam->tgt_mat->pos.x - cam->tgt_omat->pos.x - tran_accum.x) / dt;
+        F32 velz = (cam->tgt_mat->pos.z - cam->tgt_omat->pos.z - tran_accum.z) / dt;
         F32 camx = cam->tgt_mat->pos.x - cam->mat.pos.x;
         F32 camz = cam->tgt_mat->pos.z - cam->mat.pos.z;
         F32 cammag = xsqrt(SQR(camx) + SQR(camz));
@@ -1059,8 +1140,32 @@ void zCameraUpdate(xCamera* cam, F32 dt)
             }
         }
 
-        if (zcam_overrot_tmr > zcam_overrot_tstart && cammag > 1.2f &&
-            velmag > zcam_overrot_velmin)
+#ifdef PLATFORM_PC
+        // No auto-follow while a drag steers the camera.
+        //
+        // What the block below does is swing the camera around behind the way
+        // the player is running, on its own, once they have been moving for
+        // zcam_overrot_tstart seconds. Turning the camera by hand pushes the
+        // timer back to -zcam_overrot_tmanual, so on a console it only ever
+        // happens a good three seconds after you last touched the stick -- by
+        // which time it reads as the camera being helpful.
+        //
+        // Under a drag it reads as the camera being broken. Nothing in a
+        // third-person game made this century moves the view without being
+        // asked, and a slow drift that starts seconds after you stop is worse
+        // than an obvious one.
+        //
+        // Held down through the game's own mechanism rather than a second
+        // condition on the test below: this is exactly what the stick's arms do
+        // to say "the player is driving", and it means the timer resumes on its
+        // own terms the moment a pad takes over.
+        if (iCameraLookActive())
+        {
+            zcam_overrot_tmr = -zcam_overrot_tmanual;
+        }
+#endif
+
+        if (zcam_overrot_tmr > zcam_overrot_tstart && cammag > 1.2f && velmag > zcam_overrot_velmin)
         {
             camz /= cammag;
             velz /= velmag;
@@ -1155,6 +1260,40 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
     yaw_goal = xatan2(dirx, dirz);
 
+#ifdef PLATFORM_PC
+    // The orbit's camera, in place of the goals retail just computed.
+    //
+    // Taken over here rather than earlier so that everything feeding the goals
+    // -- the near camera, lasso and wall framing, the height multipliers, the
+    // bounce cases -- has already had its say, and everything after them, which
+    // is the collision and the look-at, still gets its own.
+    //
+    // `mvtm` and `lktm` are the SECONDS xCameraMove and xCameraLookYPR take to
+    // reach a goal, and 0.1 of it is the rest of what felt wrong: on a stick
+    // the goal sits a constant distance ahead and the lag is a constant offset
+    // nobody sees, and under a drag every movement arrives late and coasts past.
+    // 0 is xCameraMove's own snap -- it writes cur to goal and places mat.pos
+    // exactly -- so this is the existing path, not a second one.
+    //
+    // Both are restored below. lktm is rebuilt every frame by
+    // zCameraFreeLookSetGoals and would have recovered anyway; mvtm is only
+    // ever lowered, so leaving it at 0 would take the ease off the camera for
+    // the rest of the session.
+    F32 mvtm_was = mvtm;
+    F32 lktm_was = lktm;
+
+    if (iCameraLookActive() && wall_jump_enabled == WJVS_DISABLED &&
+        zCameraOrbit(cam, dgoal, hgoal, pgoal, pitch_goal))
+    {
+        mvtm = 0.0f;
+        lktm = 0.0f;
+    }
+    else
+    {
+        sOrbitOn = 0;
+    }
+#endif
+
     if (lassocam_enabled && stop_track == 0)
     {
         xCameraMove(cam, 0x20, dgoal, hgoal, pgoal, mvtm, mvtm_acc, mvtm_dec);
@@ -1165,6 +1304,11 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     }
 
     xCameraLookYPR(cam, 0x0, yaw_goal, pitch_goal, roll_goal, lktm, lktm_acc, lktm_dec);
+
+#ifdef PLATFORM_PC
+    mvtm = mvtm_was;
+    lktm = lktm_was;
+#endif
 
     if (wall_jump_enabled == WJVS_ENABLED)
     {

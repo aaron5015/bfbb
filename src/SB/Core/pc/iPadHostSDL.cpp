@@ -30,6 +30,8 @@
 #include "iPadBind.h"
 #include "iPadKeyboard.h"
 #include "iPadStick.h"
+#include "iPadTouch.h"
+#include "iTime.h"
 #include "xPad.h"
 
 #include <SDL3/SDL.h>
@@ -46,6 +48,44 @@ static S32 sPortSlot[IPAD_MAX_CONTROLLERS];
 
 static iPadHostState sState[IPAD_MAX_CONTROLLERS];
 static bool sKeyboardOnPort0;
+
+#ifdef __ANDROID__
+// The system back button, as a press of Start. It arrives as SDL_SCANCODE_AC_BACK
+// and is caught by a watch, because a tap can go down and up inside one pump and
+// never show in the key state. The watch runs on whichever thread posted the
+// event, hence the atomic.
+static SDL_AtomicInt sBackPresses;
+static S32 sBackFrames;
+
+static bool SDLCALL WatchBackButton(void*, SDL_Event* e)
+{
+    if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_AC_BACK && !e->key.repeat)
+    {
+        SDL_AddAtomicInt(&sBackPresses, 1);
+    }
+    return true;
+}
+#endif
+
+// Android and iOS block the game thread while the app is in the background.
+// The game clock stops for that time, so the frame after it is an ordinary
+// frame and not the whole absence at once. A watch and not a case in the event
+// pump: both events reach the queue before the pump drains it, so only the
+// watch sees when each happened. Desktop SDL sends neither.
+//
+// Not in iWindowSDL.cpp: that is in bfbb_rw, which does not link the clock.
+static bool SDLCALL WatchBackground(void*, SDL_Event* e)
+{
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+    {
+        iTimeSuspend();
+    }
+    else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND)
+    {
+        iTimeResume();
+    }
+    return true;
+}
 
 static S32 sPinnedSlot = -1;
 static bool sReady;
@@ -382,6 +422,12 @@ void iPadHostInit()
     ChooseController();
     iPadBindLoad(IPAD_BIND_PAD, kPadTokens, kPadTokenCount, sPadBind);
     iPadKeyboardInit();
+    iPadTouchInit();
+
+#ifdef __ANDROID__
+    SDL_AddEventWatch(WatchBackButton, NULL);
+#endif
+    SDL_AddEventWatch(WatchBackground, NULL);
 
     // XInput has no notion of focus and this backend should not grow one: the
     // keyboard already stops when the window loses focus, and a controller that
@@ -598,6 +644,29 @@ void iPadHostPoll()
     {
         iPadKeyboardPoll(&sState[0]);
     }
+
+    // The on-screen controls add to whatever holds port 0, and stand aside
+    // while a controller there is in use.
+    iPadTouchPoll(&sState[0], !sKeyboardOnPort0);
+
+#ifdef __ANDROID__
+    // Held for one poll and released for one, so the game sees a press edge for
+    // each tap however quickly the taps come.
+    if (sBackFrames == 0 && SDL_GetAtomicInt(&sBackPresses) > 0)
+    {
+        SDL_AddAtomicInt(&sBackPresses, -1);
+        sBackFrames = 2;
+    }
+    if (sBackFrames == 2)
+    {
+        sState[0].connected = true;
+        sState[0].buttons |= XPAD_BUTTON_START;
+    }
+    if (sBackFrames > 0)
+    {
+        sBackFrames--;
+    }
+#endif
 
     if (sHotkey != NULL)
     {

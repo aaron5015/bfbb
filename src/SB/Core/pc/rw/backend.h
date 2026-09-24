@@ -63,6 +63,18 @@ inline bool iBackendIsD3D()
     return iBackendIsD3D9() || iBackendIsD3D11();
 }
 
+// Vulkan is the third implementation of that namespace, and is NOT in the one
+// above: what is written against both Direct3Ds names their shader blobs and
+// devices, and the ones Vulkan has are its own.
+inline bool iBackendIsVulkan()
+{
+#ifdef RW_VULKAN
+    return iScreenGetBackend() == iSCREENBACKEND_VULKAN;
+#else
+    return false;
+#endif
+}
+
 inline bool iBackendIsGL3()
 {
 #ifdef RW_GL3

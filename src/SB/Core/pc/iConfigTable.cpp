@@ -41,6 +41,10 @@ const iConfigSetting kConfigSettings[] = {
       "Folder holding boot.HIP, FONT.HIP and fmv/. Empty means the folder you\n"
       "; started the game from. BFBB_ASSETS overrides this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
+    { "assets", "mod", "",
+      "Mod folder, laid out like the asset folder. Its files are read in place\n"
+      "; of the originals. Empty means none. BFBB_MOD overrides this.",
+      ICONFIG_FOLDER, NULL, kNone, kNone },
     { "assets", "platform_wording", "on",
       "Rewrite the Xbox wording in the game's text as it loads: dashboard,\n"
       "; memory card slots. The port never changes the files on disk.",
@@ -58,6 +62,14 @@ const iConfigSetting kConfigSettings[] = {
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "video", "mode", "fullscreen", "Window mode: fullscreen, borderless, windowed.", ICONFIG_ENUM,
       "fullscreen|borderless|windowed", kNone, kNone },
+    { "video", "profile",
+#ifdef __ANDROID__
+      "modern",
+#else
+      "custom",
+#endif
+      "Render size, HUD and draw distance: vanilla, modern, or custom (the lines below).",
+      ICONFIG_ENUM, "custom|vanilla|modern", kNone, kNone },
     { "video", "width", "640", "Render width in pixels.", ICONFIG_INT, NULL, 320.0f, 15360.0f },
     { "video", "height", "480",
       "Render height in pixels. A shape other than 4:3 widens the view rather\n"
@@ -79,7 +91,7 @@ const iConfigSetting kConfigSettings[] = {
       "Draw everything however far away. Off restores the console's culling,\n"
       "; detail swaps and 400-unit world clip.",
       ICONFIG_BOOL, NULL, kNone, kNone },
-    { "video", "msaa", "4",
+    { "video", "msaa", "1",
       "Samples per pixel, for smoother edges: 1 (off), 2, 4, 8. A count the card\n"
       "; will not grant falls back to off.",
       ICONFIG_ENUM, "1|2|4|8", kNone, kNone },
@@ -148,6 +160,9 @@ const iConfigSetting kConfigSettings[] = {
       "; off (the ones on the disc), or a folder name under buttons/. The glyph\n"
       "; follows your binding, not the console named here.",
       ICONFIG_STRING, "auto|xbox|gamecube|ps2|off", kNone, kNone },
+    { "input", "touch_controls", "auto",
+      "On-screen controls for a touchscreen: auto (on for Android), on, off.",
+      ICONFIG_ENUM, "auto|on|off", kNone, kNone },
     { "audio", "soundtrack", "",
       "Folder of your own music to play instead of the game's. Empty uses the\n"
       "; game's. The port matches a file to a track by asset name, or by a\n"
