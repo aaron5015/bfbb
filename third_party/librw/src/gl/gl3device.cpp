@@ -2691,6 +2691,35 @@ clearCamera(Camera *cam, RGBA *col, uint32 mode)
 // clearCamera forces them: glClear obeys both, and glBlitFramebuffer obeys the
 // scissor. A frame that ended with either set would otherwise blit into a
 // corner of the window, or not at all.
+static PresentOverlayFn presentOverlay;
+
+void
+setPresentOverlay(PresentOverlayFn fn)
+{
+	presentOverlay = fn;
+}
+
+// After an application's overlay has drawn with GL directly. Every cache is
+// assumed wrong: the next flush sets each state again, the next Shader::use
+// binds its program, textures and framebuffers rebind on first use, and the
+// next camera sets its viewport.
+static void
+forgetGlState(void)
+{
+	memset(&oldGlState, 0xFE, sizeof(oldGlState));
+	currentShader = nil;
+	activeTexture = -1;
+	for(int i = 0; i < MAXNUMSTAGES; i++)
+		boundTexture[i] = ~(uint32)0;
+	currentFramebuffer = ~(uint32)0;
+	glGlobals.presentWidth = 0;
+	glGlobals.presentHeight = 0;
+	glGlobals.presentOffX = 0;
+	glGlobals.presentOffY = 0;
+	if(gl3Caps.glversion >= 30)
+		glBindVertexArray(vao);
+}
+
 static void
 blitVirtualScreen(Raster *raster)
 {
@@ -2739,6 +2768,15 @@ blitVirtualScreen(Raster *raster)
 
 	glBlitFramebuffer(0, 0, vw, vh, dx, dy, dx + dw, dy + dh,
 	                  GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+	if(presentOverlay){
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if(presentOverlay(winw, winh))
+			forgetGlState();
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glDisable(GL_SCISSOR_TEST);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	}
 
 	// The blit carried the frame's alpha into a window that has an alpha
 	// channel, and a compositor that honours it shows the desktop through.
