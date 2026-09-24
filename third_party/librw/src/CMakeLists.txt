@@ -34,6 +34,7 @@ add_library(librw
     rwuserdata.h
     skin.cpp
     texture.cpp
+    gcntex.cpp
     tga.cpp
     tristrip.cpp
     userdata.cpp
@@ -206,25 +207,35 @@ if(LIBRW_PLATFORM_GL3)
         )
     endif()
 
-    set(OpenGL_GL_PREFERENCE GLVND)
-    find_package(OpenGL)
-    if(TARGET OpenGL::OpenGL)
-        target_link_libraries(librw
-            PRIVATE
-                OpenGL::OpenGL
-        )
-    elseif(TARGET OpenGL::EGL)
-        target_link_libraries(librw
-            PRIVATE
-                OpenGL::EGL
-        )
-    elseif(TARGET OpenGL::GL)
-        target_link_libraries(librw
-            PRIVATE
-                OpenGL::GL
-        )
+    # Android has no desktop GL and no GL/gl.h for find_package(OpenGL) to
+    # find, so it fails outright there -- and there is nothing for it to find
+    # on this build's behalf anyway. glad holds every entry point as a
+    # function pointer and fills them from SDL_GL_GetProcAddress at run time
+    # (--no-loader; see src/gl/glad/glad.h), so nothing in librw refers to a
+    # GL symbol at link time. SDL loads libGLESv2 itself.
+    if(ANDROID)
+        message(STATUS "librw: Android -- GLES entry points come from SDL at run time, nothing to link")
     else()
-        message(FATAL_ERROR "find_package(OpenGL) failed.")
+        set(OpenGL_GL_PREFERENCE GLVND)
+        find_package(OpenGL)
+        if(TARGET OpenGL::OpenGL)
+            target_link_libraries(librw
+                PRIVATE
+                    OpenGL::OpenGL
+            )
+        elseif(TARGET OpenGL::EGL)
+            target_link_libraries(librw
+                PRIVATE
+                    OpenGL::EGL
+            )
+        elseif(TARGET OpenGL::GL)
+            target_link_libraries(librw
+                PRIVATE
+                    OpenGL::GL
+            )
+        else()
+            message(FATAL_ERROR "find_package(OpenGL) failed.")
+        endif()
     endif()
 endif()
 

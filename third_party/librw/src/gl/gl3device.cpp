@@ -84,12 +84,24 @@ const char *shaderDecl330 =
 "#define FRAGCOLOR(c) (fragColor = c)\n";
 const char *shaderDecl100es =
 "#version 100\n"
+// fwidth and dFdx are core from 3.0 and an extension before it. A vertex
+// shader has no derivatives, and "enable" on an unsupported extension is a
+// warning rather than an error, so one preamble still serves both stages.
+"#extension GL_OES_standard_derivatives : enable\n"
 "#define GL2\n"
 "#define texture texture2D\n"
 "#define VSIN(index) attribute\n"
 "#define VSOUT varying\n"
 "#define FSIN varying\n"
 "#define FRAGCOLOR(c) (gl_FragColor = c)\n"
+"precision highp float;\n"
+"precision highp int;\n";
+const char *shaderDecl300es =
+"#version 300 es\n"
+"#define VSIN(index) layout(location = index) in\n"
+"#define VSOUT out\n"
+"#define FSIN in\n"
+"#define FRAGCOLOR(c) (fragColor = c)\n"
 "precision highp float;\n"
 "precision highp int;\n";
 const char *shaderDecl310es =
@@ -982,7 +994,9 @@ flushGlRenderState(void)
 
 	if(oldGlState.multisample != curGlState.multisample){
 		oldGlState.multisample = curGlState.multisample;
-		(oldGlState.multisample ? glEnable : glDisable)(GL_MULTISAMPLE);
+		// GLES has no GL_MULTISAMPLE; a multisampled target always is.
+		if(!gl3Caps.gles)
+			(oldGlState.multisample ? glEnable : glDisable)(GL_MULTISAMPLE);
 	}
 
 	if(oldGlState.colorMask != curGlState.colorMask){
@@ -1209,7 +1223,7 @@ bindFramebuffer(uint32 fbo)
 void
 rebindFramebuffer(void)
 {
-	rebindFramebuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, currentFramebuffer);
 }
 
 void
@@ -2691,6 +2705,35 @@ clearCamera(Camera *cam, RGBA *col, uint32 mode)
 // clearCamera forces them: glClear obeys both, and glBlitFramebuffer obeys the
 // scissor. A frame that ended with either set would otherwise blit into a
 // corner of the window, or not at all.
+static PresentOverlayFn presentOverlay;
+
+void
+setPresentOverlay(PresentOverlayFn fn)
+{
+	presentOverlay = fn;
+}
+
+// After an application's overlay has drawn with GL directly. Every cache is
+// assumed wrong: the next flush sets each state again, the next Shader::use
+// binds its program, textures and framebuffers rebind on first use, and the
+// next camera sets its viewport.
+static void
+forgetGlState(void)
+{
+	memset(&oldGlState, 0xFE, sizeof(oldGlState));
+	currentShader = nil;
+	activeTexture = -1;
+	for(int i = 0; i < MAXNUMSTAGES; i++)
+		boundTexture[i] = ~(uint32)0;
+	currentFramebuffer = ~(uint32)0;
+	glGlobals.presentWidth = 0;
+	glGlobals.presentHeight = 0;
+	glGlobals.presentOffX = 0;
+	glGlobals.presentOffY = 0;
+	if(gl3Caps.glversion >= 30)
+		glBindVertexArray(vao);
+}
+
 static void
 blitVirtualScreen(Raster *raster)
 {
@@ -2739,6 +2782,15 @@ blitVirtualScreen(Raster *raster)
 
 	glBlitFramebuffer(0, 0, vw, vh, dx, dy, dx + dw, dy + dh,
 	                  GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+	if(presentOverlay){
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if(presentOverlay(winw, winh))
+			forgetGlState();
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glDisable(GL_SCISSOR_TEST);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	}
 
 	// The blit carried the frame's alpha into a window that has an alpha
 	// channel, and a compositor that honours it shows the desktop through.
@@ -3066,61 +3118,88 @@ static struct {
 	{ SDL_GL_CONTEXT_PROFILE_CORE, 3, 3 },
 	{ SDL_GL_CONTEXT_PROFILE_CORE, 2, 1 },
 	{ SDL_GL_CONTEXT_PROFILE_ES, 3, 1 },
+	{ SDL_GL_CONTEXT_PROFILE_ES, 3, 0 },
 	{ SDL_GL_CONTEXT_PROFILE_ES, 2, 0 },
 	{ 0, 0, 0 },
 };
 
+// The whole of one profile's attempt: a window, a context on it, and the
+// entry points for the API that context turned out to speak. All three have
+// to succeed together for the profile to count as available.
+//
+// Creating the context INSIDE the loop is the point. SDL_CreateWindow does
+// not fail on a profile the driver cannot give -- the request is only
+// attributes at that stage -- so a loop that breaks on the window alone
+// always takes the first entry, and the fallbacks below it are unreachable.
+// On a host with no desktop GL at all (Android, and any GLES-only driver)
+// that meant asking for CORE 3.3, getting a window, and then failing at
+// SDL_GL_CreateContext with the ES entries never tried.
 static int
-startSDL3(void)
+tryProfileSDL3(int index, SDL_Window **pwin, SDL_GLContext *pctx)
 {
 	SDL_Window *win;
 	SDL_GLContext ctx;
-	DisplayMode *mode;
+	DisplayMode *mode = &glGlobals.modes[glGlobals.currentMode];
 
-	mode = &glGlobals.modes[glGlobals.currentMode];
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profiles[index].gl);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, profiles[index].major);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, profiles[index].minor);
+
+	if(mode->flags & VIDEOMODEEXCLUSIVE) {
+		win = SDL_CreateWindow(glGlobals.winTitle, mode->mode.w, mode->mode.h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+		// This is the recommended way for SDL3.
+		if (win) {
+			SDL_SetWindowFullscreenMode(win, &mode->mode);
+			SDL_SetWindowFullscreen(win, true);
+		}
+	} else {
+		win = SDL_CreateWindow(glGlobals.winTitle, glGlobals.winWidth, glGlobals.winHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+		if (win)
+			SDL_SetWindowFullscreenMode(win, NULL);
+	}
+	if(win == nil)
+		return 0;
+
+	ctx = SDL_GL_CreateContext(win);
+	if(ctx == nil){
+		SDL_DestroyWindow(win);
+		return 0;
+	}
+
+	// Set before the load, because which loader runs is read from them.
+	gl3Caps.gles = profiles[index].gl == SDL_GL_CONTEXT_PROFILE_ES;
+	gl3Caps.glversion = profiles[index].major*10 + profiles[index].minor;
+
+	// A driver may hand back a context older than the one asked for rather
+	// than refusing, so this is a real failure case and not a formality:
+	// glad fails when an entry point the requested version promises is not
+	// there. Falling through to the next profile is the right answer.
+	if(!((gl3Caps.gles ? gladLoadGLES2Loader : gladLoadGLLoader) ((GLADloadproc) SDL_GL_GetProcAddress, gl3Caps.glversion))){
+		SDL_GL_DestroyContext(ctx);
+		SDL_DestroyWindow(win);
+		return 0;
+	}
+
+	*pwin = win;
+	*pctx = ctx;
+	return 1;
+}
+
+static int
+startSDL3(void)
+{
+	SDL_Window *win = nil;
+	SDL_GLContext ctx = nil;
 
 	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, glGlobals.numSamples);
 
 	int i;
-	for(i = 0; profiles[i].gl; i++){
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profiles[i].gl);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, profiles[i].major);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, profiles[i].minor);
+	for(i = 0; profiles[i].gl; i++)
+		if(tryProfileSDL3(i, &win, &ctx))
+			break;
 
-		if(mode->flags & VIDEOMODEEXCLUSIVE) {
-			win = SDL_CreateWindow(glGlobals.winTitle, mode->mode.w, mode->mode.h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
-			// This is the recommended way for SDL3.
-			if (win) {
-				SDL_SetWindowFullscreenMode(win, &mode->mode);
-				SDL_SetWindowFullscreen(win, true);
-			}
-		} else {
-			win = SDL_CreateWindow(glGlobals.winTitle, glGlobals.winWidth, glGlobals.winHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
-			if (win)
-				SDL_SetWindowFullscreenMode(win, NULL);
-		}
-		// The window is made whatever the version; it is the context that is
-		// refused. Try the next profile when it is.
-		if(win){
-			ctx = SDL_GL_CreateContext(win);
-			if(ctx){
-				gl3Caps.gles = profiles[i].gl == SDL_GL_CONTEXT_PROFILE_ES;
-				gl3Caps.glversion = profiles[i].major*10 + profiles[i].minor;
-				break;
-			}
-			SDL_DestroyWindow(win);
-			win = nil;
-		}
-	}
-	if(win == nil){
+	if(win == nil || ctx == nil){
 		RWERROR((ERR_GENERAL, SDL_GetError()));
-		return 0;
-	}
-
-	if (!((gl3Caps.gles ? gladLoadGLES2Loader : gladLoadGLLoader) ((GLADloadproc) SDL_GL_GetProcAddress, gl3Caps.glversion)) ) {
-		RWERROR((ERR_GENERAL, "gladLoadGLLoader failed"));
-		SDL_GL_DestroyContext(ctx);
-		SDL_DestroyWindow(win);
 		return 0;
 	}
 
@@ -3339,8 +3418,10 @@ initOpenGL(void)
 		glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &gl3Caps.maxAnisotropy);
 
 	if(gl3Caps.gles){
-		if(gl3Caps.glversion >= 30)
+		if(gl3Caps.glversion >= 31)
 			shaderDecl = shaderDecl310es;
+		else if(gl3Caps.glversion >= 30)
+			shaderDecl = shaderDecl300es;
 		else
 			shaderDecl = shaderDecl100es;
 	}else{

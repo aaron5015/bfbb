@@ -1,5 +1,13 @@
 const char *skin_matfx_env_vert_src =
-"uniform mat4 u_boneMatrices[64];\n"
+"// Three rows per bone; see skin.vert.\n"
+"uniform vec4 u_boneMatrices[192];\n"
+
+"vec3 BoneTransform(int bone, vec4 v)\n"
+"{\n"
+"	return vec3(dot(u_boneMatrices[bone*3], v),\n"
+"	            dot(u_boneMatrices[bone*3+1], v),\n"
+"	            dot(u_boneMatrices[bone*3+2], v));\n"
+"}\n"
 "uniform mat4 u_texMatrix;\n"
 "uniform vec4 u_colorClamp;\n"
 "uniform vec4 u_envColor;\n"
@@ -18,8 +26,8 @@ const char *skin_matfx_env_vert_src =
 "	vec3 SkinVertex = vec3(0.0, 0.0, 0.0);\n"
 "	vec3 SkinNormal = vec3(0.0, 0.0, 0.0);\n"
 "	for(int i = 0; i < 4; i++){\n"
-"		SkinVertex += (u_boneMatrices[int(in_indices[i])] * vec4(in_pos, 1.0)).xyz * in_weights[i];\n"
-"		SkinNormal += (mat3(u_boneMatrices[int(in_indices[i])]) * in_normal) * in_weights[i];\n"
+"		SkinVertex += BoneTransform(int(in_indices[i]), vec4(in_pos, 1.0)) * in_weights[i];\n"
+"		SkinNormal += BoneTransform(int(in_indices[i]), vec4(in_normal, 0.0)) * in_weights[i];\n"
 "	}\n"
 
 "	vec4 Vertex = u_world * vec4(SkinVertex, 1.0);\n"

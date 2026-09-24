@@ -404,17 +404,17 @@ int32 nativeRasterOffset;
 #ifdef RW_D3D9
 #define RWD3D_CREATE9(f, r) f(r)
 #else
-#define RWD3D_CREATE9(f, r) nil
+#define RWD3D_CREATE9(f, r) ((Raster*)nil)
 #endif
 #ifdef RW_D3D11
 #define RWD3D_CREATE11(f, r) impl11::f(r)
 #else
-#define RWD3D_CREATE11(f, r) nil
+#define RWD3D_CREATE11(f, r) ((Raster*)nil)
 #endif
 #ifdef RW_VULKAN
 #define RWD3D_CREATEVK(f, r) implvk::f(r)
 #else
-#define RWD3D_CREATEVK(f, r) nil
+#define RWD3D_CREATEVK(f, r) ((Raster*)nil)
 #endif
 
 struct RasterFormatInfo

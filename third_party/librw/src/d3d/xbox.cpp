@@ -403,6 +403,29 @@ makeDefaultPipeline(void)
 
 int32 nativeRasterOffset;
 
+// A level's rows are padded out to four bytes.
+//
+// The narrow end of a mip chain is where this shows: at one byte a texel a
+// 2x2 level occupies eight bytes rather than four, and a 1x1 four rather than
+// one. Sized tightly, a mipmapped 8-bit texture comes out four bytes short of
+// what the stream holds, and readNativeTexture -- which reads the whole chain
+// into level 0 in one go, on the promise that the levels are consecutive --
+// writes those four bytes past the end of the allocation. With asserts off
+// that is heap corruption whose crash lands somewhere else entirely.
+//
+// Measured, not assumed: across seven of BFBB's Xbox packs, 251 textures, this
+// rule reproduces every totalSize in the stream exactly, and tight packing
+// misses four of them -- three cave drawings in gl02 and a target in b102,
+// each 8-bit with a full mip chain.
+//
+// Levels at least four texels wide are unaffected, which is why nothing but
+// the small end of an 8- or 16-bit chain ever changes size here.
+static uint32
+pitch4(uint32 width, uint32 bytesPerTexel)
+{
+	return (width*bytesPerTexel + 3) & ~3u;
+}
+
 static uint32
 calculateTextureSize(uint32 width, uint32 height, uint32 depth, uint32 format)
 {
@@ -418,7 +441,7 @@ calculateTextureSize(uint32 width, uint32 height, uint32 depth, uint32 format)
 	case D3DFMT_LIN_A8:
 	case D3DFMT_LIN_AL8:
 	case D3DFMT_LIN_L8:
-		return width * height * depth;
+		return pitch4(width, 1) * height * depth;
 	case D3DFMT_R5G6B5:
 	case D3DFMT_R6G5B5:
 	case D3DFMT_X1R5G5B5:
@@ -452,7 +475,7 @@ calculateTextureSize(uint32 width, uint32 height, uint32 depth, uint32 format)
 	//case D3DFMT_LIN_L6V5U5:
 	case D3DFMT_LIN_D16:
 	case D3DFMT_LIN_F16:
-		return width * 2 * height * depth;
+		return pitch4(width, 2) * height * depth;
 	case D3DFMT_A8R8G8B8:
 	case D3DFMT_X8R8G8B8:
 	case D3DFMT_A8B8G8R8:
@@ -473,7 +496,7 @@ calculateTextureSize(uint32 width, uint32 height, uint32 depth, uint32 format)
 	//case D3DFMT_LIN_Q8W8V8U8:
 	case D3DFMT_LIN_D24S8:
 	case D3DFMT_LIN_F24S8:
-		return width * 4 * height * depth;
+		return pitch4(width, 4) * height * depth;
 	case D3DFMT_DXT1:
 		assert(depth <= 1);
 		return ((width + 3) >> 2) * ((height + 3) >> 2) * 8;
@@ -548,9 +571,32 @@ static RasterFormatInfo formatInfoRW[16] = {
 static void
 rasterSetFormat(Raster *raster)
 {
-	assert(raster->format != 0);	// no default yet
-
 	XboxRaster *natras = GETXBOXRASTEREXT(raster);
+
+	// **A compressed raster gets here before anything knows it is one.**
+	//
+	// readNativeTexture has to call Raster::create to have a raster at all,
+	// and only afterwards can it put the DXT format and customFormat on the
+	// native extension. So a texture whose RW format word carries no colour
+	// bits -- which is how a DXT surface is described when the pixel format
+	// lives in the stream's separate compression field instead -- arrives
+	// with nothing for the table below to look up.
+	//
+	// This used to assert, and with asserts off it took the raster's depth to
+	// zero along with it, because formatInfoRW[0] is the empty entry. Keep the
+	// depth the caller streamed and say the D3D format is not known yet: the
+	// DXT path fills in both, and nothing in this file reads either before it
+	// does. An uncompressed raster that lands here is genuinely undescribed
+	// and rasterToImage still refuses it, which is where that belongs.
+	if((raster->format & 0xF00) == 0 &&
+	   (raster->format & (Raster::PAL4 | Raster::PAL8)) == 0){
+		natras->format = D3DFMT_UNKNOWN;
+		natras->hasAlpha = 0;
+		natras->bpp = raster->depth/8;
+		raster->stride = raster->width*natras->bpp;
+		return;
+	}
+
 	if(raster->format & (Raster::PAL4 | Raster::PAL8)){
 		natras->format = D3DFMT_P8;
 		raster->depth = 8;
@@ -560,7 +606,11 @@ rasterSetFormat(Raster *raster)
 	}
 	natras->bpp = raster->depth/8;
 	natras->hasAlpha =  formatInfoRW[(raster->format >> 8) & 0xF].hasAlpha;
-	raster->stride = raster->width&natras->bpp;
+	// `*`, not `&`. d3d.cpp has always had it right; this copy did not, and
+	// every raster came out of create with a stride of zero or one. rasterLock
+	// recomputes it, so nothing read the wrong value, but nothing should have
+	// to rely on that.
+	raster->stride = raster->width*natras->bpp;
 }
 
 static Raster*
@@ -657,6 +707,95 @@ rasterNumLevels(Raster *raster)
 	return levels->numlevels;
 }
 
+// **The three formats an Image cannot be handed native texels for.**
+//
+// An Image has exactly three colour depths that mean a pixel layout: 16 is
+// ARGB1555, 24 is RGB888, 32 is RGBA8888. Xbox rasters also arrive as R5G6B5,
+// A4R4G4B4 and L8, and calling any of those a 16- or 8-bit Image would be a
+// lie that the rest of librw then acts on -- a 565 raster read as 1555 has its
+// green shifted a bit and the top of its red taken for alpha, which produces a
+// half-transparent picture rather than an obviously broken one. So they are
+// decoded to 32 bits here instead.
+//
+// Channels are scaled the way raster.cpp's own converters scale them, by
+// spreading the range rather than shifting it: a plain shift leaves white at
+// 248 and tints every light texture.
+
+// Blue in the high bits, not red.
+//
+// Xbox texels are laid out blue first: it is the same thing the C8888 and C888
+// paths have always compensated for, where an unswizzled texel arrives as
+// B,G,R,A and the loop at the bottom of rasterToImage puts the ends back. A
+// packed sixteen-bit texel says it the same way round, so the five bits above
+// green are blue.
+//
+// Measured against the art rather than read off a format table, because the
+// table says D3DFMT_R5G6B5 and the table is not what is in the file. BFBB's
+// boot.HIP holds six of these: decoded red-high, `ice` is salmon and the
+// Cruise Bubble's splash is yellow; decoded blue-high they are pale blue frost
+// and cyan water. plat.HIP's BXWaterEnvMap, which is C888 and takes the swap
+// the old code already did, agrees.
+static void
+expandC565(uint8 *dst, uint8 *src, int32 n)
+{
+	for(int32 i = 0; i < n; i++){
+		uint32 c = src[0] | src[1]<<8;
+		dst[0] = (c & 0x1F)*0xFF/0x1F;
+		dst[1] = ((c>>5) & 0x3F)*0xFF/0x3F;
+		dst[2] = ((c>>11) & 0x1F)*0xFF/0x1F;
+		dst[3] = 0xFF;
+		src += 2;
+		dst += 4;
+	}
+}
+
+// Blue first as well, by the same rule as C565 -- but inferred from it rather
+// than measured: none of the BFBB packs read so far holds a C4444 texture. If
+// one ever turns up with its reds and blues exchanged, this is the line.
+static void
+expandC4444(uint8 *dst, uint8 *src, int32 n)
+{
+	for(int32 i = 0; i < n; i++){
+		uint32 c = src[0] | src[1]<<8;
+		dst[0] = (c & 0xF)*0xFF/0xF;
+		dst[1] = ((c>>4) & 0xF)*0xFF/0xF;
+		dst[2] = ((c>>8) & 0xF)*0xFF/0xF;
+		dst[3] = ((c>>12) & 0xF)*0xFF/0xF;
+		src += 2;
+		dst += 4;
+	}
+}
+
+// X8R8G8B8: four bytes a texel with the top one undefined, so the picture is
+// opaque and the spare byte must not be allowed to become transparency.
+//
+// C888 used to be described to Image as 24 bits, which is three bytes a texel,
+// while formatInfoRW has always said an Xbox C888 raster is 32 deep -- so the
+// two asserts below the unswizzle caught it and the whole texture was lost.
+static void
+expandC888(uint8 *dst, uint8 *src, int32 n)
+{
+	for(int32 i = 0; i < n; i++){
+		dst[0] = src[2];
+		dst[1] = src[1];
+		dst[2] = src[0];
+		dst[3] = 0xFF;
+		src += 4;
+		dst += 4;
+	}
+}
+
+static void
+expandLUM8(uint8 *dst, uint8 *src, int32 n)
+{
+	for(int32 i = 0; i < n; i++){
+		dst[0] = dst[1] = dst[2] = src[0];
+		dst[3] = 0xFF;
+		src++;
+		dst += 4;
+	}
+}
+
 static void
 unswizzle(uint8 *dst, uint8 *src, int32 w, int32 h, int32 bpp)
 {
@@ -742,6 +881,11 @@ rasterToImage(Raster *raster)
 		return image;
 	}
 
+	// Non-zero for the formats that are decoded rather than copied, and it is
+	// the texel size in the RASTER -- the image's is always four by then. See
+	// expandC565 above for why these three cannot go across as they are.
+	int32 srcbpp = 0;
+
 	switch(raster->format & 0xF00){
 	case Raster::C1555:
 		depth = 16;
@@ -750,25 +894,42 @@ rasterToImage(Raster *raster)
 		depth = 32;
 		break;
 	case Raster::C888:
-		depth = 24;
+		depth = 32;
+		srcbpp = 4;
 		break;
 	case Raster::C555:
 		depth = 16;
 		break;
-
-	default:
 	case Raster::C565:
 	case Raster::C4444:
+		depth = 32;
+		srcbpp = 2;
+		break;
 	case Raster::LUM8:
+		depth = 32;
+		srcbpp = 1;
+		break;
+
+	default:
+		// A raster with no colour format at all, or a depth buffer. The old
+		// code asserted and then carried on with an uninitialised depth, which
+		// in a build with asserts off is whatever was on the stack.
 		assert(0 && "unsupported raster format");
+		if(unlock)
+			raster->unlock(0);
+		return nil;
 	}
 	int32 pallength = 0;
 	if((raster->format & Raster::PAL4) == Raster::PAL4){
+		// Palettised: the texels are indices and the palette entries are what
+		// carries the colour, so none of the decoding above applies.
 		depth = 4;
 		pallength = 16;
+		srcbpp = 0;
 	}else if((raster->format & Raster::PAL8) == Raster::PAL8){
 		depth = 8;
 		pallength = 256;
+		srcbpp = 0;
 	}
 
 	image = Image::create(raster->width, raster->height, depth);
@@ -787,6 +948,38 @@ rasterToImage(Raster *raster)
 
 	uint8 *imgpixels = image->pixels;
 	uint8 *pixels = raster->pixels;
+
+	if(srcbpp){
+		// Two passes, because unswizzle moves whole texels and the image's are
+		// a different size from the raster's. The scratch buffer holds the
+		// raster's own texels, unswizzled, and the expand puts them into the
+		// image -- which Image::allocate laid out contiguously, so one run of
+		// width*height texels reaches all of it.
+		assert(srcbpp == (int)natras->bpp);
+		int32 n = image->width*image->height;
+		uint8 *linear = rwNewT(uint8, n*srcbpp, MEMDUR_FUNCTION | ID_IMAGE);
+		unswizzle(linear, pixels, image->width, image->height, srcbpp);
+		switch(raster->format & 0xF00){
+		case Raster::C565:
+			expandC565(imgpixels, linear, n);
+			break;
+		case Raster::C4444:
+			expandC4444(imgpixels, linear, n);
+			break;
+		case Raster::C888:
+			expandC888(imgpixels, linear, n);
+			break;
+		case Raster::LUM8:
+			expandLUM8(imgpixels, linear, n);
+			break;
+		}
+		rwFree(linear);
+
+		image->compressPalette();
+		if(unlock)
+			raster->unlock(0);
+		return image;
+	}
 
 	// NB:
 	assert(image->bpp == (int)natras->bpp);

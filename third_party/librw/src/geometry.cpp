@@ -296,7 +296,21 @@ Geometry::streamGetSize(void)
 void
 Geometry::addMorphTargets(int32 n)
 {
-	if(n == 0)
+	// Grow only, and never below the one Geometry::create established.
+	//
+	// streamRead asks for `numMorphTargets-1`, so a geometry whose header says
+	// it has none asks to remove one. The arithmetic below then resized to
+	// zero bytes -- which frees the block and hands back nil -- and walked a
+	// null pointer backwards from 0x148 copying vertex data. BFBB's Xbox packs
+	// reach it: every JSP in them declares zero morph targets while carrying
+	// one, and gl01's `spongeball` is the first thing a scene load touches.
+	//
+	// A Geometry has one morph target from the moment it is created and the
+	// rest of librw indexes morphTargets[0] unconditionally, so keeping that
+	// one is the only answer that leaves a usable object. The reader then
+	// reads no morph target out of the stream, which is what the header asked
+	// for.
+	if(n <= 0)
 		return;
 	n += this->numMorphTargets;
 

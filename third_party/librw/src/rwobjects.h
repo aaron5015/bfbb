@@ -172,6 +172,11 @@ struct Image
 #endif
 };
 
+// A GameCube native texture's struct -- the TEXTURENATIVE chunk's STRUCT payload,
+// big-endian, platform 6 -- decoded to a 32-bit RGBA image of its top level.
+// nil for a format or size it cannot read. See gcntex.cpp.
+Image *readGCTextureImage(const uint8 *data, uint32 length);
+
 Image *readTGA(const char *filename);
 void writeTGA(Image *image, const char *filename);
 Image *readBMP(const char *filename);

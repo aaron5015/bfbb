@@ -23,6 +23,8 @@
 
 namespace rw {
 
+Texture *readNativeTextureGC(Stream *stream);	// gcntex.cpp
+
 int32 Texture::numAllocated;
 int32 TexDictionary::numAllocated;
 
@@ -482,6 +484,9 @@ Texture::streamReadNative(Stream *stream)
 		return xbox::readNativeTexture(stream);
 	if(platform == PLATFORM_GL3)
 		return gl3::readNativeTexture(stream);
+	// GameCube: platform 6, written big-endian. See gcntex.cpp.
+	if(platform == 0x06000000)
+		return readNativeTextureGC(stream);
 	assert(0 && "unsupported platform");
 	return nil;
 }

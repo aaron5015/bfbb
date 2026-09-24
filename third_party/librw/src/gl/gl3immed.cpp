@@ -40,6 +40,21 @@ static AttribDesc im2dattribDesc[3] = {
 		sizeof(Im2DVertex), offsetof(Im2DVertex, u) },
 };
 
+// The colour attributes are declared with size GL_BGRA, which desktop GL takes
+// from ARB_vertex_array_bgra and GLES does not have: glVertexAttribPointer
+// refuses it and leaves the attribute enabled with no buffer. Adreno then
+// reads the colour through address 0. On GLES they are plain RGBA and
+// im2d.vert and im3d.vert swap red and blue back.
+static void
+bgraColorAttribs(AttribDesc *attribDescs, int32 numAttribs)
+{
+	if(!gl3Caps.gles)
+		return;
+	for(int32 i = 0; i < numAttribs; i++)
+		if(attribDescs[i].size == GL_BGRA)
+			attribDescs[i].size = 4;
+}
+
 static int primTypeMap[] = {
 	GL_POINTS,	// invalid
 	GL_LINES,
@@ -68,6 +83,7 @@ openIm2D(void)
 	const char *fs[] = { shaderDecl, header_frag_src, simple_frag_src, nil };
 	im2dShader = Shader::create(vs, fs);
 	assert(im2dShader);
+	bgraColorAttribs(im2dattribDesc, nelem(im2dattribDesc));
 
 	glGenBuffers(1, &im2DIbo);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im2DIbo);
@@ -243,6 +259,7 @@ openIm3D(void)
 	const char *fs[] = { shaderDecl, header_frag_src, simple_frag_src, nil };
 	im3dShader = Shader::create(vs, fs);
 	assert(im3dShader);
+	bgraColorAttribs(im3dattribDesc, nelem(im3dattribDesc));
 
 	glGenBuffers(1, &im3DIbo);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, im3DIbo);

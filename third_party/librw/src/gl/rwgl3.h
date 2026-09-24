@@ -515,6 +515,13 @@ extern const char *im2d_vert_src;
 
 extern Shader *im2dOverrideShader;
 
+// Drawn over the finished frame at the window's own resolution, after the
+// virtual screen is scaled into the window and before the swap. Framebuffer 0
+// is bound. The callback returns whether it drew; if it did, it may have
+// changed any GL state, and librw forgets what it had cached. nil turns it off.
+typedef bool32 (*PresentOverlayFn)(int32 winWidth, int32 winHeight);
+void setPresentOverlay(PresentOverlayFn fn);
+
 // per Scene
 void setProjectionMatrix(float32*);
 void setViewMatrix(float32*);

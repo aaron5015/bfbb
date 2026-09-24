@@ -936,6 +936,21 @@ void setVertexShaderConstantI(uint32 reg, const int32 *data, int32 numRegs);
 void setVirtualScreen(int32 width, int32 height);
 void setVirtualScreenSamples(int32 samples);
 extern Device renderdevice;
+
+// Drawn over the finished frame at the window's resolution, after the virtual
+// screen is scaled into the swap chain image and before it is presented. The
+// callback returns whether it drew. nil turns it off. The GL3 device has the
+// same hook.
+typedef bool32 (*PresentOverlayFn)(int32 winWidth, int32 winHeight);
+void setPresentOverlay(PresentOverlayFn fn);
+
+// Only from inside the callback: alpha-blended triangles, each vertex twelve
+// floats. x and y are window pixels with y down; then a position relative to
+// the shape's centre, the shape's half width and height, its corner radius
+// and outline width, all in pixels; then red, green, blue and alpha. The shape
+// is a rounded box by its signed distance -- a circle when the corner reaches
+// both half extents, filled when the outline width is 0.
+void drawPresentOverlay(const float32 *vertices, int32 numVertices);
 }
 #endif
 

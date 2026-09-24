@@ -1,4 +1,12 @@
-uniform mat4 u_boneMatrices[64];
+// Three rows per bone; see skin.vert.
+uniform vec4 u_boneMatrices[192];
+
+vec3 BoneTransform(int bone, vec4 v)
+{
+	return vec3(dot(u_boneMatrices[bone*3], v),
+	            dot(u_boneMatrices[bone*3+1], v),
+	            dot(u_boneMatrices[bone*3+2], v));
+}
 uniform mat4 u_texMatrix;
 uniform vec4 u_colorClamp;
 uniform vec4 u_envColor;
@@ -17,8 +25,8 @@ main(void)
 	vec3 SkinVertex = vec3(0.0, 0.0, 0.0);
 	vec3 SkinNormal = vec3(0.0, 0.0, 0.0);
 	for(int i = 0; i < 4; i++){
-		SkinVertex += (u_boneMatrices[int(in_indices[i])] * vec4(in_pos, 1.0)).xyz * in_weights[i];
-		SkinNormal += (mat3(u_boneMatrices[int(in_indices[i])]) * in_normal) * in_weights[i];
+		SkinVertex += BoneTransform(int(in_indices[i]), vec4(in_pos, 1.0)) * in_weights[i];
+		SkinNormal += BoneTransform(int(in_indices[i]), vec4(in_normal, 0.0)) * in_weights[i];
 	}
 
 	vec4 Vertex = u_world * vec4(SkinVertex, 1.0);

@@ -1,4 +1,14 @@
-uniform mat4 u_boneMatrices[64];
+// Three rows per bone, as the D3D9 path uploads them; the fourth row of a bone
+// matrix is always 0 0 0 1. 64 mat4s are 256 vertex uniform vectors, which is
+// the whole of what many GLES drivers allow.
+uniform vec4 u_boneMatrices[192];
+
+vec3 BoneTransform(int bone, vec4 v)
+{
+	return vec3(dot(u_boneMatrices[bone*3], v),
+	            dot(u_boneMatrices[bone*3+1], v),
+	            dot(u_boneMatrices[bone*3+2], v));
+}
 
 VSIN(ATTRIB_POS)	vec3 in_pos;
 
@@ -36,8 +46,8 @@ main(void)
 	vec3 SkinVertex = vec3(0.0, 0.0, 0.0);
 	vec3 SkinNormal = vec3(0.0, 0.0, 0.0);
 	for(int i = 0; i < 4; i++){
-		SkinVertex += (u_boneMatrices[int(in_indices[i])] * vec4(in_pos, 1.0)).xyz * in_weights[i];
-		SkinNormal += (mat3(u_boneMatrices[int(in_indices[i])]) * in_normal) * in_weights[i];
+		SkinVertex += BoneTransform(int(in_indices[i]), vec4(in_pos, 1.0)) * in_weights[i];
+		SkinNormal += BoneTransform(int(in_indices[i]), vec4(in_normal, 0.0)) * in_weights[i];
 	}
 
 	vec4 Vertex = u_world * vec4(SkinVertex, 1.0);
@@ -83,7 +93,7 @@ main(void)
 		hullLocal = in_normal;
 
 	for(int k = 0; k < 4; k++)
-		SkinHull += (mat3(u_boneMatrices[int(in_indices[k])]) * hullLocal) * in_weights[k];
+		SkinHull += BoneTransform(int(in_indices[k]), vec4(hullLocal, 0.0)) * in_weights[k];
 
 	Vertex = u_world * vec4(SkinVertex + normalize(SkinHull)*thickness*u_outlineSign.x, 1.0);
 

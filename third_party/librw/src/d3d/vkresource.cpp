@@ -51,24 +51,29 @@ struct ArenaChunk
 // anything presents, and would otherwise hold all of it in host memory at once.
 #define ARENAFLUSHBYTES (256<<20)
 
-static ArenaChunk *chunks;
-static int32 numChunks;
-static int32 maxChunks;
-static int32 currentChunk;
-static VkDeviceSize arenaBytes;
+struct Arena
+{
+	ArenaChunk *chunks;
+	int32 numChunks;
+	int32 maxChunks;
+	int32 currentChunk;
+	VkDeviceSize bytes;
+};
+
+static Arena arenas[FRAMESINFLIGHT];
 
 static bool32
-addChunk(VkDeviceSize size)
+addChunk(Arena *a, VkDeviceSize size)
 {
-	if(numChunks == maxChunks){
-		int32 n = maxChunks ? maxChunks*2 : 8;
+	if(a->numChunks == a->maxChunks){
+		int32 n = a->maxChunks ? a->maxChunks*2 : 8;
 		ArenaChunk *c = rwNewT(ArenaChunk, n, MEMDUR_EVENT | ID_DRIVER);
-		if(chunks){
-			memcpy(c, chunks, numChunks*sizeof(ArenaChunk));
-			rwFree(chunks);
+		if(a->chunks){
+			memcpy(c, a->chunks, a->numChunks*sizeof(ArenaChunk));
+			rwFree(a->chunks);
 		}
-		chunks = c;
-		maxChunks = n;
+		a->chunks = c;
+		a->maxChunks = n;
 	}
 
 	VkBufferCreateInfo bi = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -80,76 +85,79 @@ addChunk(VkDeviceSize size)
 	ai.usage = VMA_MEMORY_USAGE_AUTO;
 	ai.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
 	VmaAllocationInfo info;
-	ArenaChunk *c = &chunks[numChunks];
+	ArenaChunk *c = &a->chunks[a->numChunks];
 	if(vmaCreateBuffer(vkGlobals.allocator, &bi, &ai, &c->buffer, &c->allocation, &info) != VK_SUCCESS)
 		return 0;
 	c->data = (uint8*)info.pMappedData;
 	c->size = size;
 	c->used = 0;
-	numChunks++;
+	a->numChunks++;
 	return 1;
 }
 
 bool32
 arenaAlloc(VkDeviceSize size, VkDeviceSize align, ArenaSpan *span)
 {
-	if(arenaBytes > ARENAFLUSHBYTES && flushAllowed())
+	if(arenas[frameSlot()].bytes > ARENAFLUSHBYTES && flushAllowed())
 		flushFrame();
-	// The arena is reset when a frame opens, so one has to be open before any
-	// of it is handed out.
+	// The arena is reset when a frame opens, and which one depends on the slot
+	// it opens in, so one has to be open before any of it is handed out.
 	frameCommands();
+	Arena *a = &arenas[frameSlot()];
 
-	for(; currentChunk < numChunks; currentChunk++){
-		ArenaChunk *c = &chunks[currentChunk];
+	for(; a->currentChunk < a->numChunks; a->currentChunk++){
+		ArenaChunk *c = &a->chunks[a->currentChunk];
 		VkDeviceSize off = (c->used + align-1) & ~(align-1);
 		if(off + size <= c->size){
 			c->used = off + size;
 			span->buffer = c->buffer;
 			span->offset = off;
 			span->data = c->data + off;
-			arenaBytes += size;
+			a->bytes += size;
 			return 1;
 		}
 	}
-	if(!addChunk(size > ARENACHUNKSIZE ? size : ARENACHUNKSIZE))
+	if(!addChunk(a, size > ARENACHUNKSIZE ? size : ARENACHUNKSIZE))
 		return 0;
-	currentChunk = numChunks-1;
-	ArenaChunk *c = &chunks[currentChunk];
+	a->currentChunk = a->numChunks-1;
+	ArenaChunk *c = &a->chunks[a->currentChunk];
 	c->used = size;
 	span->buffer = c->buffer;
 	span->offset = 0;
 	span->data = c->data;
-	arenaBytes += size;
+	a->bytes += size;
 	return 1;
 }
 
 void
 arenaReset(void)
 {
-	for(int32 i = 0; i < numChunks; i++)
-		chunks[i].used = 0;
-	currentChunk = 0;
-	arenaBytes = 0;
+	Arena *a = &arenas[frameSlot()];
+	for(int32 i = 0; i < a->numChunks; i++)
+		a->chunks[i].used = 0;
+	a->currentChunk = 0;
+	a->bytes = 0;
 }
 
 void
 arenaDestroy(void)
 {
-	for(int32 i = 0; i < numChunks; i++)
-		vmaDestroyBuffer(vkGlobals.allocator, chunks[i].buffer, chunks[i].allocation);
-	rwFree(chunks);
-	chunks = nil;
-	numChunks = maxChunks = currentChunk = 0;
-	arenaBytes = 0;
+	for(int32 j = 0; j < FRAMESINFLIGHT; j++){
+		Arena *a = &arenas[j];
+		for(int32 i = 0; i < a->numChunks; i++)
+			vmaDestroyBuffer(vkGlobals.allocator, a->chunks[i].buffer, a->chunks[i].allocation);
+		rwFree(a->chunks);
+		memset(a, 0, sizeof(*a));
+	}
 }
 
 // --- deferred destruction ---------------------------------------------------
 
 // A D3D resource is reference counted and outlives its last Release for as
 // long as a queued command needs it. A Vulkan one is gone when destroyed, and
-// the command buffer being recorded -- or the frame still on the GPU -- may
-// name it. So destruction is queued, and carried out once the frame that could
-// have used it has finished.
+// the command buffer being recorded -- or a frame still on the GPU -- may name
+// it. So destruction is queued with the serial of the newest frame that could
+// have used it, and carried out once that frame has finished.
 enum GarbageType
 {
 	GARBAGE_BUFFER,
@@ -167,6 +175,7 @@ struct Garbage
 	VmaAllocation allocation;
 	VkPipeline pipeline;
 	VkShaderModule module;
+	uint32 serial;
 };
 
 static Garbage *garbage;
@@ -215,7 +224,9 @@ defer(const Garbage *g)
 		garbage = a;
 		maxGarbage = n;
 	}
-	garbage[numGarbage++] = *g;
+	garbage[numGarbage] = *g;
+	garbage[numGarbage].serial = frameSerial();
+	numGarbage++;
 }
 
 void
@@ -249,14 +260,20 @@ deferDestroyShaderModule(VkShaderModule module)
 	defer(&g);
 }
 
-// Called with nothing in flight: when a frame opens, after waiting for the last.
+// Called when a frame opens, and once the device is idle when it closes.
 void
 collectGarbage(void)
 {
-	for(int32 i = 0; i < numGarbage; i++)
-		destroyNow(&garbage[i]);
-	numGarbage = 0;
-	if(!gpuBusy()){
+	uint32 finished = finishedSerial();
+	int32 kept = 0;
+	for(int32 i = 0; i < numGarbage; i++){
+		if(garbage[i].serial <= finished)
+			destroyNow(&garbage[i]);
+		else
+			garbage[kept++] = garbage[i];
+	}
+	numGarbage = kept;
+	if(numGarbage == 0 && !gpuBusy()){
 		rwFree(garbage);
 		garbage = nil;
 		maxGarbage = 0;

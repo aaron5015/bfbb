@@ -217,15 +217,19 @@ skinUninstanceCB(Geometry *geo, InstanceDataHeader *header)
 	assert(0 && "can't uninstance");
 }
 
-static float skinMatrices[64*16];
+// Three rows of each bone matrix, which is all skin.vert reads.
+static float skinMatrices[64*12];
 
 void
 uploadSkinMatrices(Atomic *a)
 {
 	int i;
 	Skin *skin = Skin::get(a->geometry);
-	Matrix *m = (Matrix*)skinMatrices;
 	HAnimHierarchy *hier = Skin::getHierarchy(a);
+	Matrix bones[64];
+	int32 numBones = skin->numBones;
+	if(numBones > 64)
+		numBones = 64;
 
 	if(hier){
 		Matrix *invMats = (Matrix*)skin->inverseMatrices;
@@ -233,26 +237,30 @@ uploadSkinMatrices(Atomic *a)
 
 		assert(skin->numBones == hier->numNodes);
 		if(hier->flags & HAnimHierarchy::LOCALSPACEMATRICES){
-			for(i = 0; i < hier->numNodes; i++){
+			for(i = 0; i < numBones; i++){
 				invMats[i].flags = 0;
-				Matrix::mult(m, &invMats[i], &hier->matrices[i]);
-				m++;
+				Matrix::mult(&bones[i], &invMats[i], &hier->matrices[i]);
 			}
 		}else{
 			Matrix invAtmMat;
 			Matrix::invert(&invAtmMat, a->getFrame()->getLTM());
-			for(i = 0; i < hier->numNodes; i++){
+			for(i = 0; i < numBones; i++){
 				invMats[i].flags = 0;
 				Matrix::mult(&tmp, &hier->matrices[i], &invAtmMat);
-				Matrix::mult(m, &invMats[i], &tmp);
-				m++;
+				Matrix::mult(&bones[i], &invMats[i], &tmp);
 			}
 		}
 	}else{
-		for(i = 0; i < skin->numBones; i++){
-			m->setIdentity();
-			m++;
-		}
+		for(i = 0; i < numBones; i++)
+			bones[i].setIdentity();
+	}
+
+	float *m = skinMatrices;
+	for(i = 0; i < numBones; i++){
+		RawMatrix rows;
+		RawMatrix::transpose(&rows, (RawMatrix*)&bones[i]);
+		memcpy(m, &rows, 12*sizeof(float));
+		m += 12;
 	}
 	setUniform(u_boneMatrices, skinMatrices);
 }
@@ -495,7 +503,7 @@ skinClose(void *o, int32, int32)
 void
 initSkin(void)
 {
-	u_boneMatrices = registerUniform("u_boneMatrices", UNIFORM_MAT4, 64);
+	u_boneMatrices = registerUniform("u_boneMatrices", UNIFORM_VEC4, 64*3);
 	// The combined pipeline's shader reads the environment uniforms, and this
 	// plugin registers it whether or not the matfx plugin is in the build.
 	registerEnvUniforms();

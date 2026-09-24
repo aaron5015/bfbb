@@ -736,14 +736,19 @@ enum {
 static VkDescriptorSetLayout setLayout;
 static VkPipelineLayout pipelineLayout;
 
-// Sets are allocated per frame from pools that are all reset when the next one
-// opens, so nothing tracks which set is still in use.
+// Sets are allocated per frame from its slot's pools, which are all reset when
+// the next frame in that slot opens, so nothing tracks which set is still in
+// use.
 #define SETSPERPOOL 1024
-static VkDescriptorPool *pools;
-static int32 numPools;
-static int32 maxPools;
-static int32 currentPool;
-static uint32 poolSerial;
+struct PoolSet
+{
+	VkDescriptorPool *pools;
+	int32 numPools;
+	int32 maxPools;
+	int32 currentPool;
+	uint32 serial;
+};
+static PoolSet poolSets[FRAMESINFLIGHT];
 
 static VkDescriptorPool
 newPool(void)
@@ -767,37 +772,40 @@ newPool(void)
 static VkDescriptorSet
 allocateSet(void)
 {
-	if(poolSerial != frameSerial()){
-		for(int32 i = 0; i < numPools; i++)
-			vkResetDescriptorPool(vkGlobals.device, pools[i], 0);
-		currentPool = 0;
-		poolSerial = frameSerial();
+	// The slot is the open frame's; a set is only ever wanted while recording.
+	frameCommands();
+	PoolSet *ps = &poolSets[frameSlot()];
+	if(ps->serial != frameSerial()){
+		for(int32 i = 0; i < ps->numPools; i++)
+			vkResetDescriptorPool(vkGlobals.device, ps->pools[i], 0);
+		ps->currentPool = 0;
+		ps->serial = frameSerial();
 	}
 	for(;;){
-		if(currentPool == numPools){
-			if(numPools == maxPools){
-				int32 n = maxPools ? maxPools*2 : 4;
+		if(ps->currentPool == ps->numPools){
+			if(ps->numPools == ps->maxPools){
+				int32 n = ps->maxPools ? ps->maxPools*2 : 4;
 				VkDescriptorPool *p = rwNewT(VkDescriptorPool, n, MEMDUR_EVENT | ID_DRIVER);
-				if(pools){
-					memcpy(p, pools, numPools*sizeof(VkDescriptorPool));
-					rwFree(pools);
+				if(ps->pools){
+					memcpy(p, ps->pools, ps->numPools*sizeof(VkDescriptorPool));
+					rwFree(ps->pools);
 				}
-				pools = p;
-				maxPools = n;
+				ps->pools = p;
+				ps->maxPools = n;
 			}
-			pools[numPools] = newPool();
-			if(pools[numPools] == VK_NULL_HANDLE)
+			ps->pools[ps->numPools] = newPool();
+			if(ps->pools[ps->numPools] == VK_NULL_HANDLE)
 				return VK_NULL_HANDLE;
-			numPools++;
+			ps->numPools++;
 		}
 		VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-		ai.descriptorPool = pools[currentPool];
+		ai.descriptorPool = ps->pools[ps->currentPool];
 		ai.descriptorSetCount = 1;
 		ai.pSetLayouts = &setLayout;
 		VkDescriptorSet set = VK_NULL_HANDLE;
 		if(vkAllocateDescriptorSets(vkGlobals.device, &ai, &set) == VK_SUCCESS)
 			return set;
-		currentPool++;
+		ps->currentPool++;
 	}
 }
 
@@ -1506,10 +1514,15 @@ bindFanIndices(VkBuffer buffer)
 
 static VertexShader *blitVS;
 static PixelShader *blitPS;
+static VertexShader *overlayVS;
+static PixelShader *overlayPS;
 
 namespace spv {
 #include "shadersvk/blit_VS.h"
 #include "shadersvk/blit_PS.h"
+// GLSL, not HLSL: see shaders/glsl_h.py.
+#include "shadersvk/overlay_VS.h"
+#include "shadersvk/overlay_PS.h"
 }
 
 void
@@ -1562,6 +1575,78 @@ drawBlit(VkFormat format, Image *source)
 	invalidateBindings();
 }
 
+// The present overlay's triangles. See drawPresentOverlay in rwd3d.h for the
+// vertex; the position is turned from window pixels into clip space here, so
+// the shaders need no constants and no descriptor set.
+void
+drawOverlay(VkFormat format, VkExtent2D extent, const float32 *vertices, int32 numVertices)
+{
+	enum { STRIDE = 12 };
+	if(overlayVS == nil || overlayPS == nil || numVertices <= 0 ||
+	   extent.width == 0 || extent.height == 0)
+		return;
+	VkCommandBuffer cmd = frameCommands();
+
+	ArenaSpan span;
+	if(!arenaAlloc((VkDeviceSize)numVertices*STRIDE*sizeof(float32), 4, &span))
+		return;
+	float32 *out = (float32*)span.data;
+	memcpy(out, vertices, numVertices*STRIDE*sizeof(float32));
+	for(int32 i = 0; i < numVertices; i++, out += STRIDE){
+		out[0] = out[0]/extent.width*2.0f - 1.0f;
+		out[1] = out[1]/extent.height*2.0f - 1.0f;
+	}
+
+	PipelineKey key;
+	memset(&key, 0, sizeof(key));
+	key.vertexShader = overlayVS;
+	key.pixelShader = overlayPS;
+	key.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	key.colorFormat = format;
+	key.depthFormat = VK_FORMAT_UNDEFINED;
+	key.samples = VK_SAMPLE_COUNT_1_BIT;
+	key.blendEnable = 1;
+	key.srcBlend = BLENDSRCALPHA;
+	key.destBlend = BLENDINVSRCALPHA;
+	key.writeMask = 0xF;
+	key.numBindings = 1;
+	key.bindings[0].binding = 0;
+	key.bindings[0].stride = STRIDE*sizeof(float32);
+	key.bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	static const VkFormat formats[5] = {
+		VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32_SFLOAT,
+		VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT
+	};
+	static const uint32 offsets[5] = { 0, 8, 16, 24, 32 };
+	key.numAttributes = 5;
+	for(int i = 0; i < 5; i++){
+		key.attributes[i].location = i;
+		key.attributes[i].binding = 0;
+		key.attributes[i].format = formats[i];
+		key.attributes[i].offset = offsets[i];
+	}
+	VkPipeline pipeline = getPipeline(&key, overlayVS->module, overlayPS->module);
+	if(pipeline == VK_NULL_HANDLE)
+		return;
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+	vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+	vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
+	vkCmdSetDepthTestEnable(cmd, VK_FALSE);
+	vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+	vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_ALWAYS);
+	vkCmdSetStencilTestEnable(cmd, VK_FALSE);
+	vkCmdSetStencilOp(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, VK_STENCIL_OP_KEEP,
+		VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS);
+	vkCmdSetStencilCompareMask(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+	vkCmdSetStencilWriteMask(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+	vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+
+	vkCmdBindVertexBuffers(cmd, 0, 1, &span.buffer, &span.offset);
+	vkCmdDraw(cmd, numVertices, 1, 0, 0);
+	invalidateBindings();
+}
+
 // --- open and close ---------------------------------------------------------
 
 void
@@ -1606,6 +1691,8 @@ openPipelines(void)
 
 	blitVS = (VertexShader*)createVertexShader((void*)spv::blit_VS);
 	blitPS = (PixelShader*)createPixelShader((void*)spv::blit_PS);
+	overlayVS = (VertexShader*)createVertexShader((void*)spv::overlay_VS);
+	overlayPS = (PixelShader*)createPixelShader((void*)spv::overlay_PS);
 
 	if(!vkGlobals.bgraVertexColor)
 		fprintf(stderr, "librw: this Vulkan device cannot take B8G8R8A8 vertex colours; "
@@ -1623,6 +1710,10 @@ closePipelines(void)
 	blitVS = nil;
 	destroyPixelShader(blitPS);
 	blitPS = nil;
+	destroyVertexShader(overlayVS);
+	overlayVS = nil;
+	destroyPixelShader(overlayPS);
+	overlayPS = nil;
 	for(int32 i = 0; i < numPipelines; i++)
 		vkDestroyPipeline(vkGlobals.device, pipelines[i].pipeline, nil);
 	rwFree(pipelines);
@@ -1635,11 +1726,13 @@ closePipelines(void)
 		vkDestroySampler(vkGlobals.device, blitSampler, nil);
 		blitSampler = VK_NULL_HANDLE;
 	}
-	for(int32 i = 0; i < numPools; i++)
-		vkDestroyDescriptorPool(vkGlobals.device, pools[i], nil);
-	rwFree(pools);
-	pools = nil;
-	numPools = maxPools = currentPool = 0;
+	for(int32 j = 0; j < FRAMESINFLIGHT; j++){
+		PoolSet *ps = &poolSets[j];
+		for(int32 i = 0; i < ps->numPools; i++)
+			vkDestroyDescriptorPool(vkGlobals.device, ps->pools[i], nil);
+		rwFree(ps->pools);
+		memset(ps, 0, sizeof(*ps));
+	}
 	vkDestroyPipelineLayout(vkGlobals.device, pipelineLayout, nil);
 	pipelineLayout = VK_NULL_HANDLE;
 	vkDestroyDescriptorSetLayout(vkGlobals.device, setLayout, nil);

@@ -81,8 +81,12 @@ extern VkGlobals vkGlobals;
 // of a scene: copies cannot be recorded while a render pass is open, and the
 // upload buffer has no render pass in it.
 //
-// One frame is in flight at a time. Opening a frame waits for the last one, so
-// nothing the CPU writes can race a GPU still reading it.
+// Up to FRAMESINFLIGHT frames are submitted and not yet finished, so the CPU
+// records the next frame while the GPU draws the last. Each frame records into
+// a slot with its own command buffers, arena and descriptor pools, and a slot
+// is only reused once the GPU has finished the frame last submitted from it --
+// so nothing the CPU writes can race a GPU still reading it.
+#define FRAMESINFLIGHT 2
 
 // The frame's commands, opening a frame if none is.
 VkCommandBuffer frameCommands(void);
@@ -91,10 +95,16 @@ VkCommandBuffer uploadCommands(void);
 // frame -- arena space, descriptor sets, what a command buffer has bound --
 // is stamped with this and taken as gone when it no longer matches.
 uint32 frameSerial(void);
+// Which slot the open frame records into, 0 to FRAMESINFLIGHT-1.
+int32 frameSlot(void);
 // Whether a submitted frame may still be running on the GPU, or one is being
-// recorded. Destruction waits while either is true.
+// recorded.
 bool32 gpuBusy(void);
-// Submit what has been recorded and wait for it, without presenting.
+// The newest serial that no frame being recorded or still on the GPU carries.
+// Whatever a frame of that serial or older named is safe to destroy.
+uint32 finishedSerial(void);
+// Submit what has been recorded and wait for every submitted frame, without
+// presenting.
 void flushFrame(void);
 // Close the render pass, if one is open. Needed before any copy or transition.
 void endRendering(void);
@@ -154,7 +164,8 @@ void transitionImage(VkCommandBuffer cmd, Image *img, VkImageLayout layout);
 void releaseAllResources(void);
 
 // Per-frame space in host-visible buffers, for vertices written this frame,
-// shader constants and staging copies. Reset when the next frame opens.
+// shader constants and staging copies. One arena per slot, reset when a frame
+// opens in that slot.
 struct ArenaSpan
 {
 	VkBuffer buffer;
@@ -201,6 +212,7 @@ void setAlphaTestConstants(uint32 func, uint32 ref);
 // The present-time blit: a fullscreen triangle sampling `source` into a target
 // of `format`, with the viewport already set.
 void drawBlit(VkFormat format, Image *source);
+void drawOverlay(VkFormat format, VkExtent2D extent, const float32 *vertices, int32 numVertices);
 
 #endif
 
