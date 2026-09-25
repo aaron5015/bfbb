@@ -88,6 +88,11 @@ struct RwTexture* iSnapshotBackgroundTexture();
 // The default is on.
 void iSnapshotSetEnabled(S32 enabled);
 
+// The last presented frame, for reading back: NULL when there is none, when
+// the feature is off, and while latched, when what it holds is the level that
+// was just left rather than what is on screen. See iSaveThumb.h.
+struct RwRaster* iSnapshotLastFrame();
+
 // What to add to a screen-space x and y to make a quad sample the still one for
 // one. Zero on every backend but D3D9, where a vertex at screen x lines up with
 // the CENTRE of pixel x rather than its corner: a quad drawn at 0..w then reads
@@ -101,5 +106,17 @@ void iSnapshotSetEnabled(S32 enabled);
 // and outside the shim; glow.cpp and distort.cpp are inside it and test
 // RWHALFPIXEL directly for the same reason in reverse.
 F32 iSnapshotHalfPixel();
+
+// Copies the frame about to be presented into `dst`, whatever the snapshot's
+// own state. `dst` is a raster from an earlier call, or NULL; it is replaced
+// when the screen size no longer matches. Returns the raster holding the copy,
+// or NULL (with `dst` possibly destroyed) when there is nothing to copy.
+struct RwRaster* iSnapshotCopyFrame(struct RwRaster* dst);
+
+// Called once a frame from iSnapshotCapture, after the copy, whether or not a
+// copy was made. For iTour.h, which steps its script on it. A pointer rather
+// than a call so the shim does not link against the platform layer.
+typedef void (*iSnapshotFrameHook)();
+void iSnapshotSetFrameHook(iSnapshotFrameHook fn);
 
 #endif
