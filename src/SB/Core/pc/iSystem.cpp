@@ -19,6 +19,7 @@
 #include "iHipoly.h"
 #include "iSoundtrack.h"
 #include "iTextPatch.h"
+#include "iAssetOverride.h"
 #include "iTime.h"
 #include "iLoadScreen.h"
 #include "iLoadTransition.h"
@@ -37,6 +38,7 @@
 #include "xstransvc.h"
 #include "xString.h"
 #include "iWindow.h"
+#include "iTour.h"
 
 #include <rwcore.h>
 #include <rpworld.h>
@@ -455,7 +457,7 @@ static RwTexture* TextureRead(const RwChar* name, const RwChar* maskName)
 // directly.
 static iWindowMode WindowModeFromConfig()
 {
-    const char* name = iConfigGetString("video.mode", "fullscreen");
+    const char* name = iConfigGetString("video.mode", "borderless");
 
     if (iHostStrCaseCmp(name, "fullscreen") == 0)
     {
@@ -473,7 +475,7 @@ static iWindowMode WindowModeFromConfig()
     printf("bfbb: config: video.mode is not fullscreen, borderless or windowed, using "
            "the default: %s\n",
            name);
-    return iWINDOW_FULLSCREEN;
+    return iWINDOW_BORDERLESS;
 }
 
 // The size of the shadow raster, from config.ini's video.shadow_resolution.
@@ -967,6 +969,10 @@ static void ApplyConfig()
     // config.ini is.
     S32 wording = iConfigGetBool("assets.platform_wording", TRUE);
     iTextPatchSetEnabled(wording);
+    // The PC menus, and the save folders only their save screen reaches.
+    S32 codeMenu = iConfigGetBool("assets.code_menu", TRUE);
+    iAssetOverrideSetEnabled(codeMenu);
+    iSGSetPCTargets(codeMenu);
 
     // Said out loud, and always, because these change what the game looks and
     // sounds like. Someone reporting that the port looks wrong should not have
@@ -1020,6 +1026,26 @@ void iSystemInit(U32 options)
     xDebugInit();
     xMemInit();
     iFileInit();
+
+    // The code-built menus are the retail menus' logic, and point at the
+    // retail menus' textures and models by ID. A mod's own menu package has
+    // other ones, and the first missing texture ends the run, so the mod's
+    // menus are used whole.
+    if (iAssetOverrideEnabled())
+    {
+        static const char* const kMenuPackages[] = { "mn/mnu3.HIP", "mn/mnu4.HIP", "mn/mnu5.HIP" };
+        for (U32 i = 0; i < sizeof(kMenuPackages) / sizeof(kMenuPackages[0]); i++)
+        {
+            if (iFileModReplaces(kMenuPackages[i]))
+            {
+                printf("bfbb: the mod replaces %s; PC menus off, the mod's menus are used\n",
+                       kMenuPackages[i]);
+                iAssetOverrideSetEnabled(FALSE);
+                iSGSetPCTargets(FALSE);
+                break;
+            }
+        }
+    }
 
     // The assets, before anything asks for one and before the window opens.
     //
@@ -1140,6 +1166,12 @@ void iSystemInit(U32 options)
     TRCInit();
 
     iPadHostSetHotkey(iHipolyHotkey);
+
+    if (iTourActive())
+    {
+        sWindowMode = iWINDOW_WINDOWED;
+        iTourInit();
+    }
     printf("bfbb: platform layer up, input backend: %s\n", iPadHostName());
 
     if (RenderWareInit())
@@ -1150,6 +1182,12 @@ void iSystemInit(U32 options)
         // several hundred lines further on, with nothing to point at.
         printf("bfbb: FATAL -- RenderWare failed to start\n");
         exit(1);
+    }
+
+    // A tour counts in frames; see iTour.h.
+    if (iTourActive())
+    {
+        iWindowSetFrameRate(60);
     }
 
     // The reference every alpha test is measured against, which librw leaves
