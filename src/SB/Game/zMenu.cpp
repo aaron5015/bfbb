@@ -286,7 +286,7 @@ U32 zMenuLoop()
             tgt[1] = src[2];
             tgt[2] = src[1];
             tgt[3] = src[0];
-            if (tgt[3] < '0' || tgt[3] > '9')
+            if (tgt[ITAG_LAST_CHAR_BYTE] < '0' || tgt[ITAG_LAST_CHAR_BYTE] > '9')
             {
                 memcpy(tgt, src, sizeof(U32));
             }
@@ -335,7 +335,7 @@ U32 zMenuUpdateMode()
     if (gGameMode == eGameMode_Load)
     {
         F32 elapsed1 = float(iTimeGet()) - time_last;
-        retVal = zSaveLoad_LoadLoop();
+        retVal = iSGLoadLoop();
         if (retVal == '0000')
         {
             retVal = 0;
@@ -348,7 +348,7 @@ U32 zMenuUpdateMode()
     }
     else if (gGameMode == eGameMode_Save)
     {
-        zSaveLoad_SaveLoop();
+        iSGSaveLoop();
         globals.autoSaveFeature = 1;
         retVal = 'HB00';
     }

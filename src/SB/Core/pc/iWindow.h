@@ -91,7 +91,7 @@ void iWindowPump();
 // it paces to the MONITOR, and a 240 Hz monitor gives four times the frames a
 // GameCube title was built for. Every part of the game that counts frames
 // rather than seconds then runs four times too fast, and retail's own guard at
-// zGame.cpp:559 -- which substitutes 1/60 s for any frame it measures under ten
+// zGameLoop -- which substitutes 1/60 s for any frame it measures under ten
 // microseconds -- is a reminder that its timing was written against a console
 // that could not produce one.
 void iWindowPaceFrame();
@@ -139,10 +139,26 @@ S32 iWindowShouldClose();
 
 void iWindowGetSize(S32* width, S32* height);
 
+// The primary display's size in pixels, usable before the window is opened.
+// FALSE when the backend has no display to ask.
+S32 iWindowGetDisplaySize(S32* width, S32* height);
+
 // The mode the window was opened in. iWINDOW_WINDOWED before it is opened, so
 // a caller that asks too early gets the answer that needs nothing done about
 // it rather than one that would put the device into exclusive fullscreen.
 iWindowMode iWindowGetMode();
+
+// Switches between WINDOWED and BORDERLESS while the game runs. Both are plain
+// windows to the renderer, so this is a change of frame and size and nothing
+// else. FALSE, with nothing changed, when it cannot be done live: exclusive
+// fullscreen belongs to the device (see above), and Android has one mode.
+//
+// Alt+Enter and F11 call this through the event pump, toggling.
+S32 iWindowSetMode(iWindowMode mode);
+
+// Called by rw/engine_start.cpp once the renderer has taken exclusive
+// fullscreen. FULLSCREEN without it is the borderless fallback.
+void iWindowSetExclusive(S32 on);
 
 // The backend's handle. See the note above: only the RenderWare shim may
 // interpret this, and what it means depends on which backend was linked.

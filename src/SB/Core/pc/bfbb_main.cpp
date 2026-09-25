@@ -46,6 +46,14 @@
 #include "iFMVAudio.h"
 #include "iFMVDecoder.h"
 
+#ifdef __ANDROID__
+// The log has to be opened from here rather than from the Android shim's own
+// startup, because the banner below is printed from a static constructor and
+// anything printed before the redirect is discarded by the platform. See
+// android/iAndroid.h for the two halves.
+#include "android/iAndroid.h"
+#endif
+
 #ifdef _WIN32
 namespace
 {
@@ -497,29 +505,34 @@ namespace
     //
     // librw exports these as public compile definitions, and CMakeLists.txt
     // explains why every target of the port has to see them.
-    const char* const kRenderBackend =
-#if defined(RW_D3D9) && defined(RW_D3D11) && defined(RW_GL3)
-        "D3D9, D3D11 and OpenGL";
-#elif defined(RW_D3D9) && defined(RW_D3D11)
-        "D3D9 and D3D11";
-#elif defined(RW_D3D9) && defined(RW_GL3)
-        "D3D9 and OpenGL";
-#elif defined(RW_D3D11) && defined(RW_GL3)
-        "D3D11 and OpenGL";
-#elif defined(RW_D3D9)
-        "D3D9";
-#elif defined(RW_D3D11)
-        "D3D11";
-#elif defined(RW_GL3)
-        "OpenGL";
-#else
-        "no renderer";
+    //
+    // A list with a separator in front of every name, and the first one skipped
+    // where it is printed: one line per backend, where a sentence would need a
+    // case for every combination.
+    const char* const kRenderBackend = ""
+#ifdef RW_D3D9
+        ", D3D9"
 #endif
+#ifdef RW_D3D11
+        ", D3D11"
+#endif
+#ifdef RW_GL3
+        ", OpenGL"
+#endif
+#ifdef RW_VULKAN
+        ", Vulkan"
+#endif
+        ;
 
     struct StartupBanner
     {
         StartupBanner()
         {
+#ifdef __ANDROID__
+            // FIRST. Everything below this line prints, and on Android
+            // nothing printed before it survives.
+            iAndroidOpenLog();
+#endif
             InstallDiagnostics();
             setvbuf(stdout, NULL, _IONBF, 0);
             setvbuf(stderr, NULL, _IONBF, 0);
@@ -527,8 +540,9 @@ namespace
             // claiming a gap that has since been filled -- or a backend that is
             // not the one running -- is worse than no banner: it is the first
             // thing anyone reads when something does not work.
-            printf("bfbb: PC port, %s. Movie decoder: %s, movie audio: %s.\n",
-                   kRenderBackend, iFMVDecoderName(), iFMVAudioName());
+            printf("bfbb: PC port, renderers: %s. Movie decoder: %s, movie audio: %s.\n",
+                   kRenderBackend[0] ? kRenderBackend + 2 : "none", iFMVDecoderName(),
+                   iFMVAudioName());
             if (getenv("BFBB_TEST_CRASH")) { *(volatile int*)0 = 1; }
         }
     };

@@ -31,28 +31,92 @@ namespace
     const int kRailTiles = 4;
     const int kStileTiles = 4;
 
-    // Which atomics have already been through this.
+    // The frames this has rebuilt, each with the mesh the artist made and the
+    // widening it was last rebuilt for.
     //
-    // The count-based test is not enough on its own: on a 4:3 or pillarboxed
-    // screen the rebuild adds no segments, so the mesh it produces has exactly
-    // the eighty vertices the signature looks for and would be rebuilt again on
-    // the next frame, and every frame after, leaking a geometry each time. The
-    // frame appears on two menu screens, so a couple of slots is plenty.
+    // Kept rather than rebuilt once and forgotten because the widening follows
+    // video.ui, and the settings screen changes that while the frame is up:
+    // the next draw has to see a different margin and build again from the
+    // original. A 4:3 or pillarboxed screen gets the original back. The
+    // original is held by a reference of its own so that swapping it out does
+    // not free it.
+    //
+    // Other passes replace a drawn atomic's geometry too -- a copy of whatever
+    // this built can be what the atomic holds on the next draw -- so an entry
+    // is found by its atomic and nothing else, and is dropped when the model
+    // that owns the atomic is unloaded (iMenuFrameForget). That is what stops
+    // a new atomic made where an old one was from inheriting its entry.
+    struct Seen
+    {
+        RpAtomic* atomic;
+        RpGeometry* original;
+        RpGeometry* built;
+        // The widening it was built for, in thousandths of object space; -1
+        // before the first build.
+        int widen;
+        bool rope;
+    };
+
     const int kMaxSeen = 8;
-    RpAtomic* sSeen[kMaxSeen];
+    Seen sSeen[kMaxSeen];
     int sSeenCount = 0;
 
-    bool already_done(RpAtomic* atomic)
+    Seen* find_seen(RpAtomic* atomic)
     {
         for (int i = 0; i < sSeenCount; i++)
         {
-            if (sSeen[i] == atomic)
+            if (sSeen[i].atomic == atomic)
             {
-                return true;
+                return &sSeen[i];
             }
         }
+        return NULL;
+    }
 
-        return false;
+    Seen* add_seen(RpAtomic* atomic, RpGeometry* original)
+    {
+        Seen* slot = NULL;
+        for (int i = 0; i < sSeenCount && slot == NULL; i++)
+        {
+            if (sSeen[i].atomic == NULL)
+            {
+                slot = &sSeen[i];
+            }
+        }
+        if (slot == NULL)
+        {
+            if (sSeenCount == kMaxSeen)
+            {
+                return NULL;
+            }
+            slot = &sSeen[sSeenCount++];
+        }
+
+        // A reference of its own, so the rebuilds can always start again from
+        // the artist's mesh; given back in iMenuFrameForget.
+        original->refCount++;
+        slot->atomic = atomic;
+        slot->original = original;
+        slot->built = NULL;
+        slot->widen = -1;
+        slot->rope = false;
+        return slot;
+    }
+
+    RpAtomic* ForgetCB(RpAtomic* atomic, void*)
+    {
+        for (int i = 0; i < sSeenCount; i++)
+        {
+            Seen& e = sSeen[i];
+            if (e.atomic == atomic)
+            {
+                RpGeometryDestroy(e.original);
+                e.atomic = NULL;
+                e.original = NULL;
+                e.built = NULL;
+            }
+        }
+        return atomic;
     }
 
     // A quad's four vertices, as the exporter laid them out: bottom-left,
@@ -71,7 +135,8 @@ namespace
         int vert;
         int tri;
 
-        // One quad, moved to start at x0 and otherwise exactly as drawn.
+        // One quad, moved to start at x0, `sx` times as long, and otherwise
+        // exactly as drawn.
         //
         // This is a TRANSLATION, and it has to be. The two end caps do not
         // share a vertex order -- the artist turned the right-hand one 180
@@ -79,7 +144,8 @@ namespace
         // one where the left cap's is the near bottom one. Writing positions
         // into fixed slots therefore mirrors one cap and leaves the other
         // alone. Moving every vertex by one offset cannot.
-        void quad(const RwV3d* srcPos, const RwTexCoords* srcUV, float x0, float z)
+        void quad(const RwV3d* srcPos, const RwTexCoords* srcUV, float x0, float z,
+                  float sx = 1.0f)
         {
             float minX = srcPos[0].x;
             for (int i = 1; i < 4; i++)
@@ -92,7 +158,7 @@ namespace
 
             for (int i = 0; i < 4; i++)
             {
-                verts[vert + i].x = x0 + (srcPos[i].x - minX);
+                verts[vert + i].x = x0 + (srcPos[i].x - minX) * sx;
                 verts[vert + i].y = srcPos[i].y;
                 verts[vert + i].z = z;
                 uvs[vert + i] = srcUV[i];
@@ -130,6 +196,42 @@ namespace
     };
 }
 
+namespace
+{
+    // The frame as the artist built it, by its signature -- and the reason this
+    // needs no hardcoded asset id: eighty vertices, and the four middle quads of
+    // a rail are one tile repeated, so they share a texture rectangle exactly.
+    // A mesh of this size whose tiles do not repeat is some other model that
+    // happens to have eighty vertices, and it is left alone.
+    bool is_artist_frame(const RpGeometry* g)
+    {
+        if (g == NULL || g->numVertices != kSrcVerts || g->numTriangles != kSrcTris ||
+            g->numMorphTargets == 0 || g->numTexCoordSets == 0 || g->matList.numMaterials == 0)
+        {
+            return false;
+        }
+
+        const RwTexCoords* su = g->texCoords[0];
+        if (g->morphTarget[0].verts == NULL || su == NULL)
+        {
+            return false;
+        }
+
+        for (int i = 1; i < kRailTiles; i++)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                if (su[kTopTiles + i * 4 + k].u != su[kTopTiles + k].u ||
+                    su[kTopTiles + i * 4 + k].v != su[kTopTiles + k].v)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+} // namespace
+
 int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
 {
     if (atomic == NULL || rectWidth <= 0.0f)
@@ -137,41 +239,16 @@ int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
         return 0;
     }
 
-    if (already_done(atomic))
-    {
-        return 0;
-    }
 
-    RpGeometry* src = atomic->geometry;
-    if (src == NULL || src->numVertices != kSrcVerts || src->numTriangles != kSrcTris ||
-        src->numMorphTargets == 0 || src->numTexCoordSets == 0)
+    Seen* seen = find_seen(atomic);
+    RpGeometry* src = seen != NULL ? seen->original : atomic->geometry;
+    if (!is_artist_frame(src))
     {
         return 0;
     }
 
     const RwV3d* sp = src->morphTarget[0].verts;
     const RwTexCoords* su = src->texCoords[0];
-    if (sp == NULL || su == NULL || src->matList.numMaterials == 0)
-    {
-        return 0;
-    }
-
-    // The signature, and the reason this needs no hardcoded asset id: in this
-    // frame the four middle quads of a rail are one tile repeated, so they
-    // share a texture rectangle exactly. A mesh of this size whose tiles do not
-    // repeat is some other model that happens to have eighty vertices, and it
-    // is left alone.
-    for (int i = 1; i < kRailTiles; i++)
-    {
-        for (int k = 0; k < 4; k++)
-        {
-            if (su[kTopTiles + i * 4 + k].u != su[kTopTiles + k].u ||
-                su[kTopTiles + i * 4 + k].v != su[kTopTiles + k].v)
-            {
-                return 0;
-            }
-        }
-    }
 
     // One bamboo segment, measured off the mesh rather than assumed.
     const float period = sp[kTopTiles + kBR].x - sp[kTopTiles + kBL].x;
@@ -180,27 +257,66 @@ int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
         return 0;
     }
 
-    // How much of the frame's own object space one screen margin is worth. The
-    // model spans rectWidth of the screen for every 1.0 of object space, so the
-    // margin divides straight through.
+    // How far each stile moves out, in the frame's own object space.
+    //
+    // The whole margin less a fixed clearance, so the stiles sit the same
+    // distance from the screen edge at every width, and the HUD anchored to
+    // that edge stays inside them.
+    //
+    // One unit of object space covers kScale * rectWidth of the box, not
+    // rectWidth: the frame is drawn nearer the camera than the plane its rect
+    // is measured on. Measured off 16:9 and 21:9 frames, with the stiles'
+    // outer edges 0.02 of the box inside it at 4:3.
+    const float kScale = 1.16f;
+    const float kEdgeClear = 0.02f;
     const float margin = iScreenAnchorMarginXF();
-    int extra = (int)(margin / (period * rectWidth) + 0.5f);
-    if (extra < 0)
+    float shift = (margin - kEdgeClear) / (kScale * rectWidth);
+    if (shift < 0.0f)
     {
-        extra = 0;
+        shift = 0.0f;
     }
+    const int widen = (int)(shift * 1000.0f + 0.5f);
 
     // Zero extra segments is not a reason to stop while the corner lashings are
     // being fixed: a 4:3 or pillarboxed screen needs no extra bamboo, but it has
     // the same missing rope as every other screen. With that fix off there is
     // nothing left for the rebuild to do, and the mesh is better left alone.
     const bool ropeFix = iFixMenuRope() != 0;
-    if (extra == 0 && !ropeFix)
+    if (seen != NULL && seen->widen == widen && seen->rope == ropeFix)
     {
         return 0;
     }
+    if (seen == NULL)
+    {
+        seen = add_seen(atomic, src);
+        if (seen == NULL)
+        {
+            return 0;
+        }
+    }
 
-    const int railTiles = kRailTiles + 2 * extra;
+    if (widen == 0 && !ropeFix)
+    {
+        if (atomic->geometry != seen->original)
+        {
+            RpAtomicSetGeometry(atomic, seen->original, 0);
+        }
+        seen->built = NULL;
+        seen->widen = 0;
+        seen->rope = false;
+        return 1;
+    }
+
+    // The tiles between the caps: as many whole ones as the widened rail holds,
+    // each stretched by the few percent left over, so the rail ends exactly
+    // where the stiles now stand.
+    const float span = kRailTiles * period + 2.0f * shift;
+    int railTiles = (int)(span / period + 0.5f);
+    if (railTiles < kRailTiles)
+    {
+        railTiles = kRailTiles;
+    }
+    const float step = span / railTiles;
     const int quads = 2 * (2 + railTiles) + 2 * kStileTiles;
 
     RpGeometry* dst = RpGeometryCreate(quads * 4, quads * 2,
@@ -223,8 +339,6 @@ int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
     b.tris = dst->triangles;
     b.vert = 0;
     b.tri = 0;
-
-    const float shift = extra * period;
 
     // The two depths the frame is drawn on. Retail puts the stiles on the nearer
     // one AND draws them second, so they beat the rails twice over: at each
@@ -253,9 +367,8 @@ int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
         }
     };
 
-    // Each rail is a cap, the tiles, and the other cap. The tiles are laid on
-    // the same grid the original ones were, so a widened rail is
-    // indistinguishable from the one the artist drew except for being longer.
+    // Each rail is a cap, the tiles, and the other cap. With no widening the
+    // tiles land on the grid the original ones were on.
     const auto rails = [&]() {
         const int caps[2][3] = { { kTopCapL, kTopTiles, kTopCapR },
                                  { kBotCapL, kBotTiles, kBotCapR } };
@@ -272,11 +385,11 @@ int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
 
             for (int i = 0; i < railTiles; i++)
             {
-                const float x = left + (i + 1) * period;
-                b.quad(&sp[tile], &su[tile], x, railZ);
+                const float x = left + period + i * step;
+                b.quad(&sp[tile], &su[tile], x, railZ, step / period);
             }
 
-            const float right = left + (railTiles + 1) * period;
+            const float right = left + period + span;
             b.quad(&sp[capR], &su[capR], right, railZ);
         }
     };
@@ -313,17 +426,28 @@ int iMenuFrameWiden(RpAtomic* atomic, float rectWidth)
 
     RpGeometryUnlock(dst);
 
-    if (sSeenCount < kMaxSeen)
-    {
-        sSeen[sSeenCount++] = atomic;
-    }
+    seen->built = dst;
+    seen->widen = widen;
+    seen->rope = ropeFix;
 
     // No rpATOMICSAMEBOUNDINGSPHERE: the frame is wider than it was, and the
     // sphere it is culled against has to know.
     RpAtomicSetGeometry(atomic, dst, 0);
 
-    printf("bfbb: menu frame rebuilt: %d extra segment(s) each side, %d quads%s\n", extra, quads,
+    // The atomic holds the new frame now. Dropping the reference it was made
+    // with is what lets the next rebuild -- or the scene's teardown -- free it.
+    dst->refCount--;
+
+    printf("bfbb: menu frame rebuilt: %d segments a rail, %d quads%s\n", railTiles, quads,
            ropeFix ? ", corner lashings brought forward" : "");
     fflush(stdout);
     return 1;
+}
+
+void iMenuFrameForget(RpClump* clump)
+{
+    if (clump != NULL)
+    {
+        RpClumpForAllAtomics(clump, ForgetCB, NULL);
+    }
 }

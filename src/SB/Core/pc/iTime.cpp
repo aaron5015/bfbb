@@ -9,13 +9,38 @@
 static iTime sStartupTime;
 static F32 sGameTime;
 
+// Time spent suspended, taken off the host clock, and when the current
+// suspension began.
+static U64 sSuspendedNs;
+static U64 sSuspendStartNs;
+static bool sSuspended;
+
 // A monotonic clock, not the wall clock: retail reads the GameCube timebase,
 // which no user action can move. Wall-clock jumps (NTP, DST, the user editing
 // the clock) would otherwise show up as a single enormous frame delta. Which
 // clock that is on this host is iHost's problem.
 static iTime iTicksNow()
 {
-    return (iTime)(iHostMonotonicNs() / (1000000000ULL / ITIME_TICKS_PER_SECOND));
+    U64 now = sSuspended ? sSuspendStartNs : iHostMonotonicNs();
+    return (iTime)((now - sSuspendedNs) / (1000000000ULL / ITIME_TICKS_PER_SECOND));
+}
+
+void iTimeSuspend()
+{
+    if (!sSuspended)
+    {
+        sSuspendStartNs = iHostMonotonicNs();
+        sSuspended = true;
+    }
+}
+
+void iTimeResume()
+{
+    if (sSuspended)
+    {
+        sSuspendedNs += iHostMonotonicNs() - sSuspendStartNs;
+        sSuspended = false;
+    }
 }
 
 void iTimeInit()

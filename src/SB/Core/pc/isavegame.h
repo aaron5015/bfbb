@@ -109,12 +109,19 @@ struct st_ISG_MEMCARD_DATA
 
 #define ISG_NUM_SLOTS 2
 #define ISG_NUM_FILES 3
+
+// The most save folders ("targets") there can be, each with ISG_NUM_FILES
+// games. Retail's two -- the save directory and "second" -- are all the retail
+// menus reach; the PC save screen (code_menu on) reaches the rest. See
+// iSGTargetMax below.
+#define ISG_MAX_TARGETS 10
+
 // Nothing outside isavegame touches a field of this -- xsavegame.cpp only
 // passes the pointer along -- so the host build uses the names the PS2 DWARF
 // gives them rather than carrying the GameCube's unk_ offsets forward.
 struct st_ISGSESSION
 {
-    st_ISG_MEMCARD_DATA mcdata[ISG_NUM_SLOTS];
+    st_ISG_MEMCARD_DATA mcdata[ISG_MAX_TARGETS];
 
     // Index into mcdata, or -1 when no target has been selected.
     S32 slot;
@@ -207,5 +214,54 @@ void iSGFormatSize(S32 bytes, char* out, U32 outsize);
 // and would make the save screen's free-space line read "2.0 GB" on every disk
 // ever made. This asks the host.
 void iSGFormatFreeSpace(char* out, U32 outsize);
+
+// How many save folders a target index may name: ISG_MAX_TARGETS with the
+// PC menus on, retail's two with them off.
+//
+// iSGTgtCount still answers two either way. Every retail switch on the count
+// (CardtoTgt, zMenuCardCheckStartup, format) knows 0, 1 and 2 and nothing
+// else, and CardtoTgt's two-target arm passes an index straight through -- so
+// an index past 1 reaches here intact and the retail save and load code works
+// on it unchanged.
+S32 iSGTargetMax();
+
+// Whether the save folders past retail's two are reachable. Pushed from
+// iSystem.cpp's ApplyConfig with [assets] code_menu.
+void iSGSetPCTargets(S32 on);
+
+// Make target `tgt`'s folder, so a first save into it has somewhere to go.
+S32 iSGMakeTarget(S32 tgt);
+
+// The save stills (iSaveThumb.h), with the PC menus on. A save file written
+// with iSGSaveFile gets a still beside it, taken per the source set here:
+//
+//   ISG_THUMB_NOW   take one now. The default, and right for an autosave,
+//                   which happens with the game on screen.
+//   ISG_THUMB_KEPT  the one iSGCaptureThumb kept when the game paused; the pause
+//                   menu is on screen by the time anyone saves from it.
+//   ISG_THUMB_NONE  none: a save made from the title screen, before there is a
+//                   game to take a picture of.
+enum
+{
+    ISG_THUMB_NOW,
+    ISG_THUMB_KEPT,
+    ISG_THUMB_NONE
+};
+void iSGSetThumbSource(S32 source);
+
+// Keep a still of the frame on screen, for a save made from the pause menu.
+// zGamePause calls it as the game stops; gc/isavegame.h makes it nothing.
+void iSGCaptureThumb();
+
+// Where the still for folder `tgt`, slot `game` is. 0 for no such slot.
+S32 iSGThumbPath(S32 tgt, S32 game, char* out, U32 outsize);
+
+// The save and load screens. The GameCube's are zSaveLoad_LoadLoop and
+// zSaveLoad_SaveLoop; gc/isavegame.h names them. Here they are the same
+// functions with the PC menus off, and the PC save screen with them on:
+// one list of every save, newest first, instead of a folder and then three
+// slots. See src/SB/Core/pc/menu/iSaveScreen.cpp.
+U32 iSGLoadLoop();
+U32 iSGSaveLoop();
 
 #endif

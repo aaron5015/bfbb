@@ -383,7 +383,7 @@ static void test_config()
 
             check(strstr(grown, "; Settings added by a newer build") != NULL,
                   "the appended block says where it came from");
-            check(strstr(grown, "msaa = 4") != NULL,
+            check(strstr(grown, "msaa = 1") != NULL,
                   "a setting the file never had is appended at its default");
             check(strstr(grown, "shadow_resolution = auto") != NULL, "and so is another");
 
@@ -427,6 +427,51 @@ static void test_config()
         }
     }
 
+    // The in-game settings screen: a set value is what the getters answer from
+    // then on, and the save writes it into the file in place -- the rest of the
+    // file, the unknown line included, comes back as it was.
+    iConfigSet("XBOX.glow", "on");
+    iConfigSet("video.fov", "90");
+    check(iConfigGetBool("xbox.glow", FALSE) == TRUE, "a set value is answered at once");
+    check(iConfigGetFloat("video.fov", 0.0f) == 90.0f, "and so is one the file never had");
+    check(iConfigSave(), "the changed settings save");
+    {
+        char saved[8192];
+        FILE* r = fopen(path, "rb");
+        size_t n = (r != NULL) ? fread(saved, 1, sizeof(saved) - 1, r) : 0;
+        if (r != NULL)
+        {
+            fclose(r);
+        }
+        saved[n] = '\0';
+
+        check(strstr(saved, "Glow   =   on") != NULL, "the set value replaces the line's own");
+        check(strstr(saved, "OFF") == NULL, "and the old value is gone");
+        check(strstr(saved, "fov = 90") != NULL, "a setting the file lacked is added");
+        check(strstr(saved, "; the port's settings") != NULL && strstr(saved, "glwo = off") != NULL,
+              "the comment and the unknown line survive the save");
+    }
+    check(iConfigSave(), "a save with nothing changed succeeds without writing");
+
+    // A binding put back to its default: answered from the table again, and
+    // its line taken out of the file rather than rewritten.
+    iConfigUnset("keyboard.start");
+    check(strcmp(iConfigGetString("keyboard.start", "!"), iPadBindFind("start")->key) == 0,
+          "an unset binding answers with its default");
+    check(iConfigSave(), "and the save succeeds");
+    {
+        char saved[8192];
+        FILE* r = fopen(path, "rb");
+        size_t n = (r != NULL) ? fread(saved, 1, sizeof(saved) - 1, r) : 0;
+        if (r != NULL)
+        {
+            fclose(r);
+        }
+        saved[n] = '\0';
+        check(strstr(saved, "start = f1") == NULL, "and its line is gone from the file");
+        check(strstr(saved, "[keyboard]") != NULL, "while its section stays");
+    }
+
     iHostRemoveFile(path);
 
     // The writer, which the load reaches only when there is no file -- and
@@ -461,13 +506,13 @@ static void test_config()
         check(strstr(buf, "[assets]") != NULL, "it has the [assets] section header");
         check(strstr(buf, "path =") != NULL, "and the asset path, empty as it has to be");
         check(strstr(buf, "[video]") != NULL, "it has the [video] section header");
-        check(strstr(buf, "mode = fullscreen") != NULL, "and the window mode at its default");
+        check(strstr(buf, "mode = borderless") != NULL, "and the window mode at its default");
         check(strstr(buf, "width = 640") != NULL, "and the render width at its default");
         check(strstr(buf, "height = 480") != NULL, "and the height");
         check(strstr(buf, "framerate = 60") != NULL, "and the frame rate at the console's");
         check(strstr(buf, "vsync = on") != NULL, "and vsync");
         check(strstr(buf, "draw_distance = on") != NULL, "and the draw distance");
-        check(strstr(buf, "msaa = 4") != NULL, "and the sample count");
+        check(strstr(buf, "msaa = 1") != NULL, "and the sample count");
         check(strstr(buf, "per_pixel_lighting = off") != NULL, "and per-pixel lighting");
         check(strstr(buf, "pipeline = auto") != NULL, "and the render pipeline");
         check(strstr(buf, "[xbox]") != NULL, "it has the [xbox] section header");
@@ -872,6 +917,30 @@ static void test_config_model()
     check(ConfigModelSave(why, sizeof(why), NULL, NULL) == CONFIG_MODEL_OK, "it saves");
     check(!ConfigModelDirty(), "and is clean afterwards");
 
+    // The mod folder: a folder picker in [assets], beside the asset path, and a
+    // Windows path with spaces in it saves as typed.
+    S32 mod = -1;
+    for (S32 i = 0; i < ConfigModelSettingCount(); i++)
+    {
+        const iConfigSetting* s = ConfigModelSetting(i);
+        if (strcmp(s->section, "assets") == 0 && strcmp(s->name, "mod") == 0)
+        {
+            mod = i;
+        }
+    }
+
+    check(mod >= 0, "assets.mod is in the table");
+    if (mod >= 0)
+    {
+        check(ConfigModelWantsBrowse(ConfigModelSetting(mod)), "and gets a Browse button");
+        check(strcmp(ConfigModelSectionName(ConfigModelSectionOf(mod)), "assets") == 0,
+              "in the assets section");
+
+        ConfigModelSetText(mod, "C:\\mods\\BFBBMix Xbox");
+        check(ConfigModelSave(why, sizeof(why), NULL, NULL) == CONFIG_MODEL_OK,
+              "a mod folder with a space in it saves");
+    }
+
     ConfigModelClose();
 
     {
@@ -885,6 +954,7 @@ static void test_config_model()
         buf[n] = '\0';
 
         check(strstr(buf, "mode = fullscreen") != NULL, "the changed value is in the file");
+        check(strstr(buf, "mod = C:\\mods\\BFBBMix Xbox") != NULL, "and so is the mod folder");
 
         // The rule the window used to own. A setting the file never mentioned
         // and that nobody touched is answered from the table, and writing it
@@ -987,6 +1057,126 @@ static void test_config_model()
         check(iHostPathExists(missing), "and is on disk");
         ConfigModelClose();
         iHostRemoveFile(missing);
+    }
+
+    iHostRemoveFile(path);
+    iHostRemoveDir(dir);
+}
+
+static S32 bind_row(const char* name)
+{
+    for (S32 i = 0; i < ConfigModelBindCount(); i++)
+    {
+        if (strcmp(ConfigModelBindName(i), name) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// The [keyboard] and [pad] pages: bindings read from the file, written back
+// through the game's own parser, and an empty one taking its line out again.
+static void test_config_model_bindings()
+{
+    printf("config_model bindings\n");
+
+    char dir[512];
+    if (!scratch_dir("configbind", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/config.ini", dir);
+
+    static const char kFile[] = "[keyboard]\na = space\n\n[pad]\nb = x\n";
+    FILE* w = fopen(path, "wb");
+    if (w != NULL)
+    {
+        fwrite(kFile, 1, sizeof(kFile) - 1, w);
+        fclose(w);
+    }
+
+    char why[1024];
+    why[0] = '\0';
+    if (!ConfigModelOpen(path, why, sizeof(why)))
+    {
+        check(false, "the model opens a file with bindings");
+        iHostRemoveFile(path);
+        iHostRemoveDir(dir);
+        return;
+    }
+
+    const S32 a = bind_row("a");
+    const S32 b = bind_row("b");
+    const S32 y = bind_row("y");
+    check(a >= 0 && b >= 0 && y >= 0, "a, b and y are bindable");
+    if (a < 0 || b < 0 || y < 0)
+    {
+        ConfigModelClose();
+        iHostRemoveFile(path);
+        iHostRemoveDir(dir);
+        return;
+    }
+
+    check(strcmp(ConfigModelBindText(CONFIG_MODEL_KEYBOARD, a), "space") == 0,
+          "a keyboard binding reads from the file");
+    check(strcmp(ConfigModelBindText(CONFIG_MODEL_PAD, b), "x") == 0, "and a pad one");
+    check(ConfigModelBindText(CONFIG_MODEL_PAD, a)[0] == '\0',
+          "and one the file lacks reads empty, meaning the default");
+
+    char def[256];
+    ConfigModelBindDescribeDefault(CONFIG_MODEL_KEYBOARD, a, def, sizeof(def));
+    check(strcmp(def, "space") == 0, "the keyboard default is the table's key");
+    ConfigModelBindDescribeDefault(CONFIG_MODEL_PAD, a, def, sizeof(def));
+    check(strstr(def, "printed A") != NULL, "and a face button's pad default names its letter");
+
+    ConfigModelBindSetText(CONFIG_MODEL_KEYBOARD, a, "space, enter");
+    ConfigModelBindSetText(CONFIG_MODEL_PAD, a, "lt+!rb");
+    ConfigModelBindSetText(CONFIG_MODEL_PAD, b, "");
+    check(ConfigModelDirty(), "changing a binding marks the model dirty");
+    check(ConfigModelSave(why, sizeof(why), NULL, NULL) == CONFIG_MODEL_OK,
+          "alternatives, chords and negation all save");
+    ConfigModelClose();
+
+    {
+        char buf[8192];
+        FILE* r = fopen(path, "rb");
+        size_t n = (r != NULL) ? fread(buf, 1, sizeof(buf) - 1, r) : 0;
+        if (r != NULL)
+        {
+            fclose(r);
+        }
+        buf[n] = '\0';
+
+        const char* pad = strstr(buf, "[pad]");
+        check(strstr(buf, "a = space, enter") != NULL, "the keyboard binding is in the file");
+        check(pad != NULL && strstr(pad, "a = lt+!rb") != NULL, "the pad one is under [pad]");
+        check(pad != NULL && strstr(pad, "b = ") == NULL,
+              "and an emptied binding's line is gone");
+    }
+
+    if (ConfigModelOpen(path, why, sizeof(why)))
+    {
+        ConfigModelBindSetText(CONFIG_MODEL_KEYBOARD, y, "space+nonsense");
+
+        S32 bad = -1;
+        S32 section = -1;
+        check(ConfigModelSave(why, sizeof(why), &bad, &section) == CONFIG_MODEL_BAD_VALUE,
+              "a binding naming no key refuses to save");
+        check(bad == y && section == ConfigModelSectionCount() + CONFIG_MODEL_KEYBOARD,
+              "and says which button on which page");
+
+        check(ConfigModelBindResetAll(CONFIG_MODEL_KEYBOARD), "resetting the page changes it");
+        check(ConfigModelSave(why, sizeof(why), NULL, NULL) == CONFIG_MODEL_OK,
+              "and then it saves");
+        ConfigModelClose();
+    }
+    else
+    {
+        check(false, "the model reopens the file it wrote");
     }
 
     iHostRemoveFile(path);
@@ -1505,6 +1695,37 @@ static void test_file()
     tag_xFile missing = {};
     check(iFileOpen("NOSUCH.HIP", 0, &missing) != 0, "a missing file reports failure");
 
+    // **A wrong-case DIRECTORY, which is the case that actually ships.** The
+    // asset system asks for `GL/GL01.HIP` because a scene tag is spelled in
+    // upper case, and an extraction has the folder as `gl`. Resolving only the
+    // last component meant looking inside a directory that does not exist, so
+    // the pack was invisible on any case-sensitive filesystem -- Android's, and
+    // every Linux build.
+    {
+        char sub[512];
+        snprintf(sub, sizeof(sub), "%s/gl", dir);
+        if (iHostMakeDir(sub))
+        {
+            snprintf(path, sizeof(path), "%s/gl01.hip", sub);
+            FILE* g = fopen(path, "wb");
+            fwrite(payload, 1, sizeof(payload) - 1, g);
+            fclose(g);
+
+            tag_xFile nested = {};
+            check(iFileOpen("GL/GL01.HIP", 0, &nested) == 0,
+                  "a wrong-case directory resolves too, not just the leaf");
+            iFileClose(&nested);
+
+            tag_xFile nomatch = {};
+            check(iFileOpen("GL/NOSUCH.HIP", 0, &nomatch) != 0,
+                  "and a missing file under it still reports failure");
+
+            tag_xFile nodir = {};
+            check(iFileOpen("ZZ/GL01.HIP", 0, &nodir) != 0,
+                  "as does a directory that is not there under any spelling");
+        }
+    }
+
     // The asynchronous path: queued by iFileReadAsync, completed by the
     // service function the load loops call.
     tag_xFile afile = {};
@@ -1549,6 +1770,119 @@ static void test_file()
 
     iHostRemoveFile(path);
     iHostRemoveDir(dir);
+}
+
+// Writes `size` bytes to dir/name. Returns false when the file cannot be made.
+static bool write_scratch(const char* dir, const char* name, const void* data, size_t size)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE* f = fopen(path, "wb");
+    if (f == NULL)
+    {
+        return false;
+    }
+    fwrite(data, 1, size, f);
+    fclose(f);
+    return true;
+}
+
+// The first `size` bytes of `name` through iFileOpen, or "" when it will not open.
+static void read_through_ifile(const char* name, char* out, size_t size)
+{
+    memset(out, 0, size);
+    tag_xFile file = {};
+    if (iFileOpen(name, 0, &file) == 0)
+    {
+        iFileRead(&file, out, (U32)size - 1);
+        iFileClose(&file);
+    }
+}
+
+// The mod folder: a file there is read in place of the asset root's file at
+// the same relative path, whatever the case, and a package from another
+// console's release is passed over for the original.
+static void test_file_mod()
+{
+    printf("iFile mod folder\n");
+
+    char base[512];
+    char mod[512];
+    if (!scratch_dir("modbase", base, sizeof(base)) || !scratch_dir("modover", mod, sizeof(mod)))
+    {
+        check(false, "could not make the temp directories");
+        return;
+    }
+
+    char baseGl[512];
+    char modGl[512];
+    snprintf(baseGl, sizeof(baseGl), "%s/gl", base);
+    snprintf(modGl, sizeof(modGl), "%s/GL", mod);
+    iHostMakeDir(baseGl);
+    iHostMakeDir(modGl);
+
+    // HIPA > PACK > PLAT "GC\0GameCube\0", sizes big-endian as the packer
+    // writes them on every platform.
+    static const U8 gcHip[] = { 'H', 'I', 'P', 'A', 0, 0, 0, 0,  'P', 'A', 'C', 'K', 0, 0, 0, 20,
+                                'P', 'L', 'A', 'T', 0, 0, 0, 12, 'G', 'C', 0,   'G', 'a', 'm',
+                                'e', 'C', 'u', 'b', 'e', 0 };
+
+    bool made = write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
+                write_scratch(base, "ONLY.HIP", "BASE", 4) &&
+                write_scratch(base, "GC.HIP", "BASE", 4) &&
+                write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
+                write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip));
+    check(made, "the scratch asset and mod folders can be written");
+
+    iHostSetEnv("BFBB_ASSETS", base);
+    iHostSetEnv("BFBB_MOD", mod);
+    iFileInit();
+    iFileSetPath((char*)"."); // what SB.INI's PATH= does once it loads
+
+    char got[16];
+    read_through_ifile("GL/GL01.HIP", got, sizeof(got));
+    check(strcmp(got, "MODDED") == 0, "a mod file replaces the original at the same relative path");
+    check(strncmp(iFileModName(), "bfbb_pc_modover_", 16) == 0,
+          "the mod's name is its folder's last component, for its own saves");
+
+    read_through_ifile("ONLY.HIP", got, sizeof(got));
+    check(strcmp(got, "BASE") == 0, "a file the mod does not have comes from the asset root");
+
+    read_through_ifile("GC.HIP", got, sizeof(got));
+    check(strcmp(got, "BASE") == 0, "a GameCube package in the mod folder is passed over");
+
+    char loaded[16];
+    char path[512];
+    U32* buf = iFileLoad((char*)"GL/GL01.HIP", NULL, NULL);
+    memcpy(loaded, buf != NULL ? (const char*)buf : "", 7);
+    loaded[6] = 0;
+    free(buf);
+    check(strcmp(loaded, "MODDED") == 0, "iFileLoad's absolute path is overridden too");
+
+    // A mod folder that is not there is ignored rather than breaking the root.
+    snprintf(path, sizeof(path), "%s/nosuch", mod);
+    iHostSetEnv("BFBB_MOD", path);
+    iFileInit();
+    read_through_ifile("GL/GL01.HIP", got, sizeof(got));
+    check(strcmp(got, "BASE") == 0, "a missing mod folder leaves the asset root in force");
+    check(iFileModName()[0] == '\0', "and names no mod, so saves stay where the disc's are");
+
+    iHostSetEnv("BFBB_ASSETS", NULL);
+    iHostSetEnv("BFBB_MOD", NULL);
+    iFileInit();
+    iFileExit();
+
+    const char* files[][2] = { { baseGl, "gl01.HIP" }, { base, "ONLY.HIP" }, { base, "GC.HIP" },
+                               { modGl, "GL01.hip" },  { mod, "gc.hip" } };
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
+    {
+        snprintf(path, sizeof(path), "%s/%s", files[i][0], files[i][1]);
+        iHostRemoveFile(path);
+    }
+    iHostRemoveDir(baseGl);
+    iHostRemoveDir(modGl);
+    iHostRemoveDir(base);
+    iHostRemoveDir(mod);
 }
 
 // The stick shaping in iPad.cpp, which sits above the backend and so is worth
@@ -2915,6 +3249,23 @@ char* xST_xAssetID_HIPFullPath(U32 aid)
     return aid == sFakePkgAsset ? sFakePkgName : NULL;
 }
 
+// isavegame.cpp writes a still beside a save through rw/savethumb.cpp, which
+// needs a renderer this binary does not have. The tests save with the PC
+// folders off, where no still is taken; these only have to link.
+void iSaveThumbCapture()
+{
+}
+
+S32 iSaveThumbHave()
+{
+    return FALSE;
+}
+
+S32 iSaveThumbWrite(const char*)
+{
+    return FALSE;
+}
+
 S32 xSTGetAssetInfoInHxP(U32 aid, st_PKR_ASSET_TOCINFO* info, U32)
 {
     if (aid != sFakePkgAsset)
@@ -3160,6 +3511,62 @@ static void test_snd_data()
             }
         }
         check(flat, "and the rest of the block holds, with the index clamped at zero");
+    }
+
+    iSndDataRelease(sFakePkgAsset);
+    iSndDataReset();
+
+    // Stereo, which retail never ships and BFBBMix does: a 72-byte block, both
+    // headers first, then four-byte words alternating left and right. The left
+    // is predictor 1000 over all-zero words, so it holds at 1000 as above. The
+    // right is predictor -2000 and its first word starts 0x07: nibble 7 at
+    // step 7 adds 0+1+3+7 = 11 and moves the index to 8 (step 16), then nibble
+    // 0 adds 16>>3 = 2. A decoder that swapped the channels or took the words
+    // in the wrong order puts those values somewhere else.
+    snprintf(path, sizeof(path), "%s/adpcm.HOP", dir);
+    f = fopen(path, "wb");
+    check(f != NULL, "the stereo ADPCM package could be created");
+    if (f == NULL)
+    {
+        return;
+    }
+
+    const U8 stereoHead[16] = { 1000 & 0xff, (1000 >> 8) & 0xff, 0, 0,          // left header
+                                (U8)(-2000 & 0xff), (U8)((-2000 >> 8) & 0xff), 0, 0, // right
+                                0, 0, 0, 0,                                     // left word 0
+                                0x07, 0, 0, 0 };                                // right word 0
+    fwrite(stereoHead, 1, sizeof(stereoHead), f);
+    for (U32 i = sizeof(stereoHead); i < 2 * kBlock; i++)
+    {
+        fputc(0x00, f);
+    }
+    fclose(f);
+
+    sFakePkgAsset = 0x0AD9C001;
+    sFakePkgSize = 2 * kBlock;
+
+    adpcm.channels = 2;
+    adpcm.block_align = 2 * kBlock;
+
+    abytes = 0;
+    iSndDataPcm spcm;
+    const S16* s = (const S16*)iSndDataAcquire(sFakePkgAsset, &adpcm, &abytes, &spcm);
+
+    check(s != NULL, "a stereo ADPCM asset decodes");
+    check(abytes == 64 * 2 * sizeof(S16), "a 72-byte stereo block is 64 frames of two samples");
+    check(spcm.channels == 2, "and reaches the mixer as two channels");
+
+    if (s != NULL)
+    {
+        check(s[1] == -1989 && s[3] == -1987,
+              "the right channel's first word lands in the right channel's first frames");
+
+        bool left = true;
+        for (U32 i = 0; i < 64; i++)
+        {
+            left = left && s[i * 2] == 1000;
+        }
+        check(left, "and the left channel holds, untouched by the right's nibbles");
     }
 
     iSndDataRelease(sFakePkgAsset);
@@ -4777,6 +5184,7 @@ int main()
     test_config();
     test_config_edit();
     test_config_model();
+    test_config_model_bindings();
     test_screen();
     test_drawdist();
     test_boot();
@@ -4786,6 +5194,7 @@ int main()
     test_math();
     test_mem();
     test_file();
+    test_file_mod();
     test_idtag();
     test_pad();
     test_savegame();

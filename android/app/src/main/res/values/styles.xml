@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fullscreen and no title bar, which is what SDL's own template uses:
+         the game draws every pixel it is given and has its own pause. -->
+    <style name="AppTheme" parent="android:Theme.NoTitleBar.Fullscreen" />
+
+    <!-- ProfileActivity is nothing but its dialog, so the window behind it is
+         see-through and appears without an animation. -->
+    <style name="ProfileTheme" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

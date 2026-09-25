@@ -1095,7 +1095,7 @@ S32 NPCHazard::GrabModel(en_hazmodel idx_model)
         }
     }
 
-    return this->mdl_hazard != NULL;
+    return this->mdl_hazard ? 1 : 0;
 }
 
 void NPCHazard::FreeModel()

@@ -1,5 +1,6 @@
 #include "iWindow.h"
 
+#include "iScreen.h"
 #include "rw/backend.h"
 
 // The window, on SDL, for both render backends.
@@ -35,6 +36,7 @@
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Under GL3, written by librw through the slot handed out below, and null until
@@ -45,6 +47,15 @@ static S32 sShouldClose;
 static S32 sWidth;
 static S32 sHeight;
 static iWindowMode sMode = iWINDOW_WINDOWED;
+static S32 sExclusive;
+static bool sTour;
+
+// Where the window was the last time it was windowed, for iWindowSetMode to put
+// it back. Zero until then.
+static int sWindowedX;
+static int sWindowedY;
+static int sWindowedW;
+static int sWindowedH;
 
 // Copied rather than pointed at. iWindowParams::title belongs to the caller's
 // stack frame in iSystem.cpp and librw reads it much later, inside
@@ -143,6 +154,10 @@ S32 iWindowOpen(const iWindowParams* params)
 
     sMode = params->mode;
 
+    // iTour.h: a hidden window, which nothing may make visible.
+    const char* tour = getenv("BFBB_TOUR");
+    sTour = tour != NULL && tour[0] != '\0';
+
     // The size the window will be created at, which is the size asked for and
     // not necessarily what it ends up as -- the two fullscreen modes cover a
     // monitor. What it ends up as is read back below.
@@ -183,7 +198,13 @@ S32 iWindowOpen(const iWindowParams* params)
     //
     // The rectangle is wanted as much as the size: a monitor left of the
     // primary has a negative origin.
-    SDL_WindowFlags flags = 0;
+    // Vulkan makes its surface on this window, and SDL refuses to make one on a
+    // window that was not created for it.
+    SDL_WindowFlags flags = iBackendIsVulkan() ? SDL_WINDOW_VULKAN : 0;
+    if (sTour)
+    {
+        flags |= SDL_WINDOW_HIDDEN;
+    }
     S32 x = 0;
     S32 y = 0;
     S32 w = params->width;
@@ -232,6 +253,17 @@ S32 iWindowOpen(const iWindowParams* params)
     {
         SDL_SetWindowPosition(sWindow, x, y);
     }
+
+#ifdef __ANDROID__
+    // Android hides the status and navigation bars only for a fullscreen
+    // window, and a borderless one leaves them drawn over the game. GL3's window
+    // is made fullscreen in iWindowDeferredCreated.
+    if (sMode != iWINDOW_WINDOWED)
+    {
+        SDL_SetWindowFullscreen(sWindow, true);
+        SDL_SyncWindow(sWindow);
+    }
+#endif
 
     // What the window actually got, in pixels, which is what the back buffer is
     // sized in and what every other part of the port pairs with. Read rather
@@ -307,6 +339,11 @@ void iWindowDeferredCreated()
         // fullscreen transitions are asynchronous on every platform that has a
         // compositor.
         SDL_SyncWindow(sWindow);
+    }
+
+    if (sTour)
+    {
+        SDL_HideWindow(sWindow);
     }
 
     // What the window actually got, in the units the back buffer is in.
@@ -415,6 +452,18 @@ void iWindowPump()
             sHeight = event.window.data2;
             break;
 
+        // Alt+Enter and F11 toggle windowed. iPadKeyboardSDL.cpp keeps an Enter
+        // pressed with Alt held from also reaching the game as Start.
+        case SDL_EVENT_KEY_DOWN:
+            if (!event.key.repeat &&
+                (event.key.key == SDLK_F11 ||
+                 ((event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) &&
+                  (event.key.mod & SDL_KMOD_ALT) != 0)))
+            {
+                iWindowSetMode(sMode == iWINDOW_WINDOWED ? iWINDOW_BORDERLESS : iWINDOW_WINDOWED);
+            }
+            break;
+
         default:
             break;
         }
@@ -495,6 +544,27 @@ S32 iWindowGetDisplayRefreshRate()
     return (S32)(mode->refresh_rate + 0.5f);
 }
 
+S32 iWindowGetDisplaySize(S32* width, S32* height)
+{
+    // Refcounted, so this neither needs the window nor disturbs one.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+    {
+        return FALSE;
+    }
+
+    const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    S32 ok = mode != NULL && mode->w > 0 && mode->h > 0;
+
+    if (ok)
+    {
+        *width = mode->w;
+        *height = mode->h;
+    }
+
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return ok;
+}
+
 void iWindowPaceFrame()
 {
     if (sFrameRate <= 0)
@@ -541,6 +611,123 @@ iWindowMode iWindowGetMode()
     return sMode;
 }
 
+void iWindowSetExclusive(S32 on)
+{
+    sExclusive = on;
+}
+
+S32 iWindowSetMode(iWindowMode mode)
+{
+#ifdef __ANDROID__
+    (void)mode;
+    return FALSE;
+#else
+    if (sWindow == NULL || mode == iWINDOW_FULLSCREEN || sTour)
+    {
+        return FALSE;
+    }
+
+    if (sExclusive)
+    {
+        printf("bfbb: the window is in exclusive fullscreen; set video.mode and restart to "
+               "change it\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    bool windowed = sMode == iWINDOW_WINDOWED;
+    if ((mode == iWINDOW_WINDOWED) == windowed)
+    {
+        return TRUE;
+    }
+
+    if (mode == iWINDOW_WINDOWED)
+    {
+        // GL3's borderless is SDL fullscreen (iWindowDeferredCreated); the
+        // others' is a frameless window the size of the monitor. Undoing the
+        // first is harmless for the second.
+        SDL_SetWindowFullscreen(sWindow, false);
+        SDL_SetWindowBordered(sWindow, true);
+        SDL_SetWindowResizable(sWindow, true);
+
+        S32 w = sWindowedW;
+        S32 h = sWindowedH;
+        if (w <= 0 || h <= 0)
+        {
+            // Never windowed this session: three quarters of the monitor, in
+            // the render size's shape.
+            SDL_Rect bounds;
+            SDL_DisplayID display = SDL_GetDisplayForWindow(sWindow);
+            if (!SDL_GetDisplayBounds(display, &bounds) || bounds.w <= 0 || bounds.h <= 0)
+            {
+                bounds.w = 1280;
+                bounds.h = 720;
+            }
+            w = bounds.w * 3 / 4;
+            h = bounds.h * 3 / 4;
+            S32 rw = iScreenWidth();
+            S32 rh = iScreenHeight();
+            if (rw > 0 && rh > 0)
+            {
+                if (w * rh > h * rw)
+                {
+                    w = h * rw / rh;
+                }
+                else
+                {
+                    h = w * rh / rw;
+                }
+            }
+        }
+
+        SDL_SetWindowSize(sWindow, w, h);
+        if (sWindowedW > 0)
+        {
+            SDL_SetWindowPosition(sWindow, sWindowedX, sWindowedY);
+        }
+        else
+        {
+            SDL_SetWindowPosition(sWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+    }
+    else
+    {
+        // Kept so going back lands where the window was.
+        SDL_GetWindowPosition(sWindow, &sWindowedX, &sWindowedY);
+        SDL_GetWindowSize(sWindow, &sWindowedW, &sWindowedH);
+
+        SDL_Rect bounds;
+        if (!SDL_GetDisplayBounds(SDL_GetDisplayForWindow(sWindow), &bounds) || bounds.w <= 0 ||
+            bounds.h <= 0)
+        {
+            return FALSE;
+        }
+
+        SDL_SetWindowResizable(sWindow, false);
+        SDL_SetWindowBordered(sWindow, false);
+        SDL_SetWindowPosition(sWindow, bounds.x, bounds.y);
+        SDL_SetWindowSize(sWindow, bounds.w, bounds.h);
+    }
+
+    // The transitions are asynchronous wherever there is a compositor. The size
+    // read back is what the back buffer follows.
+    SDL_SyncWindow(sWindow);
+    int got_w = 0;
+    int got_h = 0;
+    if (SDL_GetWindowSizeInPixels(sWindow, &got_w, &got_h) && got_w > 0 && got_h > 0)
+    {
+        sWidth = got_w;
+        sHeight = got_h;
+    }
+
+    sMode = mode;
+    printf("bfbb: window is now %s, %dx%d\n", mode == iWINDOW_WINDOWED ? "windowed" : "borderless",
+           (int)sWidth, (int)sHeight);
+    fflush(stdout);
+    return TRUE;
+#endif
+}
+
 void iWindowGetSize(S32* width, S32* height)
 {
     if (width != NULL)
@@ -556,11 +743,12 @@ void iWindowGetSize(S32* width, S32* height)
 
 // Whatever the running backend's EngineOpenParams wants, as iWindow.h says: an
 // SDL_Window* under GL3, which librw wrote into the slot itself, and the HWND
-// behind that window under D3D.
+// behind that window under D3D. Vulkan takes the SDL_Window* as well, one the
+// port made.
 void* iWindowNativeHandle()
 {
 #ifdef _WIN32
-    if (!iBackendIsGL3())
+    if (!iBackendIsGL3() && !iBackendIsVulkan())
     {
         if (sWindow == NULL)
         {

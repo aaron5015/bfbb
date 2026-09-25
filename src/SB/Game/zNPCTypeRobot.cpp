@@ -5028,8 +5028,7 @@ void zNPCTubelet::Unbonk()
     ModelAtomicHide(1, NULL);
     ModelAtomicHide(4, NULL);
     hitpoints = cfg_npc->pts_damage;
-    pflags &= 0xdf;
-    // Epilogue weirdness: the target restores r31 before r0.
+    pflags &= (U8)0xdf;
     bonkSpinRate = -1.0f;
 }
 
@@ -5809,11 +5808,11 @@ void zNPCSlick::SlipSlidenAway(F32 dt)
 
     tmr_moreorless -= nsteps * (1.0f / 60.0f);
     moreorless -= nsteps;
-#else
-    moreorless--;
-#endif
 
     if (moreorless < 0)
+#else
+    if (--moreorless < 0)
+#endif
     {
         moreorless = 8;
 

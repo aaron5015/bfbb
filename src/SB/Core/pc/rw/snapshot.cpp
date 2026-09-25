@@ -32,7 +32,7 @@
 
 #include "rw.h"
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 // d3d9Globals.defaultRenderTarget, which is the surface every camera drawing to
 // the frame buffer actually lands on: the virtual screen when there is one, the
 // back buffer when there is not. Reading it here is what makes the capture
@@ -75,7 +75,7 @@ static S32 sFailed;
 // texture asset -- which is the GameCube and PS2 loading screen exactly.
 static S32 sEnabled = TRUE;
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
 
 // The size to capture at, and the raster to capture into. Shared by both
 // backends because neither the sizing rule nor the lifetime differs: the
@@ -92,7 +92,7 @@ static S32 snapshotEnsureRaster(RwInt32 width, RwInt32 height);
 // already handles: zGame falls back to the background texture asset, which is
 // the GameCube and PS2 loading screen exactly.
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 namespace d3dsnap
 {
 
@@ -122,6 +122,13 @@ namespace d3dsnap
             // D3D11 keeps the system-memory copy in `texture` and the GPU's
             // own in `tex11`; D3D9 has only the one.
             return GETD3DRASTEREXT(r)->tex11;
+        }
+#endif
+#ifdef RW_VULKAN
+        if (iBackendIsVulkan())
+        {
+            // The same arrangement as D3D11's, under `vk`.
+            return GETD3DRASTEREXT(r)->vk;
         }
 #endif
         return GETD3DRASTEREXT(r)->texture;
@@ -280,10 +287,74 @@ namespace gl3snap
 } // namespace gl3snap
 #endif
 
-void iSnapshotCapture()
+static iSnapshotFrameHook sFrameHook;
+
+RwRaster* iSnapshotCopyFrame(RwRaster* dst)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+    RwInt32 w = 0;
+    RwInt32 h = 0;
+    bool d3d = false;
+
+#ifdef RW_D3D_ANY
+    if ((iBackendIsD3D() || iBackendIsVulkan()) && rw::d3d::deviceOpen())
+    {
+        rw::d3d::getScreenExtent(&w, &h);
+        d3d = true;
+    }
+#endif
+#ifdef RW_GL3
+    if (iBackendIsGL3() && rw::gl3::virtualScreenFramebuffer() != 0)
+    {
+        w = (RwInt32)rw::gl3::virtualScreenWidth;
+        h = (RwInt32)rw::gl3::virtualScreenHeight;
+    }
+#endif
+
+    if (w <= 0 || h <= 0)
+    {
+        return NULL;
+    }
+
+    if (dst != NULL && (dst->width != w || dst->height != h))
+    {
+        RwRasterDestroy(dst);
+        dst = NULL;
+    }
+    if (dst == NULL)
+    {
+        dst = RwRasterCreate(w, h, 32, rwRASTERTYPECAMERATEXTURE | rwRASTERFORMAT8888);
+        if (dst == NULL)
+        {
+            return NULL;
+        }
+    }
+
+    bool ok = false;
+#ifdef RW_D3D_ANY
+    if (d3d)
+    {
+        ok = rw::d3d::captureFrame(reinterpret_cast<rw::Raster*>(dst));
+    }
+#endif
+#ifdef RW_GL3
+    if (!d3d)
+    {
+        ok = rw::gl3::copyVirtualScreen(reinterpret_cast<rw::Raster*>(dst));
+    }
+#endif
+    (void)d3d;
+    return ok ? dst : NULL;
+}
+
+void iSnapshotSetFrameHook(iSnapshotFrameHook fn)
+{
+    sFrameHook = fn;
+}
+
+static void snapshotCaptureFrame()
+{
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3dsnap::iSnapshotCapture();
         return;
@@ -297,10 +368,20 @@ void iSnapshotCapture()
 #endif
 }
 
+void iSnapshotCapture()
+{
+    snapshotCaptureFrame();
+
+    if (sFrameHook != NULL)
+    {
+        sFrameHook();
+    }
+}
+
 RwTexture* iSnapshotBackgroundTexture()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3dsnap::iSnapshotBackgroundTexture();
     }
@@ -314,7 +395,7 @@ RwTexture* iSnapshotBackgroundTexture()
     return NULL;
 }
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
 
 // The capture target, made on the first capture rather than at startup: until
 // the engine is open there is no device to create a render target on and
@@ -386,6 +467,15 @@ void iSnapshotSetObscured(S32 obscured)
 void iSnapshotDiscard()
 {
     sHaveFrame = 0;
+}
+
+RwRaster* iSnapshotLastFrame()
+{
+    if (!sEnabled || sFailed || !sHaveFrame || sLatched)
+    {
+        return NULL;
+    }
+    return sRaster;
 }
 
 void iSnapshotSetEnabled(S32 enabled)

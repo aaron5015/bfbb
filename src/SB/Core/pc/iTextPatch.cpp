@@ -3,6 +3,7 @@
 
 #include "iTextPatch.h"
 
+#include "iHostWords.h"
 #include "iPadLayout.h"
 #include "xPad.h"
 
@@ -36,28 +37,34 @@ namespace
         const char* to;
     };
 
+// What the host is called is iHostWords.h. The name has to fit inside the
+// console names it replaces, which is why Android has no rule for the bare
+// four-letter "Xbox".
+
     const Rule kRules[] = {
         // "please do not turn off your Xbox console" -- the autosave warnings,
         // which are the strings a player actually meets.
-        { "your Xbox console", "your computer" },
-        { "Xbox console", "computer" },
+        { "your Xbox console", "your " HOST_MACHINE },
+        { "Xbox console", HOST_MACHINE },
 
         // The Xbox saved to its hard disk, and could drop back to its own
         // dashboard from the pause menu. Neither has a counterpart here.
-        { "Xbox Hard Disk", "hard drive" },
-        { "Xbox Dashboard", "Desktop" },
+        { "Xbox Hard Disk", HOST_DISK },
+        { "Xbox Dashboard", HOST_HOME },
 
-        { "Xbox", "PC" },
+#ifndef __ANDROID__
+        { "Xbox", HOST_NAME },
+#endif
 
-        { "Nintendo GameCube", "PC" },
-        { "GameCube", "PC" },
-        { "Game Cube", "PC" },
+        { "Nintendo GameCube", HOST_NAME },
+        { "GameCube", HOST_NAME },
+        { "Game Cube", HOST_NAME },
 
         // PS2 text the Xbox release never finished stripping. It survives in
         // the shared menu assets, where the memory-card flow came from.
-        { "PlayStation" REG "2", "PC" },
-        { "PlayStation 2", "PC" },
-        { "PlayStation", "PC" },
+        { "PlayStation" REG "2", HOST_NAME },
+        { "PlayStation 2", HOST_NAME },
+        { "PlayStation", HOST_NAME },
 
         { "DUALSHOCK" REG "2 analog controller", "controller" },
         { "analog controller (DUALSHOCK" REG "2)", "controller" },
@@ -178,7 +185,7 @@ namespace
         // The four assets the rest include by name. Fixing these settles every
         // message that says {i:PS2_MEMCARD} without an entry of its own.
         { "PS2_MEMCARD", "save folder" }, // "memory card (8MB) (for {i:PS2_NAME})"
-        { "PS2_NAME", "PC" },
+        { "PS2_NAME", HOST_NAME },
         { "PS2_PAD", "controller" },
         { "PS2_PAD_PAL", "controller" },
 
@@ -253,7 +260,7 @@ namespace
         // The pause menu's last entry, and the controller prompt. Both are live
         // on this build: the first is one button press away at any time, the
         // second appears whenever a pad is unplugged.
-        { "text_menu_reboot", "{i:button_picture_03} Quit to Desktop" },
+        { "text_menu_reboot", "{i:button_picture_03} " HOST_QUIT },
         { "text_no_controller",
           "No controller is detected.{n}Please connect a controller, and press the {i:ui_accept} "
           "button to continue" },
@@ -358,6 +365,11 @@ namespace
         return changed;
     }
     S32 sHashed;
+
+    // Checked once at the first patch as well as by pc_selftest, which does not
+    // run on every host: a rule that grows would overrun the string it rewrites.
+    S32 sRulesChecked;
+    S32 sRulesFit;
 
     char foldByte(char c)
     {
@@ -577,6 +589,17 @@ S32 iTextPatchAsset(U32 assetID, char* text, U32 capacity)
     }
 
     S32 fixed = applyPictureFix(assetID, text);
+
+    if (!sRulesChecked)
+    {
+        sRulesFit = iTextPatchRulesFit();
+        sRulesChecked = TRUE;
+    }
+
+    if (!sRulesFit)
+    {
+        return fixed;
+    }
 
     return applyRules(text) || fixed;
 }

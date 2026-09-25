@@ -9,7 +9,7 @@
 // literals on the console.
 //
 // This is the render size, not the window size. The port draws into a virtual
-// screen that blitVirtualScreen (third_party/librw/src/d3d/d3ddevice.cpp)
+// screen that each backend's blitVirtualScreen
 // stretches into the back buffer at present time, keeping its aspect. The two
 // are independent: a render size above the window supersamples, below it scales
 // up. iSystem opens the window at the render size because that is the least
@@ -113,6 +113,7 @@ enum iScreenUIMode
 };
 
 void iScreenSetUIMode(iScreenUIMode mode);
+iScreenUIMode iScreenGetUIMode();
 
 // The anchor is a TRANSLATION, and this is the widget it currently translates.
 //
@@ -181,6 +182,20 @@ F32 iScreenAnchorMarginYF();
 F32 iScreenStretchX(F32 n);
 F32 iScreenStretchY(F32 n);
 
+// The exception: a backdrop with something painted into it that a widget on
+// top was placed against. Stretched, the painting slides away from the widget.
+// The options screen's is the one -- its bamboo panel's shadow is in the
+// texture. TRUE for such a texture; it is drawn in the box instead, and
+// iScreenUIDrawBleed fills the margins beside it.
+S32 iScreenUIBleedBoxed(U32 textureID);
+
+// Fills the margins beside a boxed backdrop in NATIVE by mirror-repeating the
+// plain strip at each edge of the texture. Nothing in PILLARBOX, where the
+// sides show the menu's 3D scene. Called right after the backdrop is drawn,
+// with its render state still set: the rect it was drawn at, in pixels, and
+// its texture coordinates at (x1,y1), (x1,y2), (x2,y2), (x2,y1).
+void iScreenUIDrawBleed(F32 x1, F32 y1, F32 x2, F32 y2, F32 z, const F32* uv);
+
 // The next UI model is a full-screen overlay, not an object placed in the box.
 //
 // xModelRender2D shrinks the camera's view window to the 4:3 box so that a HUD
@@ -225,8 +240,7 @@ void iScreenSetPerPixelLighting(S32 on);
 //           the two above before the device is made, so nothing downstream
 //           ever sees AUTO.
 //
-// D3D9 only. The GL3 and D3D11 backends have no fixed function to fall back
-// to, and asking for one there is reported and ignored.
+// D3D9 only. The other backends have no fixed function to fall back to.
 enum iScreenPipeline
 {
     iSCREENPIPE_AUTO,
@@ -246,9 +260,11 @@ void iScreenSetPipeline(iScreenPipeline pipeline);
 //
 //   D3D9   Direct3D 9. Windows only, and the only backend with the
 //          fixed-function path above.
-//   D3D11  Direct3D 11. Windows only, and it cannot be in the same build as
-//          D3D9 -- the two are one namespace in librw.
-//   GL3    OpenGL 3.3. The only backend that runs off Windows.
+//   D3D11  Direct3D 11. Windows only. A second rw::d3d device beside D3D9;
+//          the default Windows build carries both.
+//   GL3    OpenGL 3.3. Runs off Windows.
+//   VULKAN Vulkan 1.3. Runs off Windows too. librw's third rw::d3d device, so
+//          it draws with the D3D pipelines and shaders.
 //   NULL   No device at all, which is what a build with no render backend
 //          resolves to. Headless, for compiling and for the self-tests -- NOT
 //          something video.backend offers, because librw's null driver asserts
@@ -264,6 +280,7 @@ enum iScreenBackend
     iSCREENBACKEND_D3D9,
     iSCREENBACKEND_D3D11,
     iSCREENBACKEND_GL3,
+    iSCREENBACKEND_VULKAN,
     iSCREENBACKEND_NULL
 };
 

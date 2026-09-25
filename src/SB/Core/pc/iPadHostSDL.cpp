@@ -30,6 +30,9 @@
 #include "iPadBind.h"
 #include "iPadKeyboard.h"
 #include "iPadStick.h"
+#include "iPadTokens.h"
+#include "iPadTouch.h"
+#include "iTime.h"
 #include "xPad.h"
 
 #include <SDL3/SDL.h>
@@ -47,6 +50,44 @@ static S32 sPortSlot[IPAD_MAX_CONTROLLERS];
 static iPadHostState sState[IPAD_MAX_CONTROLLERS];
 static bool sKeyboardOnPort0;
 
+#ifdef __ANDROID__
+// The system back button, as a press of Start. It arrives as SDL_SCANCODE_AC_BACK
+// and is caught by a watch, because a tap can go down and up inside one pump and
+// never show in the key state. The watch runs on whichever thread posted the
+// event, hence the atomic.
+static SDL_AtomicInt sBackPresses;
+static S32 sBackFrames;
+
+static bool SDLCALL WatchBackButton(void*, SDL_Event* e)
+{
+    if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_AC_BACK && !e->key.repeat)
+    {
+        SDL_AddAtomicInt(&sBackPresses, 1);
+    }
+    return true;
+}
+#endif
+
+// Android and iOS block the game thread while the app is in the background.
+// The game clock stops for that time, so the frame after it is an ordinary
+// frame and not the whole absence at once. A watch and not a case in the event
+// pump: both events reach the queue before the pump drains it, so only the
+// watch sees when each happened. Desktop SDL sends neither.
+//
+// Not in iWindowSDL.cpp: that is in bfbb_rw, which does not link the clock.
+static bool SDLCALL WatchBackground(void*, SDL_Event* e)
+{
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+    {
+        iTimeSuspend();
+    }
+    else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND)
+    {
+        iTimeResume();
+    }
+    return true;
+}
+
 static S32 sPinnedSlot = -1;
 static bool sReady;
 
@@ -62,51 +103,35 @@ static SDL_JoystickID sInstance[IPAD_MAX_CONTROLLERS];
 // Read once, so the per-frame cost is a load.
 static const bool sReportPad = getenv("BFBB_PAD") != NULL;
 
+// Port 0 as a tour script holds it; see iPadHostScript.
+static bool sScripted;
+static U32 sScriptButtons;
+
 // ---------------------------------------------------------------------------
 // Buttons
 //
-// The same token names the XInput backend uses, so a [pad] section is worth the
-// same on both. SDL3 names the face buttons by POSITION -- south, east, west,
+// The token names are in iPadTokens.cpp, shared with bfbb_config. SDL3 names
+// the face buttons by POSITION -- south, east, west,
 // north -- rather than by the letter printed on them, which is what makes them
 // portable: the button under your thumb is south on every pad, and only the
 // label changes between an Xbox pad and a Switch one. `a` here is that
 // position, as it is on the Xbox controller the defaults were written for.
 
-enum
-{
-    PADIN_A,
-    PADIN_B,
-    PADIN_X,
-    PADIN_Y,
-    PADIN_LB,
-    PADIN_RB,
-    PADIN_LT,
-    PADIN_RT,
-    PADIN_LS,
-    PADIN_RS,
-    PADIN_BACK,
-    PADIN_START,
-    PADIN_DPUP,
-    PADIN_DPDOWN,
-    PADIN_DPLEFT,
-    PADIN_DPRIGHT,
-    PADIN_COUNT
-};
-
-static const iPadBindToken kPadTokens[] = {
-    { "a", PADIN_A },           { "b", PADIN_B },
-    { "x", PADIN_X },           { "y", PADIN_Y },
-    { "lb", PADIN_LB },         { "rb", PADIN_RB },
-    { "lt", PADIN_LT },         { "rt", PADIN_RT },
-    { "ls", PADIN_LS },         { "rs", PADIN_RS },
-    { "back", PADIN_BACK },     { "start", PADIN_START },
-    { "dpup", PADIN_DPUP },     { "dpdown", PADIN_DPDOWN },
-    { "dpleft", PADIN_DPLEFT }, { "dpright", PADIN_DPRIGHT },
-};
-
-static const S32 kPadTokenCount = (S32)(sizeof(kPadTokens) / sizeof(kPadTokens[0]));
-
 static iPadBind sPadBind[IPAD_BIND_MAX_BUTTONS];
+
+static void LoadPadBindings()
+{
+    S32 count;
+    const iPadBindToken* tokens = iPadPadTokens(&count);
+    iPadBindLoad(IPAD_BIND_PAD, tokens, count, sPadBind);
+}
+
+static const char* PadTokenName(S16 id)
+{
+    S32 count;
+    const iPadBindToken* tokens = iPadPadTokens(&count);
+    return iPadBindTokenName(id, tokens, count);
+}
 
 static U32 sPadHeld;
 
@@ -130,40 +155,18 @@ static bool PadInputHeld(S16 id)
 // Comparing 0x18 against a range it was never in gave 3084; scaling that to
 // SDL's signed STICK span rather than its trigger span gave 7710. Both let the
 // trigger click far too early on a pad with real analog travel.
-#define IPAD_SDL_TRIGGER_THRESHOLD 9830
+// IPAD_SDL_TRIGGER_THRESHOLD, in iPadTokens.h, is that 30%.
 
 static U32 ConvertButtons(SDL_Gamepad* pad)
 {
     sPadHeld = 0;
 
-    struct Map
+    for (S32 b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++)
     {
-        SDL_GamepadButton button;
-        S32 input;
-    };
-
-    static const Map kMap[] = {
-        { SDL_GAMEPAD_BUTTON_SOUTH, PADIN_A },
-        { SDL_GAMEPAD_BUTTON_EAST, PADIN_B },
-        { SDL_GAMEPAD_BUTTON_WEST, PADIN_X },
-        { SDL_GAMEPAD_BUTTON_NORTH, PADIN_Y },
-        { SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, PADIN_LB },
-        { SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PADIN_RB },
-        { SDL_GAMEPAD_BUTTON_LEFT_STICK, PADIN_LS },
-        { SDL_GAMEPAD_BUTTON_RIGHT_STICK, PADIN_RS },
-        { SDL_GAMEPAD_BUTTON_BACK, PADIN_BACK },
-        { SDL_GAMEPAD_BUTTON_START, PADIN_START },
-        { SDL_GAMEPAD_BUTTON_DPAD_UP, PADIN_DPUP },
-        { SDL_GAMEPAD_BUTTON_DPAD_DOWN, PADIN_DPDOWN },
-        { SDL_GAMEPAD_BUTTON_DPAD_LEFT, PADIN_DPLEFT },
-        { SDL_GAMEPAD_BUTTON_DPAD_RIGHT, PADIN_DPRIGHT },
-    };
-
-    for (S32 i = 0; i < (S32)(sizeof(kMap) / sizeof(kMap[0])); i++)
-    {
-        if (SDL_GetGamepadButton(pad, kMap[i].button))
+        S32 input = iPadInputFromSDLButton(b);
+        if (input >= 0 && SDL_GetGamepadButton(pad, (SDL_GamepadButton)b))
         {
-            sPadHeld |= 1u << kMap[i].input;
+            sPadHeld |= 1u << input;
         }
     }
 
@@ -380,8 +383,14 @@ void iPadHostInit()
     sKeyboardOnPort0 = false;
 
     ChooseController();
-    iPadBindLoad(IPAD_BIND_PAD, kPadTokens, kPadTokenCount, sPadBind);
+    LoadPadBindings();
     iPadKeyboardInit();
+    iPadTouchInit();
+
+#ifdef __ANDROID__
+    SDL_AddEventWatch(WatchBackButton, NULL);
+#endif
+    SDL_AddEventWatch(WatchBackground, NULL);
 
     // XInput has no notion of focus and this backend should not grow one: the
     // keyboard already stops when the window loses focus, and a controller that
@@ -499,11 +508,73 @@ static void MapPortsToSlots()
         // Anything config.ini spells out in [pad] is still what wins -- this
         // reloads the same file, it does not override it -- which is why the
         // generated [pad] listing is commented out.
-        iPadBindLoad(IPAD_BIND_PAD, kPadTokens, kPadTokenCount, sPadBind);
+        LoadPadBindings();
     }
 }
 
 static iPadHostHotkeyFn sHotkey;
+
+void iPadHostScript(S32 on, U32 buttons)
+{
+    sScripted = on != 0;
+    sScriptButtons = buttons;
+}
+
+void iPadHostReloadBindings()
+{
+    LoadPadBindings();
+    iPadKeyboardInit();
+}
+
+S32 iPadHostCaptureKey(S32 prime, char* out, S32 size)
+{
+    return iPadKeyboardCapture(prime, out, size);
+}
+
+S32 iPadHostCaptureButton(S32 prime, char* out, S32 size)
+{
+    static U32 sWasHeld;
+
+    SDL_Gamepad* pad = sGamepad[0];
+    U32 held = 0;
+    if (pad != NULL)
+    {
+        SDL_UpdateGamepads();
+        for (S32 b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++)
+        {
+            S32 input = iPadInputFromSDLButton(b);
+            if (input >= 0 && SDL_GetGamepadButton(pad, (SDL_GamepadButton)b))
+            {
+                held |= 1u << input;
+            }
+        }
+        if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) >= IPAD_SDL_TRIGGER_THRESHOLD)
+        {
+            held |= 1u << PADIN_LT;
+        }
+        if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >= IPAD_SDL_TRIGGER_THRESHOLD)
+        {
+            held |= 1u << PADIN_RT;
+        }
+    }
+
+    const U32 pressed = prime ? 0 : (held & ~sWasHeld);
+    sWasHeld = held;
+
+    for (S32 input = 0; input < PADIN_COUNT; input++)
+    {
+        if (pressed & (1u << input))
+        {
+            const char* name = PadTokenName((S16)input);
+            if (name != NULL)
+            {
+                snprintf(out, (size_t)size, "%s", name);
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
 
 void iPadHostSetHotkey(iPadHostHotkeyFn fn)
 {
@@ -599,6 +670,42 @@ void iPadHostPoll()
         iPadKeyboardPoll(&sState[0]);
     }
 
+    // The on-screen controls add to whatever holds port 0, and stand aside
+    // while a controller there is in use.
+    iPadTouchPoll(&sState[0], !sKeyboardOnPort0);
+
+#ifdef __ANDROID__
+    // Held for one poll and released for one, so the game sees a press edge for
+    // each tap however quickly the taps come.
+    if (sBackFrames == 0 && SDL_GetAtomicInt(&sBackPresses) > 0)
+    {
+        SDL_AddAtomicInt(&sBackPresses, -1);
+        sBackFrames = 2;
+    }
+    if (sBackFrames == 2)
+    {
+        sState[0].connected = true;
+        sState[0].buttons |= XPAD_BUTTON_START;
+    }
+    if (sBackFrames > 0)
+    {
+        sBackFrames--;
+    }
+#endif
+
+    // A tour (iTour.h) plays port 0 alone: every real device is ignored, so a
+    // controller or keyboard someone is using elsewhere cannot steer it.
+    if (sScripted)
+    {
+        for (S32 p = 0; p < IPAD_MAX_CONTROLLERS; p++)
+        {
+            ClearState(&sState[p]);
+        }
+        sState[0].connected = true;
+        sState[0].buttons = sScriptButtons;
+        return;
+    }
+
     if (sHotkey != NULL)
     {
         const bool* keys = SDL_GetKeyboardState(NULL);
@@ -692,7 +799,7 @@ const char* iPadHostBoundInput(U32 xpadButton)
         }
 
         S16 id = iPadBindSoleInput(sPadBind[i]);
-        return (id >= 0) ? iPadBindTokenName(id, kPadTokens, kPadTokenCount) : NULL;
+        return (id >= 0) ? PadTokenName(id) : NULL;
     }
 
     return NULL;

@@ -65,6 +65,24 @@ const char* iPadHostInputForLabel(char)
     return NULL;
 }
 
+void iPadHostReloadBindings()
+{
+}
+
+void iPadHostScript(S32, U32)
+{
+}
+
+S32 iPadHostCaptureKey(S32, char*, S32)
+{
+    return FALSE;
+}
+
+S32 iPadHostCaptureButton(S32, char*, S32)
+{
+    return FALSE;
+}
+
 void iPadHostSetHotkey(iPadHostHotkeyFn)
 {
 }

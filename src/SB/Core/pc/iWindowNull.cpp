@@ -77,6 +77,11 @@ S32 iWindowGetDisplayRefreshRate()
     return 0;
 }
 
+S32 iWindowGetDisplaySize(S32*, S32*)
+{
+    return FALSE;
+}
+
 void iWindowSetVSync(S32 on)
 {
     sVSync = on;
@@ -110,6 +115,16 @@ void iWindowGetSize(S32* width, S32* height)
 iWindowMode iWindowGetMode()
 {
     return sMode;
+}
+
+// No window to change.
+S32 iWindowSetMode(iWindowMode)
+{
+    return FALSE;
+}
+
+void iWindowSetExclusive(S32)
+{
 }
 
 void* iWindowNativeHandle()

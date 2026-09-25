@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon to switch profiles. Each saves the choice and
+     starts the game; see ProfileActivity. A game already running keeps the
+     profile it started with. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="play_modern"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/profile_modern_short"
+        android:shortcutLongLabel="@string/profile_modern_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.joeyballentine.bfbb"
+            android:targetClass="io.github.joeyballentine.bfbb.ProfileActivity">
+            <extra android:name="profile" android:value="modern" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="play_vanilla"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/profile_vanilla_short"
+        android:shortcutLongLabel="@string/profile_vanilla_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.joeyballentine.bfbb"
+            android:targetClass="io.github.joeyballentine.bfbb.ProfileActivity">
+            <extra android:name="profile" android:value="vanilla" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="import_files"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/import_short"
+        android:shortcutLongLabel="@string/import_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.joeyballentine.bfbb"
+            android:targetClass="io.github.joeyballentine.bfbb.ProfileActivity">
+            <extra android:name="import" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>

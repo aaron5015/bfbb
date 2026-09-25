@@ -18,7 +18,7 @@ static void xSFXStop(xSFX* t);
 
 void xSFXEnvironmentalStreamSceneExit(void)
 {
-    memset(&s_managedEnvSFX, 0, 4);
+    memset(&s_managedEnvSFX, 0, sizeof(s_managedEnvSFX));
 }
 
 void xSFXUpdateEnvironmentalStreamSounds(xSFX* pSFXList, U32 numSounds)

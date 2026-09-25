@@ -468,7 +468,7 @@ void zNPCNeptune::ParseINI()
 void zNPCNeptune::Reset()
 {
     zNPCAmbient::Reset();
-    flags |= 0x40;
+    flags |= XENT_0x40;
 }
 
 void zNPCMimeFish::Reset()

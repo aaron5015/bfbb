@@ -213,6 +213,11 @@ F32 iScreenStretchY(F32 n)
     return (F32)sHeight * n;
 }
 
+iScreenUIMode iScreenGetUIMode()
+{
+    return sUIMode;
+}
+
 void iScreenSetUIMode(iScreenUIMode mode)
 {
     sUIMode = mode;
@@ -330,6 +335,8 @@ const char* iScreenBackendName(iScreenBackend backend)
         return "d3d11";
     case iSCREENBACKEND_GL3:
         return "gl3";
+    case iSCREENBACKEND_VULKAN:
+        return "vulkan";
     case iSCREENBACKEND_NULL:
         return "null";
     default:

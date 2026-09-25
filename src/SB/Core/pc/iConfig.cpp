@@ -2,6 +2,7 @@
 
 #include "iConfig.h"
 
+#include "iConfigEdit.h"
 #include "iConfigTable.h"
 #include "iHost.h"
 #include "iPadBind.h"
@@ -569,6 +570,173 @@ const char* iConfigPath()
 {
     iConfigLoad();
     return sHavePath ? sPath : NULL;
+}
+
+namespace
+{
+    // Settings changed with iConfigSet since the last iConfigSave.
+    bool sChanged[kMaxEntries];
+
+    // Settings taken out with iConfigUnset since the last iConfigSave, whose
+    // lines the save removes.
+    const S32 kMaxRemoved = 64;
+    char sRemoved[kMaxRemoved][kMaxKey];
+    S32 sRemovedCount;
+
+    void forgetRemoved(const char* key)
+    {
+        for (S32 i = 0; i < sRemovedCount; i++)
+        {
+            if (strcmp(sRemoved[i], key) == 0)
+            {
+                memmove(sRemoved[i], sRemoved[i + 1], (size_t)(sRemovedCount - i - 1) * kMaxKey);
+                sRemovedCount--;
+                return;
+            }
+        }
+    }
+
+    bool splitKey(const char* key, char* section, char** name)
+    {
+        snprintf(section, kMaxKey, "%s", key);
+        char* dot = strchr(section, '.');
+        if (dot == NULL)
+        {
+            return false;
+        }
+        *dot = '\0';
+        *name = dot + 1;
+        return true;
+    }
+} // namespace
+
+void iConfigUnset(const char* key)
+{
+    iConfigLoad();
+
+    char lower[kMaxKey];
+    snprintf(lower, sizeof(lower), "%s", key);
+    lowerInPlace(lower);
+
+    for (S32 i = 0; i < sCount; i++)
+    {
+        if (strcmp(sEntries[i].key, lower) == 0)
+        {
+            memmove(&sEntries[i], &sEntries[i + 1], (size_t)(sCount - i - 1) * sizeof(Entry));
+            memmove(&sChanged[i], &sChanged[i + 1], (size_t)(sCount - i - 1) * sizeof(bool));
+            sCount--;
+            break;
+        }
+    }
+
+    forgetRemoved(lower);
+    if (sRemovedCount < kMaxRemoved)
+    {
+        snprintf(sRemoved[sRemovedCount++], kMaxKey, "%s", lower);
+    }
+}
+
+void iConfigSet(const char* key, const char* value)
+{
+    iConfigLoad();
+
+    char lower[kMaxKey];
+    snprintf(lower, sizeof(lower), "%s", key);
+    lowerInPlace(lower);
+    forgetRemoved(lower);
+
+    for (S32 i = 0; i < sCount; i++)
+    {
+        if (strcmp(sEntries[i].key, lower) == 0)
+        {
+            if (strcmp(sEntries[i].value, value) != 0)
+            {
+                snprintf(sEntries[i].value, sizeof(sEntries[i].value), "%s", value);
+                sChanged[i] = true;
+            }
+            return;
+        }
+    }
+
+    if (sCount == kMaxEntries)
+    {
+        printf("bfbb: config: no room to set '%s'\n", lower);
+        return;
+    }
+
+    Entry* e = &sEntries[sCount];
+    snprintf(e->key, sizeof(e->key), "%s", lower);
+    snprintf(e->value, sizeof(e->value), "%s", value);
+    sChanged[sCount] = true;
+    sCount++;
+}
+
+bool iConfigSave()
+{
+    iConfigLoad();
+
+    bool any = sRemovedCount > 0;
+    for (S32 i = 0; i < sCount; i++)
+    {
+        any = any || sChanged[i];
+    }
+    if (!any)
+    {
+        return true;
+    }
+    if (!sHavePath)
+    {
+        return false;
+    }
+
+    iConfigEditFile* file = iConfigEditOpen(sPath);
+    if (file == NULL)
+    {
+        printf("bfbb: config: %s could not be read to save settings\n", sPath);
+        return false;
+    }
+
+    bool ok = true;
+    for (S32 i = 0; i < sCount && ok; i++)
+    {
+        if (!sChanged[i])
+        {
+            continue;
+        }
+
+        char section[kMaxKey];
+        char* name;
+        if (!splitKey(sEntries[i].key, section, &name))
+        {
+            continue;
+        }
+
+        ok = iConfigEditSet(file, section, name, sEntries[i].value);
+    }
+
+    for (S32 i = 0; i < sRemovedCount && ok; i++)
+    {
+        char section[kMaxKey];
+        char* name;
+        if (splitKey(sRemoved[i], section, &name))
+        {
+            iConfigEditUnset(file, section, name);
+        }
+    }
+
+    ok = ok && iConfigEditSave(file, sPath);
+    iConfigEditClose(file);
+
+    if (ok)
+    {
+        memset(sChanged, 0, sizeof(sChanged));
+        sRemovedCount = 0;
+    }
+    else
+    {
+        printf("bfbb: config: settings could not be saved to %s\n", sPath);
+    }
+    return ok;
 }
 
 S32 iConfigGetBool(const char* key, S32 def)

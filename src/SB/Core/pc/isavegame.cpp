@@ -1,5 +1,7 @@
 #include "isavegame.h"
 #include "iHost.h"
+#include "iFile.h"
+#include "iSaveThumb.h"
 
 #include <types.h>
 
@@ -46,13 +48,23 @@ static char g_saveroot[512];
 // six saves rather than three, and it costs no screen the player was not
 // already being shown.
 //
-// ISG_NUM_SLOTS is the ceiling: mcdata is sized by it, and iSG_mcidx2slot maps a
-// target index straight onto a slot index.
+// It is also what iSGTgtCount always reports. With the PC menus on, the PC save
+// screen reaches further folders by index (iSGTargetMax); see isavegame.h.
 #define ISG_HOST_TARGETS 2
 
-#if ISG_HOST_TARGETS > 2
-#error "iSG_target_root has a name for two folders, not more"
-#endif
+// A target index this build accepts: retail's two, or every folder the PC save
+// screen can reach.
+static S32 sPCTargets;
+
+static S32 iSG_targets()
+{
+    return sPCTargets ? ISG_MAX_TARGETS : ISG_HOST_TARGETS;
+}
+
+void iSGSetPCTargets(S32 on)
+{
+    sPCTargets = on;
+}
 
 static st_ISGSESSION g_isgdata_MAIN;
 
@@ -86,6 +98,10 @@ void iSGSetSaveRoot(const char* dir)
 // setting, and otherwise wherever this host keeps per-user data, which is where
 // its users expect to find it. Which directory that is belongs to iHost; the
 // "/bfbb/saves" under it is this game's policy and belongs here.
+//
+// With a mod folder in use, the default becomes "/bfbb/mods/<name>/saves": a
+// mod's levels and tasks differ from the disc's, so its saves and the disc's
+// must not load into each other. A folder the player named is used as given.
 static void iSG_resolve_saveroot()
 {
     const char* explicit_dir = getenv("BFBB_SAVE_DIR");
@@ -102,28 +118,44 @@ static void iSG_resolve_saveroot()
     }
 
     char base[512];
-    if (iHostUserDataDir(base, sizeof(base)))
+    if (!iHostUserDataDir(base, sizeof(base)))
     {
-        snprintf(g_saveroot, sizeof(g_saveroot), "%s/bfbb/saves", base);
+        base[0] = '\0';
+    }
+    const char* sep = base[0] != '\0' ? "/bfbb/" : "";
+
+    const char* mod = iFileModName();
+    if (mod[0] != '\0')
+    {
+        snprintf(g_saveroot, sizeof(g_saveroot), "%s%smods/%s/saves", base, sep, mod);
+        printf("bfbb: mod saves: %s\n", g_saveroot);
+        fflush(stdout);
         return;
     }
 
-    snprintf(g_saveroot, sizeof(g_saveroot), "saves");
+    snprintf(g_saveroot, sizeof(g_saveroot), "%s%ssaves", base, sep);
 }
 
 // The first target is the save root ITSELF rather than a subdirectory of it.
 // That is not symmetry for its own sake being thrown away -- it is what keeps
 // saves written while this build exposed one target where the game can still
 // find them. Only the second target needs somewhere new to live.
+//
+// The folders past those two exist only for the PC save screen, and are made
+// the first time something is saved into one.
 static void iSG_target_root(S32 slot, char* out, size_t outsize)
 {
     if (slot <= 0)
     {
         snprintf(out, outsize, "%s", g_saveroot);
     }
-    else
+    else if (slot == 1)
     {
         snprintf(out, outsize, "%s/second", g_saveroot);
+    }
+    else
+    {
+        snprintf(out, outsize, "%s/more/%d", g_saveroot, (int)slot);
     }
 }
 
@@ -252,7 +284,7 @@ S32 iSG_mcidx2slot(S32 tidx, S32* out_slot, S32* ready)
         }
     }
 
-    if (tidx < 0 || tidx >= ISG_HOST_TARGETS)
+    if (tidx < 0 || tidx >= iSG_targets())
     {
         return 0;
     }
@@ -353,7 +385,24 @@ S32 iSGTgtFormat(st_ISGSESSION* isgdata, S32 tgtidx, S32 async, S32* canRecover)
 
 U8 iSGCheckMemoryCard(st_ISGSESSION* isgdata, S32 index)
 {
-    return (index >= 0 && index < ISG_HOST_TARGETS) ? 1 : 0;
+    return (index >= 0 && index < iSG_targets()) ? 1 : 0;
+}
+
+S32 iSGTargetMax()
+{
+    return iSG_targets();
+}
+
+S32 iSGMakeTarget(S32 tgt)
+{
+    if (tgt < 0 || tgt >= iSG_targets())
+    {
+        return 0;
+    }
+
+    char root[512];
+    iSG_target_root(tgt, root, sizeof(root));
+    return iSG_mkdir_p(root) ? 1 : 0;
 }
 
 // Retail returns the slot holding a card from another region, which the TRC
@@ -654,6 +703,80 @@ static void iSG_fail(st_ISGSESSION* isgdata, en_ASYNC_OPERR err)
     isgdata->as_operr = err;
 }
 
+// Where a save's still comes from; see iSGSetThumbSource.
+static S32 sThumbSource = ISG_THUMB_NOW;
+
+void iSGSetThumbSource(S32 source)
+{
+    sThumbSource = source;
+}
+
+void iSGCaptureThumb()
+{
+    if (sPCTargets)
+    {
+        iSaveThumbCapture();
+    }
+}
+
+S32 iSGThumbPath(S32 tgt, S32 game, char* out, U32 outsize)
+{
+    if (tgt < 0 || tgt >= iSG_targets() || game < 0 || game >= ISG_NUM_FILES)
+    {
+        return 0;
+    }
+
+    char root[512];
+    iSG_target_root(tgt, root, sizeof(root));
+    snprintf(out, outsize, "%s/%s.tga", root, iSGMakeName(ISG_NGTYP_GAMEFILE, NULL, game));
+    return 1;
+}
+
+// The still beside a save that has just been written, as SpongeBob00.tga next
+// to SpongeBob00. PC menus only: retail's screens have nowhere to show one.
+//
+// A save with no still to go with it takes the old one away, unless it is an
+// autosave with nothing to take right now -- then the one it had is still of
+// the same game, only earlier, and better than the stock picture.
+static void iSG_write_still(const char* savePath)
+{
+    if (!sPCTargets)
+    {
+        return;
+    }
+
+    char still[544];
+    snprintf(still, sizeof(still), "%s.tga", savePath);
+
+    switch (sThumbSource)
+    {
+    case ISG_THUMB_NOW:
+        iSaveThumbCapture();
+        if (!iSaveThumbHave())
+        {
+            return;
+        }
+        break;
+
+    case ISG_THUMB_KEPT:
+        if (!iSaveThumbHave())
+        {
+            iHostRemoveFile(still);
+            return;
+        }
+        break;
+
+    default:
+        iHostRemoveFile(still);
+        return;
+    }
+
+    if (!iSaveThumbWrite(still))
+    {
+        iHostRemoveFile(still);
+    }
+}
+
 // Written to a temporary and renamed, so that losing power partway through
 // leaves the previous save intact rather than a truncated one. The console got
 // this for free -- CARD writes whole sectors and updates the directory entry
@@ -709,6 +832,8 @@ S32 iSGSaveFile(st_ISGSESSION* isgdata, const char* fname, char* data, S32 n, S3
         iSG_fail(isgdata, ISG_OPERR_SVWRITE);
         return 0;
     }
+
+    iSG_write_still(path);
 
     isgdata->as_opstat = ISG_OPSTAT_SUCCESS;
     isgdata->as_operr = ISG_OPERR_NONE;

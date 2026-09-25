@@ -2,7 +2,7 @@
 // in iGlow.h.
 //
 // Every backend that can hand back the frame buffer as a texture and take a
-// pixel shader of the port's own for a 2D primitive: D3D9, D3D11 and GL3. What
+// pixel shader of the port's own for a 2D primitive: D3D9, D3D11, GL3 and Vulkan. What
 // differs between them is the shader language, how a constant is named and how
 // the frame is copied. Everything else -- the chain, its sizes, the quad and
 // the render states -- is written once below.
@@ -24,7 +24,7 @@
 
 #include "backend.h"
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 #include "src/d3d/rwd3dimpl.h"
 #endif
 // GL3 needs no header of its own here: rw.h includes src/gl/rwgl3.h and
@@ -40,14 +40,14 @@
 // because the setter is.
 static S32 sEnabled = TRUE;
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
 
 // The compiled shader, whichever backend compiled it. void* rather than a
 // backend's own handle: the chain below only ever passes one back to the
 // backend that made it, and a build can carry several.
 typedef void* GlowShader;
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 // One source, compiled into both trees under one name by shaders/make_shaders.cmd.
 // The tree is named in the include because a build can carry both Direct3D
 // backends and the two trees use the same file names; RWD3D_SHADER picks the
@@ -65,6 +65,13 @@ namespace sm4
 #include "shaders11/glow_blur_PS.h"
 #include "shaders11/glow_bright_PS.h"
 } // namespace sm4
+#endif
+#ifdef RW_VULKAN
+namespace spv
+{
+#include "shadersvk/glow_blur_PS.h"
+#include "shadersvk/glow_bright_PS.h"
+} // namespace spv
 #endif
 #endif
 
@@ -133,7 +140,7 @@ static void glowFail(const char* what, long hr)
 // dispatchers under them are what the chain calls; which half runs is
 // video.backend, resolved before the device opened.
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
+#ifdef RW_D3D_ANY
 namespace d3dglow
 {
 
@@ -151,6 +158,13 @@ namespace d3dglow
             // D3D11 keeps the system-memory copy in `texture` and the GPU's
             // own in `tex11`; D3D9 has only the one.
             return GETD3DRASTEREXT(r)->tex11;
+        }
+#endif
+#ifdef RW_VULKAN
+        if (iBackendIsVulkan())
+        {
+            // The same arrangement as D3D11's, under `vk`.
+            return GETD3DRASTEREXT(r)->vk;
         }
 #endif
         return GETD3DRASTEREXT(r)->texture;
@@ -293,8 +307,8 @@ namespace gl3glow
 
 static bool glowDeviceReady()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3dglow::glowDeviceReady();
     }
@@ -310,8 +324,8 @@ static bool glowDeviceReady()
 
 static void glowScreenExtent(RwInt32* w, RwInt32* h)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3dglow::glowScreenExtent(w, h);
         return;
@@ -330,8 +344,8 @@ static void glowScreenExtent(RwInt32* w, RwInt32* h)
 
 static bool glowCopyFrame(RwRaster* dst)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3dglow::glowCopyFrame(dst);
     }
@@ -347,8 +361,8 @@ static bool glowCopyFrame(RwRaster* dst)
 
 static bool glowCaptureIsLive()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3dglow::glowCaptureIsLive();
     }
@@ -358,8 +372,8 @@ static bool glowCaptureIsLive()
 
 static bool glowCreateShaders()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         return d3dglow::glowCreateShaders();
     }
@@ -375,8 +389,8 @@ static bool glowCreateShaders()
 
 static void glowBindShader(GlowShader shader)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3dglow::glowBindShader(shader);
         return;
@@ -392,8 +406,8 @@ static void glowBindShader(GlowShader shader)
 
 static void glowUnbindShader()
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3dglow::glowUnbindShader();
         return;
@@ -409,8 +423,8 @@ static void glowUnbindShader()
 
 static void glowUploadBlurConstants(F32* weights, F32* offs01, F32* offs23)
 {
-#if defined(RW_D3D9) || defined(RW_D3D11)
-    if (iBackendIsD3D())
+#ifdef RW_D3D_ANY
+    if (iBackendIsD3D() || iBackendIsVulkan())
     {
         d3dglow::glowUploadBlurConstants(weights, offs01, offs23);
         return;

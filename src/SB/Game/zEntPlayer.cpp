@@ -2815,8 +2815,7 @@ static U32 LedgeGrabCB(xAnimTransition*, xAnimSingle*, void* object)
 {
     zEntPlayer_SNDStop(ePlayerSnd_Heli);
     globals.player.s->ledge.tmr = 0.00001f;
-    // FIXME: figure out the type of object (local variable missing from dwarf)
-    globals.player.s->ledge.startrot = *(*((F32**)object + 0x48 / 4) + 0xb8 / 4);
+    globals.player.s->ledge.startrot = ((xEnt*)object)->frame->rot.angle;
 
     F32 endrot = globals.player.s->ledge.endrot;
     F32 startrot = globals.player.s->ledge.startrot;
@@ -5917,7 +5916,7 @@ void zEntPlayer_Init(xEnt* ent, xEntAsset* asset)
     }
 
     globals.player.model_spongebob = ent->model;
-    memset(&globals.player.sb_models, 0, 56);
+    memset(&globals.player.sb_models, 0, sizeof(globals.player.sb_models));
     index = 0;
 
     for (m = globals.player.model_spongebob; m != NULL; m = m->Next)
@@ -6073,7 +6072,7 @@ void zEntPlayer_Init(xEnt* ent, xEntAsset* asset)
     globals.player.Visible = 1;
     globals.player.AutoMoveSpeed = 0;
     ent->pflags &= (U8)~XENT_PFLAGS_HAS_GRAVITY;
-    ent->collis->chk &= ~0x1;
+    ent->collis->chk &= (U8)~0x1;
     ent->update = zEntPlayer_Update;
     ent->move = zEntPlayer_Move;
     ent->render = (xEntRenderCallback)zEntPlayer_Render;

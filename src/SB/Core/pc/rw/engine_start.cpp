@@ -47,6 +47,7 @@
 #include "iDistort.h"
 #include "iGlow.h"
 #include "iScreen.h"
+#include "iTouchOverlay.h"
 #include "iWindow.h"
 
 #include <stdarg.h>
@@ -259,8 +260,8 @@ static IDirect3D9* sProbeD3D9;
 // that cannot be written twice, which is mostly rw::EngineOpenParams -- the one
 // librw type whose SHAPE is per backend.
 
-#if defined(RW_D3D9) || defined(RW_D3D8) || defined(RW_D3D11)
-// The cartoon look's settings, for either Direct3D device. Both run librw's one
+#if defined(RW_D3D_ANY) || defined(RW_D3D8)
+// The cartoon look's settings, for any rw::d3d device. All three run librw's one
 // set of toon shaders and read the same rw::d3d state, so they are handed it by
 // one function.
 static void SetD3DToon(void)
@@ -491,6 +492,36 @@ static RwBool OpenDeviceD3D11(void)
 }
 #endif
 
+#ifdef RW_VULKAN
+static RwBool OpenDeviceVulkan(void)
+{
+    rw::d3d::EngineOpenParams params;
+    params.sdlWindow = (SDL_Window*)iWindowNativeHandle();
+
+    if (params.sdlWindow == NULL)
+    {
+        return FALSE;
+    }
+
+    rw::d3d::setVirtualScreenSamples(iScreenMultiSample());
+    rw::d3d::setPerPixelLightingEnabled(iScreenPerPixelLighting());
+    SetD3DToon();
+    rw::d3d::setVirtualScreen(iScreenWidth(), iScreenHeight());
+
+    // Engine::open throws away what DEVICEOPEN said, as the D3D arms above
+    // describe. librw reports the reason through RWERROR before that, so the
+    // question left here is only whether an instance came up at all.
+    if (!rw::Engine::open(&params))
+    {
+        printf("bfbb: librw refused to open the Vulkan device on this window\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+#endif
+
 #ifdef RW_GL3
 static RwBool OpenDeviceGL3(void)
 {
@@ -649,6 +680,11 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
         opened = OpenDeviceGL3();
         break;
 #endif
+#ifdef RW_VULKAN
+    case iSCREENBACKEND_VULKAN:
+        opened = OpenDeviceVulkan();
+        break;
+#endif
     default:
         opened = OpenDeviceNull();
         break;
@@ -659,11 +695,14 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
         return FALSE;
     }
 
+    // The on-screen controls draw on the present; a no-op on other backends.
+    iTouchOverlayInstall();
+
     sGlobals.engineStatus = rwENGINESTATUSOPENED;
     return TRUE;
 }
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
 
 // Pick the display mode for exclusive fullscreen, if that is what was asked for.
 //
@@ -727,6 +766,7 @@ static void SelectFullscreenVideoMode()
             mode.depth == desktop.depth)
         {
             rw::Engine::setVideoMode(i);
+            iWindowSetExclusive(TRUE);
             printf("bfbb: exclusive fullscreen at %dx%d\n", (int)mode.width, (int)mode.height);
             fflush(stdout);
             return;
@@ -750,7 +790,7 @@ RwBool RwEngineStart(void)
         return FALSE;
     }
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
     if (!iBackendIsNull())
     {
         SelectFullscreenVideoMode();
@@ -781,6 +821,37 @@ RwBool RwEngineStart(void)
                 "bfbb:   (librw asks for GL 3.3, GL 2.1, GLES 3.1 and GLES 2.0 in that order)\n");
             fflush(stdout);
             return FALSE;
+        }
+
+        // WHICH OpenGL came up, which nothing said before.
+        //
+        // librw asks for GL 3.3, GL 2.1, GLES 3.1 and GLES 2.0 in that order and
+        // takes the first that gives a window, a context and a full set of entry
+        // points -- and then never mentions which it was. On a desktop that is
+        // merely unhelpful. On a phone it is the whole question: the GLES arm is
+        // the one the port has never run, `gl3Caps.gles` is what selects the ES
+        // shader preamble and half a dozen behaviours in gl3raster.cpp, and a
+        // device that quietly landed on GLES 2.0 draws differently from one that
+        // got 3.1 for reasons no other line of output would explain.
+        //
+        // Printed before the virtual screen is built, so that a driver that dies
+        // inside the first framebuffer it is asked for has already said what it
+        // was. glGetString is the driver's own answer rather than what was asked
+        // for, which is the point -- a context can come back older than the
+        // request.
+        {
+            const GLubyte* version = glGetString(GL_VERSION);
+            const GLubyte* renderer = glGetString(GL_RENDERER);
+
+            printf("bfbb: OpenGL %s, %s -- %s\n",
+                   version != NULL ? (const char*)version : "(no version)",
+                   renderer != NULL ? (const char*)renderer : "(no renderer)",
+                   rw::gl3::gl3Caps.gles ? "GLES profile" : "desktop profile");
+            printf("bfbb:   S3TC %s\n",
+                   rw::gl3::gl3Caps.dxtSupported
+                       ? "yes"
+                       : "no -- compressed textures decompress on the CPU");
+            fflush(stdout);
         }
 
         // Build the virtual screen now rather than leaving it to whichever camera
@@ -833,7 +904,18 @@ RwBool RwEngineStart(void)
 
 #endif
 
-#if defined(RW_D3D9) || defined(RW_D3D11) || defined(RW_GL3)
+#ifdef RW_VULKAN
+    // And again. librw has said why through RWERROR by now.
+    if (iBackendIsVulkan() && !rw::d3d::deviceOpen())
+    {
+        printf("bfbb: the Vulkan device did not come up\n");
+        fflush(stdout);
+        return FALSE;
+    }
+
+#endif
+
+#if defined(RW_D3D_ANY) || defined(RW_GL3)
     // Said out loud because both can be refused by the card rather than by the
     // setting. Only now: the surfaces are made when the device comes up, and
     // until then there is nothing to have granted anything.
@@ -843,8 +925,8 @@ RwBool RwEngineStart(void)
         S32 perPixel = 0;
         const char* path = "shader";
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
-        if (iBackendIsD3D())
+#if defined(RW_D3D_ANY)
+        if (iBackendIsD3D() || iBackendIsVulkan())
         {
             granted = (S32)rw::d3d::getVirtualScreenSamples();
             perPixel = rw::d3d::getPerPixelLighting();
@@ -1034,8 +1116,8 @@ RwVideoMode* RwEngineGetVideoModeInfo(RwVideoMode* modeinfo, RwInt32 modeIndex)
         RwInt32 screenWidth = 0;
         RwInt32 screenHeight = 0;
 
-#if defined(RW_D3D9) || defined(RW_D3D11)
-        if (iBackendIsD3D())
+#if defined(RW_D3D_ANY)
+        if (iBackendIsD3D() || iBackendIsVulkan())
         {
             rw::d3d::getVirtualScreen(&screenWidth, &screenHeight);
         }
