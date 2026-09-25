@@ -361,7 +361,8 @@ set(INPUT_LIBS)
 if(BFBB_INPUT_BACKEND STREQUAL "null")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostNull.cpp)
 elseif(BFBB_INPUT_BACKEND STREQUAL "sdl")
-  set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp ${PC_DIR}/iPadTouch.cpp)
+  set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp ${PC_DIR}/iPadTokens.cpp
+                    ${PC_DIR}/iPadTouch.cpp)
 
   # So the self-test knows which backend it is linked against: the contract it
   # checks is the same either way, but "no controller on port 0" means an
@@ -847,11 +848,16 @@ target_compile_options(bfbb_rw PRIVATE ${BFBB_NO_WARNINGS})
 # src/SB/Core/pc/README.md with what each one is waiting on; adding a file here
 # before it exists would make this build fail rather than under-report, which
 # is the right way round.
+# The menus as code; see src/SB/Core/pc/menu/README.md. A glob, so a package
+# converted by tools/menugen needs no edit here.
+file(GLOB MENU_SOURCES CONFIGURE_DEPENDS ${PC_DIR}/menu/*.cpp)
+
 add_library(bfbb_platform STATIC
   ${PC_DIR}/iBoot.cpp
   ${PC_DIR}/iCameraLook.cpp
   ${PC_DIR}/iConfig.cpp
   ${PC_DIR}/iConfigTable.cpp
+  ${PC_DIR}/iConfigEdit.cpp
   ${PC_DIR}/iDrawDist.cpp
   ${PC_DIR}/iFile.cpp
   ${PC_DIR}/iFixes.cpp
@@ -869,10 +875,15 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iPad.cpp
   ${PC_DIR}/iPadLayout.cpp
   ${PC_DIR}/iPadBind.cpp
+  ${PC_DIR}/iPadBindTable.cpp
   ${PC_DIR}/iPadGlyph.cpp
   ${PC_DIR}/iPadStick.cpp
   ${PC_DIR}/iSystem.cpp
   ${PC_DIR}/iTextPatch.cpp
+  ${PC_DIR}/iTour.cpp
+  ${PC_DIR}/iScreenBleed.cpp
+  ${PC_DIR}/iAssetOverride.cpp
+  ${MENU_SOURCES}
   ${PC_DIR}/iTRC.cpp
   ${PC_DIR}/iTime.cpp
   ${PC_DIR}/isavegame.cpp
@@ -1081,6 +1092,13 @@ endif()
 # compat/ shadows <math.h>, <string.h> and <cmath> to add the CodeWarrior
 # extensions the game's sources use, chaining to the system headers with
 # include_next. It has to come first for that to work.
+# The assets written as code include the game's own headers, and get the game
+# code's warning settings with them.
+set_source_files_properties(
+  ${PC_DIR}/iAssetOverride.cpp
+  ${MENU_SOURCES}
+  PROPERTIES COMPILE_OPTIONS "${BFBB_NO_WARNINGS}")
+
 target_include_directories(bfbb_platform PUBLIC
   ${PC_DIR}/compat
   ${PC_DIR}
@@ -1600,6 +1618,12 @@ if(BFBB_BUILD_CONFIGURATOR)
     ${PC_DIR}/configurator/config_model.cpp
     ${PC_DIR}/iConfigTable.cpp
     ${PC_DIR}/iConfigEdit.cpp
+
+    # The binding table, the parser and the input names, for the [keyboard]
+    # and [pad] pages. None of it reads config.ini or opens a device; SDL is
+    # linked for the controller capture.
+    ${PC_DIR}/iPadBindTable.cpp
+    ${PC_DIR}/iPadTokens.cpp
     ${HOST_SOURCES}
   )
 
@@ -1635,7 +1659,7 @@ if(BFBB_BUILD_CONFIGURATOR)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SB/Core/x
   )
   target_compile_options(bfbb_config PRIVATE ${BFBB_NO_WARNINGS})
-  target_link_libraries(bfbb_config PRIVATE bfbb_wx)
+  target_link_libraries(bfbb_config PRIVATE bfbb_wx bfbb_sdl)
 endif()
 
 # --- self-test ---------------------------------------------------------------
@@ -1725,6 +1749,7 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   ${PC_DIR}/iPad.cpp
   ${PC_DIR}/iPadLayout.cpp
   ${PC_DIR}/iPadBind.cpp
+  ${PC_DIR}/iPadBindTable.cpp
   ${PC_DIR}/iPadStick.cpp
 
   # What iPadTouch.cpp hands on: the camera it turns and the shapes it draws.

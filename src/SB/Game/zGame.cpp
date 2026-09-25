@@ -895,7 +895,7 @@ static S32 zGameLoopContinue()
         if (gGameMode == eGameMode_Save)
         {
             gGameWhereAmI = eGameWhere_SaveLoop;
-            zSaveLoad_SaveLoop();
+            iSGSaveLoop();
             sTimeLast = iTimeGet();
             t1 = iTimeGet();
         }
@@ -944,6 +944,7 @@ void zGamePause()
         }
         else
         {
+            iSGCaptureThumb();
             zEntEvent("techbutton6_click", 24);
             zEntEvent("SAVING GAME ICON UI", 4);
             zEntEvent("MNU4 AUTO SAVE FAILED", 4);
