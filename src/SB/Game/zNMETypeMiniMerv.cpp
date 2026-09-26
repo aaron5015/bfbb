@@ -35,7 +35,7 @@ static void RegisterMiniMervGoal()
     }
 }
 
-S32 zNMEGoalMiniMervZap::Process(en_trantype*, F32 dt, void* ctxt)
+S32 zNMEGoalMiniMervZap::Process(en_trantype*, F32 dt, void* ctxt, xScene*)
 {
     zNMEMiniMerv* npc = (zNMEMiniMerv*)ctxt;
     if (npc != NULL)
