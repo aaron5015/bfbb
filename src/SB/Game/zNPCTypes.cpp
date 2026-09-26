@@ -9,6 +9,7 @@
 #include "zNPCTypeSubBoss.h"
 #include "zNPCTypeBoss.h"
 #include "zNPCTypeTest.h"
+#include "zNMECommon.h"
 
 void zNPCTypes_StartupTypes()
 {
@@ -21,10 +22,12 @@ void zNPCTypes_StartupTypes()
     ZNPC_SubBoss_Startup();
     ZNPC_Boss_Startup();
     ZNPC_Test_Startup();
+    zNME_RegisterGoals();
 }
 
 void zNPCTypes_ShutdownTypes()
 {
+    zNME_UnregisterGoals();
     ZNPC_Test_Shutdown();
     ZNPC_Boss_Shutdown();
     ZNPC_SubBoss_Shutdown();
@@ -113,6 +116,7 @@ void zNPCTypes_RegisterTypes(xFactory* fac)
         NPC_TYPE_BOSS_SB1, ZNPC_Create_Boss, ZNPC_Destroy_Boss,
         NPC_TYPE_BOSSBOBBY, ZNPC_Create_Boss, ZNPC_Destroy_Boss,
         NPC_TYPE_BOSSPLANKTON, ZNPC_Create_Boss, ZNPC_Destroy_Boss,
+        NPC_TYPE_NME_TEST, ZNME_Create_Test, ZNME_Destroy_Test,
         0
     };
     // clang-format on
