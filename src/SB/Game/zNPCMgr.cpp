@@ -31,7 +31,7 @@ struct NPCBrainTableEntry
     char* name;
     en_NPCTYPES type;
     U32 id;
-} g_brainTable[65] =
+} g_brainTable[66] =
 {
     { "NPC_TYPE_UNKNOWN",      NPC_TYPE_UNKNOWN,      0 },
     { "NPC_TYPE_BASIC",        NPC_TYPE_BASIC,        0 },
@@ -98,6 +98,7 @@ struct NPCBrainTableEntry
     { "NPC_TYPE_NOMORE",       NPC_TYPE_NOMORE,       0 },
     { "NPC_TYPE_FORCE",        NPC_TYPE_FORCE,        0 },
     { "NPC_TYPE_FODDERTOUGH",  NPC_TYPE_FODDERTOUGH,  0 },
+    { "NPC_TYPE_NME_TEST",      NPC_TYPE_NME_TEST,      0 },
 };
 
 static struct NPCMTypeTable
@@ -105,7 +106,7 @@ static struct NPCMTypeTable
     en_NPCTYPES useNPCType;
     char* modelName;
     U32 hashOfName;
-} g_tbltype[252] =
+} g_tbltype[253] =
 {
     { NPC_TYPE_FODDER,            "robot_0a_fodder_bind",      0 },
     { NPC_TYPE_FODDERTOUGH,       "robot_0a_foddertough_bind", 0 },
@@ -357,7 +358,8 @@ static struct NPCMTypeTable
     { NPC_TYPE_FISH_MALE,         "fish_j_snow_bind01",        0 },
     { NPC_TYPE_FISH_MALE,         "fish_j_snow_bind02",        0 },
     { NPC_TYPE_FISH_MALE,         "fish_j_snow_bind03",        0 },
-    { NPC_TYPE_FISH,              "fish_h_fried_bind",         0 }
+    { NPC_TYPE_FISH,              "fish_h_fried_bind",         0 },
+    { NPC_TYPE_NME_TEST,           "nme_test_bind",             0 }
 };
 
 zNPCMgr* zNPCMgrSelf()
