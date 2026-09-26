@@ -190,7 +190,7 @@ void zNMECommon::Setup()
         psy_self->AddGoal(NME_GOAL_IDLE, NULL);
         psy_self->BrainEnd();
         psy_self->SetSafety(NME_GOAL_IDLE);
-        psy_self->GoalSet(NME_GOAL_IDLE);
+        psy_self->GoalSet(NME_GOAL_IDLE, 0);
     }
 
     SelfSetup();
