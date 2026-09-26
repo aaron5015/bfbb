@@ -6,7 +6,7 @@
 struct zNMEGoalMiniMervZap : zNMEGoalCommon
 {
     zNMEGoalMiniMervZap(S32 goalID) : zNMEGoalCommon(goalID) {}
-    S32 Process(en_trantype* trantype, F32 dt, void* ctxt) override;
+    S32 Process(en_trantype* trantype, F32 dt, void* ctxt, xScene* scene) override;
 };
 
 struct zNMEMiniMerv : zNMEStandard
