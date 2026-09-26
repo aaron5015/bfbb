@@ -21,7 +21,7 @@ static void NMEGoalDestroy(xFactoryInst* inst)
 
 void zNME_RegisterGoals()
 {
-    xFactory* factory = xBehaveMgr_GoalFactory();
+    xFactory* factory = xBehaveMgr_GetSelf()->GetFactory();
     if (factory != NULL)
     {
         factory->RegItemType(NME_GOAL_IDLE, NMEGoalCreate, NMEGoalDestroy);
@@ -153,7 +153,7 @@ void zNMECommon::Init(xEntAsset* asset)
 
     if (cfg_common == NULL)
     {
-        cfg_common = new ('NME0', NULL) NMECfgCommon();
+        cfg_common = new NMECfgCommon();
     }
 
     navnet.Reset();
