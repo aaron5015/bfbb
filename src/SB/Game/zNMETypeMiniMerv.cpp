@@ -19,7 +19,7 @@ static void MiniMervGoalDestroy(xFactoryInst* inst)
     delete inst;
 }
 
-static void RegisterMiniMervGoal()
+void zNME_Register_MiniMervGoal()
 {
     static bool registered = false;
     if (registered)
@@ -78,7 +78,6 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
 
 void zNMEMiniMerv::Setup()
 {
-    RegisterMiniMervGoal();
     zNMEStandard::Setup();
 
     if (psy_self != NULL)
