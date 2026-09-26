@@ -3,6 +3,7 @@
 #include "xFactory.h"
 #include "xMath.h"
 #include "zNPCTypes.h"
+#include "zNMETypeMiniMerv.h"
 
 static xFactoryInst* NMEGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -25,6 +26,7 @@ void zNME_RegisterGoals()
     if (factory != NULL)
     {
         factory->RegItemType(NME_GOAL_IDLE, NMEGoalCreate, NMEGoalDestroy);
+        zNME_Register_MiniMervGoal();
     }
 }
 
