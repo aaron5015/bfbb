@@ -2,6 +2,7 @@
 
 #include "xFactory.h"
 #include "xMath.h"
+#include "zNPCTypes.h"
 
 static xFactoryInst* NMEGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -247,7 +248,6 @@ void zNMECommon::Destroy()
         cfg_common = NULL;
     }
 
-    xNPCBasic::Destroy();
 }
 
 S32 zNMECommon::IsHealthy()
