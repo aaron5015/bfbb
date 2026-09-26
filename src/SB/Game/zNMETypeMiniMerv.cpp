@@ -2,6 +2,7 @@
 
 #include "zEntPlayer.h"
 #include "zGlobals.h"
+#include <math.h>
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -77,15 +78,15 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
 
 void zNMEMiniMerv::Setup()
 {
-    zNMEStandard::Setup();
     RegisterMiniMervGoal();
+    zNMEStandard::Setup();
 
     if (psy_self != NULL)
     {
         psy_self->BrainBegin();
         psy_self->AddGoal(GOAL_ZAP, NULL);
         psy_self->BrainEnd();
-        psy_self->GoalSet(NME_GOAL_IDLE, 0);
+        psy_self->GoalSet(GOAL_ZAP, 0);
     }
 }
 
@@ -139,6 +140,15 @@ void zNMEMiniMerv::FireZap()
 
 void zNMEMiniMerv::UpdateZap(F32 dt)
 {
+    if (!TargetInDetectRange())
+    {
+        warning_beam.reset();
+        zap_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
     if (cooldown_timer > 0.0f)
     {
         cooldown_timer = MAX(0.0f, cooldown_timer - dt);
@@ -178,15 +188,6 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
 {
     zNMEStandard::Process(xscn, dt);
     warning_beam.update(dt);
-
-    if (TargetInDetectRange())
-    {
-        UpdateZap(dt);
-    }
-    else
-    {
-        warning_beam.reset();
-    }
 
     if (warning_beam.visible())
     {
