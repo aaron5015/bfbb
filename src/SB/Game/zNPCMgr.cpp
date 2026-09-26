@@ -359,7 +359,7 @@ static struct NPCMTypeTable
     { NPC_TYPE_FISH_MALE,         "fish_j_snow_bind02",        0 },
     { NPC_TYPE_FISH_MALE,         "fish_j_snow_bind03",        0 },
     { NPC_TYPE_FISH,              "fish_h_fried_bind",         0 },
-    { NPC_TYPE_NME_TEST,           "nme_test_bind",             0 }
+    { NPC_TYPE_NME_TEST,           "minimerv_v1_bind",          0 }
 };
 
 zNPCMgr* zNPCMgrSelf()
