@@ -42,5 +42,7 @@ struct zNMEMiniMerv : zNMEStandard
     bool TargetInDangerRange() const;
 };
 
+void zNME_Register_MiniMervGoal();
+
 xFactoryInst* ZNME_Create_MiniMerv(S32 who, RyzMemGrow* grow, void* userdata);
 void ZNME_Destroy_MiniMerv(xFactoryInst* inst);
