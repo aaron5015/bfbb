@@ -139,6 +139,16 @@ void zNMEMiniMerv::FireZap()
 
 void zNMEMiniMerv::UpdateZap(F32 dt)
 {
+    if (globals.player.Health < 1)
+    {
+        warning_beam.reset();
+        zap_timer = 0.0f;
+        cooldown_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
     if (!TargetInDetectRange())
     {
         warning_beam.reset();
@@ -186,6 +196,17 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
 void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
 {
     zNMEStandard::Process(xscn, dt);
+
+    if (globals.player.Health > 0)
+    {
+        xVec3 dir;
+        xVec3Sub(&dir, xEntGetPos(&globals.player.ent), xEntGetPos((xEnt*)this));
+        dir.y = 0.0f;
+        if (xVec3Length2(&dir) > 0.0001f)
+        {
+            TurnToFace(dt, &dir, -1.0f);
+        }
+    }
     warning_beam.update(dt);
 
     if (warning_beam.visible())
