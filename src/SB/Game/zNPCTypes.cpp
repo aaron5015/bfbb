@@ -10,6 +10,7 @@
 #include "zNPCTypeBoss.h"
 #include "zNPCTypeTest.h"
 #include "zNMECommon.h"
+#include "zNMETypeMiniMerv.h"
 
 void zNPCTypes_StartupTypes()
 {
@@ -116,7 +117,7 @@ void zNPCTypes_RegisterTypes(xFactory* fac)
         NPC_TYPE_BOSS_SB1, ZNPC_Create_Boss, ZNPC_Destroy_Boss,
         NPC_TYPE_BOSSBOBBY, ZNPC_Create_Boss, ZNPC_Destroy_Boss,
         NPC_TYPE_BOSSPLANKTON, ZNPC_Create_Boss, ZNPC_Destroy_Boss,
-        NPC_TYPE_NME_TEST, ZNME_Create_Test, ZNME_Destroy_Test,
+        NPC_TYPE_NME_TEST, ZNME_Create_MiniMerv, ZNME_Destroy_MiniMerv,
         0
     };
     // clang-format on
