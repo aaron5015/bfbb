@@ -153,6 +153,7 @@ void zNMECommon::Init(xEntAsset* asset)
 {
     zNPCCommon::Init(asset);
     flg_vuln = -1;
+    tmr_invuln = -1.0f;
 
     if (cfg_common == NULL)
     {
