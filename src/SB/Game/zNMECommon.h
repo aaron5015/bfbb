@@ -90,6 +90,11 @@ struct zNMECommon : zNPCCommon
     void Reset() override;
     void Setup() override;
     void Process(xScene* xscn, F32 dt) override;
+    U8 ColChkFlags() const override { return 0x3E; }
+    U8 ColPenFlags() const override { return 0x3E; }
+    U8 ColChkByFlags() const override { return 60; }
+    U8 ColPenByFlags() const override { return 60; }
+    U8 PhysicsFlags() const override { return 0; }
     S32 NPCMessage(NPCMsg* mail) override;
     void Damage(en_NPC_DAMAGE_TYPE damtype, xBase* who, const xVec3* vec_hit) override;
     void BUpdate(xVec3* pos) override;
