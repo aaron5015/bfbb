@@ -16,7 +16,7 @@ struct zNMEMiniMerv : zNMEStandard
         GOAL_ZAP = 'MMZP'
     };
 
-    F32 detect_radius;
+    F32 focus_radius;
     F32 danger_radius;
     F32 warning_time;
     F32 cooldown_time;
@@ -38,7 +38,7 @@ struct zNMEMiniMerv : zNMEStandard
     void UpdateZap(F32 dt);
     void FireWarningBeam();
     void FireZap();
-    bool TargetInDetectRange() const;
+    bool TargetInFocusRange() const;
     bool TargetInDangerRange() const;
 };
 
