@@ -2,6 +2,7 @@
 
 #include "zEntPlayer.h"
 #include "zGlobals.h"
+#include "zMovePoint.h"
 #include <math.h>
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
@@ -48,7 +49,7 @@ S32 zNMEGoalMiniMervZap::Process(en_trantype*, F32 dt, void* ctxt, xScene*)
 
 zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
 {
-    detect_radius = 18.0f;
+    focus_radius = 18.0f;
     danger_radius = 10.0f;
     warning_time = 1.25f;
     cooldown_time = 0.75f;
@@ -80,6 +81,11 @@ void zNMEMiniMerv::Setup()
 {
     zNMEStandard::Setup();
 
+    if (nav_curr == NULL && npcass != NULL && npcass->movepoint != 0)
+    {
+        nav_curr = zMovePoint_From_xAssetID(npcass->movepoint);
+    }
+
     if (psy_self != NULL)
     {
         psy_self->BrainBegin();
@@ -99,11 +105,31 @@ void zNMEMiniMerv::Reset()
     warning_beam.reset();
 }
 
-bool zNMEMiniMerv::TargetInDetectRange() const
+bool zNMEMiniMerv::TargetInFocusRange() const
 {
     const xVec3* npc_pos = xEntGetPos((xEnt*)this);
     const xVec3* plyr_pos = xEntGetPos(&globals.player.ent);
-    return xVec3Dist2(npc_pos, plyr_pos) <= detect_radius * detect_radius;
+
+    F32 radius = focus_radius;
+    if (nav_curr != NULL && nav_curr->asset != NULL && nav_curr->asset->arenaRadius > 0.0f)
+    {
+        const xVec3* mvpt_pos = zMovePointGetPos(nav_curr);
+        radius = nav_curr->asset->arenaRadius;
+
+        if (xVec3Dist2(mvpt_pos, plyr_pos) > radius * radius)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if (xVec3Dist2(npc_pos, plyr_pos) > radius * radius)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool zNMEMiniMerv::TargetInDangerRange() const
@@ -149,7 +175,7 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
         return;
     }
 
-    if (!TargetInDetectRange())
+    if (!TargetInFocusRange())
     {
         warning_beam.reset();
         zap_timer = 0.0f;
@@ -197,7 +223,7 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
 {
     zNMEStandard::Process(xscn, dt);
 
-    if (globals.player.Health > 0)
+    if (globals.player.Health > 0 && TargetInFocusRange())
     {
         xVec3 dir;
         xVec3Sub(&dir, xEntGetPos(&globals.player.ent), xEntGetPos((xEnt*)this));
