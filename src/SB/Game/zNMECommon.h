@@ -94,7 +94,7 @@ struct zNMECommon : zNPCCommon
     U8 ColPenFlags() const override { return 0x3E; }
     U8 ColChkByFlags() const override { return 60; }
     U8 ColPenByFlags() const override { return 60; }
-    U8 PhysicsFlags() const override { return 0; }
+    U8 PhysicsFlags() const override;
     S32 NPCMessage(NPCMsg* mail) override;
     void Damage(en_NPC_DAMAGE_TYPE damtype, xBase* who, const xVec3* vec_hit) override;
     void BUpdate(xVec3* pos) override;
