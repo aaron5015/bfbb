@@ -152,9 +152,7 @@ zNMECommon::zNMECommon(S32 myType) : zNPCCommon(myType)
 void zNMECommon::Init(xEntAsset* asset)
 {
     zNPCCommon::Init(asset);
-    flg_move = 10;
     flg_vuln = -1;
-    flags1.flg_basenpc |= 8;
     tmr_invuln = -1.0f;
 
     if (cfg_common == NULL)
