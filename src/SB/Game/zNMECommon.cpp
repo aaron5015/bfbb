@@ -280,11 +280,6 @@ void zNMECommon::BUpdate(xVec3* pos)
     xNPCBasic::BUpdate(pos);
 }
 
-void zNMECommon::NewTime(xScene* xscn, F32 dt)
-{
-    xNPCBasic::NewTime(xscn, dt);
-}
-
 void zNMECommon::Destroy()
 {
     SelfDestroy();
