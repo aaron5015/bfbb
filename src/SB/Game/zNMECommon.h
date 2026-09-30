@@ -75,6 +75,8 @@ struct zNMECommon : zNPCCommon
     S32 flg_nmeMisc;
     S32 flg_nmeAble;
     F32 spd_throttle;
+    S32 hitpoints;
+    U8 dead;
     NMERuntime runtimeData;
     zNMENavNet navnet;
     F32 tmr_common[3];
@@ -88,6 +90,8 @@ struct zNMECommon : zNPCCommon
     void Reset() override;
     void Setup() override;
     void Process(xScene* xscn, F32 dt) override;
+    S32 NPCMessage(NPCMsg* mail) override;
+    void Damage(en_NPC_DAMAGE_TYPE damtype, xBase* who, const xVec3* vec_hit) override;
     void BUpdate(xVec3* pos) override;
     void NewTime(xScene* xscn, F32 dt) override;
     void Destroy() override;
