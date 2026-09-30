@@ -251,6 +251,12 @@ void zNMECommon::Damage(en_NPC_DAMAGE_TYPE damtype, xBase* who, const xVec3* vec
     zNPCCommon::Damage(damtype, who, vec_hit);
 }
 
+void zNMECommon::NewTime(xScene* xscn, F32 dt)
+{
+    tmr_invuln = MAX(-1.0f, tmr_invuln - dt);
+    xNPCBasic::NewTime(xscn, dt);
+}
+
 void zNMECommon::Process(xScene* xscn, F32 dt)
 {
     xNPCBasic::Process(xscn, dt);
