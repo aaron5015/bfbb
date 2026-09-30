@@ -152,6 +152,7 @@ zNMECommon::zNMECommon(S32 myType) : zNPCCommon(myType)
 void zNMECommon::Init(xEntAsset* asset)
 {
     zNPCCommon::Init(asset);
+    flg_vuln = -1;
 
     if (cfg_common == NULL)
     {
@@ -170,6 +171,7 @@ void zNMECommon::Init(xEntAsset* asset)
 void zNMECommon::Reset()
 {
     zNPCCommon::Reset();
+    flg_vuln = -1;
 
     if (psy_self != NULL)
     {
