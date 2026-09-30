@@ -206,6 +206,7 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
         {
             xVec3Normalize(&dir, &dir);
             TurnToFace(dt, &dir, 4.0f);
+            xEntMotionToMatrix((xEnt*)this, this->frame);
         }
     }
     warning_beam.update(dt);
