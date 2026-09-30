@@ -1,4 +1,5 @@
 #include "zNMECommon.h"
+#include <stdio.h>
 
 #include "xFactory.h"
 #include "xMath.h"
@@ -216,14 +217,14 @@ void zNMECommon::SelfDestroy()
 
 S32 zNMECommon::NPCMessage(NPCMsg* mail)
 {
-    xprintf("[NME DEBUG] NPCMessage: msgid=%d hp=%d dead=%d\\n", mail ? mail->msgid : -1, hitpoints, dead);
+    printf("[NME DEBUG] NPCMessage: msgid=%d hp=%d dead=%d\\n", mail ? mail->msgid : -1, hitpoints, dead);
     if (mail != NULL && mail->msgid == NPC_MID_DAMAGE)
     {
         if (!dead)
         {
-            xprintf("[NME DEBUG] DAMAGE MESSAGE RECEIVED\\n");
+            printf("[NME DEBUG] DAMAGE MESSAGE RECEIVED\\n");
             hitpoints--;
-            xprintf("[NME DEBUG] HP NOW %d\\n", hitpoints);
+            printf("[NME DEBUG] HP NOW %d\\n", hitpoints);
             if (hitpoints <= 0)
             {
                 hitpoints = 0;
@@ -241,7 +242,7 @@ S32 zNMECommon::NPCMessage(NPCMsg* mail)
 
 void zNMECommon::Damage(en_NPC_DAMAGE_TYPE damtype, xBase* who, const xVec3* vec_hit)
 {
-    xprintf("[NME DEBUG] Damage: type=%d hp=%d dead=%d baseType=%d vuln=%08X invuln=%f\\n", damtype, hitpoints, dead, baseType, flg_vuln, tmr_invuln);
+    printf("[NME DEBUG] Damage: type=%d hp=%d dead=%d baseType=%d vuln=%08X invuln=%f\\n", damtype, hitpoints, dead, baseType, flg_vuln, tmr_invuln);
     if (dead)
     {
         return;
