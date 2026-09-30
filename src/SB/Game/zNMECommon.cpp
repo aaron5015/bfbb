@@ -162,6 +162,8 @@ void zNMECommon::Init(xEntAsset* asset)
     navnet.nme_owner = this;
     psy_self = NULL;
     spd_throttle = 0.0f;
+    hitpoints = 1;
+    dead = 0;
     tmr_common[0] = tmr_common[1] = tmr_common[2] = 0.0f;
 }
 
@@ -177,6 +179,8 @@ void zNMECommon::Reset()
     navnet.Reset();
     navnet.nme_owner = this;
     runtimeData.flags = 0;
+    hitpoints = (cfg_npc != NULL && cfg_npc->pts_damage > 0.0f) ? (S32)cfg_npc->pts_damage : 1;
+    dead = 0;
     spd_throttle = 0.0f;
     tmr_common[0] = tmr_common[1] = tmr_common[2] = 0.0f;
 }
@@ -204,6 +208,38 @@ void zNMECommon::SelfSetup()
 
 void zNMECommon::SelfDestroy()
 {
+}
+
+S32 zNMECommon::NPCMessage(NPCMsg* mail)
+{
+    if (mail != NULL && mail->msgid == NPC_MID_DAMAGE)
+    {
+        if (!dead)
+        {
+            hitpoints--;
+            if (hitpoints <= 0)
+            {
+                hitpoints = 0;
+                dead = 1;
+                GiveReward();
+                xEntHide(this);
+                baseFlags &= (U16)~0x0001;
+            }
+        }
+        return 1;
+    }
+
+    return zNPCCommon::NPCMessage(mail);
+}
+
+void zNMECommon::Damage(en_NPC_DAMAGE_TYPE damtype, xBase* who, const xVec3* vec_hit)
+{
+    if (dead)
+    {
+        return;
+    }
+
+    zNPCCommon::Damage(damtype, who, vec_hit);
 }
 
 void zNMECommon::Process(xScene* xscn, F32 dt)
