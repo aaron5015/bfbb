@@ -152,6 +152,7 @@ zNMECommon::zNMECommon(S32 myType) : zNPCCommon(myType)
 void zNMECommon::Init(xEntAsset* asset)
 {
     zNPCCommon::Init(asset);
+    baseType = eBaseTypeNPC;
     flg_vuln = -1;
     tmr_invuln = -1.0f;
 
