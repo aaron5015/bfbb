@@ -204,7 +204,8 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
         dir.y = 0.0f;
         if (xVec3Length2(&dir) > 0.0001f)
         {
-            TurnToFace(dt, &dir, -1.0f);
+            xVec3Normalize(&dir, &dir);
+            TurnToFace(dt, &dir, 4.0f);
         }
     }
     warning_beam.update(dt);
