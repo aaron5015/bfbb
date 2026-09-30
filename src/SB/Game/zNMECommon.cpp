@@ -153,7 +153,6 @@ void zNMECommon::Init(xEntAsset* asset)
 {
     zNPCCommon::Init(asset);
     flg_vuln = -1;
-    flg_move = 10;
     tmr_invuln = -1.0f;
 
     if (cfg_common == NULL)
@@ -212,23 +211,6 @@ void zNMECommon::SelfSetup()
 
 void zNMECommon::SelfDestroy()
 {
-}
-
-U8 zNMECommon::PhysicsFlags() const
-{
-    S32 flags = 0;
-
-    if (flg_move & 0x6)
-    {
-        flags |= 3;
-    }
-
-    if (flg_move & 0x2)
-    {
-        flags |= 4;
-    }
-
-    return flags;
 }
 
 S32 zNMECommon::NPCMessage(NPCMsg* mail)
