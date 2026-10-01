@@ -262,7 +262,20 @@ void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
 
 void zNMEMiniMerv::RenderMuzzleFlash()
 {
-    if (muzzle_flash_timer <= 0.0f || muzzle_flash_raster == NULL)
+    if (muzzle_flash_timer <= 0.0f)
+    {
+        return;
+    }
+
+    // Retry the lookup here in case the texture was not resident when Setup()
+    // first ran. This is also how we avoid silently losing the effect during
+    // the initial visual test.
+    if (muzzle_flash_raster == NULL)
+    {
+        muzzle_flash_raster = NPCC_FindRWRaster("fx_beam_muzzle_flash");
+    }
+
+    if (muzzle_flash_raster == NULL)
     {
         return;
     }
@@ -270,63 +283,109 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 pos;
     GetMuzzlePos(&pos);
 
-    xMat3x3 cam_mat;
-    xMat3x3LookAt(&cam_mat, &pos, &globals.camera.mat.pos);
+    xMat3x3 mat;
+    xVec3 dir_card;
+    xVec3 dir_perp;
+    xVec3 dir_up;
+    xVec3 pos_top;
+    xVec3 pos_bot;
+    xVec3 pos_lerp;
+    xVec3 pos_vtx;
+    F32 uv_lo[2];
+    F32 uv_hi[2];
+    RwRGBA rgba = { 255, 255, 255, 255 };
 
-    F32 cs = cosf(muzzle_flash_angle);
-    F32 sn = sinf(muzzle_flash_angle);
+    xMat3x3LookAt(&mat, &pos, &globals.camera.mat.pos);
 
-    xVec3 right;
-    right.x = cam_mat.right.x * cs + cam_mat.up.x * sn;
-    right.y = cam_mat.right.y * cs + cam_mat.up.y * sn;
-    right.z = cam_mat.right.z * cs + cam_mat.up.z * sn;
+    xVec3Add(&dir_card, &mat.at, &mat.right);
+    xVec3Normalize(&dir_card, &dir_card);
 
-    xVec3 up;
-    up.x = -cam_mat.right.x * sn + cam_mat.up.x * cs;
-    up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
-    up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
+    xVec3Sub(&dir_perp, &mat.at, &mat.right);
+    xVec3Normalize(&dir_perp, &dir_perp);
 
-    F32 rad = 0.38f * muzzle_flash_scale;
+    xVec3Copy(&dir_up, &mat.up);
 
-    xVec3 r = right * rad;
-    xVec3 u = up * rad;
+    // Keep the first pass deliberately obvious in-game.
+    F32 rad = 0.65f * muzzle_flash_scale;
+    xVec3Copy(&pos_top, &pos);
+    xVec3Copy(&pos_bot, &pos);
+    xVec3AddScaled(&pos_top, &dir_up, rad);
+    xVec3AddScaled(&pos_bot, &dir_up, -rad);
 
-    xVec3 p0 = pos - r - u;
-    xVec3 p1 = pos + r - u;
-    xVec3 p2 = pos + r + u;
-    xVec3 p3 = pos - r + u;
-
-    // fx_beam_muzzle_flash is a 2x2 atlas of 16x16 cells.
     const F32 u0 = (muzzle_flash_frame & 1) ? 0.5f : 0.0f;
     const F32 v0 = (muzzle_flash_frame & 2) ? 0.5f : 0.0f;
     const F32 u1 = u0 + 0.5f;
     const F32 v1 = v0 + 0.5f;
+    uv_lo[0] = u0;
+    uv_lo[1] = v0;
+    uv_hi[0] = u1;
+    uv_hi[1] = v1;
 
-    RwIm3DVertex quad[4];
-    RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
-    RwIm3DVertexSetPos(&quad[1], p1.x, p1.y, p1.z);
-    RwIm3DVertexSetPos(&quad[2], p2.x, p2.y, p2.z);
-    RwIm3DVertexSetPos(&quad[3], p3.x, p3.y, p3.z);
+    RwIm3DVertex vtxbuf[2][14];
+    RwIm3DVertex* vtx_horz = vtxbuf[0];
+    RwIm3DVertex* vtx_vert = vtxbuf[1];
 
-    for (S32 i = 0; i < 4; ++i)
+    for (S32 i = 0; i <= 6; ++i)
     {
-        RwIm3DVertexSetRGBA(&quad[i], 255, 255, 255, 255);
+        F32 rat = (F32)i / 6.0f;
+
+        pos_lerp.x = LERP(rat, pos_top.x, pos_bot.x);
+        pos_lerp.y = LERP(rat, pos_top.y, pos_bot.y);
+        pos_lerp.z = LERP(rat, pos_top.z, pos_bot.z);
+
+        F32 v = LERP(rat, uv_lo[1], uv_hi[1]);
+
+        pos_vtx = dir_card * rad;
+        pos_vtx += pos_lerp;
+        RwIm3DVertexSetPos(&vtx_horz[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_horz[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_horz[0], uv_lo[0], v);
+
+        pos_vtx = dir_card * -rad;
+        pos_vtx += pos_lerp;
+        RwIm3DVertexSetPos(&vtx_horz[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_horz[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_horz[1], uv_hi[0], v);
+
+        vtx_horz += 2;
+
+        pos_vtx = dir_perp * -rad;
+        pos_vtx += pos_lerp;
+        RwIm3DVertexSetPos(&vtx_vert[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_vert[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_vert[0], uv_lo[0], v);
+
+        pos_vtx = dir_perp * rad;
+        pos_vtx += pos_lerp;
+        RwIm3DVertexSetPos(&vtx_vert[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetRGBA(&vtx_vert[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
+        RwIm3DVertexSetUV(&vtx_vert[1], uv_hi[0], v);
+
+        vtx_vert += 2;
     }
 
-    RwIm3DVertexSetUV(&quad[0], u0, v1);
-    RwIm3DVertexSetUV(&quad[1], u1, v1);
-    RwIm3DVertexSetUV(&quad[2], u1, v0);
-    RwIm3DVertexSetUV(&quad[3], u0, v0);
+    _SDRenderState old_rendstat = zRenderStateCurrent();
+    if (old_rendstat == SDRS_Unknown)
+    {
+        old_rendstat = SDRS_Default;
+    }
 
     zRenderState(SDRS_NPCVisual);
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)muzzle_flash_raster);
 
-    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
-    {
-        RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
-        RwIm3DEnd();
-    }
+    RwIm3DTransform(vtxbuf[0], 14, NULL,
+                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    RwIm3DEnd();
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)muzzle_flash_raster);
+    RwIm3DTransform(vtxbuf[1], 14, NULL,
+                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
+    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    RwIm3DEnd();
+
+    zRenderState(old_rendstat);
 }
 
 void zNMEMiniMerv::UpdateZap(F32 dt)
