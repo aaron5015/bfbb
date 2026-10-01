@@ -30,35 +30,48 @@ static void NME_DumpHAnim(xModelInstance* model)
         return;
     }
 
-    RwFrame* atomicFrame = RpAtomicGetFrame(model->Data);
-    if (atomicFrame == NULL)
+    FILE* out = fopen("minimerv_hanim_dump.txt", "w");
+    if (out == NULL)
     {
-        xprintf("[NME HAnim] atomic has no frame\\n");
         return;
     }
 
-    xprintf("[NME HAnim] atomic=%p frame=%p\\n", (void*)model->Data, (void*)atomicFrame);
+    RwFrame* atomicFrame = RpAtomicGetFrame(model->Data);
+    if (atomicFrame == NULL)
+    {
+        fprintf(out, "[HAnim] atomic has no frame\\n");
+        fclose(out);
+        return;
+    }
+
+    fprintf(out, "[HAnim] atomic=%p frame=%p\\n", (void*)model->Data, (void*)atomicFrame);
 
     RpHAnimHierarchy* hierarchy = RpHAnimFrameGetHierarchy(atomicFrame);
     if (hierarchy == NULL)
     {
-        xprintf("[NME HAnim] hierarchy not on atomic frame; searching children\\n");
+        fprintf(out, "[HAnim] hierarchy not on atomic frame; frame tree follows\\n");
         NME_DumpFrameTree(atomicFrame, 0, out);
+        fclose(out);
         return;
     }
 
-    xprintf("[NME HAnim] hierarchy=%p nodes=%d\\n", (void*)hierarchy, hierarchy->numNodes);
+    fprintf(out, "[HAnim] hierarchy=%p nodes=%d\\n", (void*)hierarchy, hierarchy->numNodes);
+
     for (S32 i = 0; i < hierarchy->numNodes; ++i)
     {
         const RpHAnimNodeInfo& node = hierarchy->pNodeInfo[i];
         RwMatrix* ltm = node.pFrame != NULL ? RwFrameGetLTM(node.pFrame) : NULL;
-        xprintf("[NME node] slot=%d nodeID=%d nodeIndex=%d frame=%p ltm=(%.3f, %.3f, %.3f)\\n", i,
-                node.nodeID, node.nodeIndex, (void*)node.pFrame, ltm != NULL ? ltm->pos.x : 0.0f,
-                ltm != NULL ? ltm->pos.y : 0.0f, ltm != NULL ? ltm->pos.z : 0.0f);
+
+        fprintf(out, "[node] slot=%d nodeID=%d nodeIndex=%d frame=%p ltm=(%.3f, %.3f, %.3f)\\n",
+                i, node.nodeID, node.nodeIndex, (void*)node.pFrame,
+                ltm != NULL ? ltm->pos.x : 0.0f,
+                ltm != NULL ? ltm->pos.y : 0.0f,
+                ltm != NULL ? ltm->pos.z : 0.0f);
     }
 
-    xprintf("[NME frames] complete RenderWare frame tree follows\\n");
+    fprintf(out, "[frames] complete RenderWare frame tree follows\\n");
     NME_DumpFrameTree(RwFrameGetRoot(atomicFrame), 0, out);
+    fclose(out);
 }
 
 static xFactoryInst* NMEGoalCreate(S32 who, RyzMemGrow* grow, void*)
