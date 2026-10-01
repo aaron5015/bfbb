@@ -263,12 +263,8 @@ void zNMECommon::Setup()
 
     SelfSetup();
 
-    // Temporary Mini Merv diagnostic. This deliberately reports the RenderWare
-    // HAnim mapping and raw frame hierarchy without changing NME behavior.
-    if (myNPCType == NPC_TYPE_NME_TEST && model != NULL)
-    {
-        NME_DumpHAnim(model);
-    }
+    // Temporary Mini Merv diagnostic. The actual model can be more reliable here
+    // than at construction time; do not gate this on the NPC type while diagnosing.
 }
 
 void zNMECommon::SelfSetup()
@@ -320,6 +316,16 @@ void zNMECommon::NewTime(xScene* xscn, F32 dt)
 void zNMECommon::Process(xScene* xscn, F32 dt)
 {
     xNPCBasic::Process(xscn, dt);
+
+    // Temporary diagnostic: dump once after the model is known to exist.
+    // runtimeData.flags bit 31 is otherwise unused by this experimental NME code.
+    if (model != NULL && !(runtimeData.flags & 0x80000000))
+    {
+        runtimeData.flags |= 0x80000000;
+        xprintf("[NME] diagnostic reached: npcType=%d model=%p atomic=%p\\n", myNPCType,
+                (void*)model, (void*)model->Data);
+        NME_DumpHAnim(model);
+    }
 
     if (psy_self != NULL)
     {
