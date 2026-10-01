@@ -10,6 +10,64 @@
 
 static const S32 MINI_MERV_MUZZLE_BONE = 28;
 
+static RwRaster* MiniMervCreateInvertedRaster(RwRaster* source)
+{
+    if (source == NULL)
+    {
+        return NULL;
+    }
+
+    RwRaster* inverted = RwRasterCreate(source->width, source->height, 32,
+                                        rwRASTERTYPETEXTURE | rwRASTERFORMAT8888);
+    if (inverted == NULL)
+    {
+        return NULL;
+    }
+
+    RwUInt8* src = RwRasterLock(source, 0, rwRASTERLOCKREAD);
+    RwUInt8* dst = RwRasterLock(inverted, 0, rwRASTERLOCKWRITE | rwRASTERLOCKNOFETCH);
+    if (src == NULL || dst == NULL)
+    {
+        if (src != NULL)
+        {
+            RwRasterUnlock(source);
+        }
+        if (dst != NULL)
+        {
+            RwRasterUnlock(inverted);
+        }
+        RwRasterDestroy(inverted);
+        return NULL;
+    }
+
+    const S32 width = source->width;
+    const S32 height = source->height;
+    const S32 src_stride = source->stride;
+    const S32 dst_stride = inverted->stride;
+
+    // Keep alpha/shape intact, but complement all three colour channels.
+    // This turns the red Xbox muzzle-flash texture into its cyan/blue
+    // complement without relying on vertex-colour modulation.
+    for (S32 y = 0; y < height; ++y)
+    {
+        RwUInt8* src_row = src + (size_t)y * src_stride;
+        RwUInt8* dst_row = dst + (size_t)y * dst_stride;
+
+        for (S32 x = 0; x < width; ++x)
+        {
+            const S32 p = x * 4;
+            dst_row[p + 0] = 255 - src_row[p + 0];
+            dst_row[p + 1] = 255 - src_row[p + 1];
+            dst_row[p + 2] = 255 - src_row[p + 2];
+            dst_row[p + 3] = src_row[p + 3];
+        }
+    }
+
+    RwRasterUnlock(source);
+    RwRasterUnlock(inverted);
+    return inverted;
+}
+
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
     if (who == zNMEMiniMerv::GOAL_ZAP)
@@ -71,6 +129,7 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     muzzle_flash_scale = 1.0f;
     muzzle_flash_frame = 0;
     muzzle_flash_raster = NULL;
+    muzzle_flash_inverted_raster = NULL;
 
     zap_beam.Prepare();
     zap_beam.TextureSet(NPCC_FindRWRaster("fx_solid"));
@@ -103,6 +162,7 @@ void zNMEMiniMerv::Setup()
     if (muzzle_flash_raster == NULL)
     {
         muzzle_flash_raster = NPCC_FindRWRaster("fx_beam_muzzle_flash");
+        muzzle_flash_inverted_raster = MiniMervCreateInvertedRaster(muzzle_flash_raster);
     }
 
     if (nav_curr == NULL && npcass != NULL && npcass->movepoint != 0)
@@ -262,7 +322,7 @@ void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
 
 void zNMEMiniMerv::RenderMuzzleFlash()
 {
-    if (muzzle_flash_timer <= 0.0f || muzzle_flash_raster == NULL)
+    if (muzzle_flash_timer <= 0.0f || muzzle_flash_inverted_raster == NULL)
     {
         return;
     }
@@ -296,7 +356,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 p2 = pos + r + u;
     xVec3 p3 = pos - r + u;
 
-    // fx_beam_muzzle_flash is a 2x2 atlas of 16x16 cells.
+    // fx_beam_muzzle_flash is a 64x64 Xbox texture with four 32x32 atlas cells.
     const F32 u0 = (muzzle_flash_frame & 1) ? 0.5f : 0.0f;
     const F32 v0 = (muzzle_flash_frame & 2) ? 0.5f : 0.0f;
     const F32 u1 = u0 + 0.5f;
@@ -319,7 +379,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwIm3DVertexSetUV(&quad[3], u0, v0);
 
     zRenderState(SDRS_NPCVisual);
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
@@ -431,6 +491,12 @@ void zNMEMiniMerv::SelfDestroy()
 {
     warning_beam.reset();
     muzzle_flash_timer = 0.0f;
+
+    if (muzzle_flash_inverted_raster != NULL)
+    {
+        RwRasterDestroy(muzzle_flash_inverted_raster);
+        muzzle_flash_inverted_raster = NULL;
+    }
 }
 
 xFactoryInst* ZNME_Create_MiniMerv(S32 who, RyzMemGrow* grow, void*)
