@@ -371,7 +371,7 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
     {
         bone_debug_timer -= 1.0f;
         bone_debug_index = (bone_debug_index + 1) % 28;
-        printf("[MiniMervBoneAxis] bone=%d\\n", bone_debug_index);
+        printf("[MiniMervBoneAxis] bone=%d\n", bone_debug_index);
     }
 
     if (warning_beam.visible())
