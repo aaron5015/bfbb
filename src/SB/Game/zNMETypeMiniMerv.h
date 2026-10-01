@@ -36,6 +36,7 @@ struct zNMEMiniMerv : zNMEStandard
     RwRaster* muzzle_flash_raster;
     xLaserBoltEmitter warning_beam;
     NPCLaser zap_beam;
+    NPCLaser muzzle_debug_beam;
 
     zNMEMiniMerv(S32 myType);
 
