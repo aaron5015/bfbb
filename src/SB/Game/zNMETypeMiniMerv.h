@@ -24,8 +24,10 @@ struct zNMEMiniMerv : zNMEStandard
     F32 cooldown_timer;
     U8 warning_active;
     U8 zap_fired;
-    U8 pad[2];
+    U8 zap_visible;
+    U8 pad[1];
     xLaserBoltEmitter warning_beam;
+    NPCLaser zap_beam;
 
     zNMEMiniMerv(S32 myType);
 
@@ -38,6 +40,7 @@ struct zNMEMiniMerv : zNMEStandard
     void UpdateZap(F32 dt);
     void FireWarningBeam();
     void FireZap();
+    void UpdateZapBeam();
     bool TargetInFocusRange() const;
     bool TargetInDangerRange() const;
 };
