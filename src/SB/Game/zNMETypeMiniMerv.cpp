@@ -305,15 +305,10 @@ void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
     muzzle_flash_timer = MAX(0.0f, muzzle_flash_timer - dt);
     muzzle_flash_frame_timer -= dt;
 
-    // The Xbox effect sheet is 64x64, with four 32x32 atlas
-    // cells as individual short-lived images for now rather than assuming
-    // they are a conventional 0->1->2->3 animation.
-    while (muzzle_flash_frame_timer <= 0.0f)
-    {
-        muzzle_flash_frame = (S32)(xurand() * 4.0f);
-        muzzle_flash_frame_timer += 0.025f;
-        muzzle_flash_angle += (xurand() - 0.5f) * 1.4f;
-    }
+    // Diagnostic: hold the first 32x32 Xbox atlas cell so we can inspect
+    // the converted texture without frame/rotation changes obscuring it.
+    muzzle_flash_frame = 0;
+    muzzle_flash_angle = 0.0f;
 
     // Give the image a quick bloom/shrink pulse over the short flash.
     F32 life = 1.0f - muzzle_flash_timer / 0.20f;
