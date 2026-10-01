@@ -17,54 +17,60 @@ static RwRaster* MiniMervCreateInvertedRaster(RwRaster* source)
         return NULL;
     }
 
-    RwRaster* inverted = RwRasterCreate(source->width, source->height, 32,
-                                        rwRASTERTYPETEXTURE | rwRASTERFORMAT8888);
-    if (inverted == NULL)
+    // Let RenderWare/librw convert the source texture into a known 32-bit
+    // RwImage layout before touching its pixels. The source raster may not
+    // itself be a simple 32-bit RGBA buffer.
+    RwImage* image = RwImageCreate(source->width, source->height, 32);
+    if (image == NULL || RwImageAllocatePixels(image) == NULL ||
+        RwImageSetFromRaster(image, source) == NULL)
     {
+        if (image != NULL)
+        {
+            RwImageDestroy(image);
+        }
         return NULL;
     }
 
-    RwUInt8* src = RwRasterLock(source, 0, rwRASTERLOCKREAD);
-    RwUInt8* dst = RwRasterLock(inverted, 0, rwRASTERLOCKWRITE | rwRASTERLOCKNOFETCH);
-    if (src == NULL || dst == NULL)
+    // RGB complement: red -> cyan/blue. Alpha is deliberately preserved.
+    // Because this is a 32-bit RwImage, the first three bytes are colour
+    // channels regardless of their platform-specific channel ordering.
+    for (S32 y = 0; y < image->height; ++y)
     {
-        if (src != NULL)
+        RwUInt8* row = image->cpPixels + (size_t)y * image->stride;
+
+        for (S32 x = 0; x < image->width; ++x)
         {
-            RwRasterUnlock(source);
+            RwUInt8* pixel = row + x * 4;
+            pixel[0] = 255 - pixel[0];
+            pixel[1] = 255 - pixel[1];
+            pixel[2] = 255 - pixel[2];
         }
-        if (dst != NULL)
-        {
-            RwRasterUnlock(inverted);
-        }
-        RwRasterDestroy(inverted);
+    }
+
+    RwInt32 width = image->width;
+    RwInt32 height = image->height;
+    RwInt32 depth = 0;
+    RwInt32 format = 0;
+
+    if (RwImageFindRasterFormat(image, rwRASTERTYPETEXTURE,
+                                &width, &height, &depth, &format) == NULL)
+    {
+        RwImageDestroy(image);
         return NULL;
     }
 
-    const S32 width = source->width;
-    const S32 height = source->height;
-    const S32 src_stride = source->stride;
-    const S32 dst_stride = inverted->stride;
-
-    // Keep alpha/shape intact, but complement all three colour channels.
-    // This turns the red Xbox muzzle-flash texture into its cyan/blue
-    // complement without relying on vertex-colour modulation.
-    for (S32 y = 0; y < height; ++y)
+    RwRaster* inverted = RwRasterCreate(width, height, depth, format);
+    if (inverted == NULL || RwRasterSetFromImage(inverted, image) == NULL)
     {
-        RwUInt8* src_row = src + (size_t)y * src_stride;
-        RwUInt8* dst_row = dst + (size_t)y * dst_stride;
-
-        for (S32 x = 0; x < width; ++x)
+        if (inverted != NULL)
         {
-            const S32 p = x * 4;
-            dst_row[p + 0] = 255 - src_row[p + 0];
-            dst_row[p + 1] = 255 - src_row[p + 1];
-            dst_row[p + 2] = 255 - src_row[p + 2];
-            dst_row[p + 3] = src_row[p + 3];
+            RwRasterDestroy(inverted);
         }
+        RwImageDestroy(image);
+        return NULL;
     }
 
-    RwRasterUnlock(source);
-    RwRasterUnlock(inverted);
+    RwImageDestroy(image);
     return inverted;
 }
 
