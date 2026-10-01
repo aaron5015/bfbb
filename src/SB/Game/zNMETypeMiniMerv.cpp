@@ -299,9 +299,8 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 pos;
     GetMuzzlePos(&pos);
 
-    // Diagnostic: use the same simple camera-facing quad and render-state
-    // setup used by the working Buddy image renderer.
     RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
+    RwIm3DVertex quad[4];
 
     F32 rad = 1.0f;
     F32 left_x = pos.x - camera_matrix->right.x * rad;
@@ -310,12 +309,10 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     F32 right_x = pos.x + camera_matrix->right.x * rad;
     F32 right_y = pos.y + camera_matrix->right.y * rad;
     F32 right_z = pos.z + camera_matrix->right.z * rad;
-
     F32 top_x = camera_matrix->up.x * rad;
     F32 top_y = camera_matrix->up.y * rad;
     F32 top_z = camera_matrix->up.z * rad;
 
-    RwIm3DVertex quad[4];
     RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
     RwIm3DVertexSetRGBA(&quad[0], 255, 255, 255, 255);
     RwIm3DVertexSetUV(&quad[0], 0.0f, 1.0f);
@@ -332,20 +329,17 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwIm3DVertexSetRGBA(&quad[3], 255, 255, 255, 255);
     RwIm3DVertexSetUV(&quad[3], 1.0f, 0.0f);
 
-    zRenderState(SDRS_NPCVisual);
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)muzzle_flash_raster);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-    RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)rwCULLMODECULLNONE);
 
     if (RwIm3DTransform(quad, 4, NULL,
                         rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
     {
         RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
-        RwIm3DEnd();
     }
 }
 
