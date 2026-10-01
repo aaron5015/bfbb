@@ -26,8 +26,6 @@ struct zNMEMiniMerv : zNMEStandard
     U8 zap_fired;
     U8 pad[2];
     xLaserBoltEmitter warning_beam;
-    F32 bone_debug_timer;
-    S32 bone_debug_index;
 
     zNMEMiniMerv(S32 myType);
 
