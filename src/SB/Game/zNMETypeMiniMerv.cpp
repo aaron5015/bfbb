@@ -4,8 +4,74 @@
 #include "zGlobals.h"
 #include "zMovePoint.h"
 #include <math.h>
+#include <stdio.h>
+#include <rphanim.h>
 
 static const U32 MINI_MERV_MUZZLE_BONE = 26;
+
+static RwFrame* MiniMervFindHAnim(RwFrame* frame, void* data)
+{
+    if (frame == NULL)
+    {
+        return NULL;
+    }
+
+    RpHAnimHierarchy** found = (RpHAnimHierarchy**)data;
+    RpHAnimHierarchy* hierarchy = RpHAnimFrameGetHierarchy(frame);
+
+    if (hierarchy != NULL)
+    {
+        *found = hierarchy;
+        return frame;
+    }
+
+    RwFrameForAllChildren(frame, MiniMervFindHAnim, data);
+    return frame;
+}
+
+static void MiniMervDumpBones(xModelInstance* model)
+{
+    if (model == NULL || model->Data == NULL)
+    {
+        printf("[MiniMervBoneDump] no model data\\n");
+        return;
+    }
+
+    RpAtomic* atomic = model->Data;
+    RpHAnimHierarchy* hierarchy = NULL;
+    RwFrame* root = (RwFrame*)atomic->object.object.parent;
+
+    MiniMervFindHAnim(root, &hierarchy);
+
+    if (hierarchy == NULL)
+    {
+        printf("[MiniMervBoneDump] no HAnim hierarchy\\n");
+        return;
+    }
+
+    printf("[MiniMervBoneDump] numNodes=%d\\n", hierarchy->numNodes);
+
+    for (S32 i = 0; i < hierarchy->numNodes; ++i)
+    {
+        const RpHAnimNodeInfo& node = hierarchy->pNodeInfo[i];
+        xVec3 pos = xModelGetBoneLocation(*model, (U32)i);
+
+        printf("[MiniMervBoneDump] slot=%d nodeID=%d nodeIndex=%d flags=0x%08X "
+               "pos=(%.3f, %.3f, %.3f)",
+               i, node.nodeID, node.nodeIndex, (U32)node.flags,
+               pos.x, pos.y, pos.z);
+
+        if (node.nodeIndex >= 0 && node.nodeIndex < hierarchy->numNodes &&
+            node.nodeIndex != i)
+        {
+            xVec3 mapped = xModelGetBoneLocation(*model, (U32)node.nodeIndex);
+            printf(" mappedPos=(%.3f, %.3f, %.3f)",
+                   mapped.x, mapped.y, mapped.z);
+        }
+
+        printf("\\n");
+    }
+}
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -143,6 +209,13 @@ bool zNMEMiniMerv::TargetInDangerRange() const
 
 void zNMEMiniMerv::FireWarningBeam()
 {
+    static bool dumped_bones = false;
+    if (!dumped_bones)
+    {
+        MiniMervDumpBones(model);
+        dumped_bones = true;
+    }
+
     xVec3 start = *xEntGetPos((xEnt*)this);
 
     if (model != NULL && MINI_MERV_MUZZLE_BONE < model->BoneCount)
