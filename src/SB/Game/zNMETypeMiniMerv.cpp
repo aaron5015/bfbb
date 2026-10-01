@@ -4,156 +4,8 @@
 #include "zGlobals.h"
 #include "zMovePoint.h"
 #include <math.h>
-#include <stdio.h>
-#include <rphanim.h>
-#include <rpskin.h>
-#include "iAnim.h"
 
-static const U32 MINI_MERV_MUZZLE_BONE = 26;
-
-static RwFrame* MiniMervFindHAnim(RwFrame* frame, void* data)
-{
-    if (frame == NULL)
-    {
-        return NULL;
-    }
-
-    RpHAnimHierarchy** found = (RpHAnimHierarchy**)data;
-    RpHAnimHierarchy* hierarchy = RpHAnimFrameGetHierarchy(frame);
-
-    if (hierarchy != NULL)
-    {
-        *found = hierarchy;
-        return frame;
-    }
-
-    RwFrameForAllChildren(frame, MiniMervFindHAnim, data);
-    return frame;
-}
-
-static void MiniMervDumpBones(xModelInstance* model)
-{
-    if (model == NULL || model->Data == NULL)
-    {
-        printf("[MiniMervBoneDump] no model data\\n");
-        return;
-    }
-
-    RpAtomic* atomic = model->Data;
-    RpHAnimHierarchy* hierarchy = NULL;
-    RwFrame* root = (RwFrame*)atomic->object.object.parent;
-
-    MiniMervFindHAnim(root, &hierarchy);
-
-    if (hierarchy == NULL)
-    {
-        printf("[MiniMervBoneDump] no HAnim hierarchy\\n");
-        return;
-    }
-
-    printf("[MiniMervBoneDump] modelBoneCount=%u boneIndex=%u boneRemap=%s\\n",
-           (U32)model->BoneCount, (U32)model->BoneIndex,
-           model->BoneRemap != NULL ? "yes" : "no");
-
-    RpSkin* skin = RpSkinGeometryGetSkin(atomic->geometry);
-    printf("[MiniMervBoneDump] skinBoneCount=%u\\n",
-           skin != NULL ? (U32)RpSkinGetNumBones(skin) : 0u);
-
-    if (model->BoneRemap != NULL)
-    {
-        printf("[MiniMervBoneDump] boneRemap:");
-        for (S32 i = 0; i < (S32)model->BoneCount; ++i)
-        {
-            printf(" %d", (S32)model->BoneRemap[i]);
-        }
-        printf("\\n");
-    }
-
-    if (model->Anim != NULL && model->Anim->NumSingle > 0 && model->Anim->Single != NULL &&
-        model->Anim->Single[0].State != NULL && model->Anim->Single[0].State->Data != NULL)
-    {
-        xAnimFile* file = model->Anim->Single[0].State->Data;
-        void* raw = file->RawData != NULL ? file->RawData[0] : NULL;
-        printf("[MiniMervBoneDump] animState=%s animFile=%s xAnimBoneCount=%u rawBoneCount=%u\\n",
-               model->Anim->Single[0].State->Name != NULL ? model->Anim->Single[0].State->Name : "(null)",
-               file->Name != NULL ? file->Name : "(null)",
-               (U32)file->BoneCount,
-               raw != NULL ? iAnimBoneCount(raw) : 0u);
-    }
-    else
-    {
-        printf("[MiniMervBoneDump] no active animation data\\n");
-    }
-
-    printf("[MiniMervBoneDump] numNodes=%d\\n", hierarchy->numNodes);
-
-    for (S32 i = 0; i < hierarchy->numNodes; ++i)
-    {
-        const RpHAnimNodeInfo& node = hierarchy->pNodeInfo[i];
-        xVec3 pos = xModelGetBoneLocation(*model, (U32)i);
-
-        printf("[MiniMervBoneDump] slot=%d nodeID=%d nodeIndex=%d flags=0x%08X "
-               "pos=(%.3f, %.3f, %.3f)",
-               i, node.nodeID, node.nodeIndex, (U32)node.flags,
-               pos.x, pos.y, pos.z);
-
-        if (node.nodeIndex >= 0 && node.nodeIndex < hierarchy->numNodes &&
-            node.nodeIndex != i)
-        {
-            xVec3 mapped = xModelGetBoneLocation(*model, (U32)node.nodeIndex);
-            printf(" mappedPos=(%.3f, %.3f, %.3f)",
-                   mapped.x, mapped.y, mapped.z);
-        }
-
-        printf("\\n");
-    }
-}
-
-
-
-static void MiniMervRenderBoneAxis(xModelInstance* model, S32 bone)
-{
-    if (model == NULL || bone < 0 || bone >= 28)
-        return;
-
-    xMat4x3 mat;
-    xModelGetBoneMat(mat, *model, (size_t)bone);
-
-    const F32 len = 0.9f;
-    RwIm3DVertex verts[6];
-
-    const xVec3 points[6] =
-    {
-        mat.pos,
-        { mat.pos.x + mat.right.x * len, mat.pos.y + mat.right.y * len, mat.pos.z + mat.right.z * len },
-        mat.pos,
-        { mat.pos.x + mat.up.x * len, mat.pos.y + mat.up.y * len, mat.pos.z + mat.up.z * len },
-        mat.pos,
-        { mat.pos.x + mat.at.x * len, mat.pos.y + mat.at.y * len, mat.pos.z + mat.at.z * len }
-    };
-
-    const U8 colors[3][3] =
-    {
-        {255, 60, 60},
-        {60, 255, 60},
-        {60, 120, 255}
-    };
-
-    for (S32 i = 0; i < 6; ++i)
-    {
-        RwIm3DVertexSetPos(&verts[i], points[i].x, points[i].y, points[i].z);
-        S32 axis = i / 2;
-        RwIm3DVertexSetRGBA(&verts[i], colors[axis][0], colors[axis][1], colors[axis][2], 255);
-    }
-
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
-    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
-    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
-
-    if (RwIm3DTransform(verts, 6, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
-        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
-}
+static const xVec3 MINI_MERV_MUZZLE_VERTEX = { 0.017167f, -0.76482f, 0.83404f };
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -208,9 +60,6 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     warning_active = 0;
     zap_fired = 0;
     pad[0] = pad[1] = 0;
-
-    bone_debug_timer = 0.0f;
-    bone_debug_index = 0;
 
     warning_beam.init(8, "Mini Merv warning");
     warning_beam.set_texture("plankton_laser_bolt");
@@ -294,18 +143,21 @@ bool zNMEMiniMerv::TargetInDangerRange() const
 
 void zNMEMiniMerv::FireWarningBeam()
 {
-    static bool dumped_bones = false;
-    if (!dumped_bones)
-    {
-        MiniMervDumpBones(model);
-        dumped_bones = true;
-    }
-
     xVec3 start = *xEntGetPos((xEnt*)this);
 
-    if (model != NULL && MINI_MERV_MUZZLE_BONE < model->BoneCount)
+    // Mini Merv's muzzle vertex is stored in model-local space.
+    if (frame != NULL)
     {
-        start = xModelGetBoneLocation(*model, MINI_MERV_MUZZLE_BONE);
+        start = frame->mat.pos;
+        start.x += frame->mat.right.x * MINI_MERV_MUZZLE_VERTEX.x;
+        start.x += frame->mat.up.x * MINI_MERV_MUZZLE_VERTEX.y;
+        start.x += frame->mat.at.x * MINI_MERV_MUZZLE_VERTEX.z;
+        start.y += frame->mat.right.y * MINI_MERV_MUZZLE_VERTEX.x;
+        start.y += frame->mat.up.y * MINI_MERV_MUZZLE_VERTEX.y;
+        start.y += frame->mat.at.y * MINI_MERV_MUZZLE_VERTEX.z;
+        start.z += frame->mat.right.z * MINI_MERV_MUZZLE_VERTEX.x;
+        start.z += frame->mat.up.z * MINI_MERV_MUZZLE_VERTEX.y;
+        start.z += frame->mat.at.z * MINI_MERV_MUZZLE_VERTEX.z;
     }
     xVec3 target = *xEntGetPos(&globals.player.ent);
     xVec3 dir;
@@ -402,23 +254,11 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
     }
     warning_beam.update(dt);
 
-    bone_debug_timer += dt;
-    if (bone_debug_timer >= 1.0f)
-    {
-        bone_debug_timer -= 1.0f;
-        bone_debug_index = (bone_debug_index + 1) % 28;
-        printf("[MiniMervBoneAxis] bone=%d\n", bone_debug_index);
-    }
-
-    // Temporary bone-axis diagnostic: keep RenderExtra active even when
-    // Mini Merv is outside its attack/detection range.
-    flg_xtrarend |= 0x1;
 }
 
 void zNMEMiniMerv::RenderExtra()
 {
     warning_beam.render();
-    MiniMervRenderBoneAxis(model, bone_debug_index);
 }
 
 void zNMEMiniMerv::SelfDestroy()
