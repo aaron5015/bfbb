@@ -28,6 +28,12 @@ struct zNMEMiniMerv : zNMEStandard
     U8 zap_visible;
     U8 pad[1];
     F32 zap_visual_timer;
+    F32 muzzle_flash_timer;
+    F32 muzzle_flash_frame_timer;
+    F32 muzzle_flash_angle;
+    F32 muzzle_flash_scale;
+    S32 muzzle_flash_frame;
+    RwRaster* muzzle_flash_raster;
     xLaserBoltEmitter warning_beam;
     NPCLaser zap_beam;
 
@@ -43,6 +49,8 @@ struct zNMEMiniMerv : zNMEStandard
     void FireWarningBeam();
     void FireZap();
     void UpdateZapBeam();
+    void UpdateMuzzleFlash(F32 dt);
+    void RenderMuzzleFlash();
     void GetMuzzlePos(xVec3* pos) const;
     bool TargetInFocusRange() const;
     bool TargetInDangerRange() const;
