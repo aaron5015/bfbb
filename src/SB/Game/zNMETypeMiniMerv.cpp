@@ -286,23 +286,26 @@ void zNMEMiniMerv::RenderMuzzleFlash()
         return;
     }
 
-    if (muzzle_flash_raster == NULL)
-    {
-        muzzle_flash_raster = NPCC_FindRWRaster("fx_solid");
-    }
-
-    if (muzzle_flash_raster == NULL)
-    {
-        return;
-    }
-
     xVec3 pos;
     GetMuzzlePos(&pos);
+
+    // Diagnostic only: put an untextured, enormous quad one unit in front
+    // of the muzzle and disable depth testing. This isolates geometry from
+    // texture/raster/depth issues.
+    xVec3 target = *xEntGetPos(&globals.player.ent);
+    xVec3 dir;
+    xVec3Sub(&dir, &target, &pos);
+    F32 len2 = xVec3Length2(&dir);
+    if (len2 > 0.0001f)
+    {
+        xVec3SMul(&dir, &dir, 1.0f / sqrtf(len2));
+        pos += dir * 1.0f;
+    }
 
     RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
     RwIm3DVertex quad[4];
 
-    F32 rad = 1.0f;
+    F32 rad = 1.5f;
     F32 left_x = pos.x - camera_matrix->right.x * rad;
     F32 left_y = pos.y - camera_matrix->right.y * rad;
     F32 left_z = pos.z - camera_matrix->right.z * rad;
@@ -314,30 +317,22 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     F32 top_z = camera_matrix->up.z * rad;
 
     RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
-    RwIm3DVertexSetRGBA(&quad[0], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[0], 0.0f, 1.0f);
-
+    RwIm3DVertexSetRGBA(&quad[0], 255, 0, 255, 255);
     RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
-    RwIm3DVertexSetRGBA(&quad[1], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[1], 0.0f, 0.0f);
-
+    RwIm3DVertexSetRGBA(&quad[1], 255, 0, 255, 255);
     RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
-    RwIm3DVertexSetRGBA(&quad[2], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[2], 1.0f, 1.0f);
-
+    RwIm3DVertexSetRGBA(&quad[2], 255, 0, 255, 255);
     RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
-    RwIm3DVertexSetRGBA(&quad[3], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[3], 1.0f, 0.0f);
+    RwIm3DVertexSetRGBA(&quad[3], 255, 0, 255, 255);
 
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
-    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-    if (RwIm3DTransform(quad, 4, NULL,
-                        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
+    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
     {
         RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
     }
