@@ -374,10 +374,9 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
         printf("[MiniMervBoneAxis] bone=%d\n", bone_debug_index);
     }
 
-    if (warning_beam.visible())
-    {
-        flg_xtrarend |= 0x1;
-    }
+    // Temporary bone-axis diagnostic: keep RenderExtra active even when
+    // Mini Merv is outside its attack/detection range.
+    flg_xtrarend |= 0x1;
 }
 
 void zNMEMiniMerv::RenderExtra()
