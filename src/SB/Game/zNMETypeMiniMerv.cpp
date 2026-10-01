@@ -102,7 +102,7 @@ void zNMEMiniMerv::Setup()
 
     if (muzzle_flash_raster == NULL)
     {
-        muzzle_flash_raster = NPCC_FindRWRaster("fx_beam_muzzle_flash");
+        muzzle_flash_raster = NPCC_FindRWRaster("fx_solid");
     }
 
     if (nav_curr == NULL && npcass != NULL && npcass->movepoint != 0)
@@ -272,7 +272,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     // the initial visual test.
     if (muzzle_flash_raster == NULL)
     {
-        muzzle_flash_raster = NPCC_FindRWRaster("fx_beam_muzzle_flash");
+        muzzle_flash_raster = NPCC_FindRWRaster("fx_solid");
     }
 
     if (muzzle_flash_raster == NULL)
