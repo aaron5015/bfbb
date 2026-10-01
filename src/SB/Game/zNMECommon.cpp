@@ -3,142 +3,9 @@
 #include "xFactory.h"
 #include "xMath.h"
 #include "xDebug.h"
-#include <rphanim.h>
 #include <stdint.h>
-#include <stdio.h>
 #include "zNPCTypes.h"
 #include "zNMETypeMiniMerv.h"
-
-static void NME_DumpFrameTree(RwFrame* frame, S32 depth, FILE* out)
-{
-    if (frame == NULL || out == NULL || depth > 32) return;
-    RwMatrix* ltm = RwFrameGetLTM(frame);
-    fprintf(out, "[frame] depth=%d frame=%p ltm=(%.3f, %.3f, %.3f)\n", depth, (void*)frame,
-            ltm->pos.x, ltm->pos.y, ltm->pos.z);
-    struct Args { S32 depth; FILE* out; } args = { depth + 1, out };
-    RwFrameForAllChildren(frame, [](RwFrame* child, void* data) -> RwFrame* {
-        Args* args = (Args*)data;
-        NME_DumpFrameTree(child, args->depth, args->out);
-        return child;
-    }, &args);
-}
-
-static void NME_DumpAnimSweep(xModelInstance* model)
-{
-    if (model == NULL || model->Mat == NULL || model->BoneCount == 0 || model->Anim == NULL)
-    {
-        return;
-    }
-
-    static FILE* out = NULL;
-    static S32 frame = 0;
-    static F32 minY[64], maxY[64], minX[64], maxX[64], minZ[64], maxZ[64];
-    static U8 initialized = 0;
-    const S32 count = MIN((S32)model->BoneCount, 63);
-
-    if (!initialized)
-    {
-        out = fopen("minimerv_anim_sweep.txt", "w");
-        if (out == NULL) return;
-        for (S32 i = 0; i < 64; ++i)
-        {
-            minX[i] = minY[i] = minZ[i] = 1000000.0f;
-            maxX[i] = maxY[i] = maxZ[i] = -1000000.0f;
-        }
-        fprintf(out, "[sweep] Evaluated Mini Merv animation matrices\\n");
-        fprintf(out, "[sweep] Positions are Mat[1..BoneCount] in model-local coordinates.\\n");
-        fprintf(out, "[sweep] Candidate muzzle slot should have a low Y and visible X/Z sway.\\n");
-        initialized = 1;
-    }
-
-    // This is the same evaluation path used by the renderer. At this point we
-    // want the real animation pose, not the zero pFrame pointers in HAnim data.
-    xModelEval(model);
-
-    F32 animTime = 0.0f;
-    if (model->Anim->Single != NULL)
-    {
-        animTime = model->Anim->Single->Time;
-    }
-
-    fprintf(out, "[frame] %d time=%.4f", frame, animTime);
-    for (S32 i = 1; i <= count; ++i)
-    {
-        const RwMatrix& m = model->Mat[i];
-        minX[i] = MIN(minX[i], m.pos.x); maxX[i] = MAX(maxX[i], m.pos.x);
-        minY[i] = MIN(minY[i], m.pos.y); maxY[i] = MAX(maxY[i], m.pos.y);
-        minZ[i] = MIN(minZ[i], m.pos.z); maxZ[i] = MAX(maxZ[i], m.pos.z);
-        fprintf(out, " %d=(%.3f,%.3f,%.3f)", i, m.pos.x, m.pos.y, m.pos.z);
-    }
-    fprintf(out, "\\n");
-    fflush(out);
-
-    ++frame;
-    if (frame >= 240)
-    {
-        fprintf(out, "\\n[summary] 240 evaluated frames\\n");
-        for (S32 i = 1; i <= count; ++i)
-        {
-            fprintf(out, "[slot] %d X=(%.3f..%.3f) Y=(%.3f..%.3f) Z=(%.3f..%.3f)\\n",
-                    i, minX[i], maxX[i], minY[i], maxY[i], minZ[i], maxZ[i]);
-        }
-        fclose(out);
-        out = NULL;
-        frame = 0;
-        initialized = 0;
-    }
-}
-
-static void NME_DumpHAnim(xModelInstance* model)
-{
-    if (model == NULL || model->Data == NULL)
-    {
-        return;
-    }
-
-    FILE* out = fopen("minimerv_hanim_dump.txt", "w");
-    if (out == NULL)
-    {
-        return;
-    }
-
-    RwFrame* atomicFrame = RpAtomicGetFrame(model->Data);
-    if (atomicFrame == NULL)
-    {
-        fprintf(out, "[HAnim] atomic has no frame\\n");
-        fclose(out);
-        return;
-    }
-
-    fprintf(out, "[HAnim] atomic=%p frame=%p\\n", (void*)model->Data, (void*)atomicFrame);
-
-    RpHAnimHierarchy* hierarchy = RpHAnimFrameGetHierarchy(atomicFrame);
-    if (hierarchy == NULL)
-    {
-        fprintf(out, "[HAnim] hierarchy not on atomic frame; frame tree follows\\n");
-        NME_DumpFrameTree(atomicFrame, 0, out);
-        fclose(out);
-        return;
-    }
-
-    fprintf(out, "[HAnim] hierarchy=%p nodes=%d\\n", (void*)hierarchy, hierarchy->numNodes);
-
-    for (S32 i = 0; i < hierarchy->numNodes; ++i)
-    {
-        const RpHAnimNodeInfo& node = hierarchy->pNodeInfo[i];
-        RwMatrix* ltm = node.pFrame != NULL ? RwFrameGetLTM(node.pFrame) : NULL;
-
-        fprintf(out, "[node] slot=%d nodeID=%d nodeIndex=%d frame=%p ltm=(%.3f, %.3f, %.3f)\\n",
-                i, node.nodeID, node.nodeIndex, (void*)node.pFrame,
-                ltm != NULL ? ltm->pos.x : 0.0f,
-                ltm != NULL ? ltm->pos.y : 0.0f,
-                ltm != NULL ? ltm->pos.z : 0.0f);
-    }
-
-    fprintf(out, "[model] BoneCount=%u BoneIndex=%u Flags=%04X BoneRemap=%p Mat=%p\\n",                (unsigned)model->BoneCount, (unsigned)model->BoneIndex, (unsigned)model->Flags,                (void*)model->BoneRemap, (void*)model->Mat);    if (model->BoneRemap != NULL)    {        fprintf(out, "[model] BoneRemap:");        for (S32 i = 0; i < model->BoneCount; ++i)        {            fprintf(out, " %d->%u", i + 1, (unsigned)model->BoneRemap[i]);        }        fprintf(out, "\\n");    }    if (model->Mat != NULL)    {        fprintf(out, "[mat] xModelInstance::Mat entries (0=root, 1..BoneCount=bones)\\n");        for (S32 i = 0; i <= model->BoneCount; ++i)        {            const RwMatrix& m = model->Mat[i];            fprintf(out, "[mat] slot=%d pos=(%.3f, %.3f, %.3f) right=(%.3f, %.3f, %.3f) up=(%.3f, %.3f, %.3f) at=(%.3f, %.3f, %.3f)\\n",                    i, m.pos.x, m.pos.y, m.pos.z,                    m.right.x, m.right.y, m.right.z,                    m.up.x, m.up.y, m.up.z,                    m.at.x, m.at.y, m.at.z);        }    }    fprintf(out, "[frames] complete RenderWare frame tree follows\\n");
-    NME_DumpFrameTree(RwFrameGetRoot(atomicFrame), 0, out);
-    fclose(out);
-}
 
 static xFactoryInst* NMEGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -340,8 +207,6 @@ void zNMECommon::Setup()
 
     SelfSetup();
 
-    // Temporary Mini Merv diagnostic. The actual model can be more reliable here
-    // than at construction time; do not gate this on the NPC type while diagnosing.
 }
 
 void zNMECommon::SelfSetup()
@@ -393,21 +258,6 @@ void zNMECommon::NewTime(xScene* xscn, F32 dt)
 void zNMECommon::Process(xScene* xscn, F32 dt)
 {
     xNPCBasic::Process(xscn, dt);
-
-    // Temporary diagnostic: dump once after the model is known to exist.
-    // runtimeData.flags bit 31 is otherwise unused by this experimental NME code.
-    if (model != NULL && !(runtimeData.flags & 0x80000000))
-    {
-        runtimeData.flags |= 0x80000000;
-        xprintf("[NME] diagnostic reached: npcType=%d model=%p atomic=%p\\n", myNPCType,
-                (void*)model, (void*)model->Data);
-        NME_DumpHAnim(model);
-    }
-
-    if (model != NULL && model->Anim != NULL && model->Mat != NULL)
-    {
-        NME_DumpAnimSweep(model);
-    }
 
     if (psy_self != NULL)
     {
