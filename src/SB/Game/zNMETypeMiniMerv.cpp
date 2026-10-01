@@ -302,7 +302,8 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
     RwIm3DVertex quad[4];
 
-    F32 rad = 1.5f;
+    // Intentionally absurd size for the texture visibility test.
+    F32 rad = 3.0f;
     F32 left_x = pos.x - camera_matrix->right.x * rad;
     F32 left_y = pos.y - camera_matrix->right.y * rad;
     F32 left_z = pos.z - camera_matrix->right.z * rad;
@@ -330,7 +331,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwIm3DVertexSetUV(&quad[3], 1.0f, 0.0f);
 
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER,
-                     (void*)NPCC_FindRWRaster("fx_solid"));
+                     (void*)NPCC_FindRWRaster("fx_beam_muzzle_flash"));
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
