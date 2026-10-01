@@ -286,60 +286,76 @@ void zNMEMiniMerv::RenderMuzzleFlash()
         return;
     }
 
-    xVec3 pos;
-    GetMuzzlePos(&pos);
-
-    xVec3 target = *xEntGetPos(&globals.player.ent);
-    xVec3 dir;
-    xVec3Sub(&dir, &target, &pos);
-    F32 len2 = xVec3Length2(&dir);
-    if (len2 > 0.0001f)
-    {
-        xVec3SMul(&dir, &dir, 1.0f / sqrtf(len2));
-        pos += dir * 1.0f;
-    }
+    xVec3 center;
+    GetMuzzlePos(&center);
 
     RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
-    RwIm3DVertex quad[4];
+    RwIm3DVertex quad[8];
 
-    // Intentionally absurd size for the texture visibility test.
     F32 rad = 3.0f;
-    F32 left_x = pos.x - camera_matrix->right.x * rad;
-    F32 left_y = pos.y - camera_matrix->right.y * rad;
-    F32 left_z = pos.z - camera_matrix->right.z * rad;
-    F32 right_x = pos.x + camera_matrix->right.x * rad;
-    F32 right_y = pos.y + camera_matrix->right.y * rad;
-    F32 right_z = pos.z + camera_matrix->right.z * rad;
-    F32 top_x = camera_matrix->up.x * rad;
-    F32 top_y = camera_matrix->up.y * rad;
-    F32 top_z = camera_matrix->up.z * rad;
 
-    RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
-    RwIm3DVertexSetRGBA(&quad[0], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[0], 0.0f, 1.0f);
+    // Deliberately offset the two textures so they can be compared directly.
+    xVec3 centers[2] = { center, center };
+    centers[0].x -= camera_matrix->right.x * 3.5f;
+    centers[0].y -= camera_matrix->right.y * 3.5f;
+    centers[0].z -= camera_matrix->right.z * 3.5f;
+    centers[1].x += camera_matrix->right.x * 3.5f;
+    centers[1].y += camera_matrix->right.y * 3.5f;
+    centers[1].z += camera_matrix->right.z * 3.5f;
 
-    RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
-    RwIm3DVertexSetRGBA(&quad[1], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[1], 0.0f, 0.0f);
+    for (S32 j = 0; j < 2; j++)
+    {
+        xVec3& pos = centers[j];
 
-    RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
-    RwIm3DVertexSetRGBA(&quad[2], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[2], 1.0f, 1.0f);
+        F32 left_x = pos.x - camera_matrix->right.x * rad;
+        F32 left_y = pos.y - camera_matrix->right.y * rad;
+        F32 left_z = pos.z - camera_matrix->right.z * rad;
+        F32 right_x = pos.x + camera_matrix->right.x * rad;
+        F32 right_y = pos.y + camera_matrix->right.y * rad;
+        F32 right_z = pos.z + camera_matrix->right.z * rad;
+        F32 top_x = camera_matrix->up.x * rad;
+        F32 top_y = camera_matrix->up.y * rad;
+        F32 top_z = camera_matrix->up.z * rad;
 
-    RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
-    RwIm3DVertexSetRGBA(&quad[3], 255, 255, 255, 255);
-    RwIm3DVertexSetUV(&quad[3], 1.0f, 0.0f);
+        RwIm3DVertex* v = &quad[j * 4];
 
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER,
-                     (void*)NPCC_FindRWRaster("fx_beam_muzzle_flash"));
+        RwIm3DVertexSetPos(&v[0], left_x, left_y, left_z);
+        RwIm3DVertexSetRGBA(&v[0], 255, 255, 255, 255);
+        RwIm3DVertexSetUV(&v[0], 0.0f, 1.0f);
+
+        RwIm3DVertexSetPos(&v[1], left_x + top_x, left_y + top_y, left_z + top_z);
+        RwIm3DVertexSetRGBA(&v[1], 255, 255, 255, 255);
+        RwIm3DVertexSetUV(&v[1], 0.0f, 0.0f);
+
+        RwIm3DVertexSetPos(&v[2], right_x, right_y, right_z);
+        RwIm3DVertexSetRGBA(&v[2], 255, 255, 255, 255);
+        RwIm3DVertexSetUV(&v[2], 1.0f, 1.0f);
+
+        RwIm3DVertexSetPos(&v[3], right_x + top_x, right_y + top_y, right_z + top_z);
+        RwIm3DVertexSetRGBA(&v[3], 255, 255, 255, 255);
+        RwIm3DVertexSetUV(&v[3], 1.0f, 0.0f);
+    }
+
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-    if (RwIm3DTransform(quad, 4, NULL,
-                        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
+    RwRaster* rasters[2] =
     {
-        RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        NPCC_FindRWRaster("fx_solid"),
+        NPCC_FindRWRaster("fx_beam_muzzle_flash")
+    };
+
+    for (S32 j = 0; j < 2; j++)
+    {
+        RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)rasters[j]);
+
+        RwIm3DVertex* v = &quad[j * 4];
+        if (RwIm3DTransform(v, 4, NULL,
+                            rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
+        {
+            RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        }
     }
 }
 
