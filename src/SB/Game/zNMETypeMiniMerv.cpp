@@ -5,7 +5,9 @@
 #include "zMovePoint.h"
 #include <math.h>
 
-static const S32 MINI_MERV_MUZZLE_BONE = 28;\n\nstatic xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
+static const S32 MINI_MERV_MUZZLE_BONE = 28;
+
+static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
     if (who == zNMEMiniMerv::GOAL_ZAP)
     {
@@ -139,14 +141,43 @@ bool zNMEMiniMerv::TargetInDangerRange() const
     return xVec3Dist2(npc_pos, plyr_pos) <= danger_radius * danger_radius;
 }
 
-void zNMEMiniMerv::FireWarningBeam()\n{\n    xVec3 start = *xEntGetPos((xEnt*)this);\n\n    // Mat[28] is the evaluated animated slot that tracks the lowest, swaying\n    // muzzle. Mat[] positions are model-local, so transform it by the entity frame.\n    if (frame != NULL && model != NULL && model->Mat != NULL && model->BoneCount >= MINI_MERV_MUZZLE_BONE)\n    {\n        const xVec3& local = *(const xVec3*)&model->Mat[MINI_MERV_MUZZLE_BONE].pos;\n        start = frame->mat.pos;\n        start.x += frame->mat.right.x * local.x + frame->mat.up.x * local.y + frame->mat.at.x * local.z;\n        start.y += frame->mat.right.y * local.x + frame->mat.up.y * local.y + frame->mat.at.y * local.z;\n        start.z += frame->mat.right.z * local.x + frame->mat.up.z * local.y + frame->mat.at.z * local.z;\n    }\n\n    xVec3 target = *xEntGetPos(&globals.player.ent);\n    xVec3 dir;\n    xVec3Sub(&dir, &target, &start);\n\n    F32 len2 = xVec3Length2(&dir);\n    if (len2 <= 0.0001f)\n    {\n        return;\n    }\n\n    xVec3SMul(&dir, &dir, 1.0f / sqrtf(len2));\n    warning_beam.emit(start, dir);\n}include "zNMETypeMiniMerv.h"
+void zNMEMiniMerv::FireWarningBeam()
+{
+    xVec3 start = *xEntGetPos((xEnt*)this);
+
+    // Mat[28] is the evaluated animated slot that tracks the lowest, swaying
+    // muzzle. Mat[] positions are model-local, so transform it by the entity frame.
+    if (frame != NULL && model != NULL && model->Mat != NULL && model->BoneCount >= MINI_MERV_MUZZLE_BONE)
+    {
+        const xVec3& local = *(const xVec3*)&model->Mat[MINI_MERV_MUZZLE_BONE].pos;
+        start = frame->mat.pos;
+        start.x += frame->mat.right.x * local.x + frame->mat.up.x * local.y + frame->mat.at.x * local.z;
+        start.y += frame->mat.right.y * local.x + frame->mat.up.y * local.y + frame->mat.at.y * local.z;
+        start.z += frame->mat.right.z * local.x + frame->mat.up.z * local.y + frame->mat.at.z * local.z;
+    }
+
+    xVec3 target = *xEntGetPos(&globals.player.ent);
+    xVec3 dir;
+    xVec3Sub(&dir, &target, &start);
+
+    F32 len2 = xVec3Length2(&dir);
+    if (len2 <= 0.0001f)
+    {
+        return;
+    }
+
+    xVec3SMul(&dir, &dir, 1.0f / sqrtf(len2));
+    warning_beam.emit(start, dir);
+}include "zNMETypeMiniMerv.h"
 
 #include "zEntPlayer.h"
 #include "zGlobals.h"
 #include "zMovePoint.h"
 #include <math.h>
 
-static const S32 MINI_MERV_MUZZLE_BONE = 28;\n\nstatic xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
+static const S32 MINI_MERV_MUZZLE_BONE = 28;
+
+static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
     if (who == zNMEMiniMerv::GOAL_ZAP)
     {
