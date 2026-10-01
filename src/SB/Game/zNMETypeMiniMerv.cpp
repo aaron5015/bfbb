@@ -101,7 +101,7 @@ static void MiniMervRenderBoneLabels(xModelInstance* model)
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
-    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
     for (S32 bone = 0; bone < 28; ++bone)
@@ -121,8 +121,8 @@ static void MiniMervRenderBoneLabels(xModelInstance* model)
                 if (!segments[digits[d]][s])
                     continue;
 
-                F32 x0 = (segs[s][0] * 0.42f + xoff) * 0.22f;
-                F32 y0 = segs[s][1] * 0.42f * 0.22f;
+                F32 x0 = (segs[s][0] * 0.42f + xoff) * 0.42f;
+                F32 y0 = segs[s][1] * 0.42f * 0.42f;
                 F32 x1 = (segs[s][2] * 0.42f + xoff) * 0.22f;
                 F32 y1 = segs[s][3] * 0.42f * 0.22f;
 
@@ -143,9 +143,9 @@ static void MiniMervRenderBoneLabels(xModelInstance* model)
                 F32 right_y = pos.y + camera_matrix->right.y * (x1 + px) + camera_matrix->up.y * (y1 + py);
                 F32 right_z = pos.z + camera_matrix->right.z * (x1 + px) + camera_matrix->up.z * (y1 + py);
 
-                F32 top_x = camera_matrix->up.x * 0.015f;
-                F32 top_y = camera_matrix->up.y * 0.015f;
-                F32 top_z = camera_matrix->up.z * 0.015f;
+                F32 top_x = camera_matrix->up.x * 0.025f;
+                F32 top_y = camera_matrix->up.y * 0.025f;
+                F32 top_z = camera_matrix->up.z * 0.025f;
 
                 RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
                 RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
