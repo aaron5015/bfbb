@@ -1,4 +1,5 @@
 #include "zNMETypeMiniMerv.h"
+#include <rw.h>
 
 #include "zEntPlayer.h"
 #include "zGlobals.h"
@@ -47,31 +48,13 @@ static RwRaster* MiniMervCreateInvertedRaster(RwRaster* source)
         }
     }
 
-    RwInt32 width = image->width;
-    RwInt32 height = image->height;
-    RwInt32 depth = 0;
-    RwInt32 format = 0;
-
-    if (RwImageFindRasterFormat(image, rwRASTERTYPETEXTURE,
-                                &width, &height, &depth, &format) == NULL)
-    {
-        RwImageDestroy(image);
-        return NULL;
-    }
-
-    RwRaster* inverted = RwRasterCreate(width, height, depth, format);
-    if (inverted == NULL || RwRasterSetFromImage(inverted, image) == NULL)
-    {
-        if (inverted != NULL)
-        {
-            RwRasterDestroy(inverted);
-        }
-        RwImageDestroy(image);
-        return NULL;
-    }
-
+    // The public RenderWare C declarations for FindRasterFormat/SetFromImage
+    // exist, but this PC port does not currently link implementations for them.
+    // Use librw's native conversion here instead of inventing a raster layout.
+    rw::Raster* inverted = rw::Raster::createFromImage(reinterpret_cast<rw::Image*>(image));
     RwImageDestroy(image);
-    return inverted;
+
+    return reinterpret_cast<RwRaster*>(inverted);
 }
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
