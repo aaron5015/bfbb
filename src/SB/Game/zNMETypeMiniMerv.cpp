@@ -78,6 +78,11 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     RwRGBA zap_color = { 80, 220, 255, 255 };
     zap_beam.ColorSet(&zap_color, &zap_color);
 
+    muzzle_debug_beam.Prepare();
+    muzzle_debug_beam.TextureSet(NPCC_FindRWRaster("fx_solid"));
+    muzzle_debug_beam.RadiusSet(0.45f, 0.45f);
+    muzzle_debug_beam.ColorSet(&zap_color, &zap_color);
+
     warning_beam.init(8, "Mini Merv warning");
     warning_beam.set_texture("plankton_laser_bolt");
     warning_beam.cfg.radius = 0.08f;
@@ -232,6 +237,20 @@ void zNMEMiniMerv::UpdateZapBeam()
 
     xVec3 target = *xEntGetPos(&globals.player.ent);
     zap_beam.Render(&start, &target);
+
+    if (muzzle_flash_timer > 0.0f)
+    {
+        xVec3 debug_end = start;
+        xVec3 debug_dir;
+        xVec3Sub(&debug_dir, &target, &start);
+        F32 len2 = xVec3Length2(&debug_dir);
+        if (len2 > 0.0001f)
+        {
+            xVec3SMul(&debug_dir, &debug_dir, 1.0f / sqrtf(len2));
+            debug_end += debug_dir * 0.75f;
+            muzzle_debug_beam.Render(&start, &debug_end);
+        }
+    }
 }
 
 void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
