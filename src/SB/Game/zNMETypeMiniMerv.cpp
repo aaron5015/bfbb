@@ -347,7 +347,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
     up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
 
-    F32 rad = 0.38f * muzzle_flash_scale;
+    F32 rad = 1.0f * muzzle_flash_scale;
 
     xVec3 r = right * rad;
     xVec3 u = up * rad;
