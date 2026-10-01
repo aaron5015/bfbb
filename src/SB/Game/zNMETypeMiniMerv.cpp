@@ -4,6 +4,8 @@
 #include "zGlobals.h"
 #include "zMovePoint.h"
 #include "zNPCTypeRobot.h"
+#include "zRenderState.h"
+#include "xMath.h"
 #include <math.h>
 
 static const S32 MINI_MERV_MUZZLE_BONE = 28;
@@ -63,6 +65,12 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     zap_visible = 0;
     pad[0] = 0;
     zap_visual_timer = 0.0f;
+    muzzle_flash_timer = 0.0f;
+    muzzle_flash_frame_timer = 0.0f;
+    muzzle_flash_angle = 0.0f;
+    muzzle_flash_scale = 1.0f;
+    muzzle_flash_frame = 0;
+    muzzle_flash_raster = NULL;
 
     zap_beam.Prepare();
     zap_beam.TextureSet(NPCC_FindRWRaster("fx_solid"));
@@ -92,6 +100,11 @@ void zNMEMiniMerv::Setup()
 {
     zNMEStandard::Setup();
 
+    if (muzzle_flash_raster == NULL)
+    {
+        muzzle_flash_raster = NPCC_FindRWRaster("fx_beam_muzzle_flash");
+    }
+
     if (nav_curr == NULL && npcass != NULL && npcass->movepoint != 0)
     {
         nav_curr = zMovePoint_From_xAssetID(npcass->movepoint);
@@ -115,6 +128,11 @@ void zNMEMiniMerv::Reset()
     zap_fired = 0;
     zap_visible = 0;
     zap_visual_timer = 0.0f;
+    muzzle_flash_timer = 0.0f;
+    muzzle_flash_frame_timer = 0.0f;
+    muzzle_flash_angle = 0.0f;
+    muzzle_flash_scale = 1.0f;
+    muzzle_flash_frame = 0;
     warning_beam.reset();
 }
 
@@ -194,6 +212,11 @@ void zNMEMiniMerv::FireZap()
     zap_fired = 1;
     zap_visible = 1;
     zap_visual_timer = 0.20f;
+    muzzle_flash_timer = 0.20f;
+    muzzle_flash_frame_timer = 0.0f;
+    muzzle_flash_frame = (S32)(xurand() * 4.0f);
+    muzzle_flash_angle = (xurand() - 0.5f) * 6.2831853f;
+    muzzle_flash_scale = 0.55f;
     cooldown_timer = cooldown_time;
 }
 
@@ -209,6 +232,101 @@ void zNMEMiniMerv::UpdateZapBeam()
 
     xVec3 target = *xEntGetPos(&globals.player.ent);
     zap_beam.Render(&start, &target);
+}
+
+void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
+{
+    if (muzzle_flash_timer <= 0.0f)
+    {
+        return;
+    }
+
+    muzzle_flash_timer = MAX(0.0f, muzzle_flash_timer - dt);
+    muzzle_flash_frame_timer -= dt;
+
+    // The original effect is extremely fast. Treat the four 16x16 atlas
+    // cells as individual short-lived images for now rather than assuming
+    // they are a conventional 0->1->2->3 animation.
+    while (muzzle_flash_frame_timer <= 0.0f)
+    {
+        muzzle_flash_frame = (S32)(xurand() * 4.0f);
+        muzzle_flash_frame_timer += 0.025f;
+        muzzle_flash_angle += (xurand() - 0.5f) * 1.4f;
+    }
+
+    // Give the image a quick bloom/shrink pulse over the short flash.
+    F32 life = 1.0f - muzzle_flash_timer / 0.20f;
+    F32 pulse = sinf(life * 3.14159265f);
+    muzzle_flash_scale = 0.55f + 0.45f * pulse;
+}
+
+void zNMEMiniMerv::RenderMuzzleFlash()
+{
+    if (muzzle_flash_timer <= 0.0f || muzzle_flash_raster == NULL)
+    {
+        return;
+    }
+
+    xVec3 pos;
+    GetMuzzlePos(&pos);
+
+    xMat3x3 cam_mat;
+    xMat3x3LookAt(&cam_mat, &pos, &globals.camera.mat.pos);
+
+    F32 cs = cosf(muzzle_flash_angle);
+    F32 sn = sinf(muzzle_flash_angle);
+
+    xVec3 right;
+    right.x = cam_mat.right.x * cs + cam_mat.up.x * sn;
+    right.y = cam_mat.right.y * cs + cam_mat.up.y * sn;
+    right.z = cam_mat.right.z * cs + cam_mat.up.z * sn;
+
+    xVec3 up;
+    up.x = -cam_mat.right.x * sn + cam_mat.up.x * cs;
+    up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
+    up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
+
+    F32 rad = 0.38f * muzzle_flash_scale;
+
+    xVec3 r = right * rad;
+    xVec3 u = up * rad;
+
+    xVec3 p0 = pos - r - u;
+    xVec3 p1 = pos + r - u;
+    xVec3 p2 = pos + r + u;
+    xVec3 p3 = pos - r + u;
+
+    // fx_beam_muzzle_flash is a 2x2 atlas of 16x16 cells.
+    const F32 u0 = (muzzle_flash_frame & 1) ? 0.5f : 0.0f;
+    const F32 v0 = (muzzle_flash_frame & 2) ? 0.5f : 0.0f;
+    const F32 u1 = u0 + 0.5f;
+    const F32 v1 = v0 + 0.5f;
+
+    RwIm3DVertex quad[4];
+    RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
+    RwIm3DVertexSetPos(&quad[1], p1.x, p1.y, p1.z);
+    RwIm3DVertexSetPos(&quad[2], p2.x, p2.y, p2.z);
+    RwIm3DVertexSetPos(&quad[3], p3.x, p3.y, p3.z);
+
+    for (S32 i = 0; i < 4; ++i)
+    {
+        RwIm3DVertexSetRGBA(&quad[i], 255, 255, 255, 255);
+    }
+
+    RwIm3DVertexSetUV(&quad[0], u0, v1);
+    RwIm3DVertexSetUV(&quad[1], u1, v1);
+    RwIm3DVertexSetUV(&quad[2], u1, v0);
+    RwIm3DVertexSetUV(&quad[3], u0, v0);
+
+    zRenderState(SDRS_NPCVisual);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
+
+    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
+    {
+        RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        RwIm3DEnd();
+    }
 }
 
 void zNMEMiniMerv::UpdateZap(F32 dt)
@@ -285,6 +403,7 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
     }
 
     warning_beam.update(dt);
+    UpdateMuzzleFlash(dt);
 
     if (zap_visual_timer > 0.0f)
     {
@@ -305,11 +424,13 @@ void zNMEMiniMerv::RenderExtra()
 {
     warning_beam.render();
     UpdateZapBeam();
+    RenderMuzzleFlash();
 }
 
 void zNMEMiniMerv::SelfDestroy()
 {
     warning_beam.reset();
+    muzzle_flash_timer = 0.0f;
 }
 
 xFactoryInst* ZNME_Create_MiniMerv(S32 who, RyzMemGrow* grow, void*)
