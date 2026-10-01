@@ -73,6 +73,130 @@ static void MiniMervDumpBones(xModelInstance* model)
     }
 }
 
+
+static void MiniMervAddLabelQuad(RwIm3DVertex* verts, S32& count,
+                                 const xVec3& pos, const RwMatrix* camera,
+                                 F32 x0, F32 y0, F32 x1, F32 y1,
+                                 U8 red, U8 green, U8 blue)
+{
+    const F32 size = 0.22f;
+    const F32 half = 0.015f;
+
+    F32 ax = x0 * size;
+    F32 ay = y0 * size;
+    F32 bx = x1 * size;
+    F32 by = y1 * size;
+
+    F32 dx = bx - ax;
+    F32 dy = by - ay;
+    F32 len = sqrtf(dx * dx + dy * dy);
+    if (len <= 0.0001f)
+        return;
+
+    F32 px = -dy / len * half;
+    F32 py = dx / len * half;
+
+    const F32 ox = (pos.x + camera->right.x * ax + camera->up.x * ay);
+    const F32 oy = (pos.y + camera->right.y * ax + camera->up.y * ay);
+    const F32 oz = (pos.z + camera->right.z * ax + camera->up.z * ay);
+
+    RwIm3DVertexSetPos(&verts[count], ox + camera->right.x * px + camera->up.x * py,
+                       oy + camera->right.y * px + camera->up.y * py,
+                       oz + camera->right.z * px + camera->up.z * py);
+    RwIm3DVertexSetRGBA(&verts[count++], red, green, blue, 255);
+
+    RwIm3DVertexSetPos(&verts[count], ox - camera->right.x * px - camera->up.x * py,
+                       oy - camera->right.y * px - camera->up.y * py,
+                       oz - camera->right.z * px - camera->up.z * py);
+    RwIm3DVertexSetRGBA(&verts[count++], red, green, blue, 255);
+
+    const F32 ox2 = (pos.x + camera->right.x * bx + camera->up.x * by);
+    const F32 oy2 = (pos.y + camera->right.y * bx + camera->up.y * by);
+    const F32 oz2 = (pos.z + camera->right.z * bx + camera->up.z * by);
+
+    RwIm3DVertexSetPos(&verts[count], ox2 - camera->right.x * px - camera->up.x * py,
+                       oy2 - camera->right.y * px - camera->up.y * py,
+                       oz2 - camera->right.z * px - camera->up.z * py);
+    RwIm3DVertexSetRGBA(&verts[count++], red, green, blue, 255);
+
+    RwIm3DVertexSetPos(&verts[count], ox2 + camera->right.x * px + camera->up.x * py,
+                       oy2 + camera->right.y * px + camera->up.y * py,
+                       oz2 + camera->right.z * px + camera->up.z * py);
+    RwIm3DVertexSetRGBA(&verts[count++], red, green, blue, 255);
+}
+
+static void MiniMervRenderBoneLabel(const xVec3& pos, S32 number, const RwMatrix* camera,
+                                    RwIm3DVertex* verts, S32& count)
+{
+    static const U8 segments[10][7] =
+    {
+        {1,1,1,1,1,1,0}, {0,1,1,0,0,0,0}, {1,1,0,1,1,0,1},
+        {1,1,1,1,0,0,1}, {0,1,1,0,0,1,1}, {1,0,1,1,0,1,1},
+        {1,0,1,1,1,1,1}, {1,1,1,0,0,0,0}, {1,1,1,1,1,1,1},
+        {1,1,1,1,0,1,1}
+    };
+    static const F32 segs[7][4] =
+    {
+        {-0.45f, 0.50f, 0.45f, 0.50f},
+        { 0.45f, 0.50f, 0.45f, 0.00f},
+        { 0.45f, 0.00f, 0.45f,-0.50f},
+        {-0.45f,-0.50f, 0.45f,-0.50f},
+        {-0.45f, 0.00f,-0.45f,-0.50f},
+        {-0.45f, 0.50f,-0.45f, 0.00f},
+        {-0.45f, 0.00f, 0.45f, 0.00f}
+    };
+
+    S32 digits[2] = { number / 10, number % 10 };
+    S32 digit_count = number >= 10 ? 2 : 1;
+    F32 spacing = 1.0f;
+
+    for (S32 d = 0; d < digit_count; ++d)
+    {
+        F32 xoff = digit_count == 2 ? (d == 0 ? -0.50f : 0.50f) : 0.0f;
+        for (S32 s = 0; s < 7; ++s)
+        {
+            if (segments[digits[d]][s])
+            {
+                F32 x0 = segs[s][0] * 0.42f + xoff * spacing;
+                F32 y0 = segs[s][1] * 0.42f;
+                F32 x1 = segs[s][2] * 0.42f + xoff * spacing;
+                F32 y1 = segs[s][3] * 0.42f;
+                MiniMervAddLabelQuad(verts, count, pos, camera, x0, y0, x1, y1,
+                                     255, 220, 40);
+            }
+        }
+    }
+}
+
+static void MiniMervRenderBoneLabels(xModelInstance* model)
+{
+    if (model == NULL || globals.camera.lo_cam == NULL || model->BoneCount < 28)
+        return;
+
+    RwMatrix* camera = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
+    RwIm3DVertex verts[28 * 2 * 7 * 4];
+    S32 count = 0;
+
+    for (S32 i = 0; i < 28; ++i)
+    {
+        xVec3 pos = xModelGetBoneLocation(*model, (U32)i);
+        pos.y += 0.12f;
+        MiniMervRenderBoneLabel(pos, i, camera, verts, count);
+    }
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+
+    if (count > 0 && RwIm3DTransform(verts, count, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    {
+        RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+    }
+}
+
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
     if (who == zNMEMiniMerv::GOAL_ZAP)
@@ -326,6 +450,7 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
 void zNMEMiniMerv::RenderExtra()
 {
     warning_beam.render();
+    MiniMervRenderBoneLabels(model);
 }
 
 void zNMEMiniMerv::SelfDestroy()
