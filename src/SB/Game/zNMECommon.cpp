@@ -2,8 +2,65 @@
 
 #include "xFactory.h"
 #include "xMath.h"
+#include "xDebug.h"
+#include <rphanim.h>
 #include "zNPCTypes.h"
 #include "zNMETypeMiniMerv.h"
+
+static void NME_DumpFrameTree(RwFrame* frame, S32 depth)
+{
+    if (frame == NULL || depth > 32)
+    {
+        return;
+    }
+
+    RwMatrix* ltm = RwFrameGetLTM(frame);
+    xprintf("[NME frame] depth=%d frame=%p ltm=(%.3f, %.3f, %.3f)\\n", depth, (void*)frame,
+            ltm->pos.x, ltm->pos.y, ltm->pos.z);
+
+    RwFrameForAllChildren(frame, [](RwFrame* child, void* data) -> RwFrame* {
+        NME_DumpFrameTree(child, (S32)(intptr_t)data);
+        return child;
+    }, (void*)(intptr_t)(depth + 1));
+}
+
+static void NME_DumpHAnim(xModelInstance* model)
+{
+    if (model == NULL || model->Data == NULL)
+    {
+        return;
+    }
+
+    RwFrame* atomicFrame = RpAtomicGetFrame(model->Data);
+    if (atomicFrame == NULL)
+    {
+        xprintf("[NME HAnim] atomic has no frame\\n");
+        return;
+    }
+
+    xprintf("[NME HAnim] atomic=%p frame=%p\\n", (void*)model->Data, (void*)atomicFrame);
+
+    RpHAnimHierarchy* hierarchy = RpHAnimFrameGetHierarchy(atomicFrame);
+    if (hierarchy == NULL)
+    {
+        xprintf("[NME HAnim] hierarchy not on atomic frame; searching children\\n");
+        NME_DumpFrameTree(atomicFrame, 0);
+        return;
+    }
+
+    xprintf("[NME HAnim] hierarchy=%p nodes=%d\\n", (void*)hierarchy, hierarchy->numNodes);
+    for (S32 i = 0; i < hierarchy->numNodes; ++i)
+    {
+        const RpHAnimNodeInfo& node = hierarchy->pNodeInfo[i];
+        RwMatrix* ltm = node.pFrame != NULL ? RwFrameGetLTM(node.pFrame) : NULL;
+        xprintf("[NME node] slot=%d nodeID=%d nodeIndex=%d frame=%p ltm=(%.3f, %.3f, %.3f)\\n", i,
+                node.nodeID, node.nodeIndex, (void*)node.pFrame, ltm != NULL ? ltm->pos.x : 0.0f,
+                ltm != NULL ? ltm->pos.y : 0.0f, ltm != NULL ? ltm->pos.z : 0.0f);
+    }
+
+    xprintf("[NME frames] complete RenderWare frame tree follows\\n");
+    NME_DumpFrameTree(RwFrameGetRoot(atomicFrame), 0);
+}
 
 static xFactoryInst* NMEGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -204,6 +261,13 @@ void zNMECommon::Setup()
     }
 
     SelfSetup();
+
+    // Temporary Mini Merv diagnostic. This deliberately reports the RenderWare
+    // HAnim mapping and raw frame hierarchy without changing NME behavior.
+    if (myNPCType == NPC_TYPE_NME_TEST && model != NULL)
+    {
+        NME_DumpHAnim(model);
+    }
 }
 
 void zNMECommon::SelfSetup()
