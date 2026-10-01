@@ -5,24 +5,22 @@
 #include "xDebug.h"
 #include <rphanim.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "zNPCTypes.h"
 #include "zNMETypeMiniMerv.h"
 
-static void NME_DumpFrameTree(RwFrame* frame, S32 depth)
+static void NME_DumpFrameTree(RwFrame* frame, S32 depth, FILE* out)
 {
-    if (frame == NULL || depth > 32)
-    {
-        return;
-    }
-
+    if (frame == NULL || out == NULL || depth > 32) return;
     RwMatrix* ltm = RwFrameGetLTM(frame);
-    xprintf("[NME frame] depth=%d frame=%p ltm=(%.3f, %.3f, %.3f)\\n", depth, (void*)frame,
+    fprintf(out, "[frame] depth=%d frame=%p ltm=(%.3f, %.3f, %.3f)\n", depth, (void*)frame,
             ltm->pos.x, ltm->pos.y, ltm->pos.z);
-
+    struct Args { S32 depth; FILE* out; } args = { depth + 1, out };
     RwFrameForAllChildren(frame, [](RwFrame* child, void* data) -> RwFrame* {
-        NME_DumpFrameTree(child, (S32)(intptr_t)data);
+        Args* args = (Args*)data;
+        NME_DumpFrameTree(child, args->depth, args->out);
         return child;
-    }, (void*)(intptr_t)(depth + 1));
+    }, &args);
 }
 
 static void NME_DumpHAnim(xModelInstance* model)
@@ -45,7 +43,7 @@ static void NME_DumpHAnim(xModelInstance* model)
     if (hierarchy == NULL)
     {
         xprintf("[NME HAnim] hierarchy not on atomic frame; searching children\\n");
-        NME_DumpFrameTree(atomicFrame, 0);
+        NME_DumpFrameTree(atomicFrame, 0, out);
         return;
     }
 
@@ -60,7 +58,7 @@ static void NME_DumpHAnim(xModelInstance* model)
     }
 
     xprintf("[NME frames] complete RenderWare frame tree follows\\n");
-    NME_DumpFrameTree(RwFrameGetRoot(atomicFrame), 0);
+    NME_DumpFrameTree(RwFrameGetRoot(atomicFrame), 0, out);
 }
 
 static xFactoryInst* NMEGoalCreate(S32 who, RyzMemGrow* grow, void*)
