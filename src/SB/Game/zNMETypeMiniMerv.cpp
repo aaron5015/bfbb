@@ -6,6 +6,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <rphanim.h>
+#include <rpskin.h>
+#include "iAnim.h"
 
 static const U32 MINI_MERV_MUZZLE_BONE = 26;
 
@@ -47,6 +49,40 @@ static void MiniMervDumpBones(xModelInstance* model)
     {
         printf("[MiniMervBoneDump] no HAnim hierarchy\\n");
         return;
+    }
+
+    printf("[MiniMervBoneDump] modelBoneCount=%u boneIndex=%u boneRemap=%s\\n",
+           (U32)model->BoneCount, (U32)model->BoneIndex,
+           model->BoneRemap != NULL ? "yes" : "no");
+
+    RpSkin* skin = RpSkinGeometryGetSkin(atomic->geometry);
+    printf("[MiniMervBoneDump] skinBoneCount=%u\\n",
+           skin != NULL ? (U32)RpSkinGetNumBones(skin) : 0u);
+
+    if (model->BoneRemap != NULL)
+    {
+        printf("[MiniMervBoneDump] boneRemap:");
+        for (S32 i = 0; i < (S32)model->BoneCount; ++i)
+        {
+            printf(" %d", (S32)model->BoneRemap[i]);
+        }
+        printf("\\n");
+    }
+
+    if (model->Anim != NULL && model->Anim->NumSingle > 0 && model->Anim->Single != NULL &&
+        model->Anim->Single[0].State != NULL && model->Anim->Single[0].State->Data != NULL)
+    {
+        xAnimFile* file = model->Anim->Single[0].State->Data;
+        void* raw = file->RawData != NULL ? file->RawData[0] : NULL;
+        printf("[MiniMervBoneDump] animState=%s animFile=%s xAnimBoneCount=%u rawBoneCount=%u\\n",
+               model->Anim->Single[0].State->Name != NULL ? model->Anim->Single[0].State->Name : "(null)",
+               file->Name != NULL ? file->Name : "(null)",
+               (U32)file->BoneCount,
+               raw != NULL ? iAnimBoneCount(raw) : 0u);
+    }
+    else
+    {
+        printf("[MiniMervBoneDump] no active animation data\\n");
     }
 
     printf("[MiniMervBoneDump] numNodes=%d\\n", hierarchy->numNodes);
