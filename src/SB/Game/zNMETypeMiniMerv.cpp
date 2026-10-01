@@ -315,22 +315,28 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
     RwIm3DVertexSetRGBA(&quad[0], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[0], 0.0f, 1.0f);
+
     RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
     RwIm3DVertexSetRGBA(&quad[1], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[1], 0.0f, 0.0f);
+
     RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
     RwIm3DVertexSetRGBA(&quad[2], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[2], 1.0f, 1.0f);
+
     RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
     RwIm3DVertexSetRGBA(&quad[3], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[3], 1.0f, 0.0f);
 
-    // Bind the known-working texture, but intentionally do not supply UVs.
-    // This isolates raster binding from UV/atlas handling.
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER,
                      (void*)NPCC_FindRWRaster("fx_solid"));
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    if (RwIm3DTransform(quad, 4, NULL,
+                        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
     {
         RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
     }
