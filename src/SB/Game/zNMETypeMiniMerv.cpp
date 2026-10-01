@@ -5,7 +5,7 @@
 #include "zMovePoint.h"
 #include <math.h>
 
-static const U32 MINI_MERV_MUZZLE_BONE = 27;
+static const U32 MINI_MERV_MUZZLE_BONE = 26;
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
