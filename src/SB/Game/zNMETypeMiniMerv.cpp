@@ -1,5 +1,17 @@
 #include "zNMETypeMiniMerv.h"
+
+// BFBB's global `null` macro collides with librw's namespace null.
+// Temporarily remove the macro while taking the librw declarations, then
+// restore it for the rest of this game source file.
+#ifdef null
+#undef null
+#define MINI_MERV_RESTORE_NULL
+#endif
 #include <rw.h>
+#ifdef MINI_MERV_RESTORE_NULL
+#define null 0
+#undef MINI_MERV_RESTORE_NULL
+#endif
 
 #include "zEntPlayer.h"
 #include "zGlobals.h"
