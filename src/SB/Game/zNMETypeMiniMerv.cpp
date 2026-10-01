@@ -169,3 +169,111 @@ void zNMEMiniMerv::FireWarningBeam()
     xVec3SMul(&dir, &dir, 1.0f / sqrtf(len2));
     warning_beam.emit(start, dir);
 }
+
+void zNMEMiniMerv::FireZap()
+{
+    zEntPlayer_Damage((xBase*)this, 1);
+    zap_fired = 1;
+    cooldown_timer = cooldown_time;
+}
+
+void zNMEMiniMerv::UpdateZap(F32 dt)
+{
+    if (globals.player.Health < 1)
+    {
+        warning_beam.reset();
+        zap_timer = 0.0f;
+        cooldown_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
+    if (!TargetInFocusRange())
+    {
+        warning_beam.reset();
+        zap_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
+    if (cooldown_timer > 0.0f)
+    {
+        cooldown_timer = MAX(0.0f, cooldown_timer - dt);
+    }
+
+    if (!TargetInDangerRange())
+    {
+        zap_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
+    if (cooldown_timer > 0.0f)
+    {
+        return;
+    }
+
+    if (!warning_active)
+    {
+        warning_active = 1;
+        zap_fired = 0;
+        zap_timer = warning_time;
+    }
+
+    FireWarningBeam();
+    zap_timer -= dt;
+
+    if (zap_timer <= 0.0f && !zap_fired)
+    {
+        FireZap();
+        warning_active = 0;
+    }
+}
+
+void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
+{
+    zNMEStandard::Process(xscn, dt);
+
+    if (globals.player.Health > 0 && TargetInFocusRange())
+    {
+        xVec3 dir;
+        xVec3Sub(&dir, xEntGetPos(&globals.player.ent), xEntGetPos((xEnt*)this));
+        dir.y = 0.0f;
+        if (xVec3Length2(&dir) > 0.0001f)
+        {
+            xVec3Normalize(&dir, &dir);
+            TurnToFace(dt, &dir, 4.0f);
+            xEntMotionToMatrix((xEnt*)this, this->frame);
+        }
+    }
+
+    warning_beam.update(dt);
+}
+
+void zNMEMiniMerv::RenderExtra()
+{
+    warning_beam.render();
+}
+
+void zNMEMiniMerv::SelfDestroy()
+{
+    warning_beam.reset();
+}
+
+xFactoryInst* ZNME_Create_MiniMerv(S32 who, RyzMemGrow* grow, void*)
+{
+    if (who == NPC_TYPE_NME_TEST)
+    {
+        return new (who, grow) zNMEMiniMerv(who);
+    }
+
+    return NULL;
+}
+
+void ZNME_Destroy_MiniMerv(xFactoryInst* inst)
+{
+    delete (zNMEMiniMerv*)inst;
+}
