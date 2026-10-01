@@ -2,6 +2,7 @@
 
 #include "zNMECommon.h"
 #include "xLaserBolt.h"
+#include "zNPCTypeRobot.h"
 
 struct zNMEGoalMiniMervZap : zNMEGoalCommon
 {
