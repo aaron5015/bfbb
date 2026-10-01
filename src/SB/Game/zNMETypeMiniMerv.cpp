@@ -289,9 +289,6 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 pos;
     GetMuzzlePos(&pos);
 
-    // Diagnostic only: put an untextured, enormous quad one unit in front
-    // of the muzzle and disable depth testing. This isolates geometry from
-    // texture/raster/depth issues.
     xVec3 target = *xEntGetPos(&globals.player.ent);
     xVec3 dir;
     xVec3Sub(&dir, &target, &pos);
@@ -317,18 +314,19 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     F32 top_z = camera_matrix->up.z * rad;
 
     RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
-    RwIm3DVertexSetRGBA(&quad[0], 255, 0, 255, 255);
+    RwIm3DVertexSetRGBA(&quad[0], 255, 255, 255, 255);
     RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
-    RwIm3DVertexSetRGBA(&quad[1], 255, 0, 255, 255);
+    RwIm3DVertexSetRGBA(&quad[1], 255, 255, 255, 255);
     RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
-    RwIm3DVertexSetRGBA(&quad[2], 255, 0, 255, 255);
+    RwIm3DVertexSetRGBA(&quad[2], 255, 255, 255, 255);
     RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
-    RwIm3DVertexSetRGBA(&quad[3], 255, 0, 255, 255);
+    RwIm3DVertexSetRGBA(&quad[3], 255, 255, 255, 255);
 
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
-    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
-    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
-    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    // Bind the known-working texture, but intentionally do not supply UVs.
+    // This isolates raster binding from UV/atlas handling.
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER,
+                     (void*)NPCC_FindRWRaster("fx_solid"));
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
