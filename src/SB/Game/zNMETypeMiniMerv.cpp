@@ -74,64 +74,14 @@ static void MiniMervDumpBones(xModelInstance* model)
 }
 
 
-static void MiniMervAddLabelQuad(RwIm3DVertex* verts, S32& count,
-                                 const xVec3& pos, const RwMatrix* camera,
-                                 F32 x0, F32 y0, F32 x1, F32 y1,
-                                 U8 red, U8 green, U8 blue)
+
+static void MiniMervRenderBoneLabels(xModelInstance* model)
 {
-    const F32 size = 0.22f;
-    const F32 half = 0.015f;
-
-    F32 ax = x0 * size;
-    F32 ay = y0 * size;
-    F32 bx = x1 * size;
-    F32 by = y1 * size;
-
-    F32 dx = bx - ax;
-    F32 dy = by - ay;
-    F32 len = sqrtf(dx * dx + dy * dy);
-    if (len <= 0.0001f)
+    if (model == NULL || globals.camera.lo_cam == NULL || model->BoneCount < 28)
         return;
 
-    F32 px = -dy / len * half;
-    F32 py = dx / len * half;
+    RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
 
-    xVec3 p0 = { pos.x + camera->right.x * ax + camera->up.x * ay +
-                     camera->right.x * px + camera->up.x * py,
-                 pos.y + camera->right.y * ax + camera->up.y * ay +
-                     camera->right.y * px + camera->up.y * py,
-                 pos.z + camera->right.z * ax + camera->up.z * ay +
-                     camera->right.z * px + camera->up.z * py };
-    xVec3 p1 = { pos.x + camera->right.x * ax + camera->up.x * ay -
-                     camera->right.x * px - camera->up.x * py,
-                 pos.y + camera->right.y * ax + camera->up.y * ay -
-                     camera->right.y * px - camera->up.y * py,
-                 pos.z + camera->right.z * ax + camera->up.z * ay -
-                     camera->right.z * px - camera->up.z * py };
-    xVec3 p2 = { pos.x + camera->right.x * bx + camera->up.x * by -
-                     camera->right.x * px - camera->up.x * py,
-                 pos.y + camera->right.y * bx + camera->up.y * by -
-                     camera->right.y * px - camera->up.y * py,
-                 pos.z + camera->right.z * bx + camera->up.z * by -
-                     camera->right.z * px - camera->up.z * py };
-    xVec3 p3 = { pos.x + camera->right.x * bx + camera->up.x * by +
-                     camera->right.x * px + camera->up.x * py,
-                 pos.y + camera->right.y * bx + camera->up.y * by +
-                     camera->right.y * px + camera->up.y * py,
-                 pos.z + camera->right.z * bx + camera->up.z * by +
-                     camera->right.z * px + camera->up.z * py };
-
-    const xVec3 points[6] = { p0, p1, p2, p0, p2, p3 };
-    for (S32 i = 0; i < 6; ++i)
-    {
-        RwIm3DVertexSetPos(&verts[count], points[i].x, points[i].y, points[i].z);
-        RwIm3DVertexSetRGBA(&verts[count++], red, green, blue, 255);
-    }
-}
-
-static void MiniMervRenderBoneLabel(const xVec3& pos, S32 number, const RwMatrix* camera,
-                                    RwIm3DVertex* verts, S32& count)
-{
     static const U8 segments[10][7] =
     {
         {1,1,1,1,1,1,0}, {0,1,1,0,0,0,0}, {1,1,0,1,1,0,1},
@@ -141,63 +91,73 @@ static void MiniMervRenderBoneLabel(const xVec3& pos, S32 number, const RwMatrix
     };
     static const F32 segs[7][4] =
     {
-        {-0.45f, 0.50f, 0.45f, 0.50f},
-        { 0.45f, 0.50f, 0.45f, 0.00f},
-        { 0.45f, 0.00f, 0.45f,-0.50f},
-        {-0.45f,-0.50f, 0.45f,-0.50f},
-        {-0.45f, 0.00f,-0.45f,-0.50f},
-        {-0.45f, 0.50f,-0.45f, 0.00f},
+        {-0.45f, 0.50f, 0.45f, 0.50f}, {0.45f, 0.50f, 0.45f, 0.00f},
+        {0.45f, 0.00f, 0.45f,-0.50f}, {-0.45f,-0.50f, 0.45f,-0.50f},
+        {-0.45f, 0.00f,-0.45f,-0.50f}, {-0.45f, 0.50f,-0.45f, 0.00f},
         {-0.45f, 0.00f, 0.45f, 0.00f}
     };
-
-    S32 digits[2] = { number / 10, number % 10 };
-    S32 digit_count = number >= 10 ? 2 : 1;
-    F32 spacing = 1.0f;
-
-    for (S32 d = 0; d < digit_count; ++d)
-    {
-        F32 xoff = digit_count == 2 ? (d == 0 ? -0.50f : 0.50f) : 0.0f;
-        for (S32 s = 0; s < 7; ++s)
-        {
-            if (segments[digits[d]][s])
-            {
-                F32 x0 = segs[s][0] * 0.42f + xoff * spacing;
-                F32 y0 = segs[s][1] * 0.42f;
-                F32 x1 = segs[s][2] * 0.42f + xoff * spacing;
-                F32 y1 = segs[s][3] * 0.42f;
-                MiniMervAddLabelQuad(verts, count, pos, camera, x0, y0, x1, y1,
-                                     255, 220, 40);
-            }
-        }
-    }
-}
-
-static void MiniMervRenderBoneLabels(xModelInstance* model)
-{
-    if (model == NULL || globals.camera.lo_cam == NULL || model->BoneCount < 28)
-        return;
-
-    RwMatrix* camera = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
-    RwIm3DVertex verts[28 * 2 * 7 * 6];
-    S32 count = 0;
-
-    for (S32 i = 0; i < 28; ++i)
-    {
-        xVec3 pos = xModelGetBoneLocation(*model, (U32)i);
-        pos.y += 0.12f;
-        MiniMervRenderBoneLabel(pos, i, camera, verts, count);
-    }
 
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
-    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-    if (count > 0 && RwIm3DTransform(verts, count, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    for (S32 bone = 0; bone < 28; ++bone)
     {
-        RwIm3DRenderPrimitive(rwPRIMTYPETRILIST);
+        xVec3 pos = xModelGetBoneLocation(*model, (U32)bone);
+        pos.y += 0.18f;
+
+        S32 digits[2] = { bone / 10, bone % 10 };
+        S32 digit_count = bone >= 10 ? 2 : 1;
+
+        for (S32 d = 0; d < digit_count; ++d)
+        {
+            F32 xoff = digit_count == 2 ? (d == 0 ? -0.50f : 0.50f) : 0.0f;
+
+            for (S32 s = 0; s < 7; ++s)
+            {
+                if (!segments[digits[d]][s])
+                    continue;
+
+                F32 x0 = (segs[s][0] * 0.42f + xoff) * 0.22f;
+                F32 y0 = segs[s][1] * 0.42f * 0.22f;
+                F32 x1 = (segs[s][2] * 0.42f + xoff) * 0.22f;
+                F32 y1 = segs[s][3] * 0.42f * 0.22f;
+
+                F32 dx = x1 - x0;
+                F32 dy = y1 - y0;
+                F32 len = sqrtf(dx * dx + dy * dy);
+                if (len <= 0.0001f)
+                    continue;
+
+                F32 px = -dy / len * 0.015f;
+                F32 py = dx / len * 0.015f;
+                RwIm3DVertex quad[4];
+
+                F32 left_x = pos.x + camera_matrix->right.x * (x0 - px) + camera_matrix->up.x * (y0 - py);
+                F32 left_y = pos.y + camera_matrix->right.y * (x0 - px) + camera_matrix->up.y * (y0 - py);
+                F32 left_z = pos.z + camera_matrix->right.z * (x0 - px) + camera_matrix->up.z * (y0 - py);
+                F32 right_x = pos.x + camera_matrix->right.x * (x1 + px) + camera_matrix->up.x * (y1 + py);
+                F32 right_y = pos.y + camera_matrix->right.y * (x1 + px) + camera_matrix->up.y * (y1 + py);
+                F32 right_z = pos.z + camera_matrix->right.z * (x1 + px) + camera_matrix->up.z * (y1 + py);
+
+                F32 top_x = camera_matrix->up.x * 0.015f;
+                F32 top_y = camera_matrix->up.y * 0.015f;
+                F32 top_z = camera_matrix->up.z * 0.015f;
+
+                RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
+                RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
+                RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
+                RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
+                for (S32 i = 0; i < 4; ++i)
+                    RwIm3DVertexSetRGBA(&quad[i], 255, 220, 40, 255);
+
+                if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+                    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+            }
+        }
     }
 }
 
