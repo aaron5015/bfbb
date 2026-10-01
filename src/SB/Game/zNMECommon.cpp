@@ -23,6 +23,72 @@ static void NME_DumpFrameTree(RwFrame* frame, S32 depth, FILE* out)
     }, &args);
 }
 
+static void NME_DumpAnimSweep(xModelInstance* model)
+{
+    if (model == NULL || model->Mat == NULL || model->BoneCount == 0 || model->Anim == NULL)
+    {
+        return;
+    }
+
+    static FILE* out = NULL;
+    static S32 frame = 0;
+    static F32 minY[64], maxY[64], minX[64], maxX[64], minZ[64], maxZ[64];
+    static U8 initialized = 0;
+    const S32 count = MIN((S32)model->BoneCount, 63);
+
+    if (!initialized)
+    {
+        out = fopen("minimerv_anim_sweep.txt", "w");
+        if (out == NULL) return;
+        for (S32 i = 0; i < 64; ++i)
+        {
+            minX[i] = minY[i] = minZ[i] = 1000000.0f;
+            maxX[i] = maxY[i] = maxZ[i] = -1000000.0f;
+        }
+        fprintf(out, "[sweep] Evaluated Mini Merv animation matrices\\n");
+        fprintf(out, "[sweep] Positions are Mat[1..BoneCount] in model-local coordinates.\\n");
+        fprintf(out, "[sweep] Candidate muzzle slot should have a low Y and visible X/Z sway.\\n");
+        initialized = 1;
+    }
+
+    // This is the same evaluation path used by the renderer. At this point we
+    // want the real animation pose, not the zero pFrame pointers in HAnim data.
+    xModelEval(model);
+
+    F32 animTime = 0.0f;
+    if (model->Anim->Single != NULL)
+    {
+        animTime = model->Anim->Single->Time;
+    }
+
+    fprintf(out, "[frame] %d time=%.4f", frame, animTime);
+    for (S32 i = 1; i <= count; ++i)
+    {
+        const RwMatrix& m = model->Mat[i];
+        minX[i] = MIN(minX[i], m.pos.x); maxX[i] = MAX(maxX[i], m.pos.x);
+        minY[i] = MIN(minY[i], m.pos.y); maxY[i] = MAX(maxY[i], m.pos.y);
+        minZ[i] = MIN(minZ[i], m.pos.z); maxZ[i] = MAX(maxZ[i], m.pos.z);
+        fprintf(out, " %d=(%.3f,%.3f,%.3f)", i, m.pos.x, m.pos.y, m.pos.z);
+    }
+    fprintf(out, "\\n");
+    fflush(out);
+
+    ++frame;
+    if (frame >= 240)
+    {
+        fprintf(out, "\\n[summary] 240 evaluated frames\\n");
+        for (S32 i = 1; i <= count; ++i)
+        {
+            fprintf(out, "[slot] %d X=(%.3f..%.3f) Y=(%.3f..%.3f) Z=(%.3f..%.3f)\\n",
+                    i, minX[i], maxX[i], minY[i], maxY[i], minZ[i], maxZ[i]);
+        }
+        fclose(out);
+        out = NULL;
+        frame = 0;
+        initialized = 0;
+    }
+}
+
 static void NME_DumpHAnim(xModelInstance* model)
 {
     if (model == NULL || model->Data == NULL)
@@ -336,6 +402,11 @@ void zNMECommon::Process(xScene* xscn, F32 dt)
         xprintf("[NME] diagnostic reached: npcType=%d model=%p atomic=%p\\n", myNPCType,
                 (void*)model, (void*)model->Data);
         NME_DumpHAnim(model);
+    }
+
+    if (model != NULL && model->Anim != NULL && model->Mat != NULL)
+    {
+        NME_DumpAnimSweep(model);
     }
 
     if (psy_self != NULL)
