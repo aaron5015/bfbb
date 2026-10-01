@@ -69,7 +69,7 @@ static void NME_DumpHAnim(xModelInstance* model)
                 ltm != NULL ? ltm->pos.z : 0.0f);
     }
 
-    fprintf(out, "[frames] complete RenderWare frame tree follows\\n");
+    fprintf(out, "[model] BoneCount=%u BoneIndex=%u Flags=%04X BoneRemap=%p Mat=%p\\n",                (unsigned)model->BoneCount, (unsigned)model->BoneIndex, (unsigned)model->Flags,                (void*)model->BoneRemap, (void*)model->Mat);    if (model->BoneRemap != NULL)    {        fprintf(out, "[model] BoneRemap:");        for (S32 i = 0; i < model->BoneCount; ++i)        {            fprintf(out, " %d->%u", i + 1, (unsigned)model->BoneRemap[i]);        }        fprintf(out, "\\n");    }    if (model->Mat != NULL)    {        fprintf(out, "[mat] xModelInstance::Mat entries (0=root, 1..BoneCount=bones)\\n");        for (S32 i = 0; i <= model->BoneCount; ++i)        {            const RwMatrix& m = model->Mat[i];            fprintf(out, "[mat] slot=%d pos=(%.3f, %.3f, %.3f) right=(%.3f, %.3f, %.3f) up=(%.3f, %.3f, %.3f) at=(%.3f, %.3f, %.3f)\\n",                    i, m.pos.x, m.pos.y, m.pos.z,                    m.right.x, m.right.y, m.right.z,                    m.up.x, m.up.y, m.up.z,                    m.at.x, m.at.y, m.at.z);        }    }    fprintf(out, "[frames] complete RenderWare frame tree follows\\n");
     NME_DumpFrameTree(RwFrameGetRoot(atomicFrame), 0, out);
     fclose(out);
 }
