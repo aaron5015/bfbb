@@ -4,6 +4,7 @@
 #include "xMath.h"
 #include "xDebug.h"
 #include <rphanim.h>
+#include <stdint.h>
 #include "zNPCTypes.h"
 #include "zNMETypeMiniMerv.h"
 
