@@ -75,90 +75,48 @@ static void MiniMervDumpBones(xModelInstance* model)
 
 
 
-static void MiniMervRenderBoneLabels(xModelInstance* model)
+static void MiniMervRenderBoneAxis(xModelInstance* model, S32 bone)
 {
-    if (model == NULL || globals.camera.lo_cam == NULL || model->BoneCount < 28)
+    if (model == NULL || bone < 0 || bone >= 28)
         return;
 
-    RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
+    xMat4x3 mat;
+    xModelGetBoneMat(mat, *model, (size_t)bone);
 
-    static const U8 segments[10][7] =
+    const F32 len = 0.9f;
+    RwIm3DVertex verts[6];
+
+    const xVec3 points[6] =
     {
-        {1,1,1,1,1,1,0}, {0,1,1,0,0,0,0}, {1,1,0,1,1,0,1},
-        {1,1,1,1,0,0,1}, {0,1,1,0,0,1,1}, {1,0,1,1,0,1,1},
-        {1,0,1,1,1,1,1}, {1,1,1,0,0,0,0}, {1,1,1,1,1,1,1},
-        {1,1,1,1,0,1,1}
+        mat.pos,
+        { mat.pos.x + mat.right.x * len, mat.pos.y + mat.right.y * len, mat.pos.z + mat.right.z * len },
+        mat.pos,
+        { mat.pos.x + mat.up.x * len, mat.pos.y + mat.up.y * len, mat.pos.z + mat.up.z * len },
+        mat.pos,
+        { mat.pos.x + mat.at.x * len, mat.pos.y + mat.at.y * len, mat.pos.z + mat.at.z * len }
     };
-    static const F32 segs[7][4] =
+
+    const U8 colors[3][3] =
     {
-        {-0.45f, 0.50f, 0.45f, 0.50f}, {0.45f, 0.50f, 0.45f, 0.00f},
-        {0.45f, 0.00f, 0.45f,-0.50f}, {-0.45f,-0.50f, 0.45f,-0.50f},
-        {-0.45f, 0.00f,-0.45f,-0.50f}, {-0.45f, 0.50f,-0.45f, 0.00f},
-        {-0.45f, 0.00f, 0.45f, 0.00f}
+        {255, 60, 60},
+        {60, 255, 60},
+        {60, 120, 255}
     };
+
+    for (S32 i = 0; i < 6; ++i)
+    {
+        RwIm3DVertexSetPos(&verts[i], points[i].x, points[i].y, points[i].z);
+        S32 axis = i / 2;
+        RwIm3DVertexSetRGBA(&verts[i], colors[axis][0], colors[axis][1], colors[axis][2], 255);
+    }
 
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
-    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
-    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
-    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
 
-    for (S32 bone = 0; bone < 28; ++bone)
-    {
-        xVec3 pos = xModelGetBoneLocation(*model, (U32)bone);
-        pos.y += 0.18f;
-
-        S32 digits[2] = { bone / 10, bone % 10 };
-        S32 digit_count = bone >= 10 ? 2 : 1;
-
-        for (S32 d = 0; d < digit_count; ++d)
-        {
-            F32 xoff = digit_count == 2 ? (d == 0 ? -0.50f : 0.50f) : 0.0f;
-
-            for (S32 s = 0; s < 7; ++s)
-            {
-                if (!segments[digits[d]][s])
-                    continue;
-
-                F32 x0 = (segs[s][0] * 0.42f + xoff) * 0.42f;
-                F32 y0 = segs[s][1] * 0.42f * 0.42f;
-                F32 x1 = (segs[s][2] * 0.42f + xoff) * 0.22f;
-                F32 y1 = segs[s][3] * 0.42f * 0.22f;
-
-                F32 dx = x1 - x0;
-                F32 dy = y1 - y0;
-                F32 len = sqrtf(dx * dx + dy * dy);
-                if (len <= 0.0001f)
-                    continue;
-
-                F32 px = -dy / len * 0.015f;
-                F32 py = dx / len * 0.015f;
-                RwIm3DVertex quad[4];
-
-                F32 left_x = pos.x + camera_matrix->right.x * (x0 - px) + camera_matrix->up.x * (y0 - py);
-                F32 left_y = pos.y + camera_matrix->right.y * (x0 - px) + camera_matrix->up.y * (y0 - py);
-                F32 left_z = pos.z + camera_matrix->right.z * (x0 - px) + camera_matrix->up.z * (y0 - py);
-                F32 right_x = pos.x + camera_matrix->right.x * (x1 + px) + camera_matrix->up.x * (y1 + py);
-                F32 right_y = pos.y + camera_matrix->right.y * (x1 + px) + camera_matrix->up.y * (y1 + py);
-                F32 right_z = pos.z + camera_matrix->right.z * (x1 + px) + camera_matrix->up.z * (y1 + py);
-
-                F32 top_x = camera_matrix->up.x * 0.025f;
-                F32 top_y = camera_matrix->up.y * 0.025f;
-                F32 top_z = camera_matrix->up.z * 0.025f;
-
-                RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
-                RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
-                RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
-                RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
-                for (S32 i = 0; i < 4; ++i)
-                    RwIm3DVertexSetRGBA(&quad[i], 255, 220, 40, 255);
-
-                if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
-                    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
-            }
-        }
-    }
+    if (RwIm3DTransform(verts, 6, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
 }
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
@@ -214,6 +172,9 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     warning_active = 0;
     zap_fired = 0;
     pad[0] = pad[1] = 0;
+
+    bone_debug_timer = 0.0f;
+    bone_debug_index = 0;
 
     warning_beam.init(8, "Mini Merv warning");
     warning_beam.set_texture("plankton_laser_bolt");
@@ -405,6 +366,14 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
     }
     warning_beam.update(dt);
 
+    bone_debug_timer += dt;
+    if (bone_debug_timer >= 1.0f)
+    {
+        bone_debug_timer -= 1.0f;
+        bone_debug_index = (bone_debug_index + 1) % 28;
+        printf("[MiniMervBoneAxis] bone=%d\\n", bone_debug_index);
+    }
+
     if (warning_beam.visible())
     {
         flg_xtrarend |= 0x1;
@@ -414,7 +383,7 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
 void zNMEMiniMerv::RenderExtra()
 {
     warning_beam.render();
-    MiniMervRenderBoneLabels(model);
+    MiniMervRenderBoneAxis(model, bone_debug_index);
 }
 
 void zNMEMiniMerv::SelfDestroy()
