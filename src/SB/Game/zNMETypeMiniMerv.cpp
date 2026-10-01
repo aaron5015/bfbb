@@ -267,9 +267,6 @@ void zNMEMiniMerv::RenderMuzzleFlash()
         return;
     }
 
-    // Retry the lookup here in case the texture was not resident when Setup()
-    // first ran. This is also how we avoid silently losing the effect during
-    // the initial visual test.
     if (muzzle_flash_raster == NULL)
     {
         muzzle_flash_raster = NPCC_FindRWRaster("fx_solid");
@@ -283,123 +280,53 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 pos;
     GetMuzzlePos(&pos);
 
-    // Mat[28] is slightly inside the muzzle assembly. The beam can start
-    // there because it immediately extends toward the target, but a centered
-    // billboard can be hidden by the muzzle geometry. Move only this visual
-    // effect a short distance toward the target.
-    xVec3 flash_dir;
-    xVec3 flash_target = *xEntGetPos(&globals.player.ent);
-    xVec3Sub(&flash_dir, &flash_target, &pos);
-    F32 flash_len2 = xVec3Length2(&flash_dir);
-    if (flash_len2 > 0.0001f)
-    {
-        xVec3SMulBy(&flash_dir, 0.35f / sqrtf(flash_len2));
-        pos += flash_dir;
-    }
+    // Diagnostic: use the same simple camera-facing quad and render-state
+    // setup used by the working Buddy image renderer.
+    RwMatrix* camera_matrix = RwFrameGetLTM(RwCameraGetFrame(globals.camera.lo_cam));
 
-    xMat3x3 mat;
-    xVec3 dir_card;
-    xVec3 dir_perp;
-    xVec3 dir_up;
-    xVec3 pos_top;
-    xVec3 pos_bot;
-    xVec3 pos_lerp;
-    xVec3 pos_vtx;
-    F32 uv_lo[2];
-    F32 uv_hi[2];
-    RwRGBA rgba = { 255, 255, 255, 255 };
+    F32 rad = 1.0f;
+    F32 left_x = pos.x - camera_matrix->right.x * rad;
+    F32 left_y = pos.y - camera_matrix->right.y * rad;
+    F32 left_z = pos.z - camera_matrix->right.z * rad;
+    F32 right_x = pos.x + camera_matrix->right.x * rad;
+    F32 right_y = pos.y + camera_matrix->right.y * rad;
+    F32 right_z = pos.z + camera_matrix->right.z * rad;
 
-    xMat3x3LookAt(&mat, &pos, &globals.camera.mat.pos);
+    F32 top_x = camera_matrix->up.x * rad;
+    F32 top_y = camera_matrix->up.y * rad;
+    F32 top_z = camera_matrix->up.z * rad;
 
-    xVec3Add(&dir_card, &mat.at, &mat.right);
-    xVec3Normalize(&dir_card, &dir_card);
+    RwIm3DVertex quad[4];
+    RwIm3DVertexSetPos(&quad[0], left_x, left_y, left_z);
+    RwIm3DVertexSetRGBA(&quad[0], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[0], 0.0f, 1.0f);
 
-    xVec3Sub(&dir_perp, &mat.at, &mat.right);
-    xVec3Normalize(&dir_perp, &dir_perp);
+    RwIm3DVertexSetPos(&quad[1], left_x + top_x, left_y + top_y, left_z + top_z);
+    RwIm3DVertexSetRGBA(&quad[1], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[1], 0.0f, 0.0f);
 
-    xVec3Copy(&dir_up, &mat.up);
+    RwIm3DVertexSetPos(&quad[2], right_x, right_y, right_z);
+    RwIm3DVertexSetRGBA(&quad[2], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[2], 1.0f, 1.0f);
 
-    // Keep the first pass deliberately obvious in-game.
-    F32 rad = 0.65f * muzzle_flash_scale;
-    xVec3Copy(&pos_top, &pos);
-    xVec3Copy(&pos_bot, &pos);
-    xVec3AddScaled(&pos_top, &dir_up, rad);
-    xVec3AddScaled(&pos_bot, &dir_up, -rad);
-
-    const F32 u0 = (muzzle_flash_frame & 1) ? 0.5f : 0.0f;
-    const F32 v0 = (muzzle_flash_frame & 2) ? 0.5f : 0.0f;
-    const F32 u1 = u0 + 0.5f;
-    const F32 v1 = v0 + 0.5f;
-    uv_lo[0] = u0;
-    uv_lo[1] = v0;
-    uv_hi[0] = u1;
-    uv_hi[1] = v1;
-
-    RwIm3DVertex vtxbuf[2][14];
-    RwIm3DVertex* vtx_horz = vtxbuf[0];
-    RwIm3DVertex* vtx_vert = vtxbuf[1];
-
-    for (S32 i = 0; i <= 6; ++i)
-    {
-        F32 rat = (F32)i / 6.0f;
-
-        pos_lerp.x = pos_top.x + (pos_bot.x - pos_top.x) * rat;
-        pos_lerp.y = pos_top.y + (pos_bot.y - pos_top.y) * rat;
-        pos_lerp.z = pos_top.z + (pos_bot.z - pos_top.z) * rat;
-
-        F32 v = uv_lo[1] + (uv_hi[1] - uv_lo[1]) * rat;
-
-        pos_vtx = dir_card * rad;
-        pos_vtx += pos_lerp;
-        RwIm3DVertexSetPos(&vtx_horz[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx_horz[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
-        RwIm3DVertexSetUV(&vtx_horz[0], uv_lo[0], v);
-
-        pos_vtx = dir_card * -rad;
-        pos_vtx += pos_lerp;
-        RwIm3DVertexSetPos(&vtx_horz[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx_horz[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
-        RwIm3DVertexSetUV(&vtx_horz[1], uv_hi[0], v);
-
-        vtx_horz += 2;
-
-        pos_vtx = dir_perp * -rad;
-        pos_vtx += pos_lerp;
-        RwIm3DVertexSetPos(&vtx_vert[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx_vert[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
-        RwIm3DVertexSetUV(&vtx_vert[0], uv_lo[0], v);
-
-        pos_vtx = dir_perp * rad;
-        pos_vtx += pos_lerp;
-        RwIm3DVertexSetPos(&vtx_vert[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx_vert[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
-        RwIm3DVertexSetUV(&vtx_vert[1], uv_hi[0], v);
-
-        vtx_vert += 2;
-    }
-
-    _SDRenderState old_rendstat = zRenderStateCurrent();
-    if (old_rendstat == SDRS_Unknown)
-    {
-        old_rendstat = SDRS_Default;
-    }
+    RwIm3DVertexSetPos(&quad[3], right_x + top_x, right_y + top_y, right_z + top_z);
+    RwIm3DVertexSetRGBA(&quad[3], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&quad[3], 1.0f, 0.0f);
 
     zRenderState(SDRS_NPCVisual);
-    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)muzzle_flash_raster);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-    RwIm3DTransform(vtxbuf[0], 14, NULL,
-                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
-    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
-    RwIm3DEnd();
-
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)muzzle_flash_raster);
-    RwIm3DTransform(vtxbuf[1], 14, NULL,
-                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA | rwIM3D_VERTEXUV);
-    RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
-    RwIm3DEnd();
-
-    zRenderState(old_rendstat);
+    if (RwIm3DTransform(quad, 4, NULL,
+                        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
+    {
+        RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        RwIm3DEnd();
+    }
 }
 
 void zNMEMiniMerv::UpdateZap(F32 dt)
