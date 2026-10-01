@@ -5,6 +5,8 @@
 #include "zMovePoint.h"
 #include <math.h>
 
+static const U32 MINI_MERV_MUZZLE_BONE = 27;
+
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
     if (who == zNMEMiniMerv::GOAL_ZAP)
@@ -142,6 +144,11 @@ bool zNMEMiniMerv::TargetInDangerRange() const
 void zNMEMiniMerv::FireWarningBeam()
 {
     xVec3 start = *xEntGetPos((xEnt*)this);
+
+    if (model != NULL && MINI_MERV_MUZZLE_BONE < model->BoneCount)
+    {
+        start = xModelGetBoneLocation(*model, MINI_MERV_MUZZLE_BONE);
+    }
     xVec3 target = *xEntGetPos(&globals.player.ent);
     xVec3 dir;
     xVec3Sub(&dir, &target, &start);
