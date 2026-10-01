@@ -339,6 +339,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)rwCULLMODECULLNONE);
 
     if (RwIm3DTransform(quad, 4, NULL,
                         rwIM3D_VERTEXXYZ | rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA) != NULL)
