@@ -3,6 +3,7 @@
 #include "zEntPlayer.h"
 #include "zGlobals.h"
 #include "zMovePoint.h"
+#include "zNPCTypeRobot.h"
 #include <math.h>
 
 static const S32 MINI_MERV_MUZZLE_BONE = 28;
@@ -59,7 +60,14 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     cooldown_timer = 0.0f;
     warning_active = 0;
     zap_fired = 0;
-    pad[0] = pad[1] = 0;
+    zap_visible = 0;
+    pad[0] = 0;
+
+    zap_beam.Prepare();
+    zap_beam.TextureSet(NPCC_FindRWRaster("fx_solid"));
+    zap_beam.RadiusSet(0.16f, 0.16f);
+    RwRGBA zap_color = { 80, 220, 255, 255 };
+    zap_beam.ColorSet(&zap_color, &zap_color);
 
     warning_beam.init(8, "Mini Merv warning");
     warning_beam.set_texture("plankton_laser_bolt");
@@ -104,7 +112,9 @@ void zNMEMiniMerv::Reset()
     cooldown_timer = 0.0f;
     warning_active = 0;
     zap_fired = 0;
+    zap_visible = 0;
     warning_beam.reset();
+    zap_visible = 0;
 }
 
 bool zNMEMiniMerv::TargetInFocusRange() const
@@ -175,7 +185,30 @@ void zNMEMiniMerv::FireZap()
 {
     zEntPlayer_Damage((xBase*)this, 1);
     zap_fired = 1;
+    zap_visible = 1;
     cooldown_timer = cooldown_time;
+}
+
+void zNMEMiniMerv::UpdateZapBeam()
+{
+    if (!zap_visible || frame == NULL || model == NULL || model->Mat == NULL)
+    {
+        return;
+    }
+
+    xVec3 start = *xEntGetPos((xEnt*)this);
+
+    if (model->BoneCount >= MINI_MERV_MUZZLE_BONE)
+    {
+        const xVec3& local = *(const xVec3*)&model->Mat[MINI_MERV_MUZZLE_BONE].pos;
+        start = frame->mat.pos;
+        start.x += frame->mat.right.x * local.x + frame->mat.up.x * local.y + frame->mat.at.x * local.z;
+        start.y += frame->mat.right.y * local.x + frame->mat.up.y * local.y + frame->mat.at.y * local.z;
+        start.z += frame->mat.right.z * local.x + frame->mat.up.z * local.y + frame->mat.at.z * local.z;
+    }
+
+    xVec3 target = *xEntGetPos(&globals.player.ent);
+    zap_beam.Render(&start, &target);
 }
 
 void zNMEMiniMerv::UpdateZap(F32 dt)
@@ -252,6 +285,12 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
     }
 
     warning_beam.update(dt);
+
+    if (zap_visible)
+    {
+        UpdateZapBeam();
+        zap_visible = 0;
+    }
 
     if (warning_beam.visible())
     {
