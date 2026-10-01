@@ -5,7 +5,7 @@
 #include "zMovePoint.h"
 #include <math.h>
 
-static const xVec3 MINI_MERV_MUZZLE_VERTEX = { 0.017167f, -0.76482f, 0.83404f };
+static const S32 MINI_MERV_MUZZLE_BONE = 28;
 
 static xFactoryInst* MiniMervGoalCreate(S32 who, RyzMemGrow* grow, void*)
 {
@@ -145,19 +145,16 @@ void zNMEMiniMerv::FireWarningBeam()
 {
     xVec3 start = *xEntGetPos((xEnt*)this);
 
-    // Mini Merv's muzzle vertex is stored in model-local space.
-    if (frame != NULL)
+    // Mat[28] is the evaluated animated slot identified by the Mini Merv
+    // animation sweep as the lowest, swaying laser assembly/muzzle.
+    // Mat[] positions are model-local, so transform it through the entity frame.
+    if (frame != NULL && model != NULL && model->Mat != NULL && model->BoneCount >= MINI_MERV_MUZZLE_BONE)
     {
+        const xVec3& local = *(const xVec3*)&model->Mat[MINI_MERV_MUZZLE_BONE].pos;
         start = frame->mat.pos;
-        start.x += frame->mat.right.x * MINI_MERV_MUZZLE_VERTEX.x;
-        start.x += frame->mat.up.x * MINI_MERV_MUZZLE_VERTEX.y;
-        start.x += frame->mat.at.x * MINI_MERV_MUZZLE_VERTEX.z;
-        start.y += frame->mat.right.y * MINI_MERV_MUZZLE_VERTEX.x;
-        start.y += frame->mat.up.y * MINI_MERV_MUZZLE_VERTEX.y;
-        start.y += frame->mat.at.y * MINI_MERV_MUZZLE_VERTEX.z;
-        start.z += frame->mat.right.z * MINI_MERV_MUZZLE_VERTEX.x;
-        start.z += frame->mat.up.z * MINI_MERV_MUZZLE_VERTEX.y;
-        start.z += frame->mat.at.z * MINI_MERV_MUZZLE_VERTEX.z;
+        start.x += frame->mat.right.x * local.x + frame->mat.up.x * local.y + frame->mat.at.x * local.z;
+        start.y += frame->mat.right.y * local.x + frame->mat.up.y * local.y + frame->mat.at.y * local.z;
+        start.z += frame->mat.right.z * local.x + frame->mat.up.z * local.y + frame->mat.at.z * local.z;
     }
 
     xVec3 target = *xEntGetPos(&globals.player.ent);
@@ -255,6 +252,11 @@ void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
     }
 
     warning_beam.update(dt);
+
+    if (warning_beam.visible())
+    {
+        flg_xtrarend |= 0x1;
+    }
 }
 
 void zNMEMiniMerv::RenderExtra()
