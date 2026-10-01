@@ -283,6 +283,20 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 pos;
     GetMuzzlePos(&pos);
 
+    // Mat[28] is slightly inside the muzzle assembly. The beam can start
+    // there because it immediately extends toward the target, but a centered
+    // billboard can be hidden by the muzzle geometry. Move only this visual
+    // effect a short distance toward the target.
+    xVec3 flash_dir;
+    xVec3 flash_target = *xEntGetPos(&globals.player.ent);
+    xVec3Sub(&flash_dir, &flash_target, &pos);
+    F32 flash_len2 = xVec3Length2(&flash_dir);
+    if (flash_len2 > 0.0001f)
+    {
+        xVec3SMulBy(&flash_dir, 0.35f / sqrtf(flash_len2));
+        pos += flash_dir;
+    }
+
     xMat3x3 mat;
     xVec3 dir_card;
     xVec3 dir_perp;
