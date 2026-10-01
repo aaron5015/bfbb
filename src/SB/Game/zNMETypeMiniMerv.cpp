@@ -329,11 +329,11 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     {
         F32 rat = (F32)i / 6.0f;
 
-        pos_lerp.x = LERP(rat, pos_top.x, pos_bot.x);
-        pos_lerp.y = LERP(rat, pos_top.y, pos_bot.y);
-        pos_lerp.z = LERP(rat, pos_top.z, pos_bot.z);
+        pos_lerp.x = pos_top.x + (pos_bot.x - pos_top.x) * rat;
+        pos_lerp.y = pos_top.y + (pos_bot.y - pos_top.y) * rat;
+        pos_lerp.z = pos_top.z + (pos_bot.z - pos_top.z) * rat;
 
-        F32 v = LERP(rat, uv_lo[1], uv_hi[1]);
+        F32 v = uv_lo[1] + (uv_hi[1] - uv_lo[1]) * rat;
 
         pos_vtx = dir_card * rad;
         pos_vtx += pos_lerp;
