@@ -373,7 +373,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     for (S32 i = 0; i < 4; ++i)
     {
-        RwIm3DVertexSetRGBA(&quad[i], 255, 255, 255, 255);
+        RwIm3DVertexSetRGBA(&quad[i], 255, 255, 255, 200);
     }
 
     RwIm3DVertexSetUV(&quad[0], u0, v1);
@@ -386,9 +386,10 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     // encountered by this camera-facing quad.
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
 
-    // Explicitly enable texture alpha blending. The inverted raster preserves
-    // the source alpha, while the vertex alpha stays fully opaque.
-    RwRenderStateSet(rwRENDERSTATEVERTEXALPHA, (void*)TRUE);
+    // Explicitly enable alpha blending. The inverted raster preserves the
+    // source alpha, and the vertex alpha gives the effect a little translucency
+    // even if the source sheet itself is opaque.
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
