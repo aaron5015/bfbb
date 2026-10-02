@@ -26,11 +26,13 @@ static const S32 MINI_MERV_MUZZLE_BONE = 28;
 // TSSM's muzzle effect appears to treat the four atlas cells as
 // alternative flash shapes rather than a fixed 0 -> 1 -> 2 -> 3 animation.
 // Each short-lived flash chooses one cell, rapidly expands to a common
-// maximum, then collapses/fades away before the next flash is chosen.
-static const F32 MINI_MERV_MUZZLE_LIFETIME = 0.20f;
-static const F32 MINI_MERV_MUZZLE_PEAK_TIME = 0.045f;
+// maximum, then collapses/fades. New flashes overlap the previous one near
+// its apex instead of waiting for it to disappear.
+static const F32 MINI_MERV_MUZZLE_LIFETIME = 0.045f;
+static const F32 MINI_MERV_MUZZLE_PEAK_TIME = 0.0225f;
+static const F32 MINI_MERV_MUZZLE_SPAWN_INTERVAL = 0.020f;
 static const F32 MINI_MERV_MUZZLE_MIN_SCALE = 0.05f;
-static const F32 MINI_MERV_MUZZLE_MAX_SCALE = 1.45f;
+static const F32 MINI_MERV_MUZZLE_MAX_SCALE = 1.10f;
 static const F32 MINI_MERV_MUZZLE_ROTATION_RATE = 7.0f;
 
 static RwRaster* MiniMervCreateInvertedRaster(RwRaster* source)
@@ -135,11 +137,14 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     zap_visible = 0;
     pad[0] = 0;
     zap_visual_timer = 0.0f;
-    muzzle_flash_timer = 0.0f;
-    muzzle_flash_frame_timer = 0.0f;
-    muzzle_flash_angle = 0.0f;
-    muzzle_flash_scale = 1.0f;
-    muzzle_flash_frame = 0;
+    muzzle_flash_spawn_timer = 0.0f;
+    for (S32 i = 0; i < MUZZLE_FLASH_COUNT; ++i)
+    {
+        muzzle_flash_timer[i] = 0.0f;
+        muzzle_flash_angle[i] = 0.0f;
+        muzzle_flash_scale[i] = 1.0f;
+        muzzle_flash_frame[i] = 0;
+    }
     muzzle_flash_raster = NULL;
     muzzle_flash_inverted_raster = NULL;
 
@@ -200,11 +205,14 @@ void zNMEMiniMerv::Reset()
     zap_fired = 0;
     zap_visible = 0;
     zap_visual_timer = 0.0f;
-    muzzle_flash_timer = 0.0f;
-    muzzle_flash_frame_timer = 0.0f;
-    muzzle_flash_angle = 0.0f;
-    muzzle_flash_scale = 1.0f;
-    muzzle_flash_frame = 0;
+    muzzle_flash_spawn_timer = 0.0f;
+    for (S32 i = 0; i < MUZZLE_FLASH_COUNT; ++i)
+    {
+        muzzle_flash_timer[i] = 0.0f;
+        muzzle_flash_angle[i] = 0.0f;
+        muzzle_flash_scale[i] = 1.0f;
+        muzzle_flash_frame[i] = 0;
+    }
     warning_beam.reset();
 }
 
@@ -300,11 +308,11 @@ void zNMEMiniMerv::FireZap()
     zap_fired = 1;
     zap_visible = 1;
     zap_visual_timer = 0.20f;
-    muzzle_flash_timer = MINI_MERV_MUZZLE_LIFETIME;
-    muzzle_flash_frame = (S32)(xurand() * 4.0f);
-    muzzle_flash_frame_timer = 0.0f;
-    muzzle_flash_angle = (xurand() - 0.5f) * 6.2831853f;
-    muzzle_flash_scale = MINI_MERV_MUZZLE_MIN_SCALE;
+    muzzle_flash_spawn_timer = 0.0f;
+    for (S32 i = 0; i < MUZZLE_FLASH_COUNT; ++i)
+    {
+        muzzle_flash_timer[i] = 0.0f;
+    }
     cooldown_timer = cooldown_time;
 }
 
@@ -349,13 +357,10 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
 
         // Only restart the muzzle cycle when the previous one has finished.
         // Damage remains continuous, but the visual is allowed to animate.
-        if (muzzle_flash_timer <= 0.0f)
+        // Start the overlapping flash stream on the first close-range hit.
+        if (muzzle_flash_spawn_timer <= 0.0f)
         {
-            muzzle_flash_timer = MINI_MERV_MUZZLE_LIFETIME;
-            muzzle_flash_frame = (S32)(xurand() * 4.0f);
-            muzzle_flash_frame_timer = 0.0f;
-            muzzle_flash_angle = (xurand() - 0.5f) * 6.2831853f;
-            muzzle_flash_scale = MINI_MERV_MUZZLE_MIN_SCALE;
+            muzzle_flash_spawn_timer = MINI_MERV_MUZZLE_SPAWN_INTERVAL;
         }
 
         return;
@@ -417,45 +422,77 @@ void zNMEMiniMerv::UpdateZapBeam()
 
 void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
 {
-    if (muzzle_flash_timer <= 0.0f)
+    // Advance and fade every active flash independently.
+    for (S32 i = 0; i < MUZZLE_FLASH_COUNT; ++i)
     {
-        return;
+        if (muzzle_flash_timer[i] <= 0.0f)
+        {
+            continue;
+        }
+
+        muzzle_flash_timer[i] = MAX(0.0f, muzzle_flash_timer[i] - dt);
+
+        const F32 elapsed = MINI_MERV_MUZZLE_LIFETIME - muzzle_flash_timer[i];
+
+        if (elapsed < MINI_MERV_MUZZLE_PEAK_TIME)
+        {
+            const F32 t = elapsed / MINI_MERV_MUZZLE_PEAK_TIME;
+            muzzle_flash_scale[i] = MINI_MERV_MUZZLE_MIN_SCALE +
+                (MINI_MERV_MUZZLE_MAX_SCALE - MINI_MERV_MUZZLE_MIN_SCALE) * t;
+        }
+        else
+        {
+            const F32 fade_t = (elapsed - MINI_MERV_MUZZLE_PEAK_TIME) /
+                (MINI_MERV_MUZZLE_LIFETIME - MINI_MERV_MUZZLE_PEAK_TIME);
+            const F32 remaining = MAX(0.0f, 1.0f - fade_t);
+            muzzle_flash_scale[i] = MINI_MERV_MUZZLE_MAX_SCALE * remaining;
+        }
+
+        muzzle_flash_angle[i] += MINI_MERV_MUZZLE_ROTATION_RATE * dt;
     }
 
-    muzzle_flash_timer = MAX(0.0f, muzzle_flash_timer - dt);
-
-    // The atlas cell is selected once when this flash is spawned. Do not
-    // advance through 0 -> 1 -> 2 -> 3: consecutive flashes may choose the
-    // same cell, which is part of the deliberately irregular appearance.
-    //
-    // The flash itself has a very short life: an almost immediate expansion
-    // followed by a much longer collapse/fade. Every cell reaches the same
-    // maximum size.
-    const F32 elapsed = MINI_MERV_MUZZLE_LIFETIME - muzzle_flash_timer;
-
-    if (elapsed < MINI_MERV_MUZZLE_PEAK_TIME)
+    // Spawn the next random shape slightly before the current flash reaches
+    // its apex. This intentionally creates a brief overlap between flashes.
+    muzzle_flash_spawn_timer -= dt;
+    if (muzzle_flash_spawn_timer <= 0.0f)
     {
-        const F32 t = elapsed / MINI_MERV_MUZZLE_PEAK_TIME;
-        muzzle_flash_scale = MINI_MERV_MUZZLE_MIN_SCALE +
-            (MINI_MERV_MUZZLE_MAX_SCALE - MINI_MERV_MUZZLE_MIN_SCALE) * t;
-    }
-    else
-    {
-        const F32 fade_t = (elapsed - MINI_MERV_MUZZLE_PEAK_TIME) /
-            (MINI_MERV_MUZZLE_LIFETIME - MINI_MERV_MUZZLE_PEAK_TIME);
-        const F32 remaining = MAX(0.0f, 1.0f - fade_t);
-        muzzle_flash_scale = MINI_MERV_MUZZLE_MAX_SCALE * remaining;
-    }
+        S32 slot = -1;
 
-    // TSSM rotates the selected shape continuously during its short life.
-    // The initial angle is randomized per flash, but there is no per-frame
-    // random rotation.
-    muzzle_flash_angle += MINI_MERV_MUZZLE_ROTATION_RATE * dt;
+        for (S32 i = 0; i < MUZZLE_FLASH_COUNT; ++i)
+        {
+            if (muzzle_flash_timer[i] <= 0.0f)
+            {
+                slot = i;
+                break;
+            }
+        }
+
+        if (slot < 0)
+        {
+            // With the current timing there should normally be a free slot.
+            // If a frame hitch fills all three, replace the oldest/nearest-to-
+            // finished flash rather than allowing the stream to stall.
+            slot = 0;
+            for (S32 i = 1; i < MUZZLE_FLASH_COUNT; ++i)
+            {
+                if (muzzle_flash_timer[i] < muzzle_flash_timer[slot])
+                {
+                    slot = i;
+                }
+            }
+        }
+
+        muzzle_flash_timer[slot] = MINI_MERV_MUZZLE_LIFETIME;
+        muzzle_flash_frame[slot] = (S32)(xurand() * 4.0f);
+        muzzle_flash_angle[slot] = (xurand() - 0.5f) * 6.2831853f;
+        muzzle_flash_scale[slot] = MINI_MERV_MUZZLE_MIN_SCALE;
+
+        muzzle_flash_spawn_timer += MINI_MERV_MUZZLE_SPAWN_INTERVAL;
+    }
 }
-
 void zNMEMiniMerv::RenderMuzzleFlash()
 {
-    if (muzzle_flash_timer <= 0.0f || muzzle_flash_inverted_raster == NULL)
+    if (muzzle_flash_inverted_raster == NULL)
     {
         return;
     }
@@ -466,89 +503,94 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xMat3x3 cam_mat;
     xMat3x3LookAt(&cam_mat, &pos, &globals.camera.mat.pos);
 
-    F32 cs = cosf(muzzle_flash_angle);
-    F32 sn = sinf(muzzle_flash_angle);
-
-    xVec3 right;
-    right.x = cam_mat.right.x * cs + cam_mat.up.x * sn;
-    right.y = cam_mat.right.y * cs + cam_mat.up.y * sn;
-    right.z = cam_mat.right.z * cs + cam_mat.up.z * sn;
-
-    xVec3 up;
-    up.x = -cam_mat.right.x * sn + cam_mat.up.x * cs;
-    up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
-    up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
-
-    // Render two crossed camera-facing planes at the same size. This gives the
-    // flash some depth from different viewing angles without adding a second
-    // scaled copy of the animated texture.
-    F32 rad = 0.75f * muzzle_flash_scale;
-
-    xVec3 r = right * rad;
-    xVec3 u = up * rad;
-    xVec3 d = cam_mat.at * rad;
-
-    xVec3 p0 = pos - r - u;
-    xVec3 p1 = pos + r - u;
-    xVec3 p2 = pos + r + u;
-    xVec3 p3 = pos - r + u;
-
-    xVec3 q0 = pos - d - u;
-    xVec3 q1 = pos + d - u;
-    xVec3 q2 = pos + d + u;
-    xVec3 q3 = pos - d + u;
-
     // fx_beam_muzzle_flash is a 64x64 Xbox texture with four 32x32 atlas cells.
     // Keep bilinear filtering from sampling across the 32x32 atlas-cell
     // boundaries. The Xbox sheet is 64x64, so half a texel is 1/128.
     const F32 texel = 1.0f / 128.0f;
-    const F32 u0 = ((muzzle_flash_frame & 1) ? 0.5f : 0.0f) + texel;
-    const F32 v0 = ((muzzle_flash_frame & 2) ? 0.5f : 0.0f) + texel;
-    const F32 u1 = ((muzzle_flash_frame & 1) ? 1.0f : 0.5f) - texel;
-    const F32 v1 = ((muzzle_flash_frame & 2) ? 1.0f : 0.5f) - texel;
-
-    RwIm3DVertex quad[8];
-
-    RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
-    RwIm3DVertexSetPos(&quad[1], p1.x, p1.y, p1.z);
-    RwIm3DVertexSetPos(&quad[2], p2.x, p2.y, p2.z);
-    RwIm3DVertexSetPos(&quad[3], p3.x, p3.y, p3.z);
-
-    RwIm3DVertexSetPos(&quad[4], q0.x, q0.y, q0.z);
-    RwIm3DVertexSetPos(&quad[5], q1.x, q1.y, q1.z);
-    RwIm3DVertexSetPos(&quad[6], q2.x, q2.y, q2.z);
-    RwIm3DVertexSetPos(&quad[7], q3.x, q3.y, q3.z);
-
-    for (S32 i = 0; i < 8; ++i)
-    {
-        RwIm3DVertexSetRGBA(&quad[i], 180, 235, 255, 100);
-    }
-
-    RwIm3DVertexSetUV(&quad[0], u0, v1);
-    RwIm3DVertexSetUV(&quad[1], u1, v1);
-    RwIm3DVertexSetUV(&quad[2], u1, v0);
-    RwIm3DVertexSetUV(&quad[3], u0, v0);
-
-    RwIm3DVertexSetUV(&quad[4], u0, v1);
-    RwIm3DVertexSetUV(&quad[5], u1, v1);
-    RwIm3DVertexSetUV(&quad[6], u1, v0);
-    RwIm3DVertexSetUV(&quad[7], u0, v0);
 
     zRenderState(SDRS_NPCVisual);
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
-
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
 
-    if (RwIm3DTransform(quad, 8, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
+    for (S32 f = 0; f < MUZZLE_FLASH_COUNT; ++f)
     {
-        RwImVertexIndex index[12] = {
-            0, 1, 3, 1, 2, 3,
-            4, 5, 7, 5, 6, 7
-        };
-        RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 12);
-        RwIm3DEnd();
+        if (muzzle_flash_timer[f] <= 0.0f)
+        {
+            continue;
+        }
+
+        F32 cs = cosf(muzzle_flash_angle[f]);
+        F32 sn = sinf(muzzle_flash_angle[f]);
+
+        xVec3 right;
+        right.x = cam_mat.right.x * cs + cam_mat.up.x * sn;
+        right.y = cam_mat.right.y * cs + cam_mat.up.y * sn;
+        right.z = cam_mat.right.z * cs + cam_mat.up.z * sn;
+
+        xVec3 up;
+        up.x = -cam_mat.right.x * sn + cam_mat.up.x * cs;
+        up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
+        up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
+
+        F32 rad = 0.75f * muzzle_flash_scale[f];
+
+        xVec3 r = right * rad;
+        xVec3 u = up * rad;
+        xVec3 d = cam_mat.at * rad;
+
+        xVec3 p0 = pos - r - u;
+        xVec3 p1 = pos + r - u;
+        xVec3 p2 = pos + r + u;
+        xVec3 p3 = pos - r + u;
+
+        xVec3 q0 = pos - d - u;
+        xVec3 q1 = pos + d - u;
+        xVec3 q2 = pos + d + u;
+        xVec3 q3 = pos - d + u;
+
+        const F32 u0 = ((muzzle_flash_frame[f] & 1) ? 0.5f : 0.0f) + texel;
+        const F32 v0 = ((muzzle_flash_frame[f] & 2) ? 0.5f : 0.0f) + texel;
+        const F32 u1 = ((muzzle_flash_frame[f] & 1) ? 1.0f : 0.5f) - texel;
+        const F32 v1 = ((muzzle_flash_frame[f] & 2) ? 1.0f : 0.5f) - texel;
+
+        RwIm3DVertex quad[8];
+
+        RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
+        RwIm3DVertexSetPos(&quad[1], p1.x, p1.y, p1.z);
+        RwIm3DVertexSetPos(&quad[2], p2.x, p2.y, p2.z);
+        RwIm3DVertexSetPos(&quad[3], p3.x, p3.y, p3.z);
+
+        RwIm3DVertexSetPos(&quad[4], q0.x, q0.y, q0.z);
+        RwIm3DVertexSetPos(&quad[5], q1.x, q1.y, q1.z);
+        RwIm3DVertexSetPos(&quad[6], q2.x, q2.y, q2.z);
+        RwIm3DVertexSetPos(&quad[7], q3.x, q3.y, q3.z);
+
+        for (S32 i = 0; i < 8; ++i)
+        {
+            RwIm3DVertexSetRGBA(&quad[i], 180, 235, 255, 100);
+        }
+
+        RwIm3DVertexSetUV(&quad[0], u0, v1);
+        RwIm3DVertexSetUV(&quad[1], u1, v1);
+        RwIm3DVertexSetUV(&quad[2], u1, v0);
+        RwIm3DVertexSetUV(&quad[3], u0, v0);
+
+        RwIm3DVertexSetUV(&quad[4], u0, v1);
+        RwIm3DVertexSetUV(&quad[5], u1, v1);
+        RwIm3DVertexSetUV(&quad[6], u1, v0);
+        RwIm3DVertexSetUV(&quad[7], u0, v0);
+
+        if (RwIm3DTransform(quad, 8, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
+        {
+            RwImVertexIndex index[12] = {
+                0, 1, 3, 1, 2, 3,
+                4, 5, 7, 5, 6, 7
+            };
+            RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 12);
+            RwIm3DEnd();
+        }
     }
 }
 void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
@@ -596,7 +638,11 @@ void zNMEMiniMerv::RenderExtra()
 void zNMEMiniMerv::SelfDestroy()
 {
     warning_beam.reset();
-    muzzle_flash_timer = 0.0f;
+    muzzle_flash_spawn_timer = 0.0f;
+    for (S32 i = 0; i < MUZZLE_FLASH_COUNT; ++i)
+    {
+        muzzle_flash_timer[i] = 0.0f;
+    }
 
     if (muzzle_flash_inverted_raster != NULL)
     {
