@@ -240,7 +240,7 @@ void zNMEMiniMerv::GetMuzzlePos(xVec3* pos) const
     // Mat[] positions are model-local, so transform it through the entity frame.
     if (frame != NULL && model != NULL && model->Mat != NULL && model->BoneCount >= MINI_MERV_MUZZLE_BONE)
     {
-        const xMat4x3& bone = model->Mat[MINI_MERV_MUZZLE_BONE];
+        const xMat4x3& bone = *(const xMat4x3*)&model->Mat[MINI_MERV_MUZZLE_BONE];
         const xVec3 muzzle_offset = { 0.017167f, -0.001860f, 1.038400f };
 
         *pos = bone.pos;
