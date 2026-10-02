@@ -415,10 +415,6 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     // Explicit triangle list avoids the triangle-strip winding/culling issue
     // encountered by this camera-facing quad.
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
-    // Diagnostic: nearest filtering keeps the 32x32 atlas cell sharp instead of
-    // smoothing the enlarged muzzle-flash sprite.
-    RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void*)rwFILTERNEAREST);
-
     // Explicitly enable alpha blending. The inverted raster preserves the
     // source alpha, and the vertex alpha gives the effect a little translucency
     // even if the source sheet itself is opaque.
