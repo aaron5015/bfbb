@@ -385,6 +385,11 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     // Explicit triangle list avoids the triangle-strip winding/culling issue
     // encountered by this camera-facing quad.
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
+
+    // Explicitly enable texture alpha blending. The inverted raster preserves
+    // the source alpha, while the vertex alpha stays fully opaque.
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHA, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
