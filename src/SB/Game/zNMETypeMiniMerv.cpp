@@ -379,7 +379,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     zRenderState(SDRS_NPCVisual);
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
-    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
     {
