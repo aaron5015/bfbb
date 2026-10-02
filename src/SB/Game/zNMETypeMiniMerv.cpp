@@ -155,6 +155,7 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
     warning_beam.cfg.kill_dist = 12.0f;
     warning_beam.cfg.safe_dist = 0.0f;
     warning_beam.cfg.hit_radius = 0.0f;
+    warning_beam.cfg.rand_ang = 0.0f;
     warning_beam.cfg.scar_life = 0.0f;
     warning_beam.cfg.hit_interval = 0;
     warning_beam.cfg.damage = 0.0f;
