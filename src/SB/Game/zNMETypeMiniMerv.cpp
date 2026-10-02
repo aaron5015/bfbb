@@ -243,10 +243,17 @@ void zNMEMiniMerv::GetMuzzlePos(xVec3* pos) const
         const xMat4x3& bone = *(const xMat4x3*)&model->Mat[MINI_MERV_MUZZLE_BONE];
         const xVec3 muzzle_offset = { 0.017167f, -0.001860f, 1.038400f };
 
-        *pos = bone.pos;
-        pos->x += bone.right.x * muzzle_offset.x + bone.up.x * muzzle_offset.y + bone.at.x * muzzle_offset.z;
-        pos->y += bone.right.y * muzzle_offset.x + bone.up.y * muzzle_offset.y + bone.at.y * muzzle_offset.z;
-        pos->z += bone.right.z * muzzle_offset.x + bone.up.z * muzzle_offset.y + bone.at.z * muzzle_offset.z;
+        // Bone matrices are model-local. First move the tip offset through
+        // the animated bone, then transform the result into world space.
+        xVec3 local;
+        local.x = bone.pos.x + bone.right.x * muzzle_offset.x + bone.up.x * muzzle_offset.y + bone.at.x * muzzle_offset.z;
+        local.y = bone.pos.y + bone.right.y * muzzle_offset.x + bone.up.y * muzzle_offset.y + bone.at.y * muzzle_offset.z;
+        local.z = bone.pos.z + bone.right.z * muzzle_offset.x + bone.up.z * muzzle_offset.y + bone.at.z * muzzle_offset.z;
+
+        *pos = frame->mat.pos;
+        pos->x += frame->mat.right.x * local.x + frame->mat.up.x * local.y + frame->mat.at.x * local.z;
+        pos->y += frame->mat.right.y * local.x + frame->mat.up.y * local.y + frame->mat.at.y * local.z;
+        pos->z += frame->mat.right.z * local.x + frame->mat.up.z * local.y + frame->mat.at.z * local.z;
     }
 }
 
