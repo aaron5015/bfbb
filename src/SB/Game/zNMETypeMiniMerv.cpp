@@ -355,18 +355,14 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
     up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
 
-    // Render the existing crossed billboard as the soft outer glow, then add
-    // a smaller, brighter copy to concentrate the luminous core.
-    const F32 outer_rad = 0.75f * muzzle_flash_scale;
-    const F32 inner_rad = outer_rad * 0.55f;
+    // Render two crossed camera-facing planes at the same size. This gives the
+    // flash some depth from different viewing angles without adding a second
+    // scaled copy of the animated texture.
+    F32 rad = 0.75f * muzzle_flash_scale;
 
-    xVec3 r = right * outer_rad;
-    xVec3 u = up * outer_rad;
-    xVec3 d = cam_mat.at * outer_rad;
-
-    xVec3 ir = right * inner_rad;
-    xVec3 iu = up * inner_rad;
-    xVec3 id = cam_mat.at * inner_rad;
+    xVec3 r = right * rad;
+    xVec3 u = up * rad;
+    xVec3 d = cam_mat.at * rad;
 
     xVec3 p0 = pos - r - u;
     xVec3 p1 = pos + r - u;
@@ -378,16 +374,6 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 q2 = pos + d + u;
     xVec3 q3 = pos - d + u;
 
-    xVec3 ip0 = pos - ir - iu;
-    xVec3 ip1 = pos + ir - iu;
-    xVec3 ip2 = pos + ir + iu;
-    xVec3 ip3 = pos - ir + iu;
-
-    xVec3 iq0 = pos - id - iu;
-    xVec3 iq1 = pos + id - iu;
-    xVec3 iq2 = pos + id + iu;
-    xVec3 iq3 = pos - id + iu;
-
     // fx_beam_muzzle_flash is a 64x64 Xbox texture with four 32x32 atlas cells.
     // Keep bilinear filtering from sampling across the 32x32 atlas-cell
     // boundaries. The Xbox sheet is 64x64, so half a texel is 1/128.
@@ -397,121 +383,50 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     const F32 u1 = ((muzzle_flash_frame & 1) ? 1.0f : 0.5f) - texel;
     const F32 v1 = ((muzzle_flash_frame & 2) ? 1.0f : 0.5f) - texel;
 
-    RwIm3DVertex quad[16];
+    RwIm3DVertex quad[8];
 
-    const xVec3* outer_pos[8] = {
-        &p0, &p1, &p2, &p3, &q0, &q1, &q2, &q3
-    };
-    const xVec3* inner_pos[8] = {
-        &ip0, &ip1, &ip2, &ip3, &iq0, &iq1, &iq2, &iq3
-    };
+    RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
+    RwIm3DVertexSetPos(&quad[1], p1.x, p1.y, p1.z);
+    RwIm3DVertexSetPos(&quad[2], p2.x, p2.y, p2.z);
+    RwIm3DVertexSetPos(&quad[3], p3.x, p3.y, p3.z);
+
+    RwIm3DVertexSetPos(&quad[4], q0.x, q0.y, q0.z);
+    RwIm3DVertexSetPos(&quad[5], q1.x, q1.y, q1.z);
+    RwIm3DVertexSetPos(&quad[6], q2.x, q2.y, q2.z);
+    RwIm3DVertexSetPos(&quad[7], q3.x, q3.y, q3.z);
 
     for (S32 i = 0; i < 8; ++i)
     {
-        RwIm3DVertexSetPos(&quad[i], outer_pos[i]->x, outer_pos[i]->y, outer_pos[i]->z);
         RwIm3DVertexSetRGBA(&quad[i], 180, 235, 255, 145);
-
-        RwIm3DVertexSetPos(&quad[i + 8], inner_pos[i]->x, inner_pos[i]->y, inner_pos[i]->z);
-        RwIm3DVertexSetRGBA(&quad[i + 8], 220, 250, 255, 110);
     }
 
-    for (S32 i = 0; i < 4; ++i)
-    {
-        RwIm3DVertexSetUV(&quad[i], u0, v1);
-        RwIm3DVertexSetUV(&quad[i + 4], u0, v1);
-        RwIm3DVertexSetUV(&quad[i + 8], u0, v1);
-        RwIm3DVertexSetUV(&quad[i + 12], u0, v1);
-    }
-
+    RwIm3DVertexSetUV(&quad[0], u0, v1);
     RwIm3DVertexSetUV(&quad[1], u1, v1);
     RwIm3DVertexSetUV(&quad[2], u1, v0);
     RwIm3DVertexSetUV(&quad[3], u0, v0);
+
+    RwIm3DVertexSetUV(&quad[4], u0, v1);
     RwIm3DVertexSetUV(&quad[5], u1, v1);
     RwIm3DVertexSetUV(&quad[6], u1, v0);
     RwIm3DVertexSetUV(&quad[7], u0, v0);
-    RwIm3DVertexSetUV(&quad[9], u1, v1);
-    RwIm3DVertexSetUV(&quad[10], u1, v0);
-    RwIm3DVertexSetUV(&quad[11], u0, v0);
-    RwIm3DVertexSetUV(&quad[13], u1, v1);
-    RwIm3DVertexSetUV(&quad[14], u1, v0);
-    RwIm3DVertexSetUV(&quad[15], u0, v0);
 
     zRenderState(SDRS_NPCVisual);
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
 
-    // Explicitly enable alpha blending. The inverted raster preserves the
-    // source alpha, and vertex alpha controls the overall translucency.
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
-    if (RwIm3DTransform(quad, 16, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
+    if (RwIm3DTransform(quad, 8, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
     {
-        RwImVertexIndex index[24] = {
+        RwImVertexIndex index[12] = {
             0, 1, 3, 1, 2, 3,
-            4, 5, 7, 5, 6, 7,
-            8, 9, 11, 9, 10, 11,
-            12, 13, 15, 13, 14, 15
+            4, 5, 7, 5, 6, 7
         };
-        RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 24);
+        RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 12);
         RwIm3DEnd();
     }
-}void zNMEMiniMerv::UpdateZap(F32 dt)
-{
-    if (globals.player.Health < 1)
-    {
-        warning_beam.reset();
-        zap_timer = 0.0f;
-        cooldown_timer = 0.0f;
-        warning_active = 0;
-        zap_fired = 0;
-        return;
-    }
-
-    if (!TargetInFocusRange())
-    {
-        warning_beam.reset();
-        zap_timer = 0.0f;
-        warning_active = 0;
-        zap_fired = 0;
-        return;
-    }
-
-    if (cooldown_timer > 0.0f)
-    {
-        cooldown_timer = MAX(0.0f, cooldown_timer - dt);
-    }
-
-    if (!TargetInDangerRange())
-    {
-        zap_timer = 0.0f;
-        warning_active = 0;
-        zap_fired = 0;
-        return;
-    }
-
-    if (cooldown_timer > 0.0f)
-    {
-        return;
-    }
-
-    if (!warning_active)
-    {
-        warning_active = 1;
-        zap_fired = 0;
-        zap_timer = warning_time;
-    }
-
-    FireWarningBeam();
-    zap_timer -= dt;
-
-    if (zap_timer <= 0.0f && !zap_fired)
-    {
-        FireZap();
-        warning_active = 0;
-    }
 }
-
 void zNMEMiniMerv::Process(xScene* xscn, F32 dt)
 {
     zNMEStandard::Process(xscn, dt);
