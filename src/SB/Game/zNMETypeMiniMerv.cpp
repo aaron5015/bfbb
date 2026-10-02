@@ -355,15 +355,26 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     up.y = -cam_mat.right.y * sn + cam_mat.up.y * cs;
     up.z = -cam_mat.right.z * sn + cam_mat.up.z * cs;
 
+    // First plane is the normal camera-facing billboard. The second plane
+    // shares the same center but is perpendicular to it, giving the flash
+    // some depth when the camera moves around the muzzle.
+    xVec3 depth = cam_mat.at;
+
     F32 rad = 0.75f * muzzle_flash_scale;
 
     xVec3 r = right * rad;
     xVec3 u = up * rad;
+    xVec3 d = depth * rad;
 
     xVec3 p0 = pos - r - u;
     xVec3 p1 = pos + r - u;
     xVec3 p2 = pos + r + u;
     xVec3 p3 = pos - r + u;
+
+    xVec3 q0 = pos - d - u;
+    xVec3 q1 = pos + d - u;
+    xVec3 q2 = pos + d + u;
+    xVec3 q3 = pos - d + u;
 
     // fx_beam_muzzle_flash is a 64x64 Xbox texture with four 32x32 atlas cells.
     // Keep bilinear filtering from sampling across the 32x32 atlas-cell
@@ -374,21 +385,31 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     const F32 u1 = ((muzzle_flash_frame & 1) ? 1.0f : 0.5f) - texel;
     const F32 v1 = ((muzzle_flash_frame & 2) ? 1.0f : 0.5f) - texel;
 
-    RwIm3DVertex quad[4];
+    RwIm3DVertex quad[8];
+
     RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
     RwIm3DVertexSetPos(&quad[1], p1.x, p1.y, p1.z);
     RwIm3DVertexSetPos(&quad[2], p2.x, p2.y, p2.z);
     RwIm3DVertexSetPos(&quad[3], p3.x, p3.y, p3.z);
 
-    for (S32 i = 0; i < 4; ++i)
+    RwIm3DVertexSetPos(&quad[4], q0.x, q0.y, q0.z);
+    RwIm3DVertexSetPos(&quad[5], q1.x, q1.y, q1.z);
+    RwIm3DVertexSetPos(&quad[6], q2.x, q2.y, q2.z);
+    RwIm3DVertexSetPos(&quad[7], q3.x, q3.y, q3.z);
+
+    for (S32 i = 0; i < 8; ++i)
     {
         RwIm3DVertexSetRGBA(&quad[i], 180, 235, 255, 145);
     }
 
-    RwIm3DVertexSetUV(&quad[0], u0, v1);
-    RwIm3DVertexSetUV(&quad[1], u1, v1);
-    RwIm3DVertexSetUV(&quad[2], u1, v0);
-    RwIm3DVertexSetUV(&quad[3], u0, v0);
+    for (S32 i = 0; i < 2; ++i)
+    {
+        S32 base = i * 4;
+        RwIm3DVertexSetUV(&quad[base + 0], u0, v1);
+        RwIm3DVertexSetUV(&quad[base + 1], u1, v1);
+        RwIm3DVertexSetUV(&quad[base + 2], u1, v0);
+        RwIm3DVertexSetUV(&quad[base + 3], u0, v0);
+    }
 
     zRenderState(SDRS_NPCVisual);
     // Explicit triangle list avoids the triangle-strip winding/culling issue
@@ -402,15 +423,16 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
-    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
+    if (RwIm3DTransform(quad, 8, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
     {
-        // Explicit triangle list avoids the triangle-strip winding/culling issue.
-        RwImVertexIndex index[6] = { 0, 1, 3, 1, 2, 3 };
-        RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 6);
+        RwImVertexIndex index[12] = {
+            0, 1, 3, 1, 2, 3,
+            4, 5, 7, 5, 6, 7
+        };
+        RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 12);
         RwIm3DEnd();
     }
 }
-
 void zNMEMiniMerv::UpdateZap(F32 dt)
 {
     if (globals.player.Health < 1)
