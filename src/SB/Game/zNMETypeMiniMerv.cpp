@@ -318,7 +318,7 @@ void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
 
 void zNMEMiniMerv::RenderMuzzleFlash()
 {
-    if (muzzle_flash_timer <= 0.0f || muzzle_flash_inverted_raster == NULL)
+    if (muzzle_flash_timer <= 0.0f || muzzle_flash_raster == NULL)
     {
         return;
     }
@@ -375,7 +375,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwIm3DVertexSetUV(&quad[3], u0, v0);
 
     zRenderState(SDRS_NPCVisual);
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
