@@ -383,10 +383,9 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
-    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXRGBA))
+    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
     {
-        // DEBUG: use an explicit triangle list instead of a triangle strip.
-        // Same four vertices; this removes strip winding from the test.
+        // Explicit triangle list avoids the triangle-strip winding/culling issue.
         RwImVertexIndex index[6] = { 0, 1, 3, 1, 2, 3 };
         RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 6);
         RwIm3DEnd();
