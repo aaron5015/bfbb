@@ -378,9 +378,9 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwIm3DVertexSetUV(&quad[3], u0, v0);
 
     zRenderState(SDRS_NPCVisual);
-    // DEBUG: render the exact same quad without a texture. This isolates
-    // geometry/culling from atlas, filtering, alpha, and texture state.
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+    // Explicit triangle list avoids the triangle-strip winding/culling issue
+    // encountered by this camera-facing quad.
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXRGBA))
