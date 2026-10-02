@@ -139,6 +139,7 @@ zNMEMiniMerv::zNMEMiniMerv(S32 myType) : zNMEStandard(myType)
 {
     focus_radius = 18.0f;
     danger_radius = 10.0f;
+    close_attack_radius = 9.0f;
     warning_time = 1.25f;
     cooldown_time = 0.75f;
     zap_timer = 0.0f;
@@ -255,6 +256,13 @@ bool zNMEMiniMerv::TargetInDangerRange() const
     return xVec3Dist2(npc_pos, plyr_pos) <= danger_radius * danger_radius;
 }
 
+bool zNMEMiniMerv::TargetInCloseAttackRange() const
+{
+    const xVec3* npc_pos = xEntGetPos((xEnt*)this);
+    const xVec3* plyr_pos = xEntGetPos(&globals.player.ent);
+    return xVec3Dist2(npc_pos, plyr_pos) <= close_attack_radius * close_attack_radius;
+}
+
 void zNMEMiniMerv::GetMuzzlePos(xVec3* pos) const
 {
     *pos = *xEntGetPos((xEnt*)this);
@@ -335,7 +343,9 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
         return;
     }
 
-    if (cooldown_timer > 0.0f)
+    const bool close_attack = TargetInCloseAttackRange();
+
+    if (cooldown_timer > 0.0f && !close_attack)
     {
         cooldown_timer = MAX(0.0f, cooldown_timer - dt);
     }
@@ -348,7 +358,10 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
         return;
     }
 
-    if (cooldown_timer > 0.0f)
+    // Inside the close-attack radius, ignore the normal post-zap cooldown.
+    // The existing warning/zap sequence immediately starts another attack
+    // after each hit and continues until the player leaves this radius.
+    if (cooldown_timer > 0.0f && !close_attack)
     {
         return;
     }
