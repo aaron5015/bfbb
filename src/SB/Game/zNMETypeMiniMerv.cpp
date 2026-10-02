@@ -378,10 +378,12 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     RwIm3DVertexSetUV(&quad[3], u0, v0);
 
     zRenderState(SDRS_NPCVisual);
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
+    // DEBUG: render the exact same quad without a texture. This isolates
+    // geometry/culling from atlas, filtering, alpha, and texture state.
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
-    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
+    if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXRGBA))
     {
         RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
         RwIm3DEnd();
