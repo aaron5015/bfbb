@@ -338,6 +338,7 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
     {
         warning_beam.reset();
         zap_timer = 0.0f;
+        cooldown_timer = 0.0f;
         warning_active = 0;
         zap_fired = 0;
         return;
@@ -345,25 +346,41 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
 
     const bool close_attack = TargetInCloseAttackRange();
 
-    if (cooldown_timer > 0.0f && !close_attack)
+    // Inside the close-attack radius, Mini Merv skips the warning entirely
+    // and continuously applies the real close-range zap damage.
+    if (close_attack)
     {
-        cooldown_timer = MAX(0.0f, cooldown_timer - dt);
+        warning_beam.reset();
+        warning_active = 0;
+        zap_fired = 0;
+        cooldown_timer = 0.0f;
+        zap_timer = 0.0f;
+
+        FireZap();
+        return;
     }
 
+    // Once detected, keep restarting the normal warning -> zap sequence
+    // whenever the player remains in danger range. The normal cooldown still
+    // separates individual zaps, but it no longer causes the attack to stop.
     if (!TargetInDangerRange())
     {
+        warning_beam.reset();
         zap_timer = 0.0f;
+        cooldown_timer = 0.0f;
         warning_active = 0;
         zap_fired = 0;
         return;
     }
 
-    // Inside the close-attack radius, ignore the normal post-zap cooldown.
-    // The existing warning/zap sequence immediately starts another attack
-    // after each hit and continues until the player leaves this radius.
-    if (cooldown_timer > 0.0f && !close_attack)
+    if (cooldown_timer > 0.0f)
     {
-        return;
+        cooldown_timer = MAX(0.0f, cooldown_timer - dt);
+        if (cooldown_timer > 0.0f)
+        {
+            FireWarningBeam();
+            return;
+        }
     }
 
     if (!warning_active)
