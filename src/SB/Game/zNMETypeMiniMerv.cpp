@@ -23,29 +23,15 @@
 
 static const S32 MINI_MERV_MUZZLE_BONE = 28;
 
-// TSSM's muzzle effect changes rapidly, with deliberately uneven motion:
- // the texture cells switch quickly, while the flash expands/collapses at
- // different speeds rather than following one gentle scale ramp.
-static const F32 MINI_MERV_MUZZLE_FRAME_TIME[4] =
-{
-    1.0f / 30.0f,
-    1.0f / 30.0f,
-    2.0f / 30.0f,
-    1.0f / 30.0f
-};
-static const F32 MINI_MERV_MUZZLE_CYCLE_TIME =
-    MINI_MERV_MUZZLE_FRAME_TIME[0] +
-    MINI_MERV_MUZZLE_FRAME_TIME[1] +
-    MINI_MERV_MUZZLE_FRAME_TIME[2] +
-    MINI_MERV_MUZZLE_FRAME_TIME[3];
+// TSSM's muzzle effect appears to treat the four atlas cells as
+// alternative flash shapes rather than a fixed 0 -> 1 -> 2 -> 3 animation.
+// Each short-lived flash chooses one cell, rapidly expands to a common
+// maximum, then collapses/fades away before the next flash is chosen.
+static const F32 MINI_MERV_MUZZLE_LIFETIME = 0.20f;
+static const F32 MINI_MERV_MUZZLE_PEAK_TIME = 0.045f;
+static const F32 MINI_MERV_MUZZLE_MIN_SCALE = 0.05f;
+static const F32 MINI_MERV_MUZZLE_MAX_SCALE = 1.45f;
 static const F32 MINI_MERV_MUZZLE_ROTATION_RATE = 7.0f;
-static const F32 MINI_MERV_MUZZLE_SCALE[4] =
-{
-    0.45f,
-    1.45f,
-    0.75f,
-    0.35f
-};
 
 static RwRaster* MiniMervCreateInvertedRaster(RwRaster* source)
 {
@@ -314,11 +300,11 @@ void zNMEMiniMerv::FireZap()
     zap_fired = 1;
     zap_visible = 1;
     zap_visual_timer = 0.20f;
-    muzzle_flash_timer = MINI_MERV_MUZZLE_CYCLE_TIME;
+    muzzle_flash_timer = MINI_MERV_MUZZLE_LIFETIME;
     muzzle_flash_frame = (S32)(xurand() * 4.0f);
-    muzzle_flash_frame_timer = MINI_MERV_MUZZLE_FRAME_TIME[muzzle_flash_frame];
+    muzzle_flash_frame_timer = 0.0f;
     muzzle_flash_angle = (xurand() - 0.5f) * 6.2831853f;
-    muzzle_flash_scale = MINI_MERV_MUZZLE_SCALE[muzzle_flash_frame];
+    muzzle_flash_scale = MINI_MERV_MUZZLE_MIN_SCALE;
     cooldown_timer = cooldown_time;
 }
 
@@ -365,11 +351,11 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
         // Damage remains continuous, but the visual is allowed to animate.
         if (muzzle_flash_timer <= 0.0f)
         {
-            muzzle_flash_timer = MINI_MERV_MUZZLE_CYCLE_TIME;
+            muzzle_flash_timer = MINI_MERV_MUZZLE_LIFETIME;
             muzzle_flash_frame = (S32)(xurand() * 4.0f);
-            muzzle_flash_frame_timer = MINI_MERV_MUZZLE_FRAME_TIME[muzzle_flash_frame];
+            muzzle_flash_frame_timer = 0.0f;
             muzzle_flash_angle = (xurand() - 0.5f) * 6.2831853f;
-            muzzle_flash_scale = MINI_MERV_MUZZLE_SCALE[muzzle_flash_frame];
+            muzzle_flash_scale = MINI_MERV_MUZZLE_MIN_SCALE;
         }
 
         return;
@@ -437,30 +423,34 @@ void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
     }
 
     muzzle_flash_timer = MAX(0.0f, muzzle_flash_timer - dt);
-    muzzle_flash_frame_timer -= dt;
 
-    // The Xbox effect sheet is 64x64 with four 32x32 cells in a 2x2 atlas.
-    // TSSM switches these cells much faster than the previous BFBB version.
-    // Keep the sequence deterministic after the randomized start.
-    while (muzzle_flash_frame_timer <= 0.0f)
+    // The atlas cell is selected once when this flash is spawned. Do not
+    // advance through 0 -> 1 -> 2 -> 3: consecutive flashes may choose the
+    // same cell, which is part of the deliberately irregular appearance.
+    //
+    // The flash itself has a very short life: an almost immediate expansion
+    // followed by a much longer collapse/fade. Every cell reaches the same
+    // maximum size.
+    const F32 elapsed = MINI_MERV_MUZZLE_LIFETIME - muzzle_flash_timer;
+
+    if (elapsed < MINI_MERV_MUZZLE_PEAK_TIME)
     {
-        muzzle_flash_frame = (muzzle_flash_frame + 1) & 3;
-        muzzle_flash_frame_timer += MINI_MERV_MUZZLE_FRAME_TIME[muzzle_flash_frame];
+        const F32 t = elapsed / MINI_MERV_MUZZLE_PEAK_TIME;
+        muzzle_flash_scale = MINI_MERV_MUZZLE_MIN_SCALE +
+            (MINI_MERV_MUZZLE_MAX_SCALE - MINI_MERV_MUZZLE_MIN_SCALE) * t;
+    }
+    else
+    {
+        const F32 fade_t = (elapsed - MINI_MERV_MUZZLE_PEAK_TIME) /
+            (MINI_MERV_MUZZLE_LIFETIME - MINI_MERV_MUZZLE_PEAK_TIME);
+        const F32 remaining = MAX(0.0f, 1.0f - fade_t);
+        muzzle_flash_scale = MINI_MERV_MUZZLE_MAX_SCALE * remaining;
     }
 
-    // TSSM rotates the billboard continuously rather than choosing a new
-    // random angle for every texture frame. The initial angle is randomized
-    // per attack, but the motion between frames is consistent.
+    // TSSM rotates the selected shape continuously during its short life.
+    // The initial angle is randomized per flash, but there is no per-frame
+    // random rotation.
     muzzle_flash_angle += MINI_MERV_MUZZLE_ROTATION_RATE * dt;
-
-    // Give each transition its own speed. The targets are deliberately
-    // exaggerated: TSSM's flash does not gently grow through a uniform ramp.
-    const S32 next_frame = (muzzle_flash_frame + 1) & 3;
-    const F32 duration = MINI_MERV_MUZZLE_FRAME_TIME[muzzle_flash_frame];
-    const F32 frame_t = 1.0f - muzzle_flash_frame_timer / duration;
-    const F32 a = MINI_MERV_MUZZLE_SCALE[muzzle_flash_frame];
-    const F32 b = MINI_MERV_MUZZLE_SCALE[next_frame];
-    muzzle_flash_scale = a + (b - a) * frame_t;
 }
 
 void zNMEMiniMerv::RenderMuzzleFlash()
