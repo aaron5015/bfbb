@@ -29,11 +29,12 @@ struct zNMEMiniMerv : zNMEStandard
     U8 zap_visible;
     U8 pad[1];
     F32 zap_visual_timer;
-    F32 muzzle_flash_timer;
-    F32 muzzle_flash_frame_timer;
-    F32 muzzle_flash_angle;
-    F32 muzzle_flash_scale;
-    S32 muzzle_flash_frame;
+    static const S32 MUZZLE_FLASH_COUNT = 3;
+    F32 muzzle_flash_spawn_timer;
+    F32 muzzle_flash_timer[MUZZLE_FLASH_COUNT];
+    F32 muzzle_flash_angle[MUZZLE_FLASH_COUNT];
+    F32 muzzle_flash_scale[MUZZLE_FLASH_COUNT];
+    S32 muzzle_flash_frame[MUZZLE_FLASH_COUNT];
     RwRaster* muzzle_flash_raster;
     RwRaster* muzzle_flash_inverted_raster;
     xLaserBoltEmitter warning_beam;
