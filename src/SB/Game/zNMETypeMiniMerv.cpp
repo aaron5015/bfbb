@@ -385,7 +385,10 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXRGBA))
     {
-        RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
+        // DEBUG: use an explicit triangle list instead of a triangle strip.
+        // Same four vertices; this removes strip winding from the test.
+        RwIm3DIndex index[6] = { 0, 1, 3, 1, 2, 3 };
+        RwIm3DRenderIndexedPrimitive(rwPRIMTYPETRILIST, index, 6);
         RwIm3DEnd();
     }
 }
