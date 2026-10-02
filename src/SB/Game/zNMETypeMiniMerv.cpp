@@ -453,7 +453,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     for (S32 i = 0; i < 8; ++i)
     {
-        RwIm3DVertexSetRGBA(&quad[i], 180, 235, 255, 145);
+        RwIm3DVertexSetRGBA(&quad[i], 180, 235, 255, 100);
     }
 
     RwIm3DVertexSetUV(&quad[0], u0, v1);
@@ -471,7 +471,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
-    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDONE);
 
     if (RwIm3DTransform(quad, 8, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
     {
