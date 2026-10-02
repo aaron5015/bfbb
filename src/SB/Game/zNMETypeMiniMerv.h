@@ -19,6 +19,7 @@ struct zNMEMiniMerv : zNMEStandard
 
     F32 focus_radius;
     F32 danger_radius;
+    F32 close_attack_radius;
     F32 warning_time;
     F32 cooldown_time;
     F32 zap_timer;
@@ -56,6 +57,7 @@ struct zNMEMiniMerv : zNMEStandard
     void GetMuzzlePos(xVec3* pos) const;
     bool TargetInFocusRange() const;
     bool TargetInDangerRange() const;
+    bool TargetInCloseAttackRange() const;
 };
 
 void zNME_Register_MiniMervGoal();
