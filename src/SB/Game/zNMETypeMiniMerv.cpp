@@ -356,7 +356,22 @@ void zNMEMiniMerv::UpdateZap(F32 dt)
         cooldown_timer = 0.0f;
         zap_timer = 0.0f;
 
-        FireZap();
+        zEntPlayer_Damage((xBase*)this, 1);
+        zap_fired = 1;
+        zap_visible = 1;
+        zap_visual_timer = 0.20f;
+
+        // Only restart the muzzle cycle when the previous one has finished.
+        // Damage remains continuous, but the visual is allowed to animate.
+        if (muzzle_flash_timer <= 0.0f)
+        {
+            muzzle_flash_timer = MINI_MERV_MUZZLE_CYCLE_TIME;
+            muzzle_flash_frame = (S32)(xurand() * 4.0f);
+            muzzle_flash_frame_timer = MINI_MERV_MUZZLE_FRAME_TIME[muzzle_flash_frame];
+            muzzle_flash_angle = (xurand() - 0.5f) * 6.2831853f;
+            muzzle_flash_scale = MINI_MERV_MUZZLE_SCALE[muzzle_flash_frame];
+        }
+
         return;
     }
 
