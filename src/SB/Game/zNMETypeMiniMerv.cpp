@@ -290,6 +290,62 @@ void zNMEMiniMerv::FireZap()
     cooldown_timer = cooldown_time;
 }
 
+void zNMEMiniMerv::UpdateZap(F32 dt)
+{
+    if (globals.player.Health < 1)
+    {
+        warning_beam.reset();
+        zap_timer = 0.0f;
+        cooldown_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
+    if (!TargetInFocusRange())
+    {
+        warning_beam.reset();
+        zap_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
+    if (cooldown_timer > 0.0f)
+    {
+        cooldown_timer = MAX(0.0f, cooldown_timer - dt);
+    }
+
+    if (!TargetInDangerRange())
+    {
+        zap_timer = 0.0f;
+        warning_active = 0;
+        zap_fired = 0;
+        return;
+    }
+
+    if (cooldown_timer > 0.0f)
+    {
+        return;
+    }
+
+    if (!warning_active)
+    {
+        warning_active = 1;
+        zap_fired = 0;
+        zap_timer = warning_time;
+    }
+
+    FireWarningBeam();
+    zap_timer -= dt;
+
+    if (zap_timer <= 0.0f && !zap_fired)
+    {
+        FireZap();
+        warning_active = 0;
+    }
+}
+
 void zNMEMiniMerv::UpdateZapBeam()
 {
     if (!zap_visible)
