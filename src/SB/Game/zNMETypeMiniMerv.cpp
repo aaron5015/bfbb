@@ -353,10 +353,13 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     xVec3 p3 = pos - r + u;
 
     // fx_beam_muzzle_flash is a 64x64 Xbox texture with four 32x32 atlas cells.
-    const F32 u0 = (muzzle_flash_frame & 1) ? 0.5f : 0.0f;
-    const F32 v0 = (muzzle_flash_frame & 2) ? 0.5f : 0.0f;
-    const F32 u1 = u0 + 0.5f;
-    const F32 v1 = v0 + 0.5f;
+    // Keep bilinear filtering from sampling across the 32x32 atlas-cell
+    // boundaries. The Xbox sheet is 64x64, so half a texel is 1/128.
+    const F32 texel = 1.0f / 128.0f;
+    const F32 u0 = ((muzzle_flash_frame & 1) ? 0.5f : 0.0f) + texel;
+    const F32 v0 = ((muzzle_flash_frame & 2) ? 0.5f : 0.0f) + texel;
+    const F32 u1 = ((muzzle_flash_frame & 1) ? 1.0f : 0.5f) - texel;
+    const F32 v1 = ((muzzle_flash_frame & 2) ? 1.0f : 0.5f) - texel;
 
     RwIm3DVertex quad[4];
     RwIm3DVertexSetPos(&quad[0], p0.x, p0.y, p0.z);
