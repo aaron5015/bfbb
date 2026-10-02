@@ -373,7 +373,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
 
     for (S32 i = 0; i < 4; ++i)
     {
-        RwIm3DVertexSetRGBA(&quad[i], 255, 255, 255, 200);
+        RwIm3DVertexSetRGBA(&quad[i], 255, 255, 255, 100);
     }
 
     RwIm3DVertexSetUV(&quad[0], u0, v1);
