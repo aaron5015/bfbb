@@ -322,7 +322,7 @@ void zNMEMiniMerv::UpdateMuzzleFlash(F32 dt)
 
 void zNMEMiniMerv::RenderMuzzleFlash()
 {
-    if (muzzle_flash_timer <= 0.0f || muzzle_flash_raster == NULL)
+    if (muzzle_flash_timer <= 0.0f || muzzle_flash_inverted_raster == NULL)
     {
         return;
     }
@@ -384,7 +384,7 @@ void zNMEMiniMerv::RenderMuzzleFlash()
     zRenderState(SDRS_NPCVisual);
     // Explicit triangle list avoids the triangle-strip winding/culling issue
     // encountered by this camera-facing quad.
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_raster);
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, muzzle_flash_inverted_raster);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
 
     if (RwIm3DTransform(quad, 4, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXRGBA))
