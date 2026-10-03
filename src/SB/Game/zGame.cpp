@@ -1,4 +1,5 @@
 #include "zCamera.h"
+#include "zTF2Bridge.h"
 #include "zCombo.h"
 #include "zCutsceneMgr.h"
 #include "zEntPlayer.h"
@@ -538,6 +539,8 @@ void zGameLoop()
     do
     {
         gGameWhereAmI = eGameWhere_LoopCalcTime;
+
+        zTF2Bridge_Frame();
 
         sTimeCurrent = iTimeGet();
         sTimeElapsed = iTimeDiffSec(sTimeLast, sTimeCurrent);

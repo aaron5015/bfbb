@@ -28,12 +28,12 @@ static const S32 MINI_MERV_MUZZLE_BONE = 28;
 // Each short-lived flash chooses one cell, rapidly expands to a common
 // maximum, then collapses/fades. New flashes overlap the previous one near
 // its apex instead of waiting for it to disappear.
-static const F32 MINI_MERV_MUZZLE_LIFETIME = 0.10f;
-static const F32 MINI_MERV_MUZZLE_PEAK_TIME = 0.031f;
-static const F32 MINI_MERV_MUZZLE_SPAWN_INTERVAL = 0.026f;
+static const F32 MINI_MERV_MUZZLE_LIFETIME = 0.15f;
+static const F32 MINI_MERV_MUZZLE_PEAK_TIME = 0.011f;
+static const F32 MINI_MERV_MUZZLE_SPAWN_INTERVAL = 0.11f;
 static const F32 MINI_MERV_MUZZLE_MIN_SCALE = 0.05f;
-static const F32 MINI_MERV_MUZZLE_MAX_SCALE = 1.00f;
-static const F32 MINI_MERV_MUZZLE_ROTATION_RATE = 6.5f;
+static const F32 MINI_MERV_MUZZLE_MAX_SCALE = 0.9f;
+static const F32 MINI_MERV_MUZZLE_ROTATION_RATE = -14.5f;
 
 static RwRaster* MiniMervCreateInvertedRaster(RwRaster* source)
 {
