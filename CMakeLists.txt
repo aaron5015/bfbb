@@ -1764,6 +1764,11 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   ${INPUT_SOURCES}
   ${AUDIO_SOURCES}
   ${HOST_SOURCES}
+
+  # iPadHostSDL.cpp calls into the TF2 bridge. pc_selftest compiles the
+  # backend sources directly rather than inheriting bfbb_platform, so it must
+  # carry the bridge implementation too.
+  ${PC_DIR}/iTF2Bridge.cpp
 )
 target_compile_definitions(pc_selftest PRIVATE ${INPUT_DEFINES} ${AUDIO_DEFINES})
 
@@ -1786,7 +1791,7 @@ if(WIN32)
   # rather than a stub, so that what it checks about voice timing is what the
   # game will actually do. dbghelp is iHostPrintCallers, in the host backend
   # this target links whole.
-  target_link_libraries(pc_selftest PRIVATE ole32 dbghelp)
+  target_link_libraries(pc_selftest PRIVATE ole32 dbghelp ws2_32)
 endif()
 
 # pc_selftest links the real audio and input backends, so it needs SDL beside
