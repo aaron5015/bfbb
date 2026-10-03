@@ -56,6 +56,10 @@ namespace
     double sGameplayAt = -1000.0;
     uint32_t sSendSeq = 0;
 
+    bool sStickValid = false;
+    float sStickX = 0.0f;
+    float sStickY = 0.0f;
+
     bool sHaveIntent = false;
     BridgeIntentPacket sIntent;
     double sIntentAt = -1000.0;
@@ -189,6 +193,13 @@ void iTF2BridgeSendState(const BridgeStatePacket* state)
     sendto(sSock, (const char*)&p, sizeof(p), 0, (const sockaddr*)&sTf2Addr, sizeof(sTf2Addr));
 }
 
+void iTF2BridgeSetStick(S32 valid, F32 x, F32 y)
+{
+    sStickValid = valid != 0;
+    sStickX = x;
+    sStickY = y;
+}
+
 const BridgeIntentPacket* iTF2BridgeGetIntent()
 {
     if (!sActive || !sHaveIntent || Now() - sIntentAt > kStaleSeconds)
@@ -222,8 +233,11 @@ void iTF2BridgeApplyPad(iPadHostState* pad)
     }
 
     pad->connected = true;
-    pad->stick_x = in->side;
-    pad->stick_y = in->forward; // host convention: Y is up-positive
+    // Host convention: Y is up-positive. When the game layer has worked out a
+    // camera-relative stick from the TF2 view direction, use it; otherwise the
+    // raw axes (which walk relative to BFBB's camera, not TF2's view).
+    pad->stick_x = sStickValid ? sStickX : in->side;
+    pad->stick_y = sStickValid ? sStickY : in->forward;
 
     if (in->buttons & BRIDGE_IN_JUMP)
     {
@@ -236,5 +250,9 @@ void iTF2BridgeApplyPad(iPadHostState* pad)
     if (in->buttons & BRIDGE_IN_ATTACK2)
     {
         pad->buttons |= XPAD_BUTTON_O; // gamecube X: bubble (placeholder)
+    }
+    if (in->buttons & BRIDGE_IN_RELOAD)
+    {
+        pad->buttons |= XPAD_BUTTON_SQUARE; // gamecube Y (placeholder, untested)
     }
 }
