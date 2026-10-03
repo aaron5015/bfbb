@@ -31,6 +31,12 @@ void iTF2BridgeSendState(const BridgeStatePacket* state);
 // is what lets a real pad or keyboard still work the BFBB menus.
 void iTF2BridgeApplyPad(iPadHostState* pad);
 
+// The game layer works out, from the TF2 view direction and BFBB's camera, which
+// stick deflection walks the player the way TF2 is looking, and hands it here.
+// Valid for one frame at a time: call every frame, with valid = FALSE to fall
+// back to the raw TF2 movement axes.
+void iTF2BridgeSetStick(S32 valid, F32 x, F32 y);
+
 // The newest intent, or NULL when none has arrived in the last quarter second.
 const BridgeIntentPacket* iTF2BridgeGetIntent();
 
