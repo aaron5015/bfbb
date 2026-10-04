@@ -41,6 +41,7 @@
 #define BRIDGE_WEAPON_FIRED 0x2u
 
 #define BRIDGE_MAX_HITSCAN_RAYS 32
+#define BRIDGE_MAX_ROCKETS 32
 
 // Coordinates. The renderer BFBB uses (librw) flips X when it builds the view
 // matrix, so BFBB's world is right-handed with +X toward screen-LEFT, +Y up and
@@ -76,6 +77,14 @@ struct BridgeIntentPacket
     float hitscanOrigin[3]; // common shot origin, Source space
     float hitscanDir[BRIDGE_MAX_HITSCAN_RAYS][3]; // exact TF2-generated directions
     float hitscanRange; // Source-unit range for the rays
+
+    // Diagnostic-only TF2 rocket state. BFBB sweeps these positions against its
+    // own world collision; no rocket damage or BFBB-side projectile entity exists yet.
+    uint32_t rocketCount;
+    int32_t rocketEntIndex[BRIDGE_MAX_ROCKETS];
+    float rocketPos[BRIDGE_MAX_ROCKETS][3]; // Source-space absolute origin
+    float rocketRadius[BRIDGE_MAX_ROCKETS]; // Source-space explosion radius
+    float rocketDebugLifetime; // seconds to keep impact/radius diagnostics visible
 };
 
 // BFBB -> TF2: where the BFBB player actually is.
