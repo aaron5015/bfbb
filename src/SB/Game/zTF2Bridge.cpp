@@ -4,6 +4,7 @@
 #include "iCamera.h"
 #include "iEnv.h"
 #include "xClumpColl.h"
+#include "iCollide.h"
 #include "xBound.h"
 #include "xEnt.h"
 #include "xEnv.h"
@@ -46,7 +47,7 @@ struct TF2BridgeDebugRay
 static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
 static uint32_t sHitscanDebugCount = 0;
 static float sHitscanDebugTime = 0.0f;
-static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range);
+static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range, uint32_t debugIndex);
 
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
 {
@@ -308,7 +309,7 @@ void zTF2Bridge_Frame()
                 sHitscanDebugRays[i].end.y = origin.y + dir.y * (attackIn->hitscanRange / attackIn->scale);
                 sHitscanDebugRays[i].end.z = origin.z + dir.z * (attackIn->hitscanRange / attackIn->scale);
                 TF2Bridge_FireHitscanRay(attackIn, attackIn->hitscanOrigin,
-                    attackIn->hitscanDir[i], attackIn->hitscanRange);
+                    attackIn->hitscanDir[i], attackIn->hitscanRange, i);
             }
         }
         else if (fired)
@@ -409,7 +410,7 @@ static bool IsTF2BridgeRobot(const zNPCCommon* npc)
 }
 
 static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float sourceOrigin[3],
-    const float sourceDir[3], float sourceRange)
+    const float sourceDir[3], float sourceRange, uint32_t debugIndex)
 {
     if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
         return;
@@ -423,6 +424,25 @@ static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float s
     ray.min_t = 0.0f;
     ray.max_t = sourceRange / in->scale;
     ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    // Let BFBB perform the world trace against the same environment collision
+    // it uses for gameplay. On PC levels this is the JSP collision tree, so this
+    // is not a second copy of the level geometry and it stays authoritative to
+    // BFBB. Keep the normal requested now as groundwork for projectile bounces.
+    xCollis worldHit;
+    memset(&worldHit, 0, sizeof(worldHit));
+    worldHit.flags = k_HIT_0x200;
+    const bool hitWorld = iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0;
+    const F32 worldDist = hitWorld ? worldHit.dist : FLOAT_MAX;
+
+    // Make the diagnostic ray stop at the first BFBB world surface. This makes
+    // walls/ground immediately visible in the temporary debug renderer.
+    if (debugIndex < BRIDGE_MAX_HITSCAN_RAYS && hitWorld)
+    {
+        sHitscanDebugRays[debugIndex].end.x = origin.x + dir.x * worldDist;
+        sHitscanDebugRays[debugIndex].end.y = origin.y + dir.y * worldDist;
+        sHitscanDebugRays[debugIndex].end.z = origin.z + dir.z * worldDist;
+    }
 
     st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
     if (npclist == NULL)
@@ -447,10 +467,20 @@ static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float s
         }
     }
 
-    if (best == NULL)
+    // The BFBB environment is opaque to a hitscan shot. If the first JSP/world
+    // surface is at or before the first NPC bound, the shot stops there.
+    if (best == NULL || worldDist <= bestDist)
     {
-        printf("bfbb: tf2bridge -- hitscan ray no NPC hit dir %.3f %.3f %.3f range %.1f\n",
-            (double)dir.x, (double)dir.y, (double)dir.z, (double)sourceRange);
+        if (hitWorld)
+        {
+            printf("bfbb: tf2bridge -- hitscan ray blocked by world at %.2f mat %u\n",
+                (double)worldDist, (unsigned)worldHit.oid);
+        }
+        else
+        {
+            printf("bfbb: tf2bridge -- hitscan ray no NPC hit dir %.3f %.3f %.3f range %.1f\n",
+                (double)dir.x, (double)dir.y, (double)dir.z, (double)sourceRange);
+        }
         return;
     }
 
