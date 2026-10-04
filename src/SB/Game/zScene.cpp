@@ -3934,8 +3934,14 @@ void zSceneRender()
 {
     zSceneRenderPreFX();
     xScrFxRender(globals.camera.lo_cam);
-    zSceneRenderPostFX();
+
+    // The TF2 bridge's 3D diagnostic must be drawn while the main RenderWare
+    // camera update is still active. zSceneRenderPostFX() ends and restarts the
+    // camera update for the HUD/UI pass, which makes an immediate-mode world
+    // primitive an unreliable diagnostic when drawn afterward.
     zTF2Bridge_DebugRenderHitscan();
+
+    zSceneRenderPostFX();
 }
 
 static void zSceneObjHashtableInit(S32 count)
