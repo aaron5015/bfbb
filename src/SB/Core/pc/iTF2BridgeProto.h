@@ -40,6 +40,8 @@
 #define BRIDGE_WEAPON_MELEE 0x1u
 #define BRIDGE_WEAPON_FIRED 0x2u
 
+#define BRIDGE_MAX_HITSCAN_RAYS 32
+
 // Coordinates. The renderer BFBB uses (librw) flips X when it builds the view
 // matrix, so BFBB's world is right-handed with +X toward screen-LEFT, +Y up and
 // +Z forward. Source is x forward, y left, z up. That lines up with no mirroring:
@@ -70,6 +72,10 @@ struct BridgeIntentPacket
     float px, py, pz; // TF2 player origin (feet), Source space
     float vx, vy, vz; // TF2 player velocity, Source space, units/second
     float ex, ey, ez; // TF2 eye position, Source space
+    uint32_t hitscanCount; // number of valid TF2-generated hitscan rays in this packet
+    float hitscanOrigin[3]; // common shot origin, Source space
+    float hitscanDir[BRIDGE_MAX_HITSCAN_RAYS][3]; // exact TF2-generated directions
+    float hitscanRange; // Source-unit range for the rays
 };
 
 // BFBB -> TF2: where the BFBB player actually is.
