@@ -276,6 +276,25 @@ void zTF2Bridge_Frame()
             const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
                 ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
             sHitscanDebugCount = count;
+
+            // One diagnostic line per hitscan packet. This compares the exact
+            // Source fire point/direction with the BFBB coordinates used by
+            // collision and with the camera that BFBB is actually rendering.
+            const xVec3 debugOrigin = FromSource(attackIn->hitscanOrigin[0],
+                attackIn->hitscanOrigin[1], attackIn->hitscanOrigin[2], attackIn->scale);
+            const xVec3 debugDir = FromSource(attackIn->hitscanDir[0][0],
+                attackIn->hitscanDir[0][1], attackIn->hitscanDir[0][2], 1.0f);
+            const xMat4x3& debugCam = globals.camera.mat;
+            printf("bfbb: tf2bridge -- hitscan debug sourceOrigin %.2f %.2f %.2f sourceDir %.3f %.3f %.3f\\n",
+                (double)attackIn->hitscanOrigin[0], (double)attackIn->hitscanOrigin[1],
+                (double)attackIn->hitscanOrigin[2], (double)attackIn->hitscanDir[0][0],
+                (double)attackIn->hitscanDir[0][1], (double)attackIn->hitscanDir[0][2]);
+            printf("bfbb: tf2bridge -- hitscan debug bfbbOrigin %.2f %.2f %.2f bfbbDir %.3f %.3f %.3f camera %.2f %.2f %.2f at %.3f %.3f %.3f\\n",
+                (double)debugOrigin.x, (double)debugOrigin.y, (double)debugOrigin.z,
+                (double)debugDir.x, (double)debugDir.y, (double)debugDir.z,
+                (double)debugCam.pos.x, (double)debugCam.pos.y, (double)debugCam.pos.z,
+                (double)debugCam.at.x, (double)debugCam.at.y, (double)debugCam.at.z);
+
             for (uint32_t i = 0; i < count; ++i)
             {
                 const xVec3 origin = FromSource(attackIn->hitscanOrigin[0],
