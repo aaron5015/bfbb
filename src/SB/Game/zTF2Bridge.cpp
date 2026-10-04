@@ -371,7 +371,9 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     ray.origin = origin;
     ray.dir = dir;
     ray.min_t = 0.0f;
-    ray.max_t = 1000.0f;
+    // Melee is deliberately short-range; ranged weapons keep the original
+    // proof-of-concept long trace until their own projectile/hitscan paths land.
+    ray.max_t = (in->weaponflags & BRIDGE_WEAPON_MELEE) ? (80.0f / in->scale) : 1000.0f;
     ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
 
     st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
