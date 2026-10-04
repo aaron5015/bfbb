@@ -741,6 +741,8 @@ void zGameLoop()
             globals.player.ent.update(&globals.player.ent, globals.sceneCur, sTimeElapsed);
         }
 
+        zTF2Bridge_AfterPlayerUpdate();
+
         gGameWhereAmI = eGameWhere_LoopSoundUpdate;
         xMat4x3 playerMat = *xEntGetFrame(&globals.player.ent);
         playerMat.pos.y += 0.6f;
@@ -759,6 +761,8 @@ void zGameLoop()
         {
             zCameraUpdate(&globals.camera, sTimeElapsed);
         }
+
+        zTF2Bridge_AfterCameraUpdate();
 
         gGameWhereAmI = eGameWhere_LoopCameraFXUpdate;
         xCameraFXBegin(&globals.camera);
