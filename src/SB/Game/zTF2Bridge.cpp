@@ -45,6 +45,7 @@ struct TF2BridgeDebugRay
 
 static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
 static uint32_t sHitscanDebugCount = 0;
+static uint32_t sHitscanDebugFrames = 0;
 static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range);
 
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
@@ -276,6 +277,7 @@ void zTF2Bridge_Frame()
             const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
                 ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
             sHitscanDebugCount = count;
+            sHitscanDebugFrames = 120;
 
             // One diagnostic line per hitscan packet. This compares the exact
             // Source fire point/direction with the BFBB coordinates used by
@@ -312,6 +314,7 @@ void zTF2Bridge_Frame()
         else if (fired)
         {
             sHitscanDebugCount = 0;
+            sHitscanDebugFrames = 0;
             TF2Bridge_FireAtNPCs(attackIn);
         }
         else if (attack && !sLastAttack)
@@ -322,6 +325,7 @@ void zTF2Bridge_Frame()
         else
         {
             sHitscanDebugCount = 0;
+            sHitscanDebugFrames = 0;
         }
         sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
@@ -654,9 +658,9 @@ void zTF2Bridge_DebugRenderHitscan()
     // A fourth, longer yellow line connects camera -> fire origin. This lets us
     // immediately see whether the Source fire point is merely a muzzle/eye
     // offset rather than being wildly displaced.
-    const float markerOrigin = 0.75f;
-    const float markerCamera = 0.75f;
-    const float stubLength = 8.0f;
+    const float markerOrigin = 2.5f;
+    const float markerCamera = 2.5f;
+    const float stubLength = 20.0f;
 
     RwIm3DVertex verts[20];
     int n = 0;
@@ -730,4 +734,11 @@ void zTF2Bridge_DebugRenderHitscan()
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
+
+    if (sHitscanDebugFrames > 0)
+    {
+        --sHitscanDebugFrames;
+        if (sHitscanDebugFrames == 0)
+            sHitscanDebugCount = 0;
+    }
 }
