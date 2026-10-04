@@ -704,7 +704,7 @@ void zTF2Bridge_DebugRenderHitscan()
     RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z - markerCamera);
     RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
     RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z + markerCamera);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255); n++;
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
 
     // Camera -> fire-origin connector: magenta.
     RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z);
