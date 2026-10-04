@@ -290,13 +290,19 @@ void zTF2Bridge_Frame()
                     attackIn->hitscanDir[i], attackIn->hitscanRange);
             }
         }
+        else if (fired)
+        {
+            sHitscanDebugCount = 0;
+            TF2Bridge_FireAtNPCs(attackIn);
+        }
+        else if (attack && !sLastAttack)
+        {
+            sHitscanDebugCount = 0;
+            TF2Bridge_FireAtNPCs(attackIn);
+        }
         else
         {
             sHitscanDebugCount = 0;
-        }
-        else if (fired)
-        {
-            TF2Bridge_FireAtNPCs(attackIn);
         }
         else if (attack && !sLastAttack)
         {
