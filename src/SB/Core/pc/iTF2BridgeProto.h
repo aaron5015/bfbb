@@ -59,6 +59,7 @@ struct BridgeIntentPacket
     uint32_t buttons; // BRIDGE_IN_*
     int32_t tfclass; // TF_CLASS_* (0 = undefined)
     int32_t tfhealth; // TF2-side health, informational
+    uint32_t weaponflags; // BRIDGE_WEAPON_* for the currently active TF2 weapon
     uint32_t flags; // BRIDGE_INTENT_*
     float scale; // Source units per BFBB unit (TF2's bfbb_unit_scale)
     float px, py, pz; // TF2 player origin (feet), Source space
