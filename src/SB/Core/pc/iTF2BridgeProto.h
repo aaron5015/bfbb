@@ -35,6 +35,10 @@
 #define BRIDGE_INTENT_OWNS_MOVE 0x1u // TF2 is running the movement: BFBB follows px/py/pz and
                                      // looks through ex/ey/ez. Unset: BFBB walks from forward/side.
 
+// Active weapon classification. Kept deliberately small for the bridge: the BFBB
+// side only needs to know which attack model to use, not Source weapon IDs.
+#define BRIDGE_WEAPON_MELEE 0x1u
+
 // Coordinates. The renderer BFBB uses (librw) flips X when it builds the view
 // matrix, so BFBB's world is right-handed with +X toward screen-LEFT, +Y up and
 // +Z forward. Source is x forward, y left, z up. That lines up with no mirroring:
