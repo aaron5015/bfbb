@@ -253,16 +253,13 @@ void zTF2Bridge_Frame()
     // fire cadence will move to the TF2 weapon code once the basic hit path is
     // proven.
     static uint32_t sLastIntentSeq = 0;
-    static bool sLastAttack = false;
     const BridgeIntentPacket* attackIn = iTF2BridgeGetIntent();
     if (playing && attackIn != NULL && attackIn->seq != sLastIntentSeq)
     {
-        const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
         if (attackIn->weaponflags & BRIDGE_WEAPON_FIRED)
         {
             TF2Bridge_FireAtNPCs(attackIn);
         }
-        sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
     }
 
