@@ -600,6 +600,12 @@ void zTF2Bridge_DebugRenderHitscan()
     if (sHitscanDebugCount == 0)
         return;
 
+    // Diagnostic only: draw the FIRST TF2-generated ray, not the entire pellet
+    // spread. One ray is much easier to compare against the player's crosshair
+    // and camera. Keep the line depth-independent so a wall cannot hide the
+    // very thing we are trying to diagnose.
+    const TF2BridgeDebugRay& ray = sHitscanDebugRays[0];
+
     void* oldTexture = NULL;
     void* oldSrcBlend = NULL;
     void* oldDstBlend = NULL;
@@ -618,21 +624,15 @@ void zTF2Bridge_DebugRenderHitscan()
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
 
-    RwIm3DVertex verts[BRIDGE_MAX_HITSCAN_RAYS * 2];
-    for (uint32_t i = 0; i < sHitscanDebugCount; ++i)
-    {
-        RwIm3DVertexSetPos(&verts[i * 2], sHitscanDebugRays[i].origin.x,
-            sHitscanDebugRays[i].origin.y, sHitscanDebugRays[i].origin.z);
-        RwIm3DVertexSetRGBA(&verts[i * 2], 255, 220, 40, 220);
-        RwIm3DVertexSetPos(&verts[i * 2 + 1], sHitscanDebugRays[i].end.x,
-            sHitscanDebugRays[i].end.y, sHitscanDebugRays[i].end.z);
-        RwIm3DVertexSetRGBA(&verts[i * 2 + 1], 255, 80, 40, 180);
-    }
+    RwIm3DVertex verts[2];
+    RwIm3DVertexSetPos(&verts[0], ray.origin.x, ray.origin.y, ray.origin.z);
+    RwIm3DVertexSetRGBA(&verts[0], 255, 255, 0, 255);
+    RwIm3DVertexSetPos(&verts[1], ray.end.x, ray.end.y, ray.end.z);
+    RwIm3DVertexSetRGBA(&verts[1], 255, 0, 0, 255);
 
-    if (RwIm3DTransform(verts, (RwUInt32)(sHitscanDebugCount * 2), NULL,
-        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    if (RwIm3DTransform(verts, 2, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
     {
         RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
         RwIm3DEnd();
