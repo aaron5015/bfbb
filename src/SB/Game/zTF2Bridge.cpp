@@ -12,6 +12,10 @@
 #include "zGameState.h"
 #include "zGlobals.h"
 #include "zScene.h"
+#include "zNPCMgr.h"
+#include "zNPCTypeCommon.h"
+#include "xBound.h"
+#include "xScene.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -239,6 +243,19 @@ void zTF2Bridge_Frame()
 
     iTF2BridgePoll();
 
+    // The first combat test uses TF2's existing IN_ATTACK bit. Process each
+    // packet once so holding the mouse does not apply damage every frame.
+    static uint32_t sLastIntentSeq = 0;
+    const BridgeIntentPacket* attackIn = iTF2BridgeGetIntent();
+    if (attackIn != NULL && attackIn->seq != sLastIntentSeq)
+    {
+        if (attackIn->buttons & BRIDGE_IN_ATTACK)
+        {
+            TF2Bridge_FireAtNPCs(attackIn);
+        }
+        sLastIntentSeq = attackIn->seq;
+    }
+
     const bool playing = zGameModeGet() == eGameMode_Game;
 
     const BridgeIntentPacket* in = iTF2BridgeGetIntent();
@@ -280,6 +297,107 @@ void zTF2Bridge_Frame()
     }
 
     iTF2BridgeSendState(&st);
+}
+
+// ---------------------------------------------------------------------------
+// TF2 weapon bridge (first combat milestone).
+//
+// TF2 already sends the user's IN_ATTACK bit with BridgeIntentPacket, so we can
+// keep the first weapon test deliberately small: on the attack edge, trace the
+// same aim ray through BFBB's live NPC bounds and hand the hit to BFBB's normal
+// NPC damage system. This keeps health, hurt/death goals, rewards and scripts
+// on the BFBB side instead of inventing a second health system in TF2.
+//
+// The first pass uses DMGTYP_SIDE as a generic robot hit. The damage amount is
+// therefore still BFBB's normal one-hit/one-damage progression; crits,
+// projectiles, knockback and weapon-specific damage will be layered on later.
+static bool IsTF2BridgeRobot(const zNPCCommon* npc)
+{
+    if (npc == NULL)
+        return false;
+
+    switch (npc->SelfType())
+    {
+    case NPC_TYPE_FODDER:
+    case NPC_TYPE_FODDERTOUGH:
+    case NPC_TYPE_FODBOMB:
+    case NPC_TYPE_CHOMPER:
+    case NPC_TYPE_FODBZZT:
+    case NPC_TYPE_HAMMER:
+    case NPC_TYPE_HAMSPIN:
+    case NPC_TYPE_TARTAR:
+    case NPC_TYPE_GLOVE:
+    case NPC_TYPE_MONSOON:
+    case NPC_TYPE_SLEEPY:
+    case NPC_TYPE_ARFDOG:
+    case NPC_TYPE_ARFARF:
+    case NPC_TYPE_CHUCK:
+    case NPC_TYPE_TUBELET:
+    case NPC_TYPE_TUBESLAVE:
+    case NPC_TYPE_SLICK:
+    case NPC_TYPE_SLICK_TOUHOU:
+    case NPC_TYPE_DUPLOTRON:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
+{
+    if (in == NULL || !(in->buttons & BRIDGE_IN_ATTACK) || globals.sceneCur == NULL)
+        return;
+
+    // Use the TF2 eye transform that is already driving BFBB's camera. This
+    // means the bullet goes exactly where the player is looking in TF2.
+    const xVec3 origin = FromSource(in->ex, in->ey, in->ez, in->scale);
+    const float yaw = in->yaw * kDegToRad;
+    const float pitch = in->pitch * kDegToRad;
+    const float cp = cosf(pitch);
+    xVec3 dir;
+    dir.x = cp * sinf(yaw);
+    dir.y = -sinf(pitch);
+    dir.z = cp * cosf(yaw);
+
+    xRay3 ray;
+    ray.origin = origin;
+    ray.dir = dir;
+    ray.min_t = 0.0f;
+    ray.max_t = 1000.0f;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+    if (npclist == NULL)
+        return;
+
+    zNPCCommon* best = NULL;
+    F32 bestDist = FLOAT_MAX;
+    for (S32 i = 0; i < npclist->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+        if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
+            continue;
+
+        xCollis hit;
+        memset(&hit, 0, sizeof(hit));
+        hit.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+        xRayHitsBound(&ray, &npc->bound, &hit);
+        if ((hit.flags & 0x1) && hit.dist < bestDist)
+        {
+            bestDist = hit.dist;
+            best = npc;
+        }
+    }
+
+    if (best == NULL)
+        return;
+
+    // BFBB's robot damage code expects the hit vector to describe the incoming
+    // direction, not an absolute world position. Let its normal damage path do
+    // the rest (HP, damage goal, death animation, rewards, etc.).
+    best->Damage(DMGTYP_SIDE, NULL, &dir);
+    printf("bfbb: tf2bridge -- shot hit NPC type %d at %.2f\n", (int)best->SelfType(),
+           (double)bestDist);
 }
 
 // Called from zGameLoop right after the player entity updated. When TF2 is
