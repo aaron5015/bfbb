@@ -1,4 +1,5 @@
 #include "zScene.h"
+#include "zTF2Bridge.h"
 
 #ifdef PLATFORM_PC
 #include <stdlib.h>
@@ -3934,6 +3935,7 @@ void zSceneRender()
     zSceneRenderPreFX();
     xScrFxRender(globals.camera.lo_cam);
     zSceneRenderPostFX();
+    zTF2Bridge_DebugRenderHitscan();
 }
 
 static void zSceneObjHashtableInit(S32 count)
