@@ -313,17 +313,11 @@ void zTF2Bridge_Frame()
         }
         else if (fired)
         {
-            sHitscanDebugCount = 0;
             TF2Bridge_FireAtNPCs(attackIn);
         }
         else if (attack && !sLastAttack)
         {
-            sHitscanDebugCount = 0;
             TF2Bridge_FireAtNPCs(attackIn);
-        }
-        else
-        {
-            sHitscanDebugCount = 0;
         }
         sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
@@ -658,8 +652,7 @@ void zTF2Bridge_DebugRenderHitscan()
     // offset rather than being wildly displaced.
     const float markerOrigin = 2.5f;
     const float markerCamera = 2.5f;
-    const float stubLength = ray.end.x == ray.origin.x && ray.end.y == ray.origin.y && ray.end.z == ray.origin.z
-        ? 20.0f : 0.0f;
+    const float stubLength = 20.0f;
 
     RwIm3DVertex verts[20];
     int n = 0;
