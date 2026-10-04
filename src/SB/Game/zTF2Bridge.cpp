@@ -47,6 +47,22 @@ struct TF2BridgeDebugRay
 static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
 static uint32_t sHitscanDebugCount = 0;
 static float sHitscanDebugTime = 0.0f;
+
+struct TF2BridgeDebugRocket
+{
+    int32_t entIndex;
+    xVec3 pos;
+    xVec3 prevPos;
+    xVec3 impact;
+    float radius;
+    float impactTime;
+    bool active;
+    bool hasPrevious;
+    bool impacted;
+};
+
+static TF2BridgeDebugRocket sRocketDebug[BRIDGE_MAX_ROCKETS] = {};
+static float sRocketDebugPrintTimer = 0.0f;
 static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range, uint32_t debugIndex);
 
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
@@ -242,8 +258,161 @@ static void DumpSceneCollision(uint32_t sceneId)
     printf("bfbb: tf2bridge -- wrote %u collision triangles to %s\n", (unsigned)count, path);
 }
 
+static TF2BridgeDebugRocket* TF2Bridge_FindRocketTrack(int32_t entIndex)
+{
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        if (sRocketDebug[i].entIndex == entIndex)
+            return &sRocketDebug[i];
+    }
+    return NULL;
+}
+
+static TF2BridgeDebugRocket* TF2Bridge_AllocRocketTrack(int32_t entIndex)
+{
+    TF2BridgeDebugRocket* freeTrack = NULL;
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        if (sRocketDebug[i].entIndex == entIndex)
+            return &sRocketDebug[i];
+        if (sRocketDebug[i].entIndex == 0 && freeTrack == NULL)
+            freeTrack = &sRocketDebug[i];
+        if (!sRocketDebug[i].active && sRocketDebug[i].impactTime <= 0.0f && freeTrack == NULL)
+            freeTrack = &sRocketDebug[i];
+    }
+
+    if (freeTrack != NULL)
+    {
+        *freeTrack = {};
+        freeTrack->entIndex = entIndex;
+    }
+    return freeTrack;
+}
+
+static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
+{
+    if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
+        return;
+
+    bool seen[BRIDGE_MAX_ROCKETS] = {};
+    const uint32_t count = in->rocketCount > BRIDGE_MAX_ROCKETS ? BRIDGE_MAX_ROCKETS : in->rocketCount;
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const int32_t entIndex = in->rocketEntIndex[i];
+        if (entIndex <= 0)
+            continue;
+
+        TF2BridgeDebugRocket* rocket = TF2Bridge_FindRocketTrack(entIndex);
+        if (rocket == NULL)
+            rocket = TF2Bridge_AllocRocketTrack(entIndex);
+        if (rocket == NULL)
+            continue;
+
+        for (uint32_t k = 0; k < BRIDGE_MAX_ROCKETS; ++k)
+        {
+            if (&sRocketDebug[k] == rocket)
+            {
+                seen[k] = true;
+                break;
+            }
+        }
+
+        const xVec3 pos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
+                                     in->rocketPos[i][2], in->scale);
+        rocket->radius = in->rocketRadius[i] / in->scale;
+        rocket->active = true;
+
+        // If this entity index was reused after its old diagnostic expired,
+        // start a fresh trajectory instead of inheriting the previous one.
+        if (rocket->impacted && rocket->impactTime <= 0.0f)
+        {
+            rocket->hasPrevious = false;
+            rocket->impacted = false;
+        }
+
+        if (!rocket->impacted && rocket->hasPrevious)
+        {
+            const xVec3 delta = {
+                pos.x - rocket->prevPos.x,
+                pos.y - rocket->prevPos.y,
+                pos.z - rocket->prevPos.z
+            };
+            const float len = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+
+            if (len > 0.0001f)
+            {
+                xRay3 ray;
+                ray.origin = rocket->prevPos;
+                ray.dir.x = delta.x / len;
+                ray.dir.y = delta.y / len;
+                ray.dir.z = delta.z / len;
+                ray.min_t = 0.0f;
+                ray.max_t = len;
+                ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+                xCollis worldHit;
+                memset(&worldHit, 0, sizeof(worldHit));
+                worldHit.flags = k_HIT_0x200;
+
+                if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
+                    worldHit.dist >= 0.0f && worldHit.dist <= len)
+                {
+                    rocket->impact.x = rocket->prevPos.x + ray.dir.x * worldHit.dist;
+                    rocket->impact.y = rocket->prevPos.y + ray.dir.y * worldHit.dist;
+                    rocket->impact.z = rocket->prevPos.z + ray.dir.z * worldHit.dist;
+                    rocket->impacted = true;
+                    rocket->active = false;
+                    rocket->impactTime = in->rocketDebugLifetime;
+
+                    printf("bfbb: tf2bridge -- rocket %d impact source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) radius=%.2f\n",
+                        entIndex,
+                        (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
+                        (double)in->rocketPos[i][2],
+                        (double)rocket->impact.x, (double)rocket->impact.y,
+                        (double)rocket->impact.z, (double)rocket->radius);
+                }
+            }
+        }
+
+        rocket->pos = pos;
+        rocket->prevPos = pos;
+        rocket->hasPrevious = true;
+    }
+
+    // A rocket no longer present in the TF2 packet is no longer drawn as a
+    // live diagnostic. An impact marker, if one exists, is allowed to finish
+    // its configured lifetime.
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        if (sRocketDebug[i].entIndex != 0 && !seen[i])
+            sRocketDebug[i].active = false;
+    }
+
+    // Numeric source/BFBB comparison, throttled so one fast rocket does not
+    // flood the console.
+    if (count > 0)
+    {
+        sRocketDebugPrintTimer -= gSceneUpdateTime;
+        if (sRocketDebugPrintTimer <= 0.0f)
+        {
+            const uint32_t i = 0;
+            const xVec3 bfbbPos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
+                                             in->rocketPos[i][2], in->scale);
+            printf("bfbb: tf2bridge -- rocket %d source=(%.2f %.2f %.2f) bfbb=(%.3f %.3f %.3f) radius=%.2f\n",
+                in->rocketEntIndex[i],
+                (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
+                (double)in->rocketPos[i][2],
+                (double)bfbbPos.x, (double)bfbbPos.y, (double)bfbbPos.z,
+                (double)(in->rocketRadius[i] / in->scale));
+            sRocketDebugPrintTimer = 0.25f;
+        }
+    }
+}
+
 void zTF2Bridge_Frame()
 {
+
     static bool sInited = false;
     if (!sInited)
     {
@@ -272,6 +441,11 @@ void zTF2Bridge_Frame()
     {
         const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
         const bool fired = (attackIn->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
+
+        if (attackIn->rocketCount > 0 || attackIn->rocketDebugLifetime <= 0.0f)
+        {
+            TF2Bridge_ProcessRocketDiagnostics(attackIn);
+        }
 
         if (attackIn->hitscanCount > 0)
         {
