@@ -34,6 +34,9 @@
 
 static const float kDegToRad = 3.14159265f / 180.0f;
 
+// Forward declaration: the bridge frame runs before the implementation below.
+static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in);
+
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
 {
     xVec3 v;
@@ -316,8 +319,6 @@ void zTF2Bridge_Frame()
 // The first pass uses DMGTYP_SIDE as a generic robot hit. The damage amount is
 // therefore still BFBB's normal one-hit/one-damage progression; crits,
 // projectiles, knockback and weapon-specific damage will be layered on later.
-static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in);
-
 static bool IsTF2BridgeRobot(const zNPCCommon* npc)
 {
     if (npc == NULL)
