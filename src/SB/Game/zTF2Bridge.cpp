@@ -814,6 +814,162 @@ void zTF2Bridge_AfterCameraUpdate()
 }
 
 
+void zTF2Bridge_DebugRenderRockets()
+{
+    bool any = false;
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        if (sRocketDebug[i].active || (sRocketDebug[i].impacted && sRocketDebug[i].impactTime > 0.0f))
+        {
+            any = true;
+            break;
+        }
+    }
+
+    if (!any)
+        return;
+
+    void* oldTexture = NULL;
+    void* oldSrcBlend = NULL;
+    void* oldDstBlend = NULL;
+    void* oldVertexAlpha = NULL;
+    void* oldZWrite = NULL;
+    void* oldZTest = NULL;
+    RwRenderStateGet(rwRENDERSTATETEXTURERASTER, &oldTexture);
+    RwRenderStateGet(rwRENDERSTATESRCBLEND, &oldSrcBlend);
+    RwRenderStateGet(rwRENDERSTATEDESTBLEND, &oldDstBlend);
+    RwRenderStateGet(rwRENDERSTATEVERTEXALPHAENABLE, &oldVertexAlpha);
+    RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, &oldZWrite);
+    RwRenderStateGet(rwRENDERSTATEZTESTENABLE, &oldZTest);
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+
+    const float pi2 = 6.283185307f;
+    const float marker = 1.5f;
+
+    // Each rocket gets a small cross while alive. An impacted rocket becomes
+    // a persistent impact cross plus three orthogonal radius rings.
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        TF2BridgeDebugRocket& rocket = sRocketDebug[i];
+
+        if (rocket.active && !rocket.impacted)
+        {
+            RwIm3DVertex verts[6];
+            const xVec3& p = rocket.pos;
+
+            RwIm3DVertexSetPos(&verts[0], p.x - marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&verts[0], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[1], p.x + marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&verts[1], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[2], p.x, p.y - marker, p.z);
+            RwIm3DVertexSetRGBA(&verts[2], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[3], p.x, p.y + marker, p.z);
+            RwIm3DVertexSetRGBA(&verts[3], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[4], p.x, p.y, p.z - marker);
+            RwIm3DVertexSetRGBA(&verts[4], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[5], p.x, p.y, p.z + marker);
+            RwIm3DVertexSetRGBA(&verts[5], 255, 220, 0, 255);
+
+            if (RwIm3DTransform(verts, 6, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+        }
+
+        if (rocket.impacted && rocket.impactTime > 0.0f)
+        {
+            const xVec3& p = rocket.impact;
+            RwIm3DVertex cross[6];
+
+            RwIm3DVertexSetPos(&cross[0], p.x - marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&cross[0], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[1], p.x + marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&cross[1], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[2], p.x, p.y - marker, p.z);
+            RwIm3DVertexSetRGBA(&cross[2], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[3], p.x, p.y + marker, p.z);
+            RwIm3DVertexSetRGBA(&cross[3], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[4], p.x, p.y, p.z - marker);
+            RwIm3DVertexSetRGBA(&cross[4], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[5], p.x, p.y, p.z + marker);
+            RwIm3DVertexSetRGBA(&cross[5], 255, 80, 80, 255);
+
+            if (RwIm3DTransform(cross, 6, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            const int segments = 32;
+            RwIm3DVertex rings[segments * 6];
+            int n = 0;
+            for (int s = 0; s < segments; ++s)
+            {
+                const float a0 = pi2 * (float)s / (float)segments;
+                const float a1 = pi2 * (float)(s + 1) / (float)segments;
+                const float c0 = cosf(a0);
+                const float s0 = sinf(a0);
+                const float c1 = cosf(a1);
+                const float s1 = sinf(a1);
+
+                // XY plane.
+                RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
+                                   p.y + s0 * rocket.radius, p.z);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
+                                   p.y + s1 * rocket.radius, p.z);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+
+                // XZ plane.
+                RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
+                                   p.y, p.z + s0 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
+                                   p.y, p.z + s1 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+
+                // YZ plane.
+                RwIm3DVertexSetPos(&rings[n], p.x, p.y + c0 * rocket.radius,
+                                   p.z + s0 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x, p.y + c1 * rocket.radius,
+                                   p.z + s1 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+            }
+
+            if (RwIm3DTransform(rings, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            rocket.impactTime -= gSceneUpdateTime;
+            if (rocket.impactTime <= 0.0f)
+            {
+                rocket.impactTime = 0.0f;
+                rocket.impacted = false;
+                rocket.entIndex = 0;
+                rocket.active = false;
+                rocket.hasPrevious = false;
+            }
+        }
+    }
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, oldTexture);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, oldSrcBlend);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, oldDstBlend);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
+}
+
 void zTF2Bridge_DebugRenderHitscan()
 {
     if (sHitscanDebugCount == 0)
