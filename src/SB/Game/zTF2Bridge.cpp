@@ -36,6 +36,15 @@ static const float kDegToRad = 3.14159265f / 180.0f;
 
 // Forward declaration: the bridge frame runs before the implementation below.
 static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in);
+
+struct TF2BridgeDebugRay
+{
+    xVec3 origin;
+    xVec3 end;
+};
+
+static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
+static uint32_t sHitscanDebugCount = 0;
 static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range);
 
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
@@ -266,11 +275,24 @@ void zTF2Bridge_Frame()
         {
             const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
                 ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
+            sHitscanDebugCount = count;
             for (uint32_t i = 0; i < count; ++i)
             {
+                const xVec3 origin = FromSource(attackIn->hitscanOrigin[0],
+                    attackIn->hitscanOrigin[1], attackIn->hitscanOrigin[2], attackIn->scale);
+                const xVec3 dir = FromSource(attackIn->hitscanDir[i][0],
+                    attackIn->hitscanDir[i][1], attackIn->hitscanDir[i][2], 1.0f);
+                sHitscanDebugRays[i].origin = origin;
+                sHitscanDebugRays[i].end.x = origin.x + dir.x * (attackIn->hitscanRange / attackIn->scale);
+                sHitscanDebugRays[i].end.y = origin.y + dir.y * (attackIn->hitscanRange / attackIn->scale);
+                sHitscanDebugRays[i].end.z = origin.z + dir.z * (attackIn->hitscanRange / attackIn->scale);
                 TF2Bridge_FireHitscanRay(attackIn, attackIn->hitscanOrigin,
                     attackIn->hitscanDir[i], attackIn->hitscanRange);
             }
+        }
+        else
+        {
+            sHitscanDebugCount = 0;
         }
         else if (fired)
         {
@@ -569,4 +591,56 @@ void zTF2Bridge_AfterCameraUpdate()
     cm.pos = FromSource(in->ex, in->ey, in->ez, in->scale);
 
     iCameraUpdatePos(globals.camera.lo_cam, &cm);
+}
+
+
+void zTF2Bridge_DebugRenderHitscan()
+{
+    if (sHitscanDebugCount == 0)
+        return;
+
+    void* oldTexture = NULL;
+    void* oldSrcBlend = NULL;
+    void* oldDstBlend = NULL;
+    void* oldVertexAlpha = NULL;
+    void* oldZWrite = NULL;
+    void* oldZTest = NULL;
+    RwRenderStateGet(rwRENDERSTATETEXTURERASTER, &oldTexture);
+    RwRenderStateGet(rwRENDERSTATESRCBLEND, &oldSrcBlend);
+    RwRenderStateGet(rwRENDERSTATEDESTBLEND, &oldDstBlend);
+    RwRenderStateGet(rwRENDERSTATEVERTEXALPHAENABLE, &oldVertexAlpha);
+    RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, &oldZWrite);
+    RwRenderStateGet(rwRENDERSTATEZTESTENABLE, &oldZTest);
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)TRUE);
+
+    RwIm3DVertex verts[BRIDGE_MAX_HITSCAN_RAYS * 2];
+    for (uint32_t i = 0; i < sHitscanDebugCount; ++i)
+    {
+        RwIm3DVertexSetPos(&verts[i * 2], sHitscanDebugRays[i].origin.x,
+            sHitscanDebugRays[i].origin.y, sHitscanDebugRays[i].origin.z);
+        RwIm3DVertexSetRGBA(&verts[i * 2], 255, 220, 40, 220);
+        RwIm3DVertexSetPos(&verts[i * 2 + 1], sHitscanDebugRays[i].end.x,
+            sHitscanDebugRays[i].end.y, sHitscanDebugRays[i].end.z);
+        RwIm3DVertexSetRGBA(&verts[i * 2 + 1], 255, 80, 40, 180);
+    }
+
+    if (RwIm3DTransform(verts, (RwUInt32)(sHitscanDebugCount * 2), NULL,
+        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    {
+        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+        RwIm3DEnd();
+    }
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, oldTexture);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, oldSrcBlend);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, oldDstBlend);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
 }
