@@ -12,5 +12,6 @@ void zTF2Bridge_Frame();
 void zTF2Bridge_AfterPlayerUpdate(); // right after the player entity updates
 void zTF2Bridge_AfterCameraUpdate(); // right after zCameraUpdate
 void zTF2Bridge_DebugRenderHitscan(); // temporary hitscan ray visualization
+void zTF2Bridge_DebugRenderRockets(); // temporary rocket/radius visualization
 
 #endif
