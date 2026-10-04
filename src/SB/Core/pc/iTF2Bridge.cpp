@@ -232,6 +232,13 @@ void iTF2BridgeApplyPad(iPadHostState* pad)
         return;
     }
 
+    // TF2 is running the movement and the gunplay: BFBB follows its position
+    // (zTF2Bridge_AfterPlayerUpdate), and no BFBB move is pressed on its behalf.
+    if (in->flags & BRIDGE_INTENT_OWNS_MOVE)
+    {
+        return;
+    }
+
     pad->connected = true;
     // Host convention: Y is up-positive. When the game layer has worked out a
     // camera-relative stick from the TF2 view direction, use it; otherwise the

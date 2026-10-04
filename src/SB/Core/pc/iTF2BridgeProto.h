@@ -17,7 +17,7 @@
 #define BRIDGE_PORT_TF2 27500
 #define BRIDGE_PORT_BFBB 27501
 
-#define BRIDGE_MAGIC_INTENT 0x31494642u // "BFI1"
+#define BRIDGE_MAGIC_INTENT 0x32494642u // "BFI2"
 #define BRIDGE_MAGIC_STATE 0x31534642u // "BFS1"
 
 // Source's IN_* usercmd button bits, copied here so BFBB needs no Source headers.
@@ -29,6 +29,21 @@
 #define BRIDGE_IN_RELOAD (1 << 13)
 
 #define BRIDGE_STATE_GAMEPLAY 0x1u // BFBB is in eGameMode_Game, not a menu/load
+#define BRIDGE_STATE_CONTROL_OFF 0x2u // BFBB is moving the player itself (cutscene, flythrough,
+                                      // respawn, warp): TF2 must follow BFBB's position
+
+#define BRIDGE_INTENT_OWNS_MOVE 0x1u // TF2 is running the movement: BFBB follows px/py/pz and
+                                     // looks through ex/ey/ez. Unset: BFBB walks from forward/side.
+
+// Coordinates. The renderer BFBB uses (librw) flips X when it builds the view
+// matrix, so BFBB's world is right-handed with +X toward screen-LEFT, +Y up and
+// +Z forward. Source is x forward, y left, z up. That lines up with no mirroring:
+//
+//      Source = ( bfbb.z, bfbb.x, bfbb.y ) * scale
+//      bfbb   = ( source.y, source.z, source.x ) / scale
+//
+// and yaw is the same number in both (0 = facing BFBB +Z / Source +X, turning
+// toward BFBB +X / Source +Y).
 
 #pragma pack(push, 1)
 
@@ -39,11 +54,16 @@ struct BridgeIntentPacket
     uint32_t seq;
     float forward; // -1..1, from usercmd forwardmove / max speed
     float side; // -1..1, +right
-    float pitch; // degrees, view angles
+    float pitch; // degrees, view angles (positive looks DOWN, as in Source)
     float yaw; // degrees
     uint32_t buttons; // BRIDGE_IN_*
     int32_t tfclass; // TF_CLASS_* (0 = undefined)
     int32_t tfhealth; // TF2-side health, informational
+    uint32_t flags; // BRIDGE_INTENT_*
+    float scale; // Source units per BFBB unit (TF2's bfbb_unit_scale)
+    float px, py, pz; // TF2 player origin (feet), Source space
+    float vx, vy, vz; // TF2 player velocity, Source space, units/second
+    float ex, ey, ez; // TF2 eye position, Source space
 };
 
 // BFBB -> TF2: where the BFBB player actually is.

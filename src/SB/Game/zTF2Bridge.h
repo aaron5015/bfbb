@@ -6,4 +6,10 @@
 // nothing unless BFBB_TF2BRIDGE is set.
 void zTF2Bridge_Frame();
 
+// When TF2 is running the movement (BRIDGE_INTENT_OWNS_MOVE): put the player
+// where TF2 says, and look through TF2's eyes. Both are no-ops otherwise, and
+// during cutscenes, flythroughs and any time BFBB has control of the player.
+void zTF2Bridge_AfterPlayerUpdate(); // right after the player entity updates
+void zTF2Bridge_AfterCameraUpdate(); // right after zCameraUpdate
+
 #endif

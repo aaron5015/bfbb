@@ -1,0 +1,16 @@
+diff a/src/SB/Game/zGame.cpp b/src/SB/Game/zGame.cpp	(rejected hunks)
+@@ -1,4 +1,5 @@
+ #include "zCamera.h"
++#include "zTF2Bridge.h"
+ #include "zCombo.h"
+ #include "zCutsceneMgr.h"
+ #include "zEntPlayer.h"
+@@ -539,6 +540,8 @@ void zGameLoop()
+     {
+         gGameWhereAmI = eGameWhere_LoopCalcTime;
+ 
++        zTF2Bridge_Frame();
++
+         sTimeCurrent = iTimeGet();
+         sTimeElapsed = iTimeDiffSec(sTimeLast, sTimeCurrent);
+ 

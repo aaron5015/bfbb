@@ -1,10 +1,14 @@
 #include "zTF2Bridge.h"
 
 #include "iTF2Bridge.h"
+#include "iCamera.h"
 #include "iEnv.h"
 #include "xClumpColl.h"
+#include "xBound.h"
+#include "xEnt.h"
 #include "xEnv.h"
 #include "xJSP.h"
+#include "zCamera.h"
 #include "zGameState.h"
 #include "zGlobals.h"
 #include "zScene.h"
@@ -13,27 +17,67 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Axis mapping between the two worlds. BFBB: x right, y up, z forward
-// (left-handed). Source: x forward, y left, z up (right-handed). A physical
-// match, with nothing mirrored, is
+// Axis mapping between the two worlds. librw flips X when it builds the view
+// matrix, so BFBB is right-handed with +X toward screen-LEFT, +Y up, +Z forward.
+// Source is x forward, y left, z up, and the two line up with no mirroring:
 //
-//      Source = ( bfbb.z, -bfbb.x, bfbb.y )
+//      Source = ( bfbb.z, bfbb.x, bfbb.y ) * scale
+//      bfbb   = ( source.y, source.z, source.x ) / scale
 //
-// tf2bridge_server.cpp uses the same mapping for positions; the TF2 view
-// direction is converted with it below.
+// Yaw is the same number in both. tf2bridge_server.cpp and bfbb_collision.cpp
+// use the same mapping. (The first version of the bridge mirrored X; that was
+// the mirrored level seen in TF2.)
 
+static const float kDegToRad = 3.14159265f / 180.0f;
+
+static xVec3 FromSource(float sx, float sy, float sz, float scale)
+{
+    xVec3 v;
+    v.x = sy / scale;
+    v.y = sz / scale;
+    v.z = sx / scale;
+    return v;
+}
+
+// Whether BFBB itself has the player right now: a cutscene, a flythrough, the
+// grab-and-respawn after falling out of bounds, a warp. TF2 follows BFBB then.
+static bool BfbbOwnsPlayerNow()
+{
+    return globals.player.ControlOff != 0 || zcam_fly != 0 || zcam_cutscene != 0;
+}
+
+// The newest TF2 intent, but only if BFBB should be doing what it says right
+// now: in a level, TF2 running the movement, and BFBB not mid-cutscene.
+static const BridgeIntentPacket* PuppetIntent()
+{
+    if (!iTF2BridgeActive() || zGameModeGet() != eGameMode_Game || BfbbOwnsPlayerNow())
+    {
+        return NULL;
+    }
+
+    const BridgeIntentPacket* in = iTF2BridgeGetIntent();
+    if (in == NULL || !(in->flags & BRIDGE_INTENT_OWNS_MOVE) || in->scale <= 0.0f)
+    {
+        return NULL;
+    }
+    return in;
+}
+
+// Fallback (TF2 not owning movement): turn the TF2 view direction and movement
+// keys into the stick deflection that walks SpongeBob that way.
 static void WalkStickFromView(const BridgeIntentPacket* in)
 {
-    // Direction the TF2 player is asking to walk, in Source's horizontal plane.
-    const float th = in->yaw * (3.14159265f / 180.0f);
+    const float th = in->yaw * kDegToRad;
     const float f = in->forward;
     const float s = in->side;
+
+    // Wished direction in Source's horizontal plane (+side is the player's right).
     const float srcX = f * cosf(th) + s * sinf(th);
     const float srcY = f * sinf(th) - s * cosf(th);
 
-    // Same direction in BFBB's horizontal plane: Source (x, y) = (bz, -bx).
-    const float dx = -srcY; // bfbb x
-    const float dz = srcX; // bfbb z
+    // The same direction in BFBB's horizontal plane: bfbb (x, z) = Source (y, x).
+    const float dx = srcY;
+    const float dz = srcX;
 
     // The game turns the stick into a heading relative to its own camera, so
     // express the direction in the camera's frame instead of the world's.
@@ -45,7 +89,6 @@ static void WalkStickFromView(const BridgeIntentPacket* in)
 
     if (atLen < 0.05f || rLen < 0.05f)
     {
-        // Camera looking straight up or down: no horizontal frame to use.
         iTF2BridgeSetStick(FALSE, 0.0f, 0.0f);
         return;
     }
@@ -55,9 +98,10 @@ static void WalkStickFromView(const BridgeIntentPacket* in)
     rx /= rLen;
     rz /= rLen;
 
-    iTF2BridgeSetStick(TRUE, dx * rx + dz * rz, dx * atx + dz * atz);
+    // The camera's `right` vector points to screen-LEFT (see above), so a stick
+    // push to the right is the negative of the dot with it.
+    iTF2BridgeSetStick(TRUE, -(dx * rx + dz * rz), dx * atx + dz * atz);
 }
-
 
 // ---------------------------------------------------------------------------
 // Level collision export.
@@ -198,7 +242,7 @@ void zTF2Bridge_Frame()
     const bool playing = zGameModeGet() == eGameMode_Game;
 
     const BridgeIntentPacket* in = iTF2BridgeGetIntent();
-    if (playing && in != NULL)
+    if (playing && in != NULL && !(in->flags & BRIDGE_INTENT_OWNS_MOVE))
     {
         WalkStickFromView(in);
     }
@@ -216,11 +260,15 @@ void zTF2Bridge_Frame()
         st.x = m.pos.x;
         st.y = m.pos.y;
         st.z = m.pos.z;
-        // BFBB-convention facing: atan2(at.x, at.z), degrees, +z is 0.
+        // Facing: atan2(at.x, at.z), degrees, 0 = BFBB +Z. Same number as TF2's yaw.
         st.yaw = atan2f(m.at.x, m.at.z) * (180.0f / 3.14159265f);
         st.health = (int32_t)globals.player.Health;
         st.sceneId = globals.sceneCur != NULL ? globals.sceneCur->sceneID : 0;
         st.flags |= BRIDGE_STATE_GAMEPLAY;
+        if (BfbbOwnsPlayerNow())
+        {
+            st.flags |= BRIDGE_STATE_CONTROL_OFF;
+        }
 
         // Once per scene, on the first frame it is in play.
         static uint32_t sDumpedScene = 0xFFFFFFFFu;
@@ -232,4 +280,94 @@ void zTF2Bridge_Frame()
     }
 
     iTF2BridgeSendState(&st);
+}
+
+// Called from zGameLoop right after the player entity updated. When TF2 is
+// running the movement, put the player where TF2 says he is.
+void zTF2Bridge_AfterPlayerUpdate()
+{
+    const BridgeIntentPacket* in = PuppetIntent();
+    if (in == NULL)
+    {
+        return;
+    }
+
+    xEnt& e = globals.player.ent;
+    if (e.frame == NULL || e.model == NULL)
+    {
+        return;
+    }
+
+    const xVec3 p = FromSource(in->px, in->py, in->pz, in->scale);
+
+    e.frame->mat.pos = p;
+    e.frame->oldmat.pos = p;
+    *xEntGetPos(&e) = p; // the model's own matrix
+
+    // TF2 owns the motion; BFBB's player must not also integrate any of his own.
+    e.frame->vel.x = e.frame->vel.y = e.frame->vel.z = 0.0f;
+    e.frame->dpos.x = e.frame->dpos.y = e.frame->dpos.z = 0.0f;
+    e.frame->dvel.x = e.frame->dvel.y = e.frame->dvel.z = 0.0f;
+
+    // Face where TF2 faces (heading only).
+    const float yaw = in->yaw * kDegToRad;
+    xMat4x3& m = e.frame->mat;
+    m.at.x = sinf(yaw);
+    m.at.y = 0.0f;
+    m.at.z = cosf(yaw);
+    m.up.x = 0.0f;
+    m.up.y = 1.0f;
+    m.up.z = 0.0f;
+    m.right.x = cosf(yaw);
+    m.right.y = 0.0f;
+    m.right.z = -sinf(yaw);
+
+    xBoundUpdate(&e.bound);
+}
+
+// Called from zGameLoop right after zCameraUpdate and before the camera is
+// handed to the renderer. When TF2 is running the movement, look through TF2's
+// eyes (first person).
+void zTF2Bridge_AfterCameraUpdate()
+{
+    const BridgeIntentPacket* in = PuppetIntent();
+    if (in == NULL || globals.camera.lo_cam == NULL)
+    {
+        return;
+    }
+
+    const float yaw = in->yaw * kDegToRad;
+    const float pitch = in->pitch * kDegToRad; // positive looks down
+
+    // Forward, then right = up x at (so an unrotated camera has right = +X,
+    // which the renderer shows on screen-left; that is how it is meant to be),
+    // then up = at x right.
+    const float cp = cosf(pitch);
+    float at[3] = { cp * sinf(yaw), -sinf(pitch), cp * cosf(yaw) };
+
+    float right[3] = { at[2], 0.0f, -at[0] }; // (0,1,0) x at
+    const float rl = sqrtf(right[0] * right[0] + right[2] * right[2]);
+    if (rl < 0.0001f)
+    {
+        return; // looking straight up or down
+    }
+    right[0] /= rl;
+    right[2] /= rl;
+
+    float up[3] = { at[1] * right[2] - at[2] * right[1], at[2] * right[0] - at[0] * right[2],
+                    at[0] * right[1] - at[1] * right[0] };
+
+    xMat4x3& cm = globals.camera.mat;
+    cm.right.x = right[0];
+    cm.right.y = right[1];
+    cm.right.z = right[2];
+    cm.up.x = up[0];
+    cm.up.y = up[1];
+    cm.up.z = up[2];
+    cm.at.x = at[0];
+    cm.at.y = at[1];
+    cm.at.z = at[2];
+    cm.pos = FromSource(in->ex, in->ey, in->ez, in->scale);
+
+    iCameraUpdatePos(globals.camera.lo_cam, &cm);
 }

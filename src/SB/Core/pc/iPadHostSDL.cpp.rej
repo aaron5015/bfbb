@@ -1,0 +1,20 @@
+diff a/src/SB/Core/pc/iPadHostSDL.cpp b/src/SB/Core/pc/iPadHostSDL.cpp	(rejected hunks)
+@@ -32,6 +32,7 @@
+ #include "iPadStick.h"
+ #include "iPadTokens.h"
+ #include "iPadTouch.h"
++#include "iTF2Bridge.h"
+ #include "iTime.h"
+ #include "xPad.h"
+ 
+@@ -738,6 +739,10 @@ void iPadHostPoll()
+             lastConnected = sState[0].connected;
+         }
+     }
++
++    // BFBB <-> TF2 bridge: in gameplay, the TF2 player's intent replaces port 0.
++    // A no-op unless BFBB_TF2BRIDGE is set; see iTF2Bridge.h.
++    iTF2BridgeApplyPad(&sState[0]);
+ }
+ 
+ const iPadHostState* iPadHostGet(S32 port)

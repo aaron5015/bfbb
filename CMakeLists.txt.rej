@@ -1,0 +1,19 @@
+diff a/CMakeLists.txt b/CMakeLists.txt	(rejected hunks)
+@@ -881,6 +881,7 @@ add_library(bfbb_platform STATIC
+   ${PC_DIR}/iSystem.cpp
+   ${PC_DIR}/iTextPatch.cpp
+   ${PC_DIR}/iTour.cpp
++  ${PC_DIR}/iTF2Bridge.cpp
+   ${PC_DIR}/iScreenBleed.cpp
+   ${PC_DIR}/iAssetOverride.cpp
+   ${MENU_SOURCES}
+@@ -1066,6 +1067,9 @@ set_source_files_properties(
+   PROPERTIES COMPILE_OPTIONS "${BFBB_EXCEPTIONS}")
+ 
+ target_link_libraries(bfbb_platform PUBLIC bfbb_rw)
++if(WIN32)
++  target_link_libraries(bfbb_platform PUBLIC ws2_32) # iTF2Bridge.cpp: Winsock
++endif()
+ 
+ # The movie decoder and its audio device. PRIVATE: nothing above bfbb_platform
+ # includes an FFmpeg header, and iFMV.cpp is the only caller of either seam.
