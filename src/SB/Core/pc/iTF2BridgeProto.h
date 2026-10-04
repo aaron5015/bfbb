@@ -38,6 +38,7 @@
 // Active weapon classification. Kept deliberately small for the bridge: the BFBB
 // side only needs to know which attack model to use, not Source weapon IDs.
 #define BRIDGE_WEAPON_MELEE 0x1u
+#define BRIDGE_WEAPON_FIRED 0x2u
 
 // Coordinates. The renderer BFBB uses (librw) flips X when it builds the view
 // matrix, so BFBB's world is right-handed with +X toward screen-LEFT, +Y up and
