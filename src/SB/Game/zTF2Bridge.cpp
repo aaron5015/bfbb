@@ -304,11 +304,6 @@ void zTF2Bridge_Frame()
         {
             sHitscanDebugCount = 0;
         }
-        else if (attack && !sLastAttack)
-        {
-            TF2Bridge_FireAtNPCs(attackIn);
-        }
-
         sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
     }
