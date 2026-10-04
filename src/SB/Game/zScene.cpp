@@ -3940,6 +3940,7 @@ void zSceneRender()
     // camera update for the HUD/UI pass, which makes an immediate-mode world
     // primitive an unreliable diagnostic when drawn afterward.
     zTF2Bridge_DebugRenderHitscan();
+    zTF2Bridge_DebugRenderRockets();
 
     zSceneRenderPostFX();
 }
