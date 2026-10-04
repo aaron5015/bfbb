@@ -642,29 +642,22 @@ void zTF2Bridge_DebugRenderHitscan()
     RwIm3DVertex verts[20];
     int n = 0;
 
-    // Helper implemented inline because the old RenderWare headers expose the
-    // vertex setters but not a convenient vector primitive.
     const xVec3 o = ray.origin;
     const xVec3 c = cam.pos;
-    xVec3 d = ray.end;
-    d.x = o.x + (d.x - o.x) * (stubLength / ((ray.end.x - o.x) * (ray.end.x - o.x) +
-                                              (ray.end.y - o.y) * (ray.end.y - o.y) +
-                                              (ray.end.z - o.z) * (ray.end.z - o.z)) > 0.000001f
-        ? stubLength / sqrtf((ray.end.x - o.x) * (ray.end.x - o.x) +
-                             (ray.end.y - o.y) * (ray.end.y - o.y) +
-                             (ray.end.z - o.z) * (ray.end.z - o.z)) : 0.0f);
-    d.y = o.y + (ray.end.y - o.y) * (stubLength / ((ray.end.x - o.x) * (ray.end.x - o.x) +
-                                                   (ray.end.y - o.y) * (ray.end.y - o.y) +
-                                                   (ray.end.z - o.z) * (ray.end.z - o.z)) > 0.000001f
-        ? stubLength / sqrtf((ray.end.x - o.x) * (ray.end.x - o.x) +
-                             (ray.end.y - o.y) * (ray.end.y - o.y) +
-                             (ray.end.z - o.z) * (ray.end.z - o.z)) : 0.0f);
-    d.z = o.z + (ray.end.z - o.z) * (stubLength / ((ray.end.x - o.x) * (ray.end.x - o.x) +
-                                                   (ray.end.y - o.y) * (ray.end.y - o.y) +
-                                                   (ray.end.z - o.z) * (ray.end.z - o.z)) > 0.000001f
-        ? stubLength / sqrtf((ray.end.x - o.x) * (ray.end.x - o.x) +
-                             (ray.end.y - o.y) * (ray.end.y - o.y) +
-                             (ray.end.z - o.z) * (ray.end.z - o.z)) : 0.0f);
+
+    const float vx = ray.end.x - o.x;
+    const float vy = ray.end.y - o.y;
+    const float vz = ray.end.z - o.z;
+    const float len = sqrtf(vx * vx + vy * vy + vz * vz);
+    const float invLen = len > 0.000001f ? 1.0f / len : 0.0f;
+
+    const xVec3 d = {
+        o.x + vx * stubLength * invLen,
+        o.y + vy * stubLength * invLen,
+        o.z + vz * stubLength * invLen
+    };
+
+    // The current BFBB camera is rebuilt from the TF2 eye every frame.
 
     // Origin cross: yellow.
     RwIm3DVertexSetPos(&verts[n], o.x - markerOrigin, o.y, o.z);
