@@ -316,6 +316,8 @@ void zTF2Bridge_Frame()
 // The first pass uses DMGTYP_SIDE as a generic robot hit. The damage amount is
 // therefore still BFBB's normal one-hit/one-damage progression; crits,
 // projectiles, knockback and weapon-specific damage will be layered on later.
+static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in);
+
 static bool IsTF2BridgeRobot(const zNPCCommon* npc)
 {
     if (npc == NULL)
