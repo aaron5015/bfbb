@@ -36,6 +36,7 @@ static const float kDegToRad = 3.14159265f / 180.0f;
 
 // Forward declaration: the bridge frame runs before the implementation below.
 static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in);
+static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range);
 
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
 {
@@ -261,7 +262,17 @@ void zTF2Bridge_Frame()
         const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
         const bool fired = (attackIn->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
 
-        if (fired)
+        if (attackIn->hitscanCount > 0)
+        {
+            const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
+                ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                TF2Bridge_FireHitscanRay(attackIn, attackIn->hitscanOrigin,
+                    attackIn->hitscanDir[i], attackIn->hitscanRange);
+            }
+        }
+        else if (fired)
         {
             TF2Bridge_FireAtNPCs(attackIn);
         }
@@ -357,6 +368,58 @@ static bool IsTF2BridgeRobot(const zNPCCommon* npc)
     default:
         return false;
     }
+}
+
+static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float sourceOrigin[3],
+    const float sourceDir[3], float sourceRange)
+{
+    if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
+        return;
+
+    const xVec3 origin = FromSource(sourceOrigin[0], sourceOrigin[1], sourceOrigin[2], in->scale);
+    xVec3 dir = FromSource(sourceDir[0], sourceDir[1], sourceDir[2], 1.0f);
+
+    xRay3 ray;
+    ray.origin = origin;
+    ray.dir = dir;
+    ray.min_t = 0.0f;
+    ray.max_t = sourceRange / in->scale;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+    if (npclist == NULL)
+        return;
+
+    zNPCCommon* best = NULL;
+    F32 bestDist = FLOAT_MAX;
+    for (S32 i = 0; i < npclist->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+        if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
+            continue;
+
+        xCollis hit;
+        memset(&hit, 0, sizeof(hit));
+        hit.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+        xRayHitsBound(&ray, &npc->bound, &hit);
+        if ((hit.flags & 0x1) && hit.dist < bestDist)
+        {
+            bestDist = hit.dist;
+            best = npc;
+        }
+    }
+
+    if (best == NULL)
+    {
+        printf("bfbb: tf2bridge -- hitscan ray no NPC hit dir %.3f %.3f %.3f range %.1f\n",
+            (double)dir.x, (double)dir.y, (double)dir.z, (double)sourceRange);
+        return;
+    }
+
+    best->Damage(DMGTYP_SIDE, NULL, &dir);
+    printf("bfbb: tf2bridge -- hitscan ray hit NPC type %d at %.2f dir %.3f %.3f %.3f\n",
+        (int)best->SelfType(), (double)bestDist,
+        (double)dir.x, (double)dir.y, (double)dir.z);
 }
 
 static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
