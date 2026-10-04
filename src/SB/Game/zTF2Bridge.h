@@ -11,5 +11,6 @@ void zTF2Bridge_Frame();
 // during cutscenes, flythroughs and any time BFBB has control of the player.
 void zTF2Bridge_AfterPlayerUpdate(); // right after the player entity updates
 void zTF2Bridge_AfterCameraUpdate(); // right after zCameraUpdate
+void zTF2Bridge_DebugRenderHitscan(); // temporary hitscan ray visualization
 
 #endif
