@@ -600,11 +600,12 @@ void zTF2Bridge_DebugRenderHitscan()
     if (sHitscanDebugCount == 0)
         return;
 
-    // Diagnostic only: draw the FIRST TF2-generated ray, not the entire pellet
-    // spread. One ray is much easier to compare against the player's crosshair
-    // and camera. Keep the line depth-independent so a wall cannot hide the
-    // very thing we are trying to diagnose.
+    // Diagnostic only. Do not try to make the full 8192-unit ray look pretty
+    // yet; first prove that the fire origin and direction agree with BFBB's
+    // actual camera. The origin and camera get bright cross markers, and the
+    // first ray gets a short, easy-to-see direction stub.
     const TF2BridgeDebugRay& ray = sHitscanDebugRays[0];
+    const xMat4x3& cam = globals.camera.mat;
 
     void* oldTexture = NULL;
     void* oldSrcBlend = NULL;
@@ -626,13 +627,86 @@ void zTF2Bridge_DebugRenderHitscan()
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
 
-    RwIm3DVertex verts[2];
-    RwIm3DVertexSetPos(&verts[0], ray.origin.x, ray.origin.y, ray.origin.z);
-    RwIm3DVertexSetRGBA(&verts[0], 255, 255, 0, 255);
-    RwIm3DVertexSetPos(&verts[1], ray.end.x, ray.end.y, ray.end.z);
-    RwIm3DVertexSetRGBA(&verts[1], 255, 0, 0, 255);
+    // Three visual tests:
+    //   1. yellow cross = exact TF2 fire origin after Source -> BFBB mapping
+    //   2. cyan cross   = BFBB camera position currently used for rendering
+    //   3. red stub    = first TF2 ray direction, only 8 BFBB units long
+    //
+    // A fourth, longer yellow line connects camera -> fire origin. This lets us
+    // immediately see whether the Source fire point is merely a muzzle/eye
+    // offset rather than being wildly displaced.
+    const float markerOrigin = 0.75f;
+    const float markerCamera = 0.75f;
+    const float stubLength = 8.0f;
 
-    if (RwIm3DTransform(verts, 2, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    RwIm3DVertex verts[20];
+    int n = 0;
+
+    // Helper implemented inline because the old RenderWare headers expose the
+    // vertex setters but not a convenient vector primitive.
+    const xVec3 o = ray.origin;
+    const xVec3 c = cam.pos;
+    xVec3 d = ray.end;
+    d.x = o.x + (d.x - o.x) * (stubLength / ((ray.end.x - o.x) * (ray.end.x - o.x) +
+                                              (ray.end.y - o.y) * (ray.end.y - o.y) +
+                                              (ray.end.z - o.z) * (ray.end.z - o.z)) > 0.000001f
+        ? stubLength / sqrtf((ray.end.x - o.x) * (ray.end.x - o.x) +
+                             (ray.end.y - o.y) * (ray.end.y - o.y) +
+                             (ray.end.z - o.z) * (ray.end.z - o.z)) : 0.0f);
+    d.y = o.y + (ray.end.y - o.y) * (stubLength / ((ray.end.x - o.x) * (ray.end.x - o.x) +
+                                                   (ray.end.y - o.y) * (ray.end.y - o.y) +
+                                                   (ray.end.z - o.z) * (ray.end.z - o.z)) > 0.000001f
+        ? stubLength / sqrtf((ray.end.x - o.x) * (ray.end.x - o.x) +
+                             (ray.end.y - o.y) * (ray.end.y - o.y) +
+                             (ray.end.z - o.z) * (ray.end.z - o.z)) : 0.0f);
+    d.z = o.z + (ray.end.z - o.z) * (stubLength / ((ray.end.x - o.x) * (ray.end.x - o.x) +
+                                                   (ray.end.y - o.y) * (ray.end.y - o.y) +
+                                                   (ray.end.z - o.z) * (ray.end.z - o.z)) > 0.000001f
+        ? stubLength / sqrtf((ray.end.x - o.x) * (ray.end.x - o.x) +
+                             (ray.end.y - o.y) * (ray.end.y - o.y) +
+                             (ray.end.z - o.z) * (ray.end.z - o.z)) : 0.0f);
+
+    // Origin cross: yellow.
+    RwIm3DVertexSetPos(&verts[n], o.x - markerOrigin, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x + markerOrigin, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y - markerOrigin, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y + markerOrigin, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z - markerOrigin);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z + markerOrigin);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+
+    // Camera cross: cyan.
+    RwIm3DVertexSetPos(&verts[n], c.x - markerCamera, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x + markerCamera, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y - markerCamera, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y + markerCamera, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z - markerCamera);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z + markerCamera);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255); n++;
+
+    // Camera -> fire-origin connector: magenta.
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
+
+    // Ray direction stub: red.
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], d.x, d.y, d.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
+
+    if (RwIm3DTransform(verts, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
     {
         RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
         RwIm3DEnd();
