@@ -294,6 +294,19 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
     if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
         return;
 
+    if (in->rocketDebugLifetime <= 0.0f)
+    {
+        for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+        {
+            sRocketDebug[i].active = false;
+            sRocketDebug[i].impacted = false;
+            sRocketDebug[i].impactTime = 0.0f;
+            sRocketDebug[i].entIndex = 0;
+            sRocketDebug[i].hasPrevious = false;
+        }
+        return;
+    }
+
     bool seen[BRIDGE_MAX_ROCKETS] = {};
     const uint32_t count = in->rocketCount > BRIDGE_MAX_ROCKETS ? BRIDGE_MAX_ROCKETS : in->rocketCount;
 
@@ -442,10 +455,7 @@ void zTF2Bridge_Frame()
         const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
         const bool fired = (attackIn->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
 
-        if (attackIn->rocketCount > 0 || attackIn->rocketDebugLifetime <= 0.0f)
-        {
-            TF2Bridge_ProcessRocketDiagnostics(attackIn);
-        }
+        TF2Bridge_ProcessRocketDiagnostics(attackIn);
 
         if (attackIn->hitscanCount > 0)
         {
