@@ -45,7 +45,7 @@ struct TF2BridgeDebugRay
 
 static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
 static uint32_t sHitscanDebugCount = 0;
-static uint32_t sHitscanDebugFrames = 0;
+static float sHitscanDebugTime = 0.0f;
 static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float origin[3], const float dir[3], float range);
 
 static xVec3 FromSource(float sx, float sy, float sz, float scale)
@@ -277,7 +277,7 @@ void zTF2Bridge_Frame()
             const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
                 ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
             sHitscanDebugCount = count;
-            sHitscanDebugFrames = 120;
+            sHitscanDebugTime = 2.0f;
 
             // One diagnostic line per hitscan packet. This compares the exact
             // Source fire point/direction with the BFBB coordinates used by
@@ -314,7 +314,6 @@ void zTF2Bridge_Frame()
         else if (fired)
         {
             sHitscanDebugCount = 0;
-            sHitscanDebugFrames = 0;
             TF2Bridge_FireAtNPCs(attackIn);
         }
         else if (attack && !sLastAttack)
@@ -325,7 +324,6 @@ void zTF2Bridge_Frame()
         else
         {
             sHitscanDebugCount = 0;
-            sHitscanDebugFrames = 0;
         }
         sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
@@ -660,7 +658,8 @@ void zTF2Bridge_DebugRenderHitscan()
     // offset rather than being wildly displaced.
     const float markerOrigin = 2.5f;
     const float markerCamera = 2.5f;
-    const float stubLength = 20.0f;
+    const float stubLength = ray.end.x == ray.origin.x && ray.end.y == ray.origin.y && ray.end.z == ray.origin.z
+        ? 20.0f : 0.0f;
 
     RwIm3DVertex verts[20];
     int n = 0;
@@ -716,10 +715,11 @@ void zTF2Bridge_DebugRenderHitscan()
     RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
     RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
 
-    // Ray direction stub: red.
+    // Full hitscan ray: red. The endpoint is the actual 8192-Source-unit
+    // endpoint (about 204.8 BFBB units at the current scale of 40).
     RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
     RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], d.x, d.y, d.z);
+    RwIm3DVertexSetPos(&verts[n], ray.end.x, ray.end.y, ray.end.z);
     RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
 
     if (RwIm3DTransform(verts, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
@@ -735,10 +735,13 @@ void zTF2Bridge_DebugRenderHitscan()
     RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
     RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
 
-    if (sHitscanDebugFrames > 0)
+    if (sHitscanDebugTime > 0.0f)
     {
-        --sHitscanDebugFrames;
-        if (sHitscanDebugFrames == 0)
+        sHitscanDebugTime -= gSceneUpdateTime;
+        if (sHitscanDebugTime <= 0.0f)
+        {
+            sHitscanDebugTime = 0.0f;
             sHitscanDebugCount = 0;
+        }
     }
 }
