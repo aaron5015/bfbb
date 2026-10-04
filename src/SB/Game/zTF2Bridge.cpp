@@ -243,20 +243,25 @@ void zTF2Bridge_Frame()
 
     iTF2BridgePoll();
 
-    // The first combat test uses TF2's existing IN_ATTACK bit. Process each
-    // packet once so holding the mouse does not apply damage every frame.
+    const bool playing = zGameModeGet() == eGameMode_Game;
+
+    // The first combat test uses TF2's existing IN_ATTACK bit. Treat the
+    // transition from released -> pressed as one BFBB shot; weapon-specific
+    // fire cadence will move to the TF2 weapon code once the basic hit path is
+    // proven.
     static uint32_t sLastIntentSeq = 0;
+    static bool sLastAttack = false;
     const BridgeIntentPacket* attackIn = iTF2BridgeGetIntent();
-    if (attackIn != NULL && attackIn->seq != sLastIntentSeq)
+    if (playing && attackIn != NULL && attackIn->seq != sLastIntentSeq)
     {
-        if (attackIn->buttons & BRIDGE_IN_ATTACK)
+        const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
+        if (attack && !sLastAttack)
         {
             TF2Bridge_FireAtNPCs(attackIn);
         }
+        sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
     }
-
-    const bool playing = zGameModeGet() == eGameMode_Game;
 
     const BridgeIntentPacket* in = iTF2BridgeGetIntent();
     if (playing && in != NULL && !(in->flags & BRIDGE_INTENT_OWNS_MOVE))
