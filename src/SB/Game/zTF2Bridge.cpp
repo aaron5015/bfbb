@@ -355,16 +355,16 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         target.npcType = (int32_t)npc->SelfType();
         target.visible = true;
 
-        // Diagnostic only: approximate TF2's splash visibility check by asking
-        // whether BFBB's JSP environment blocks a line from the explosion
-        // center to the NPC's bound center. No damage is applied here.
+        // Diagnostic only: trace from the NPC toward the explosion.
+        // Starting at the NPC avoids immediately re-hitting the surface where
+        // the rocket itself impacted. No damage is applied here.
         if (target.distance > 0.0001f)
         {
             xRay3 ray;
-            ray.origin = rocket->impact;
-            ray.dir.x = dx / target.distance;
-            ray.dir.y = dy / target.distance;
-            ray.dir.z = dz / target.distance;
+            ray.origin = *center;
+            ray.dir.x = -dx / target.distance;
+            ray.dir.y = -dy / target.distance;
+            ray.dir.z = -dz / target.distance;
             ray.min_t = 0.0f;
             ray.max_t = target.distance;
             ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
@@ -374,7 +374,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             worldHit.flags = k_HIT_0x200;
 
             if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
-                worldHit.dist >= 0.0f && worldHit.dist < target.distance)
+                worldHit.dist >= 0.0f &&
+                worldHit.dist < target.distance - 0.01f)
             {
                 target.visible = false;
             }
@@ -468,8 +469,49 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                 memset(&worldHit, 0, sizeof(worldHit));
                 worldHit.flags = k_HIT_0x200;
 
-                if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
-                    worldHit.dist >= 0.0f && worldHit.dist <= len)
+                const bool hitWorld =
+                    iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
+                    worldHit.dist >= 0.0f && worldHit.dist <= len;
+
+                if (!hitWorld)
+                {
+                    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+                    if (npclist != NULL)
+                    {
+                        zNPCCommon* nearestNpc = NULL;
+                        F32 nearestNpcDist = FLOAT_MAX;
+
+                        for (S32 n = 0; n < npclist->cnt; ++n)
+                        {
+                            zNPCCommon* npc = (zNPCCommon*)npclist->list[n];
+                            if (npc == NULL || !npc->IsAlive())
+                                continue;
+
+                            xCollis npcHit;
+                            memset(&npcHit, 0, sizeof(npcHit));
+                            npcHit.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+                            xRayHitsBound(&ray, &npc->bound, &npcHit);
+                            if ((npcHit.flags & 0x1) &&
+                                npcHit.dist >= 0.0f &&
+                                npcHit.dist <= len &&
+                                npcHit.dist < nearestNpcDist)
+                            {
+                                nearestNpcDist = npcHit.dist;
+                                nearestNpc = npc;
+                            }
+                        }
+
+                        if (nearestNpc != NULL)
+                        {
+                            printf("bfbb: tf2bridge -- rocket %d passed through NPC type %d at %.2f\n",
+                                entIndex, (int)nearestNpc->SelfType(),
+                                (double)nearestNpcDist);
+                        }
+                    }
+                }
+
+                if (hitWorld)
                 {
                     rocket->impact.x = rocket->prevPos.x + ray.dir.x * worldHit.dist;
                     rocket->impact.y = rocket->prevPos.y + ray.dir.y * worldHit.dist;
