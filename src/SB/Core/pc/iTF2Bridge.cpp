@@ -176,6 +176,23 @@ void iTF2BridgePoll()
     }
 }
 
+void iTF2BridgeSendRocketImpact(uint32_t entIndex, float x, float y, float z)
+{
+    if (!sActive)
+        return;
+
+    BridgeRocketImpactPacket p;
+    memset(&p, 0, sizeof(p));
+    p.magic = BRIDGE_MAGIC_ROCKET_IMPACT;
+    p.entIndex = entIndex;
+    p.x = x;
+    p.y = y;
+    p.z = z;
+
+    sendto(sSock, (const char*)&p, sizeof(p), 0,
+           (const sockaddr*)&sTf2Addr, sizeof(sTf2Addr));
+}
+
 void iTF2BridgeSendState(const BridgeStatePacket* state)
 {
     if (!sActive || state == NULL)
