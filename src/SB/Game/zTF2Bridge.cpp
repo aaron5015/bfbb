@@ -64,6 +64,10 @@ struct TF2BridgeDebugRocket
     xVec3 impact;
     float radius;
     float impactTime;
+    xVec3 sweepStart;
+    xVec3 sweepEnd;
+    float sweepTime;
+    bool sweepHit;
     uint32_t explosionTargetCount;
     TF2BridgeDebugExplosionTarget explosionTargets[BRIDGE_MAX_ROCKETS];
     bool active;
@@ -404,6 +408,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
             sRocketDebug[i].impactTime = 0.0f;
             sRocketDebug[i].entIndex = 0;
             sRocketDebug[i].hasPrevious = false;
+            sRocketDebug[i].sweepTime = 0.0f;
         }
         return;
     }
@@ -456,6 +461,11 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
 
             if (len > 0.0001f)
             {
+                rocket->sweepStart = rocket->prevPos;
+                rocket->sweepEnd = pos;
+                rocket->sweepTime = 2.0f;
+                rocket->sweepHit = false;
+
                 xRay3 ray;
                 ray.origin = rocket->prevPos;
                 ray.dir.x = delta.x / len;
@@ -481,12 +491,29 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     sceneHit.dist <= len;
 
                 const bool hitEntity = hitScene && sceneHit.optr != NULL;
+                rocket->sweepHit = hitScene;
 
                 if (hitEntity)
                 {
                     printf("bfbb: tf2bridge -- rocket %d hit scene entity id %u at %.2f\n",
                         entIndex, (unsigned)sceneHit.oid,
                         (double)sceneHit.dist);
+                }
+
+                if (!hitScene)
+                {
+                    xCollis envHit;
+                    memset(&envHit, 0, sizeof(envHit));
+                    envHit.flags = k_HIT_0x200;
+
+                    const bool hitEnv =
+                        iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
+                        envHit.dist >= 0.0f && envHit.dist <= len;
+
+                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f\n",
+                        entIndex, (double)len, (unsigned)sceneHit.flags,
+                        (double)sceneHit.dist, hitEnv ? "HIT" : "MISS",
+                        hitEnv ? (double)envHit.dist : -1.0);
                 }
 
                 if (hitScene)
@@ -997,6 +1024,31 @@ void zTF2Bridge_DebugRenderRockets()
     for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
     {
         TF2BridgeDebugRocket& rocket = sRocketDebug[i];
+
+        if (rocket.sweepTime > 0.0f)
+        {
+            RwIm3DVertex sweep[2];
+            RwIm3DVertexSetPos(&sweep[0], rocket.sweepStart.x, rocket.sweepStart.y, rocket.sweepStart.z);
+            RwIm3DVertexSetRGBA(&sweep[0],
+                rocket.sweepHit ? 255 : 80,
+                rocket.sweepHit ? 80 : 220,
+                rocket.sweepHit ? 80 : 255, 255);
+            RwIm3DVertexSetPos(&sweep[1], rocket.sweepEnd.x, rocket.sweepEnd.y, rocket.sweepEnd.z);
+            RwIm3DVertexSetRGBA(&sweep[1],
+                rocket.sweepHit ? 255 : 80,
+                rocket.sweepHit ? 80 : 220,
+                rocket.sweepHit ? 80 : 255, 255);
+
+            if (RwIm3DTransform(sweep, 2, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            rocket.sweepTime -= gSceneUpdateTime;
+            if (rocket.sweepTime < 0.0f)
+                rocket.sweepTime = 0.0f;
+        }
 
         if (rocket.active && !rocket.impacted)
         {
