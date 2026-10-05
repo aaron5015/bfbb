@@ -19,6 +19,7 @@
 
 #define BRIDGE_MAGIC_INTENT 0x32494642u // "BFI2"
 #define BRIDGE_MAGIC_STATE 0x31534642u // "BFS1"
+#define BRIDGE_MAGIC_ROCKET_IMPACT 0x31524942u // "BIR1"
 
 // Source's IN_* usercmd button bits, copied here so BFBB needs no Source headers.
 #define BRIDGE_IN_ATTACK (1 << 0)
@@ -54,6 +55,13 @@
 // toward BFBB +X / Source +Y).
 
 #pragma pack(push, 1)
+
+struct BridgeRocketImpactPacket
+{
+    uint32_t magic; // BRIDGE_MAGIC_ROCKET_IMPACT
+    uint32_t entIndex;
+    float x, y, z; // BFBB impact position, BFBB world units
+};
 
 // TF2 -> BFBB: what the TF2 player is asking for this tick.
 struct BridgeIntentPacket
