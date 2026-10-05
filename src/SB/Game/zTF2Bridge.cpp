@@ -48,6 +48,14 @@ static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
 static uint32_t sHitscanDebugCount = 0;
 static float sHitscanDebugTime = 0.0f;
 
+struct TF2BridgeDebugExplosionTarget
+{
+    xVec3 pos;
+    float distance;
+    int32_t npcType;
+    bool visible;
+};
+
 struct TF2BridgeDebugRocket
 {
     int32_t entIndex;
@@ -56,6 +64,8 @@ struct TF2BridgeDebugRocket
     xVec3 impact;
     float radius;
     float impactTime;
+    uint32_t explosionTargetCount;
+    TF2BridgeDebugExplosionTarget explosionTargets[BRIDGE_MAX_ROCKETS];
     bool active;
     bool hasPrevious;
     bool impacted;
@@ -289,6 +299,96 @@ static TF2BridgeDebugRocket* TF2Bridge_AllocRocketTrack(int32_t entIndex)
     return freeTrack;
 }
 
+static float TF2Bridge_GetBoundRadius(const xBound& bound)
+{
+    if (bound.type == XBOUND_TYPE_SPHERE)
+        return bound.sph.r;
+
+    xBox box;
+    xBoundGetBox(box, bound);
+
+    const float ex = 0.5f * (box.upper.x - box.lower.x);
+    const float ey = 0.5f * (box.upper.y - box.lower.y);
+    const float ez = 0.5f * (box.upper.z - box.lower.z);
+    return sqrtf(ex * ex + ey * ey + ez * ez);
+}
+
+static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
+{
+    rocket->explosionTargetCount = 0;
+
+    if (rocket == NULL || globals.sceneCur == NULL)
+        return;
+
+    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+    if (npclist == NULL)
+        return;
+
+    for (S32 i = 0; i < npclist->cnt; ++i)
+    {
+        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+        if (npc == NULL || !npc->IsAlive())
+            continue;
+
+        const xVec3* center = xBoundCenter(&npc->bound);
+        if (center == NULL)
+            continue;
+
+        const float boundRadius = TF2Bridge_GetBoundRadius(npc->bound);
+        const float dx = center->x - rocket->impact.x;
+        const float dy = center->y - rocket->impact.y;
+        const float dz = center->z - rocket->impact.z;
+        const float distSq = dx * dx + dy * dy + dz * dz;
+        const float reach = rocket->radius + boundRadius;
+
+        if (distSq > reach * reach)
+            continue;
+
+        if (rocket->explosionTargetCount >= BRIDGE_MAX_ROCKETS)
+            break;
+
+        TF2BridgeDebugExplosionTarget& target =
+            rocket->explosionTargets[rocket->explosionTargetCount++];
+
+        target.pos = *center;
+        target.distance = sqrtf(distSq);
+        target.npcType = (int32_t)npc->SelfType();
+        target.visible = true;
+
+        // Diagnostic only: approximate TF2's splash visibility check by asking
+        // whether BFBB's JSP environment blocks a line from the explosion
+        // center to the NPC's bound center. No damage is applied here.
+        if (target.distance > 0.0001f)
+        {
+            xRay3 ray;
+            ray.origin = rocket->impact;
+            ray.dir.x = dx / target.distance;
+            ray.dir.y = dy / target.distance;
+            ray.dir.z = dz / target.distance;
+            ray.min_t = 0.0f;
+            ray.max_t = target.distance;
+            ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+            xCollis worldHit;
+            memset(&worldHit, 0, sizeof(worldHit));
+            worldHit.flags = k_HIT_0x200;
+
+            if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
+                worldHit.dist >= 0.0f && worldHit.dist < target.distance)
+            {
+                target.visible = false;
+            }
+        }
+
+        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f %s\n",
+            (int)target.npcType, (double)target.distance,
+            target.visible ? "VISIBLE" : "BLOCKED");
+    }
+
+    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f targets=%u\n",
+        (double)rocket->radius, (unsigned)rocket->explosionTargetCount);
+}
+
 static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
 {
     if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
@@ -377,6 +477,10 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     rocket->impacted = true;
                     rocket->active = false;
                     rocket->impactTime = in->rocketDebugLifetime;
+
+                    // Build the splash diagnostic once, at the moment the
+                    // rocket impacts. This deliberately does not apply damage.
+                    TF2Bridge_BuildRocketExplosionDiagnostics(rocket);
 
                     // BFBB is authoritative for world collision. Tell the
                     // actual TF2 rocket to terminate at this exact impact
@@ -921,6 +1025,41 @@ void zTF2Bridge_DebugRenderRockets()
             {
                 RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
                 RwIm3DEnd();
+            }
+
+            // Explosion target markers: cyan means the NPC is
+            // inside the blast radius and visible from the impact; orange
+            // means the blast radius reaches it but BFBB world geometry blocks
+            // the diagnostic line of sight.
+            for (uint32_t t = 0; t < rocket.explosionTargetCount; ++t)
+            {
+                const TF2BridgeDebugExplosionTarget& target = rocket.explosionTargets[t];
+                const xVec3& q = target.pos;
+                const float targetMarker = 0.75f;
+                const uint8_t r = target.visible ? 80 : 255;
+                const uint8_t g = target.visible ? 220 : 150;
+                const uint8_t b = target.visible ? 255 : 40;
+
+                RwIm3DVertex targetCross[6];
+                RwIm3DVertexSetPos(&targetCross[0], q.x - targetMarker, q.y, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[0], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[1], q.x + targetMarker, q.y, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[1], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[2], q.x, q.y - targetMarker, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[2], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[3], q.x, q.y + targetMarker, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[3], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[4], q.x, q.y, q.z - targetMarker);
+                RwIm3DVertexSetRGBA(&targetCross[4], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[5], q.x, q.y, q.z + targetMarker);
+                RwIm3DVertexSetRGBA(&targetCross[5], r, g, b, 255);
+
+                if (RwIm3DTransform(targetCross, 6, NULL,
+                                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+                {
+                    RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                    RwIm3DEnd();
+                }
             }
 
             const int segments = 32;
