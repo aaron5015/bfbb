@@ -315,10 +315,10 @@ static float TF2Bridge_GetBoundRadius(const xBound& bound)
 
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
-    rocket->explosionTargetCount = 0;
-
     if (rocket == NULL || globals.sceneCur == NULL)
         return;
+
+    rocket->explosionTargetCount = 0;
 
     st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
     if (npclist == NULL)
