@@ -490,11 +490,11 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                 }
 
                 const bool hitWorld = hitScene && !hitEntity;
-                if (hitWorld)
+                if (hitScene)
                 {
-                    rocket->impact.x = rocket->prevPos.x + ray.dir.x * worldHit.dist;
-                    rocket->impact.y = rocket->prevPos.y + ray.dir.y * worldHit.dist;
-                    rocket->impact.z = rocket->prevPos.z + ray.dir.z * worldHit.dist;
+                    rocket->impact.x = rocket->prevPos.x + ray.dir.x * sceneHit.dist;
+                    rocket->impact.y = rocket->prevPos.y + ray.dir.y * sceneHit.dist;
+                    rocket->impact.z = rocket->prevPos.z + ray.dir.z * sceneHit.dist;
                     rocket->impacted = true;
                     rocket->active = false;
                     rocket->impactTime = in->rocketDebugLifetime;
