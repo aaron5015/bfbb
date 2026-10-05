@@ -24,6 +24,7 @@ void iTF2BridgePoll();
 // Sends one state packet, and records whether the game is in play (the
 // BRIDGE_STATE_GAMEPLAY flag) for iTF2BridgeApplyPad.
 void iTF2BridgeSendState(const BridgeStatePacket* state);
+void iTF2BridgeSendRocketImpact(uint32_t entIndex, const xVec3* position);
 
 // Called by the pad backend at the end of its poll on port 0. If the bridge is
 // on, BFBB is in gameplay and a fresh intent has arrived, the TF2 player's
