@@ -465,52 +465,31 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                 ray.max_t = len;
                 ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
 
-                xCollis worldHit;
-                memset(&worldHit, 0, sizeof(worldHit));
-                worldHit.flags = k_HIT_0x200;
+                // Use BFBB's native scene ray query rather than only
+                // the JSP environment. This includes the environment plus
+                // collision-bearing scene entities/NPCs, which is the same
+                // collision path BFBB itself uses for scene ray tests.
+                xCollis sceneHit;
+                memset(&sceneHit, 0, sizeof(sceneHit));
+                sceneHit.flags = k_HIT_0x200;
 
-                const bool hitWorld =
-                    iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
-                    worldHit.dist >= 0.0f && worldHit.dist <= len;
+                xRayHitsScene(globals.sceneCur, &ray, &sceneHit);
 
-                if (!hitWorld)
+                const bool hitScene =
+                    (sceneHit.flags & k_HIT_IT) != 0 &&
+                    sceneHit.dist >= 0.0f &&
+                    sceneHit.dist <= len;
+
+                const bool hitEntity = hitScene && sceneHit.optr != NULL;
+
+                if (hitEntity)
                 {
-                    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
-                    if (npclist != NULL)
-                    {
-                        zNPCCommon* nearestNpc = NULL;
-                        F32 nearestNpcDist = FLOAT_MAX;
-
-                        for (S32 n = 0; n < npclist->cnt; ++n)
-                        {
-                            zNPCCommon* npc = (zNPCCommon*)npclist->list[n];
-                            if (npc == NULL || !npc->IsAlive())
-                                continue;
-
-                            xCollis npcHit;
-                            memset(&npcHit, 0, sizeof(npcHit));
-                            npcHit.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
-
-                            xRayHitsBound(&ray, &npc->bound, &npcHit);
-                            if ((npcHit.flags & 0x1) &&
-                                npcHit.dist >= 0.0f &&
-                                npcHit.dist <= len &&
-                                npcHit.dist < nearestNpcDist)
-                            {
-                                nearestNpcDist = npcHit.dist;
-                                nearestNpc = npc;
-                            }
-                        }
-
-                        if (nearestNpc != NULL)
-                        {
-                            printf("bfbb: tf2bridge -- rocket %d passed through NPC type %d at %.2f\n",
-                                entIndex, (int)nearestNpc->SelfType(),
-                                (double)nearestNpcDist);
-                        }
-                    }
+                    printf("bfbb: tf2bridge -- rocket %d hit scene entity id %u at %.2f\n",
+                        entIndex, (unsigned)sceneHit.oid,
+                        (double)sceneHit.dist);
                 }
 
+                const bool hitWorld = hitScene && !hitEntity;
                 if (hitWorld)
                 {
                     rocket->impact.x = rocket->prevPos.x + ray.dir.x * worldHit.dist;
