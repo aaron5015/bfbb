@@ -378,6 +378,12 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     rocket->active = false;
                     rocket->impactTime = in->rocketDebugLifetime;
 
+                    // BFBB is authoritative for world collision. Tell the
+                    // actual TF2 rocket to terminate at this exact impact
+                    // point; this is still not an explosion/damage event.
+                    iTF2BridgeSendRocketImpact(entIndex, rocket->impact.x,
+                                               rocket->impact.y, rocket->impact.z);
+
                     printf("bfbb: tf2bridge -- rocket %d impact source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) radius=%.2f\n",
                         entIndex,
                         (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
