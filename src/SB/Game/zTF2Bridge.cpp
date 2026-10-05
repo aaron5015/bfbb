@@ -489,7 +489,6 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                         (double)sceneHit.dist);
                 }
 
-                const bool hitWorld = hitScene && !hitEntity;
                 if (hitScene)
                 {
                     rocket->impact.x = rocket->prevPos.x + ray.dir.x * sceneHit.dist;
