@@ -510,10 +510,12 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                         iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
                         envHit.dist >= 0.0f && envHit.dist <= len;
 
-                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f\n",
-                        entIndex, (double)len, (unsigned)sceneHit.flags,
-                        (double)sceneHit.dist, hitEnv ? "HIT" : "MISS",
-                        hitEnv ? (double)envHit.dist : -1.0);
+                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f start=(%.3f %.3f %.3f) end=(%.3f %.3f %.3f) sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f\n",
+                        entIndex, (double)len,
+                        (double)rocket->sweepStart.x, (double)rocket->sweepStart.y, (double)rocket->sweepStart.z,
+                        (double)rocket->sweepEnd.x, (double)rocket->sweepEnd.y, (double)rocket->sweepEnd.z,
+                        (unsigned)sceneHit.flags, (double)sceneHit.dist,
+                        hitEnv ? "HIT" : "MISS", hitEnv ? (double)envHit.dist : -1.0);
                 }
 
                 if (hitScene)
@@ -1027,6 +1029,38 @@ void zTF2Bridge_DebugRenderRockets()
 
         if (rocket.sweepTime > 0.0f)
         {
+            const float endpointMarker = 0.65f;
+            RwIm3DVertex endpoints[12];
+
+            const xVec3& a = rocket.sweepStart;
+            const xVec3& b = rocket.sweepEnd;
+
+            RwIm3DVertexSetPos(&endpoints[0], a.x - endpointMarker, a.y, a.z);
+            RwIm3DVertexSetPos(&endpoints[1], a.x + endpointMarker, a.y, a.z);
+            RwIm3DVertexSetPos(&endpoints[2], a.x, a.y - endpointMarker, a.z);
+            RwIm3DVertexSetPos(&endpoints[3], a.x, a.y + endpointMarker, a.z);
+            RwIm3DVertexSetPos(&endpoints[4], a.x, a.y, a.z - endpointMarker);
+            RwIm3DVertexSetPos(&endpoints[5], a.x, a.y, a.z + endpointMarker);
+
+            RwIm3DVertexSetPos(&endpoints[6], b.x - endpointMarker, b.y, b.z);
+            RwIm3DVertexSetPos(&endpoints[7], b.x + endpointMarker, b.y, b.z);
+            RwIm3DVertexSetPos(&endpoints[8], b.x, b.y - endpointMarker, b.z);
+            RwIm3DVertexSetPos(&endpoints[9], b.x, b.y + endpointMarker, b.z);
+            RwIm3DVertexSetPos(&endpoints[10], b.x, b.y, b.z - endpointMarker);
+            RwIm3DVertexSetPos(&endpoints[11], b.x, b.y, b.z + endpointMarker);
+
+            const uint8_t cr = rocket.sweepHit ? 255 : 80;
+            const uint8_t cg = rocket.sweepHit ? 80 : 220;
+            const uint8_t cb = rocket.sweepHit ? 80 : 255;
+            for (int v = 0; v < 12; ++v)
+                RwIm3DVertexSetRGBA(&endpoints[v], cr, cg, cb, 255);
+
+            if (RwIm3DTransform(endpoints, 12, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
             RwIm3DVertex sweep[2];
             RwIm3DVertexSetPos(&sweep[0], rocket.sweepStart.x, rocket.sweepStart.y, rocket.sweepStart.z);
             RwIm3DVertexSetRGBA(&sweep[0],
