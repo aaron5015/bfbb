@@ -321,6 +321,59 @@ static float TF2Bridge_GetBoundRadius(const xBound& bound)
 
 static bool IsTF2BridgeRobot(const zNPCCommon* npc);
 
+static F32 TF2Bridge_RocketExposureThreshold()
+{
+    const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_EXPOSURE_THRESHOLD");
+    if (value != NULL && value[0] != '\0')
+    {
+        const F32 threshold = (F32)atof(value);
+        if (threshold >= 0.0f && threshold <= 1.0f)
+            return threshold;
+    }
+
+    return 0.35f;
+}
+
+static bool TF2Bridge_RocketApplyDamage()
+{
+    const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_APPLY_DAMAGE");
+    if (value != NULL && value[0] != '\0')
+        return atoi(value) != 0;
+
+    return true;
+}
+
+static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample)
+{
+    const F32 dx = sample.x - origin.x;
+    const F32 dy = sample.y - origin.y;
+    const F32 dz = sample.z - origin.z;
+    const F32 distanceSq = dx * dx + dy * dy + dz * dz;
+
+    if (distanceSq <= 0.000001f)
+        return true;
+
+    const F32 distance = sqrtf(distanceSq);
+
+    xRay3 ray;
+    ray.origin = origin;
+    ray.dir.x = dx / distance;
+    ray.dir.y = dy / distance;
+    ray.dir.z = dz / distance;
+    ray.min_t = 0.0f;
+    ray.max_t = distance;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    xCollis worldHit;
+    memset(&worldHit, 0, sizeof(worldHit));
+    worldHit.flags = k_HIT_0x200;
+
+    if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) == 0)
+        return true;
+
+    return worldHit.dist < 0.0f || worldHit.dist >= distance - 0.01f;
+}
+
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
@@ -332,12 +385,10 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
     if (npclist == NULL)
         return;
 
-    // Match TF2's fixed-up radius-damage behavior: full damage at the
-    // explosion center, tapering linearly to damage * (damage / radius) at
-    // the edge. Stock rockets are 90 damage with a 146-unit radius.
-    const float baseDamage = rocket->damage;
-    const float radius = rocket->radius;
-    const float edgeScale = (radius > 0.0001f) ? (baseDamage / radius) : 0.0f;
+    const F32 baseDamage = rocket->damage;
+    const F32 radius = rocket->radius;
+    const F32 exposureThreshold = TF2Bridge_RocketExposureThreshold();
+    const bool applyDamage = TF2Bridge_RocketApplyDamage();
 
     for (S32 i = 0; i < npclist->cnt; ++i)
     {
@@ -345,16 +396,19 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
             continue;
 
+        xBox sampleBox;
+        xBoundGetBox(sampleBox, npc->bound);
+
         const xVec3* center = xBoundCenter(&npc->bound);
         if (center == NULL)
             continue;
 
-        const float boundRadius = TF2Bridge_GetBoundRadius(npc->bound);
-        const float dx = center->x - rocket->impact.x;
-        const float dy = center->y - rocket->impact.y;
-        const float dz = center->z - rocket->impact.z;
-        const float centerDistSq = dx * dx + dy * dy + dz * dz;
-        const float reach = radius + boundRadius;
+        const F32 boundRadius = TF2Bridge_GetBoundRadius(npc->bound);
+        const F32 dx = center->x - rocket->impact.x;
+        const F32 dy = center->y - rocket->impact.y;
+        const F32 dz = center->z - rocket->impact.z;
+        const F32 centerDistSq = dx * dx + dy * dy + dz * dz;
+        const F32 reach = radius + boundRadius;
 
         if (centerDistSq > reach * reach)
             continue;
@@ -368,57 +422,96 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         target.pos = *center;
         target.distance = sqrtf(centerDistSq);
         target.npcType = (int32_t)npc->SelfType();
-        target.visible = true;
+        target.visible = false;
 
-        // Keep the existing single-ray LOS test for this batch. The more
-        // accurate multi-sample exposure test is a later splash-occlusion batch.
-        if (target.distance > 0.0001f)
+        // Sample the NPC's actual bound volume rather than asking a single
+        // center-to-center ray to decide whether the entire robot is exposed.
+        // Four-by-four-by-four interior samples give us enough vertical and
+        // horizontal resolution to wrap around small lips and rocks while
+        // still treating a substantial wall or pillar as an obstruction.
+        S32 visibleSamples = 0;
+        S32 totalSamples = 0;
+
+        const F32 sampleFrac[4] = { 0.125f, 0.375f, 0.625f, 0.875f };
+
+        for (S32 sx = 0; sx < 4; ++sx)
         {
-            xRay3 ray;
-            ray.origin = *center;
-            ray.dir.x = -dx / target.distance;
-            ray.dir.y = -dy / target.distance;
-            ray.dir.z = -dz / target.distance;
-            ray.min_t = 0.0f;
-            ray.max_t = target.distance;
-            ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
-
-            xCollis worldHit;
-            memset(&worldHit, 0, sizeof(worldHit));
-            worldHit.flags = k_HIT_0x200;
-
-            if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0 &&
-                worldHit.dist >= 0.0f &&
-                worldHit.dist < target.distance - 0.01f)
+            for (S32 sy = 0; sy < 4; ++sy)
             {
-                target.visible = false;
+                for (S32 sz = 0; sz < 4; ++sz)
+                {
+                    xVec3 sample;
+                    sample.x = sampleBox.lower.x +
+                        (sampleBox.upper.x - sampleBox.lower.x) * sampleFrac[sx];
+                    sample.y = sampleBox.lower.y +
+                        (sampleBox.upper.y - sampleBox.lower.y) * sampleFrac[sy];
+                    sample.z = sampleBox.lower.z +
+                        (sampleBox.upper.z - sampleBox.lower.z) * sampleFrac[sz];
+
+                    xCollis inside;
+                    memset(&inside, 0, sizeof(inside));
+                    xVecHitsBound(&sample, &npc->bound, &inside);
+
+                    if ((inside.flags & 0x1) == 0)
+                        continue;
+
+                    ++totalSamples;
+
+                    if (TF2Bridge_RocketSampleVisible(rocket->impact, sample))
+                        ++visibleSamples;
+                }
             }
         }
 
-        if (!target.visible)
+        if (totalSamples == 0)
         {
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f BLOCKED damage=0\n",
-                (int)target.npcType, (double)target.distance);
-            continue;
+            // This should not normally happen, but don't let an unusual bound
+            // become an automatic full-exposure hit.
+            target.visible = false;
         }
+        else
+        {
+            const F32 exposure = (F32)visibleSamples / (F32)totalSamples;
+            target.visible = exposure >= exposureThreshold;
 
-        float t = radius > 0.0001f ? target.distance / radius : 1.0f;
-        if (t < 0.0f) t = 0.0f;
-        if (t > 1.0f) t = 1.0f;
+            if (!target.visible)
+            {
+                printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) BLOCKED threshold=%.1f%% damage=0\n",
+                    (int)target.npcType, (double)target.distance,
+                    (int)visibleSamples, (int)totalSamples,
+                    (double)(exposure * 100.0f),
+                    (double)(exposureThreshold * 100.0f));
+                continue;
+            }
 
-        const float damageScale = 1.0f - t * (1.0f - edgeScale);
-        const float damage = baseDamage * damageScale;
+            // TF2's RadiusDamage uses falloff = damage / radius and then
+            // subtracts distance * falloff. Because BFBB's radius and
+            // distance use the same converted world scale, this reduces to
+            // the same linear damage fraction here.
+            F32 t = radius > 0.0001f ? target.distance / radius : 1.0f;
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
 
-        if (damage > 0.0f)
-            npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
+            const F32 damageScale = 1.0f - t;
+            const F32 damage = baseDamage * damageScale;
 
-        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f damage=%.2f scale=%.3f VISIBLE\n",
-            (int)target.npcType, (double)target.distance,
-            (double)damage, (double)damageScale);
+            if (damage > 0.0f && applyDamage)
+                npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
+
+            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
+                (int)target.npcType, (double)target.distance,
+                (int)visibleSamples, (int)totalSamples,
+                (double)(exposure * 100.0f),
+                (double)damage, (double)damageScale,
+                applyDamage ? 1 : 0);
+        }
     }
 
-    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f targets=%u\n",
-        (double)radius, (double)baseDamage, (unsigned)rocket->explosionTargetCount);
+    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f exposureThreshold=%.1f%% applyDamage=%d targets=%u\n",
+        (double)radius, (double)baseDamage,
+        (double)(exposureThreshold * 100.0f),
+        applyDamage ? 1 : 0,
+        (unsigned)rocket->explosionTargetCount);
 }
 
 static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
