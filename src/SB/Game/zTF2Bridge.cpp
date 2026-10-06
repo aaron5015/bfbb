@@ -358,7 +358,7 @@ static bool TF2Bridge_RocketApplyDamage()
     return true;
 }
 
-static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample)
+static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample, F32* outHitDistance = NULL)
 {
     const F32 dx = sample.x - origin.x;
     const F32 dy = sample.y - origin.y;
@@ -399,9 +399,16 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     worldHit.flags = k_HIT_0x200;
 
     if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) == 0)
+    {
+        if (outHitDistance != NULL)
+            *outHitDistance = -1.0f;
         return true;
+    }
 
-    return worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
+    const bool visible = worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
+    if (outHitDistance != NULL)
+        *outHitDistance = visible ? -1.0f : worldHit.dist;
+    return visible;
 }
 
 static bool TF2Bridge_RocketSampleVisibleAroundCover(const xVec3& origin, const xVec3& normal,
@@ -607,9 +614,20 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     if (!sampleVisible)
                     {
-                        sampleWrapped = TF2Bridge_RocketSampleVisibleAroundCover(
-                            rocket->impact, rocket->impactNormal, sample, radius);
-                        sampleVisible = sampleWrapped;
+                        F32 directHitDistance = -1.0f;
+                        TF2Bridge_RocketSampleVisible(splashOrigin, sample, &directHitDistance);
+
+                        // Only allow wraparound when the obstruction is local
+                        // to the explosion. A distant wall remains a hard
+                        // splash blocker instead of being routed around by the
+                        // detour paths.
+                        const F32 maxLocalCoverDistance = 1.25f;
+                        if (directHitDistance >= 0.0f && directHitDistance <= maxLocalCoverDistance)
+                        {
+                            sampleWrapped = TF2Bridge_RocketSampleVisibleAroundCover(
+                                rocket->impact, rocket->impactNormal, sample, radius);
+                            sampleVisible = sampleWrapped;
+                        }
                     }
 
                     if (sampleVisible)
