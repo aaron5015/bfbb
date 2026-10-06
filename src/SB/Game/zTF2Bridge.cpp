@@ -526,9 +526,12 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             }
         }
 
+        // Exposure is the visible fraction of the NPC volume that is actually
+        // inside the blast. Samples outside the radius must not count as hidden
+        // splash exposure.
         const F32 exposure =
-            totalSamples > 0
-                ? (F32)visibleSamples / (F32)totalSamples
+            blastSamples > 0
+                ? (F32)visibleSamples / (F32)blastSamples
                 : 0.0f;
 
         target.distance =
@@ -538,11 +541,11 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
         if (totalSamples == 0 || blastSamples == 0 || exposure < exposureThreshold)
         {
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d BLOCKED threshold=%.1f%% damage=0\n",
+            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED threshold=%.1f%% damage=0\n",
                 (int)target.npcType, (double)target.distance,
-                (int)visibleSamples, (int)totalSamples,
+                (int)visibleSamples, (int)blastSamples,
                 (double)(exposure * 100.0f),
-                (int)blastSamples,
+                (int)blastSamples, (int)totalSamples,
                 (double)(exposureThreshold * 100.0f));
             continue;
         }
@@ -569,11 +572,11 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (damage > 0.0f && applyDamage)
             npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
 
-        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
+        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
             (int)target.npcType, (double)target.distance,
-            (int)visibleSamples, (int)totalSamples,
+            (int)visibleSamples, (int)blastSamples,
             (double)(exposure * 100.0f),
-            (int)blastSamples,
+            (int)blastSamples, (int)totalSamples,
             (double)damage, (double)damageScale,
             applyDamage ? 1 : 0);
     }
