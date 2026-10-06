@@ -535,59 +535,6 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
     return false;
 }
 
-static void TF2Bridge_LogRocketCollisionNeighborhood(uint32_t hitTriIndex)
-{
-    if (globals.sceneCur == NULL || globals.sceneCur->env == NULL ||
-        globals.sceneCur->env->geom == NULL || globals.sceneCur->env->geom->jsp == NULL ||
-        globals.sceneCur->env->geom->jsp->colltree == NULL || hitTriIndex == 0xffffffffu)
-        return;
-
-    const xClumpCollBSPTree* tree = globals.sceneCur->env->geom->jsp->colltree;
-    if (hitTriIndex >= tree->numTriangles)
-        return;
-
-    const xClumpCollBSPTriangle& base = tree->triangles[hitTriIndex];
-    if (base.v.p == NULL)
-        return;
-
-    const float kSharedVertexEpsilonSq = 0.0001f;
-    int logged = 0;
-    printf("bfbb: tf2bridge -- rocket collision neighborhood base=%u flags=0x%02x mat=%u\\n",
-        (unsigned)hitTriIndex, (unsigned)base.flags, (unsigned)base.matIndex);
-
-    for (uint32_t i = 0; i < tree->numTriangles && logged < 16; ++i)
-    {
-        if (i == hitTriIndex)
-            continue;
-        const xClumpCollBSPTriangle& t = tree->triangles[i];
-        if (t.v.p == NULL)
-            continue;
-        bool sharesVertex = false;
-        for (int a = 0; a < 3 && !sharesVertex; ++a)
-        {
-            for (int b = 0; b < 3; ++b)
-            {
-                const float dx = base.v.p[a].x - t.v.p[b].x;
-                const float dy = base.v.p[a].y - t.v.p[b].y;
-                const float dz = base.v.p[a].z - t.v.p[b].z;
-                if (dx * dx + dy * dy + dz * dz <= kSharedVertexEpsilonSq)
-                {
-                    sharesVertex = true;
-                    break;
-                }
-            }
-        }
-        if (!sharesVertex)
-            continue;
-        printf("bfbb: tf2bridge --   tri=%u flags=0x%02x mat=%u v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
-            (unsigned)i, (unsigned)t.flags, (unsigned)t.matIndex,
-            t.v.p[0].x, t.v.p[0].y, t.v.p[0].z,
-            t.v.p[1].x, t.v.p[1].y, t.v.p[1].z,
-            t.v.p[2].x, t.v.p[2].y, t.v.p[2].z);
-        ++logged;
-    }
-}
-
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
@@ -654,7 +601,6 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         S32 visibleSamples = 0;
         S32 alternatePathSamples = 0;
         S32 totalSamples = 0;
-        S32 exposureRayDebugCount = 0;
         F32 nearestVisibleDistance = FLOAT_MAX;
 
         const F32 sampleFrac[8] = {
@@ -715,72 +661,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
                     splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
 
-                    int exposureQueryResult = 0;
-                    uint32_t exposureHitFlags = 0;
-                    F32 exposureHitDistance = -1.0f;
-                    F32 exposureRayDistance = 0.0f;
-                    uint32_t exposureHitOid = 0;
-                    xVec3 exposureHitNormal = { 0.0f, 0.0f, 0.0f };
-                    uint32_t exposureHitTriIndex = 0;
-                    F32 exposureHitTriR = 0.0f;
-                    F32 exposureHitTriD = 0.0f;
-                    const bool sampleVisible = TF2Bridge_RocketSampleVisible(
-                        splashOrigin, sample, &exposureHitDistance,
-                        &exposureQueryResult, &exposureHitFlags, &exposureRayDistance,
-                        &exposureHitOid, &exposureHitNormal, &exposureHitTriIndex,
-                        &exposureHitTriR, &exposureHitTriD);
-
-                    if (!sampleVisible && exposureRayDebugCount < 12)
-                    {
-                        if (exposureHitTriIndex != 0xffffffffu)
-                            TF2Bridge_LogRocketCollisionNeighborhood(exposureHitTriIndex);
-                        const F32 rayInvDistance =
-                            exposureRayDistance > 0.000001f ? 1.0f / exposureRayDistance : 0.0f;
-                        const xVec3 exposureHitPos = {
-                            splashOrigin.x + (sample.x - splashOrigin.x) * rayInvDistance * exposureHitDistance,
-                            splashOrigin.y + (sample.y - splashOrigin.y) * rayInvDistance * exposureHitDistance,
-                            splashOrigin.z + (sample.z - splashOrigin.z) * rayInvDistance * exposureHitDistance
-                        };
-
-                        const xClumpCollBSPTriangle* debugTri = NULL;
-                        const xClumpCollBSPTree* debugTree =
-                            globals.sceneCur != NULL && globals.sceneCur->env != NULL &&
-                            globals.sceneCur->env->geom != NULL && globals.sceneCur->env->geom->jsp != NULL
-                                ? globals.sceneCur->env->geom->jsp->colltree
-                                : NULL;
-                        if (debugTree != NULL && exposureHitTriIndex < debugTree->numTriangles)
-                            debugTri = &debugTree->triangles[exposureHitTriIndex];
-
-                        printf("bfbb: tf2bridge -- rocket exposure-ray target=%d sample=%u "
-                            "result=%d flags=0x%08x rayDist=%.3f hitDist=%.3f "
-                            "origin=(%.3f %.3f %.3f) hit=(%.3f %.3f %.3f) "
-                            "sample=(%.3f %.3f %.3f) oid=%u triIndex=%u triR=%.3f triD=%.3f "
-                            "normal=(%.3f %.3f %.3f) "
-                            "triFlags=0x%02x triMat=%u "
-                            "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
-                            (int)target.npcType, (unsigned)sampleIndex,
-                            exposureQueryResult, (unsigned)exposureHitFlags,
-                            (double)exposureRayDistance, (double)exposureHitDistance,
-                            (double)splashOrigin.x, (double)splashOrigin.y, (double)splashOrigin.z,
-                            (double)exposureHitPos.x, (double)exposureHitPos.y, (double)exposureHitPos.z,
-                            (double)sample.x, (double)sample.y, (double)sample.z,
-                            (unsigned)exposureHitOid, (unsigned)exposureHitTriIndex,
-                            (double)exposureHitTriR, (double)exposureHitTriD,
-                            (double)exposureHitNormal.x, (double)exposureHitNormal.y,
-                            (double)exposureHitNormal.z,
-                            debugTri != NULL ? (unsigned)debugTri->flags : 0u,
-                            debugTri != NULL ? (unsigned)debugTri->matIndex : 0u,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[0].x : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[0].y : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[0].z : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[1].x : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[1].y : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[1].z : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[2].x : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[2].y : 0.0,
-                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[2].z : 0.0);
-                        ++exposureRayDebugCount;
-                    }
+                    const bool sampleVisible =
+                        TF2Bridge_RocketSampleVisible(splashOrigin, sample);
 
                     if (sampleVisible)
                     {
