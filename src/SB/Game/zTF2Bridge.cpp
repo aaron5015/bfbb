@@ -62,6 +62,7 @@ struct TF2BridgeDebugRocket
     xVec3 pos;
     xVec3 prevPos;
     xVec3 impact;
+    xVec3 impactNormal;
     float radius;
     float damage;
     float impactTime;
@@ -489,30 +490,16 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     ++blastSamples;
 
-                    // The rocket impact lies on the collision surface. Start splash visibility
-                    // just on the incoming/projectile side of that surface so the
-                    // impact triangle does not immediately occlude every sample.
+                    // The rocket impact lies on the collision surface.
+                    // Start splash visibility just outside that exact surface
+                    // using the triangle's collision normal. This avoids
+                    // starting rays inside floors, rocks, walls, or other JSP
+                    // triangles when the projectile strikes at an angle.
                     const F32 kSplashOriginEpsilon = 0.02f;
                     xVec3 splashOrigin = rocket->impact;
-                    if (rocket->hasPrevious)
-                    {
-                        const xVec3 incoming = {
-                            rocket->pos.x - rocket->prevPos.x,
-                            rocket->pos.y - rocket->prevPos.y,
-                            rocket->pos.z - rocket->prevPos.z
-                        };
-                        const F32 incomingLen = sqrtf(
-                            incoming.x * incoming.x +
-                            incoming.y * incoming.y +
-                            incoming.z * incoming.z);
-
-                        if (incomingLen > 0.0001f)
-                        {
-                            splashOrigin.x -= incoming.x / incomingLen * kSplashOriginEpsilon;
-                            splashOrigin.y -= incoming.y / incomingLen * kSplashOriginEpsilon;
-                            splashOrigin.z -= incoming.z / incomingLen * kSplashOriginEpsilon;
-                        }
-                    }
+                    splashOrigin.x += rocket->impactNormal.x * kSplashOriginEpsilon;
+                    splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
+                    splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
 
                     if (TF2Bridge_RocketSampleVisible(splashOrigin, sample))
                     {
@@ -738,6 +725,39 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     rocket->impact.x = rocket->prevPos.x + ray.dir.x * sceneHit.dist;
                     rocket->impact.y = rocket->prevPos.y + ray.dir.y * sceneHit.dist;
                     rocket->impact.z = rocket->prevPos.z + ray.dir.z * sceneHit.dist;
+
+                    // Keep the actual JSP collision normal. Splash visibility
+                    // should begin just outside the surface we struck, not
+                    // merely along the projectile's incoming direction.
+                    rocket->impactNormal = sceneHit.norm;
+                    const F32 normalLen = sqrtf(
+                        rocket->impactNormal.x * rocket->impactNormal.x +
+                        rocket->impactNormal.y * rocket->impactNormal.y +
+                        rocket->impactNormal.z * rocket->impactNormal.z);
+                    if (normalLen > 0.0001f)
+                    {
+                        rocket->impactNormal.x /= normalLen;
+                        rocket->impactNormal.y /= normalLen;
+                        rocket->impactNormal.z /= normalLen;
+
+                        // Ensure the normal points back toward the projectile
+                        // side of the surface.
+                        const F32 normalDotIncoming =
+                            rocket->impactNormal.x * ray.dir.x +
+                            rocket->impactNormal.y * ray.dir.y +
+                            rocket->impactNormal.z * ray.dir.z;
+                        if (normalDotIncoming > 0.0f)
+                        {
+                            rocket->impactNormal.x = -rocket->impactNormal.x;
+                            rocket->impactNormal.y = -rocket->impactNormal.y;
+                            rocket->impactNormal.z = -rocket->impactNormal.z;
+                        }
+                    }
+                    else
+                    {
+                        rocket->impactNormal = {-ray.dir.x, -ray.dir.y, -ray.dir.z};
+                    }
+
                     rocket->impacted = true;
                     rocket->terminated = true;
                     rocket->active = false;
