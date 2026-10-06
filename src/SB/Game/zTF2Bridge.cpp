@@ -494,10 +494,12 @@ static int TF2Bridge_RocketBuildTargetPoints(const xBound& bound, xVec3* points,
     if (points == NULL || maxCount <= 0)
         return 0;
 
-    xBox box;
-    xBoundGetBox(box, bound);
-
     const bool obb = bound.type == XBOUND_TYPE_OBB && bound.mat != NULL;
+    xBox box;
+    if (obb)
+        box = bound.box.box;
+    else
+        xBoundGetBox(box, bound);
 
     xVec3 localLower = box.lower;
     xVec3 localUpper = box.upper;
@@ -597,11 +599,14 @@ static xVec3 TF2Bridge_RocketNearestBoundPoint(const xBound& bound, const xVec3&
         };
     }
 
+    const bool obb = bound.type == XBOUND_TYPE_OBB && bound.mat != NULL;
     xBox box;
-    xBoundGetBox(box, bound);
+    if (obb)
+        box = bound.box.box;
+    else
+        xBoundGetBox(box, bound);
 
     xVec3 localPoint = point;
-    const bool obb = bound.type == XBOUND_TYPE_OBB && bound.mat != NULL;
     if (obb)
         xMat4x3Tolocal(&localPoint, bound.mat, &point);
 
