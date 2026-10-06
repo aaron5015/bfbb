@@ -380,7 +380,9 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     if (outHitOid != NULL)
         *outHitOid = 0;
     if (outHitNormal != NULL)
-        *outHitNormal = xVec3(0.0f, 0.0f, 0.0f);
+        outHitNormal->x = 0.0f;
+        outHitNormal->y = 0.0f;
+        outHitNormal->z = 0.0f;
     if (outHitTriIndex != NULL)
         *outHitTriIndex = 0;
     if (outHitTriR != NULL)
