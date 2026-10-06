@@ -485,12 +485,11 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
 
     const F32 sampleDistance = sqrtf(sampleDistanceSq);
 
-    // Diagnostic-only alternate blast paths.  The 26 directions are the
-    // neighboring cells around the explosion in a 3x3x3 grid.  The waypoint
+    // Diagnostic-only alternate blast paths. The 26 directions are the
+    // neighboring cells around the explosion in a 3x3x3 grid. The waypoint
     // sits halfway between the explosion and the sample (or halfway to the
     // blast radius, whichever is nearer), so a successful path must actually
     // travel around the obstruction without inventing an unlimited bend.
-    const F32 invSqrt3 = 0.577350269f;
     const F32 directions[26][3] = {
         {-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, 0.0f}, {-1.0f, -1.0f, 1.0f},
         {-1.0f,  0.0f, -1.0f}, {-1.0f,  0.0f, 0.0f}, {-1.0f,  0.0f, 1.0f},
@@ -514,18 +513,14 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
             directions[i][0] * directions[i][0] +
             directions[i][1] * directions[i][1] +
             directions[i][2] * directions[i][2]);
-        const F32 nx = directions[i][0] * invSqrt3 * (len > 1.0f ? 1.0f : 1.0f);
-        const F32 ny = directions[i][1] * invSqrt3 * (len > 1.0f ? 1.0f : 1.0f);
-        const F32 nz = directions[i][2] * invSqrt3 * (len > 1.0f ? 1.0f : 1.0f);
-
-        // Axis-aligned entries have length 1; edge/corner entries need their
-        // own normalization rather than the fixed 1/sqrt(3) scale.
         const F32 invLen = len > 0.000001f ? 1.0f / len : 0.0f;
-        const F32 wx = origin.x + directions[i][0] * invLen * waypointDistance;
-        const F32 wy = origin.y + directions[i][1] * invLen * waypointDistance;
-        const F32 wz = origin.z + directions[i][2] * invLen * waypointDistance;
 
-        const xVec3 waypoint = { wx, wy, wz };
+        const xVec3 waypoint = {
+            origin.x + directions[i][0] * invLen * waypointDistance,
+            origin.y + directions[i][1] * invLen * waypointDistance,
+            origin.z + directions[i][2] * invLen * waypointDistance
+        };
+
         if (!TF2Bridge_RocketSampleVisible(origin, waypoint))
             continue;
 
@@ -536,10 +531,9 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
             sqrtf(waypointToSampleX * waypointToSampleX +
                   waypointToSampleY * waypointToSampleY +
                   waypointToSampleZ * waypointToSampleZ);
-        const F32 originToWaypoint = waypointDistance;
 
         // The detour itself must still fit inside the explosion radius.
-        if (originToWaypoint + waypointToSample > blastRadius + 0.001f)
+        if (waypointDistance + waypointToSample > blastRadius + 0.001f)
             continue;
 
         if (!TF2Bridge_RocketSampleVisible(waypoint, sample))
@@ -1897,76 +1891,3 @@ void zTF2Bridge_DebugRenderHitscan()
     const float vz = ray.end.z - o.z;
     const float len = sqrtf(vx * vx + vy * vy + vz * vz);
     const float invLen = len > 0.000001f ? 1.0f / len : 0.0f;
-
-    const xVec3 d = {
-        o.x + vx * stubLength * invLen,
-        o.y + vy * stubLength * invLen,
-        o.z + vz * stubLength * invLen
-    };
-
-    // The current BFBB camera is rebuilt from the TF2 eye every frame.
-
-    // Origin cross: yellow.
-    RwIm3DVertexSetPos(&verts[n], o.x - markerOrigin, o.y, o.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], o.x + markerOrigin, o.y, o.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], o.x, o.y - markerOrigin, o.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], o.x, o.y + markerOrigin, o.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z - markerOrigin);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z + markerOrigin);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
-
-    // Camera cross: cyan.
-    RwIm3DVertexSetPos(&verts[n], c.x - markerCamera, c.y, c.z);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], c.x + markerCamera, c.y, c.z);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], c.x, c.y - markerCamera, c.z);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], c.x, c.y + markerCamera, c.z);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z - markerCamera);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z + markerCamera);
-    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
-
-    // Camera -> fire-origin connector: magenta.
-    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
-
-    // Full hitscan ray: red. The endpoint is the actual 8192-Source-unit
-    // endpoint (about 204.8 BFBB units at the current scale of 40).
-    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
-    RwIm3DVertexSetPos(&verts[n], ray.end.x, ray.end.y, ray.end.z);
-    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
-
-    if (RwIm3DTransform(verts, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
-    {
-        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
-        RwIm3DEnd();
-    }
-
-    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, oldTexture);
-    RwRenderStateSet(rwRENDERSTATESRCBLEND, oldSrcBlend);
-    RwRenderStateSet(rwRENDERSTATEDESTBLEND, oldDstBlend);
-    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
-    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
-    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
-
-    if (sHitscanDebugTime > 0.0f)
-    {
-        sHitscanDebugTime -= gSceneUpdateTime;
-        if (sHitscanDebugTime <= 0.0f)
-        {
-            sHitscanDebugTime = 0.0f;
-            sHitscanDebugCount = 0;
-        }
-    }
-}
