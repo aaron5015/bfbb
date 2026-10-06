@@ -63,6 +63,7 @@ struct TF2BridgeDebugRocket
     xVec3 prevPos;
     xVec3 impact;
     float radius;
+    float damage;
     float impactTime;
     xVec3 sweepStart;
     xVec3 sweepEnd;
@@ -329,10 +330,17 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
     if (npclist == NULL)
         return;
 
+    // Match TF2's fixed-up radius-damage behavior: full damage at the
+    // explosion center, tapering linearly to damage * (damage / radius) at
+    // the edge. Stock rockets are 90 damage with a 146-unit radius.
+    const float baseDamage = rocket->damage;
+    const float radius = rocket->radius;
+    const float edgeScale = (radius > 0.0001f) ? (baseDamage / radius) : 0.0f;
+
     for (S32 i = 0; i < npclist->cnt; ++i)
     {
         zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
-        if (npc == NULL || !npc->IsAlive())
+        if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
             continue;
 
         const xVec3* center = xBoundCenter(&npc->bound);
@@ -343,10 +351,10 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         const float dx = center->x - rocket->impact.x;
         const float dy = center->y - rocket->impact.y;
         const float dz = center->z - rocket->impact.z;
-        const float distSq = dx * dx + dy * dy + dz * dz;
-        const float reach = rocket->radius + boundRadius;
+        const float centerDistSq = dx * dx + dy * dy + dz * dz;
+        const float reach = radius + boundRadius;
 
-        if (distSq > reach * reach)
+        if (centerDistSq > reach * reach)
             continue;
 
         if (rocket->explosionTargetCount >= BRIDGE_MAX_ROCKETS)
@@ -356,13 +364,12 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
         target.pos = *center;
-        target.distance = sqrtf(distSq);
+        target.distance = sqrtf(centerDistSq);
         target.npcType = (int32_t)npc->SelfType();
         target.visible = true;
 
-        // Diagnostic only: trace from the NPC toward the explosion.
-        // Starting at the NPC avoids immediately re-hitting the surface where
-        // the rocket itself impacted. No damage is applied here.
+        // Keep the existing single-ray LOS test for this batch. The more
+        // accurate multi-sample exposure test is a later splash-occlusion batch.
         if (target.distance > 0.0001f)
         {
             xRay3 ray;
@@ -386,13 +393,30 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             }
         }
 
-        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f %s\n",
+        if (!target.visible)
+        {
+            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f BLOCKED damage=0\n",
+                (int)target.npcType, (double)target.distance);
+            continue;
+        }
+
+        float t = radius > 0.0001f ? target.distance / radius : 1.0f;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+
+        const float damageScale = 1.0f - t * (1.0f - edgeScale);
+        const float damage = baseDamage * damageScale;
+
+        if (damage > 0.0f)
+            npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
+
+        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f damage=%.2f scale=%.3f VISIBLE\n",
             (int)target.npcType, (double)target.distance,
-            target.visible ? "VISIBLE" : "BLOCKED");
+            (double)damage, (double)damageScale);
     }
 
-    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f targets=%u\n",
-        (double)rocket->radius, (unsigned)rocket->explosionTargetCount);
+    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f targets=%u\n",
+        (double)radius, (double)baseDamage, (unsigned)rocket->explosionTargetCount);
 }
 
 static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
@@ -441,6 +465,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
         const xVec3 pos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
                                      in->rocketPos[i][2], in->scale);
         rocket->radius = in->rocketRadius[i] / in->scale;
+        rocket->damage = in->rocketDamage[i];
         rocket->active = true;
 
         // If this entity index was reused after its old diagnostic expired,
