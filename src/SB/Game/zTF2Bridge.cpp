@@ -557,18 +557,17 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         TF2BridgeDebugExplosionTarget& target =
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
-        const xVec3* center = xBoundCenter(&npc->bound);
-        target.pos = center != NULL ? *center : nearest;
+        // Keep the target point on the NPC's collision bound, but choose the
+        // point nearest to the explosion instead of forcing visibility through
+        // the bound center. This is a deliberately small BFBB adaptation of
+        // TF2's nearest-point radius test: there is still exactly one visibility
+        // ray, with no sample grid, exposure percentage, or alternate route.
+        target.pos = nearest;
         target.distance = sqrtf(nearestDistSq);
         target.npcType = (int32_t)npc->SelfType();
         target.visible = false;
 
-        // CBaseEntity::BodyTarget() defaults to WorldSpaceCenter(). For these
-        // BFBB NPCs, the bound center is the closest equivalent. The important
-        // distinction from our previous system is that we trace to exactly
-        // one body target: there is no sample grid, exposure percentage, or
-        // alternate blast route.
-        const xVec3 targetPoint = target.pos;
+        const xVec3 targetPoint = nearest;
 
         F32 targetDx = targetPoint.x - splashOrigin.x;
         F32 targetDy = targetPoint.y - splashOrigin.y;
@@ -584,8 +583,10 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         }
         else
         {
-            // Trace exactly to BodyTarget, matching TF2's
-            // RadiusDamage ApplyToEntity() visibility test.
+            // Trace directly to the nearest point on the NPC bound. This is
+            // intentionally not exact Source BodyTarget behavior; it tests
+            // whether an exposed part of the BFBB collision bound can receive
+            // the blast without adding arbitrary wraparound or sampling rules.
             const bool visible = TF2Bridge_RocketSampleVisible(
                 splashOrigin, targetPoint);
 
@@ -600,8 +601,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             }
 
             target.visible = true;
-            // For non-player entities TF2 uses tr.endpos as the falloff
-            // distance. A clear trace ends at BodyTarget.
+            // Use the visible target point as the falloff distance.
             target.distance = targetDistance;
         }
 
@@ -628,7 +628,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
     printf(
         "bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f "
-        "occlusion=tf2-body-target applyDamage=%d targets=%u\\n",
+        "occlusion=nearest-bound-point applyDamage=%d targets=%u\\n",
         (double)radius, (double)baseDamage,
         applyDamage ? 1 : 0,
         (unsigned)rocket->explosionTargetCount);
