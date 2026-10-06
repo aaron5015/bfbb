@@ -58,7 +58,7 @@ struct TF2BridgeDebugExplosionTarget
 
 struct TF2BridgeDebugRocket
 {
-    static const uint32_t kMaxExposureSamples = 64;
+    static const uint32_t kMaxExposureSamples = 512;
 
     int32_t entIndex;
     xVec3 pos;
@@ -77,7 +77,6 @@ struct TF2BridgeDebugRocket
 
     // Per-sample exposure visualization:
     // 0 = outside NPC bound, 1 = outside blast, 2 = blocked, 3 = visible,
-    // 4 = reached through an alternate splash path.
     uint32_t exposureSampleCount;
     xVec3 exposureSamplePos[kMaxExposureSamples];
     uint8_t exposureSampleState[kMaxExposureSamples];
@@ -477,13 +476,16 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         S32 totalSamples = 0;
         F32 nearestVisibleDistance = FLOAT_MAX;
 
-        const F32 sampleFrac[4] = { 0.125f, 0.375f, 0.625f, 0.875f };
+        const F32 sampleFrac[8] = {
+            0.0625f, 0.1875f, 0.3125f, 0.4375f,
+            0.5625f, 0.6875f, 0.8125f, 0.9375f
+        };
 
-        for (S32 sx = 0; sx < 4; ++sx)
+        for (S32 sx = 0; sx < 8; ++sx)
         {
-            for (S32 sy = 0; sy < 4; ++sy)
+            for (S32 sy = 0; sy < 8; ++sy)
             {
-                for (S32 sz = 0; sz < 4; ++sz)
+                for (S32 sz = 0; sz < 8; ++sz)
                 {
                     xVec3 sample;
                     sample.x = sampleBox.lower.x +
