@@ -620,11 +620,22 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                             splashOrigin.z + (sample.z - splashOrigin.z) * rayInvDistance * exposureHitDistance
                         };
 
+                        const xClumpCollBSPTriangle* debugTri = NULL;
+                        const xClumpCollBSPTree* debugTree =
+                            globals.sceneCur != NULL && globals.sceneCur->env != NULL &&
+                            globals.sceneCur->env->geom != NULL && globals.sceneCur->env->geom->jsp != NULL
+                                ? globals.sceneCur->env->geom->jsp->colltree
+                                : NULL;
+                        if (debugTree != NULL && exposureHitTriIndex < debugTree->numTriangles)
+                            debugTri = &debugTree->triangles[exposureHitTriIndex];
+
                         printf("bfbb: tf2bridge -- rocket exposure-ray target=%d sample=%u "
                             "result=%d flags=0x%08x rayDist=%.3f hitDist=%.3f "
                             "origin=(%.3f %.3f %.3f) hit=(%.3f %.3f %.3f) "
                             "sample=(%.3f %.3f %.3f) oid=%u triIndex=%u triR=%.3f triD=%.3f "
-                            "normal=(%.3f %.3f %.3f)\\n",
+                            "normal=(%.3f %.3f %.3f) "
+                            "triFlags=0x%02x triMat=%u "
+                            "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
                             (int)target.npcType, (unsigned)sampleIndex,
                             exposureQueryResult, (unsigned)exposureHitFlags,
                             (double)exposureRayDistance, (double)exposureHitDistance,
@@ -634,7 +645,18 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                             (unsigned)exposureHitOid, (unsigned)exposureHitTriIndex,
                             (double)exposureHitTriR, (double)exposureHitTriD,
                             (double)exposureHitNormal.x, (double)exposureHitNormal.y,
-                            (double)exposureHitNormal.z);
+                            (double)exposureHitNormal.z,
+                            debugTri != NULL ? (unsigned)debugTri->flags : 0u,
+                            debugTri != NULL ? (unsigned)debugTri->matIndex : 0u,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[0].x : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[0].y : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[0].z : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[1].x : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[1].y : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[1].z : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[2].x : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[2].y : 0.0,
+                            debugTri != NULL && debugTri->v.p != NULL ? (double)debugTri->v.p[2].z : 0.0);
                         ++exposureRayDebugCount;
                     }
 
