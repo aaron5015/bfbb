@@ -668,7 +668,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         memset(&blastHit, 0, sizeof(blastHit));
         blastHit.flags = k_HIT_0x200;
 
-        if (!xSphereHitsBound(&blastSphere, &npc->bound, &blastHit))
+        xSphereHitsBound(&blastSphere, &npc->bound, &blastHit);
+        if (!(blastHit.flags & 0x1))
             continue;
 
         if (rocket->explosionTargetCount >= BRIDGE_MAX_ROCKETS)
