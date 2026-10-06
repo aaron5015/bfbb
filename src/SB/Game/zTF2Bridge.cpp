@@ -547,6 +547,11 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             continue;
         }
 
+        // This target passed the splash exposure threshold, so mark it as
+        // a valid splash hit for the diagnostic renderer. The actual damage
+        // decision remains controlled by the exposure threshold above.
+        target.visible = true;
+
         // TF2 RadiusDamage uses linear distance falloff:
         // damage - distance * (damage / radius).
         // Use the nearest actually exposed point of the sampled bound rather
