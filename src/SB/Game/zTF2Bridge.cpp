@@ -349,6 +349,22 @@ static F32 TF2Bridge_RocketExposureThreshold()
     return 0.0f;
 }
 
+static F32 TF2Bridge_RocketWrapDistance()
+{
+    const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_WRAP_DISTANCE");
+    if (value != NULL && value[0] != '\0')
+    {
+        const F32 distance = (F32)atof(value);
+        if (distance >= 0.05f && distance <= 2.0f)
+            return distance;
+    }
+
+    // Keep wraparound deliberately small. This is the maximum local distance
+    // the splash is allowed to detour around cover; it is separate from the
+    // explosion exposure threshold.
+    return 0.75f;
+}
+
 static bool TF2Bridge_RocketApplyDamage()
 {
     const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_APPLY_DAMAGE");
@@ -467,9 +483,7 @@ static bool TF2Bridge_RocketSampleVisibleAroundCover(const xVec3& origin, const 
     tangentB.y = n.z * tangentA.x - n.x * tangentA.z;
     tangentB.z = n.x * tangentA.y - n.y * tangentA.x;
 
-    F32 detour = radius * 0.35f;
-    if (detour > 1.25f) detour = 1.25f;
-    if (detour < 0.05f) detour = 0.05f;
+    const F32 detour = TF2Bridge_RocketWrapDistance();
 
     const F32 outward = detour * 0.75f;
     const F32 kTwoPi = 6.283185307f;
