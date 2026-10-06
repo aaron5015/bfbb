@@ -403,15 +403,26 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (center == NULL)
             continue;
 
-        const F32 boundRadius = TF2Bridge_GetBoundRadius(npc->bound);
+        // Candidate inclusion is a sphere-vs-bound test, not a center-distance
+        // approximation.  The center can be outside the blast while the bound
+        // still intersects it, or the center can be inside the visual radius
+        // while the relevant bound is actually outside it.
+        xSphere blastSphere;
+        blastSphere.center = rocket->impact;
+        blastSphere.r = radius;
+
+        xCollis blastHit;
+        memset(&blastHit, 0, sizeof(blastHit));
+        blastHit.flags = k_HIT_0x200;
+
+        xSphereHitsBound(&blastSphere, &npc->bound, &blastHit);
+        if ((blastHit.flags & 0x1) == 0)
+            continue;
+
         const F32 dx = center->x - rocket->impact.x;
         const F32 dy = center->y - rocket->impact.y;
         const F32 dz = center->z - rocket->impact.z;
         const F32 centerDistSq = dx * dx + dy * dy + dz * dz;
-        const F32 reach = radius + boundRadius;
-
-        if (centerDistSq > reach * reach)
-            continue;
 
         if (rocket->explosionTargetCount >= BRIDGE_MAX_ROCKETS)
             break;
