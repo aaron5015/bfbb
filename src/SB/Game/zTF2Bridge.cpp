@@ -481,11 +481,57 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
         return false;
 
     const F32 sampleDistance = sqrtf(sampleDistanceSq);
+    const F32 invDistance = 1.0f / sampleDistance;
+    const F32 dirX = dx * invDistance;
+    const F32 dirY = dy * invDistance;
+    const F32 dirZ = dz * invDistance;
+
+    // First recover the actual surface that blocked the direct explosion ray.
+    // Alternate routes are allowed to go around that surface, but never to
+    // start on the opposite side of it. This prevents the waypoint search from
+    // effectively teleporting the blast through a wall.
+    F32 blockerDistance = -1.0f;
+    xVec3 blockerNormal;
+    blockerNormal.x = 0.0f;
+    blockerNormal.y = 0.0f;
+    blockerNormal.z = 0.0f;
+
+    if (TF2Bridge_RocketSampleVisible(origin, sample,
+        &blockerDistance, NULL, NULL, NULL, NULL, &blockerNormal))
+        return false;
+
+    const F32 blockerNormalSq =
+        blockerNormal.x * blockerNormal.x +
+        blockerNormal.y * blockerNormal.y +
+        blockerNormal.z * blockerNormal.z;
+
+    if (blockerDistance < 0.0f || blockerNormalSq <= 0.000001f)
+        return false;
+
+    // RocketSampleVisible starts its collision ray rayEpsilon units forward
+    // from origin, so worldHit.dist is measured from that offset origin.
+    const F32 rayEpsilon = 0.05f;
+    const xVec3 blockerPoint = {
+        origin.x + dirX * (rayEpsilon + blockerDistance),
+        origin.y + dirY * (rayEpsilon + blockerDistance),
+        origin.z + dirZ * (rayEpsilon + blockerDistance)
+    };
+
+    const F32 explosionSideX = origin.x - blockerPoint.x;
+    const F32 explosionSideY = origin.y - blockerPoint.y;
+    const F32 explosionSideZ = origin.z - blockerPoint.z;
+    const F32 explosionSide =
+        explosionSideX * blockerNormal.x +
+        explosionSideY * blockerNormal.y +
+        explosionSideZ * blockerNormal.z;
+
+    if (fabsf(explosionSide) <= 0.000001f)
+        return false;
 
     // Search the actual blast volume rather than a fixed 26-direction shell.
-    // A route is valid only when both legs are clear and the total path stays
-    // inside the spherical blast radius. Multiple radial depths keep the test
-    // from depending on one arbitrary waypoint distance.
+    // A route is valid only when both legs are clear, the total path stays
+    // inside the spherical blast radius, and the waypoint remains on the
+    // explosion-facing side of the surface that blocked the direct ray.
     const F32 radialFractions[] = { 0.20f, 0.40f, 0.60f, 0.80f, 0.95f };
     const int radialCount = (int)(sizeof(radialFractions) / sizeof(radialFractions[0]));
     const int latitudeCount = 7;
@@ -499,7 +545,6 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
 
         for (int lat = 0; lat < latitudeCount; ++lat)
         {
-            // Uniformly spaced latitude bands over the sphere.
             const F32 v = -1.0f + 2.0f * (F32)lat / (F32)(latitudeCount - 1);
             const F32 horizontal = sqrtf(fmaxf(0.0f, 1.0f - v * v));
 
@@ -514,6 +559,17 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
                     origin.y + v * waypointDistance,
                     origin.z + horizontal * s * waypointDistance
                 };
+
+                const F32 waypointSide =
+                    (waypoint.x - blockerPoint.x) * blockerNormal.x +
+                    (waypoint.y - blockerPoint.y) * blockerNormal.y +
+                    (waypoint.z - blockerPoint.z) * blockerNormal.z;
+
+                // The waypoint must remain on the same side of the actual
+                // blocking surface as the explosion. A waypoint on the target
+                // side would be an artificial shortcut through the cover.
+                if (waypointSide * explosionSide < 0.0f)
+                    continue;
 
                 if (!TF2Bridge_RocketSampleVisible(origin, waypoint))
                     continue;
