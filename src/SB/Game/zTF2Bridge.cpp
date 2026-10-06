@@ -432,7 +432,24 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     if (outHitNormal != NULL)
         *outHitNormal = worldHit.norm;
     if (outHitTriIndex != NULL)
-        *outHitTriIndex = worldHit.tri.index;
+    {
+        // iCollide stores the JSP triangle pointer in RpCollisionTriangle::index
+        // while the JSP query is active. Convert that pointer back to the
+        // actual collision-tree array index so the debug output identifies a
+        // real triangle rather than printing the pointer value.
+        const xClumpCollBSPTree* tree =
+            globals.sceneCur != NULL && globals.sceneCur->env != NULL &&
+            globals.sceneCur->env->geom != NULL && globals.sceneCur->env->geom->jsp != NULL
+                ? globals.sceneCur->env->geom->jsp->colltree
+                : NULL;
+        const xClumpCollBSPTriangle* hitTri =
+            (const xClumpCollBSPTriangle*)(uintptr_t)worldHit.tri.index;
+        if (tree != NULL && hitTri >= tree->triangles &&
+            hitTri < tree->triangles + tree->numTriangles)
+            *outHitTriIndex = (uint32_t)(hitTri - tree->triangles);
+        else
+            *outHitTriIndex = 0xffffffffu;
+    }
     if (outHitTriR != NULL)
         *outHitTriR = worldHit.tri.r;
     if (outHitTriD != NULL)
