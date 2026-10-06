@@ -341,7 +341,11 @@ static F32 TF2Bridge_RocketExposureThreshold()
             return threshold;
     }
 
-    return 0.35f;
+    // Zero exposure remains a hard block. Any genuinely exposed portion of
+    // the sampled NPC volume is allowed to receive splash, so ledges and
+    // curved cover can naturally produce partial exposure instead of an
+    // all-or-nothing 35% cutoff.
+    return 0.0f;
 }
 
 static bool TF2Bridge_RocketApplyDamage()
@@ -549,7 +553,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                 ? nearestVisibleDistance
                 : radius;
 
-        if (totalSamples == 0 || blastSamples == 0 || exposure < exposureThreshold)
+        if (totalSamples == 0 || blastSamples == 0 || exposure <= exposureThreshold)
         {
             printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED threshold=%.1f%% damage=0\n",
                 (int)target.npcType, (double)target.distance,
@@ -560,9 +564,9 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             continue;
         }
 
-        // This target passed the splash exposure threshold, so mark it as
-        // a valid splash hit for the diagnostic renderer. The actual damage
-        // decision remains controlled by the exposure threshold above.
+        // Any exposed portion of the target is a valid splash hit. Fully
+        // occluded targets still fail the check above, while partial exposure
+        // is preserved instead of being discarded by a hard 35% gate.
         target.visible = true;
 
         // TF2 RadiusDamage uses linear distance falloff:
