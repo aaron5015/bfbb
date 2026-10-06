@@ -77,6 +77,7 @@ struct TF2BridgeDebugRocket
 
     // Per-sample exposure visualization:
     // 0 = outside NPC bound, 1 = outside blast, 2 = blocked, 3 = visible,
+    // 4 = direct ray blocked, but a bounded alternate path exists.
     uint32_t exposureSampleCount;
     xVec3 exposureSamplePos[kMaxExposureSamples];
     uint8_t exposureSampleState[kMaxExposureSamples];
@@ -469,6 +470,89 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     return !validHit;
 }
 
+static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
+    const xVec3& sample, F32 blastRadius, int* outValidPathCount = NULL)
+{
+    if (outValidPathCount != NULL)
+        *outValidPathCount = 0;
+
+    const F32 dx = sample.x - origin.x;
+    const F32 dy = sample.y - origin.y;
+    const F32 dz = sample.z - origin.z;
+    const F32 sampleDistanceSq = dx * dx + dy * dy + dz * dz;
+    if (sampleDistanceSq <= 0.000001f || blastRadius <= 0.000001f)
+        return false;
+
+    const F32 sampleDistance = sqrtf(sampleDistanceSq);
+
+    // Diagnostic-only alternate blast paths.  The 26 directions are the
+    // neighboring cells around the explosion in a 3x3x3 grid.  The waypoint
+    // sits halfway between the explosion and the sample (or halfway to the
+    // blast radius, whichever is nearer), so a successful path must actually
+    // travel around the obstruction without inventing an unlimited bend.
+    const F32 invSqrt3 = 0.577350269f;
+    const F32 directions[26][3] = {
+        {-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, 0.0f}, {-1.0f, -1.0f, 1.0f},
+        {-1.0f,  0.0f, -1.0f}, {-1.0f,  0.0f, 0.0f}, {-1.0f,  0.0f, 1.0f},
+        {-1.0f,  1.0f, -1.0f}, {-1.0f,  1.0f, 0.0f}, {-1.0f,  1.0f, 1.0f},
+        { 0.0f, -1.0f, -1.0f}, { 0.0f, -1.0f, 0.0f}, { 0.0f, -1.0f, 1.0f},
+        { 0.0f,  0.0f, -1.0f},                         { 0.0f,  0.0f, 1.0f},
+        { 0.0f,  1.0f, -1.0f}, { 0.0f,  1.0f, 0.0f}, { 0.0f,  1.0f, 1.0f},
+        { 1.0f, -1.0f, -1.0f}, { 1.0f, -1.0f, 0.0f}, { 1.0f, -1.0f, 1.0f},
+        { 1.0f,  0.0f, -1.0f}, { 1.0f,  0.0f, 0.0f}, { 1.0f,  0.0f, 1.0f},
+        { 1.0f,  1.0f, -1.0f}, { 1.0f,  1.0f, 0.0f}, { 1.0f,  1.0f, 1.0f}
+    };
+
+    const F32 waypointDistance = 0.5f * fminf(blastRadius, sampleDistance);
+    if (waypointDistance <= 0.000001f)
+        return false;
+
+    int validPathCount = 0;
+    for (int i = 0; i < 26; ++i)
+    {
+        const F32 len = sqrtf(
+            directions[i][0] * directions[i][0] +
+            directions[i][1] * directions[i][1] +
+            directions[i][2] * directions[i][2]);
+        const F32 nx = directions[i][0] * invSqrt3 * (len > 1.0f ? 1.0f : 1.0f);
+        const F32 ny = directions[i][1] * invSqrt3 * (len > 1.0f ? 1.0f : 1.0f);
+        const F32 nz = directions[i][2] * invSqrt3 * (len > 1.0f ? 1.0f : 1.0f);
+
+        // Axis-aligned entries have length 1; edge/corner entries need their
+        // own normalization rather than the fixed 1/sqrt(3) scale.
+        const F32 invLen = len > 0.000001f ? 1.0f / len : 0.0f;
+        const F32 wx = origin.x + directions[i][0] * invLen * waypointDistance;
+        const F32 wy = origin.y + directions[i][1] * invLen * waypointDistance;
+        const F32 wz = origin.z + directions[i][2] * invLen * waypointDistance;
+
+        const xVec3 waypoint = { wx, wy, wz };
+        if (!TF2Bridge_RocketSampleVisible(origin, waypoint))
+            continue;
+
+        const F32 waypointToSampleX = sample.x - waypoint.x;
+        const F32 waypointToSampleY = sample.y - waypoint.y;
+        const F32 waypointToSampleZ = sample.z - waypoint.z;
+        const F32 waypointToSample =
+            sqrtf(waypointToSampleX * waypointToSampleX +
+                  waypointToSampleY * waypointToSampleY +
+                  waypointToSampleZ * waypointToSampleZ);
+        const F32 originToWaypoint = waypointDistance;
+
+        // The detour itself must still fit inside the explosion radius.
+        if (originToWaypoint + waypointToSample > blastRadius + 0.001f)
+            continue;
+
+        if (!TF2Bridge_RocketSampleVisible(waypoint, sample))
+            continue;
+
+        ++validPathCount;
+    }
+
+    if (outValidPathCount != NULL)
+        *outValidPathCount = validPathCount;
+    return validPathCount > 0;
+}
+
 static void TF2Bridge_LogRocketCollisionNeighborhood(uint32_t hitTriIndex)
 {
     if (globals.sceneCur == NULL || globals.sceneCur->env == NULL ||
@@ -725,6 +809,20 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                         const F32 sampleDistance = sqrtf(sampleDistSq);
                         if (sampleDistance < nearestVisibleDistance)
                             nearestVisibleDistance = sampleDistance;
+                    }
+                    else if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
+                    {
+                        int alternatePathCount = 0;
+                        const bool hasAlternatePath =
+                            TF2Bridge_RocketSampleHasAlternatePath(
+                                splashOrigin, sample, radius, &alternatePathCount);
+                        if (hasAlternatePath)
+                        {
+                            rocket->exposureSampleState[sampleIndex] = 4;
+                            printf("bfbb: tf2bridge -- rocket alternate-path target=%d sample=%u validPaths=%d\n",
+                                (int)target.npcType, (unsigned)sampleIndex,
+                                alternatePathCount);
+                        }
                     }
                 }
             }
@@ -1591,8 +1689,9 @@ void zTF2Bridge_DebugRenderRockets()
             }
 
             // Exposure sample markers:
-            //   green = visible to the explosion
-            //   red   = inside the blast but blocked by world geometry
+            //   green  = visible to the explosion
+            //   red    = inside the blast but directly blocked
+            //   cyan   = direct ray blocked, but a bounded alternate path exists
             //   yellow = inside the NPC bound but outside the blast radius
             // These deliberately last five seconds so the individual sample
             // distribution can be inspected in screenshots.
@@ -1614,6 +1713,10 @@ void zTF2Bridge_DebugRenderRockets()
                     else if (rocket.exposureSampleState[s] == 3)
                     {
                         cr = 60; cg = 255; cb = 80;
+                    }
+                    else if (rocket.exposureSampleState[s] == 4)
+                    {
+                        cr = 40; cg = 255; cb = 255;
                     }
 
                     RwIm3DVertex sampleVerts[6];
