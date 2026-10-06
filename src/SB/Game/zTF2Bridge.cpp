@@ -355,13 +355,28 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
 
     const F32 distance = sqrtf(distanceSq);
 
+    const F32 rayEpsilon = 0.05f;
+    if (distance <= rayEpsilon)
+        return true;
+
+    const F32 invDistance = 1.0f / distance;
+    const F32 dirX = dx * invDistance;
+    const F32 dirY = dy * invDistance;
+    const F32 dirZ = dz * invDistance;
+
+    // The explosion is born on a world collision surface. Do not let that
+    // immediate contact count as an occluder of the explosion itself.
+    // Advance the visibility ray a small distance toward the sample; any
+    // geometry encountered after this point is a genuine occluder.
     xRay3 ray;
-    ray.origin = origin;
-    ray.dir.x = dx / distance;
-    ray.dir.y = dy / distance;
-    ray.dir.z = dz / distance;
+    ray.origin.x = origin.x + dirX * rayEpsilon;
+    ray.origin.y = origin.y + dirY * rayEpsilon;
+    ray.origin.z = origin.z + dirZ * rayEpsilon;
+    ray.dir.x = dirX;
+    ray.dir.y = dirY;
+    ray.dir.z = dirZ;
     ray.min_t = 0.0f;
-    ray.max_t = distance;
+    ray.max_t = distance - rayEpsilon;
     ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
 
     xCollis worldHit;
@@ -371,7 +386,7 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) == 0)
         return true;
 
-    return worldHit.dist < 0.0f || worldHit.dist >= distance - 0.01f;
+    return worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
 }
 
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
