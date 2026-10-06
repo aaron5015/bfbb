@@ -563,13 +563,23 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     if (!sampleVisible && exposureRayDebugCount < 12)
                     {
+                        const F32 rayInvDistance =
+                            exposureRayDistance > 0.000001f ? 1.0f / exposureRayDistance : 0.0f;
+                        const xVec3 exposureHitPos = {
+                            splashOrigin.x + (sample.x - splashOrigin.x) * rayInvDistance * exposureHitDistance,
+                            splashOrigin.y + (sample.y - splashOrigin.y) * rayInvDistance * exposureHitDistance,
+                            splashOrigin.z + (sample.z - splashOrigin.z) * rayInvDistance * exposureHitDistance
+                        };
+
                         printf("bfbb: tf2bridge -- rocket exposure-ray target=%d sample=%u "
                             "result=%d flags=0x%08x rayDist=%.3f hitDist=%.3f "
-                            "origin=(%.3f %.3f %.3f) sample=(%.3f %.3f %.3f)\\n",
+                            "origin=(%.3f %.3f %.3f) hit=(%.3f %.3f %.3f) "
+                            "sample=(%.3f %.3f %.3f)\\n",
                             (int)target.npcType, (unsigned)sampleIndex,
                             exposureQueryResult, (unsigned)exposureHitFlags,
                             (double)exposureRayDistance, (double)exposureHitDistance,
                             (double)splashOrigin.x, (double)splashOrigin.y, (double)splashOrigin.z,
+                            (double)exposureHitPos.x, (double)exposureHitPos.y, (double)exposureHitPos.z,
                             (double)sample.x, (double)sample.y, (double)sample.z);
                         ++exposureRayDebugCount;
                     }
