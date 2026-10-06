@@ -888,3 +888,1079 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
             sRocketDebug[i].impactTime = 0.0f;
             sRocketDebug[i].entIndex = 0;
             sRocketDebug[i].hasPrevious = false;
+
+    if (in->rocketDebugLifetime <= 0.0f)
+    {
+        for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+        {
+            sRocketDebug[i].active = false;
+            sRocketDebug[i].impacted = false;
+            sRocketDebug[i].impactTime = 0.0f;
+            sRocketDebug[i].entIndex = 0;
+            sRocketDebug[i].hasPrevious = false;
+            sRocketDebug[i].sweepTime = 0.0f;
+        }
+        return;
+    }
+
+    bool seen[BRIDGE_MAX_ROCKETS] = {};
+    const uint32_t count = in->rocketCount > BRIDGE_MAX_ROCKETS ? BRIDGE_MAX_ROCKETS : in->rocketCount;
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const int32_t entIndex = in->rocketEntIndex[i];
+        if (entIndex <= 0)
+            continue;
+
+        TF2BridgeDebugRocket* rocket = TF2Bridge_FindRocketTrack(entIndex);
+        if (rocket == NULL)
+            rocket = TF2Bridge_AllocRocketTrack(entIndex);
+        if (rocket == NULL)
+            continue;
+
+        for (uint32_t k = 0; k < BRIDGE_MAX_ROCKETS; ++k)
+        {
+            if (&sRocketDebug[k] == rocket)
+            {
+                seen[k] = true;
+                break;
+            }
+        }
+
+        const xVec3 pos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
+                                     in->rocketPos[i][2], in->scale);
+        rocket->radius = in->rocketRadius[i] / in->scale;
+        rocket->damage = in->rocketDamage[i];
+        rocket->active = true;
+
+        // If this entity index was reused after its old diagnostic expired,
+        // start a fresh trajectory instead of inheriting the previous one.
+        if (rocket->impacted && rocket->impactTime <= 0.0f)
+        {
+            rocket->hasPrevious = false;
+            rocket->impacted = false;
+        }
+
+        if (!rocket->impacted && rocket->hasPrevious)
+        {
+            const xVec3 delta = {
+                pos.x - rocket->prevPos.x,
+                pos.y - rocket->prevPos.y,
+                pos.z - rocket->prevPos.z
+            };
+            const float len = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+
+            if (len > 0.0001f)
+            {
+                rocket->sweepStart = rocket->prevPos;
+                rocket->sweepEnd = pos;
+                rocket->sweepTime = 5.0f;
+                rocket->sweepHit = false;
+
+                xRay3 ray;
+                ray.origin = rocket->prevPos;
+                ray.dir.x = delta.x / len;
+                ray.dir.y = delta.y / len;
+                ray.dir.z = delta.z / len;
+                ray.min_t = 0.0f;
+                ray.max_t = len;
+                ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+                // Use BFBB's native scene ray query rather than only
+                // the JSP environment. This includes the environment plus
+                // collision-bearing scene entities/NPCs, which is the same
+                // collision path BFBB itself uses for scene ray tests.
+                xCollis sceneHit;
+                memset(&sceneHit, 0, sizeof(sceneHit));
+                sceneHit.flags = k_HIT_0x200;
+
+                xRayHitsScene(globals.sceneCur, &ray, &sceneHit);
+
+                const bool hitScene =
+                    (sceneHit.flags & k_HIT_IT) != 0 &&
+                    sceneHit.dist >= 0.0f &&
+                    sceneHit.dist <= len;
+
+                const bool hitEntity = hitScene && sceneHit.optr != NULL;
+                rocket->sweepHit = hitScene;
+
+                if (hitEntity)
+                {
+                    printf("bfbb: tf2bridge -- rocket %d hit scene entity id %u at %.2f\n",
+                        entIndex, (unsigned)sceneHit.oid,
+                        (double)sceneHit.dist);
+                }
+
+                if (!hitScene)
+                {
+                    xCollis envHit;
+                    memset(&envHit, 0, sizeof(envHit));
+                    envHit.flags = k_HIT_0x200;
+
+                    const bool hitEnv =
+                        iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
+                        envHit.dist >= 0.0f && envHit.dist <= len;
+
+                    // Diagnostic-only long probe. Keep the actual rocket sweep unchanged;
+                    // this tells us whether the JSP query can see the same surface when given
+                    // a longer segment from the exact same starting point and direction.
+                    const float probeLen = 8.0f;
+                    xRay3 probeRay;
+                    probeRay.origin = rocket->prevPos;
+                    probeRay.dir = ray.dir;
+                    probeRay.min_t = 0.0f;
+                    probeRay.max_t = probeLen;
+                    probeRay.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+                    xCollis probeHit;
+                    memset(&probeHit, 0, sizeof(probeHit));
+                    probeHit.flags = k_HIT_0x200;
+
+                    const bool probeHitEnv =
+                        iRayHitsEnv(&probeRay, globals.sceneCur->env, &probeHit) != 0 &&
+                        probeHit.dist >= 0.0f && probeHit.dist <= probeLen;
+
+                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f start=(%.3f %.3f %.3f) end=(%.3f %.3f %.3f) sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f longProbe=%s probeDist=%.3f\n",
+                        entIndex, (double)len,
+                        (double)rocket->sweepStart.x, (double)rocket->sweepStart.y, (double)rocket->sweepStart.z,
+                        (double)rocket->sweepEnd.x, (double)rocket->sweepEnd.y, (double)rocket->sweepEnd.z,
+                        (unsigned)sceneHit.flags, (double)sceneHit.dist,
+                        hitEnv ? "HIT" : "MISS", hitEnv ? (double)envHit.dist : -1.0,
+                        probeHitEnv ? "HIT" : "MISS", probeHitEnv ? (double)probeHit.dist : -1.0);
+                }
+
+                if (hitScene)
+                {
+                    rocket->impact.x = rocket->prevPos.x + ray.dir.x * sceneHit.dist;
+                    rocket->impact.y = rocket->prevPos.y + ray.dir.y * sceneHit.dist;
+                    rocket->impact.z = rocket->prevPos.z + ray.dir.z * sceneHit.dist;
+
+                    // Keep the actual JSP collision normal. Splash visibility
+                    // should begin just outside the surface we struck, not
+                    // merely along the projectile's incoming direction.
+                    rocket->impactNormal = sceneHit.norm;
+                    const F32 normalLen = sqrtf(
+                        rocket->impactNormal.x * rocket->impactNormal.x +
+                        rocket->impactNormal.y * rocket->impactNormal.y +
+                        rocket->impactNormal.z * rocket->impactNormal.z);
+                    if (normalLen > 0.0001f)
+                    {
+                        rocket->impactNormal.x /= normalLen;
+                        rocket->impactNormal.y /= normalLen;
+                        rocket->impactNormal.z /= normalLen;
+
+                        // Ensure the normal points back toward the projectile
+                        // side of the surface.
+                        const F32 normalDotIncoming =
+                            rocket->impactNormal.x * ray.dir.x +
+                            rocket->impactNormal.y * ray.dir.y +
+                            rocket->impactNormal.z * ray.dir.z;
+                        if (normalDotIncoming > 0.0f)
+                        {
+                            rocket->impactNormal.x = -rocket->impactNormal.x;
+                            rocket->impactNormal.y = -rocket->impactNormal.y;
+                            rocket->impactNormal.z = -rocket->impactNormal.z;
+                        }
+                    }
+                    else
+                    {
+                        rocket->impactNormal = {-ray.dir.x, -ray.dir.y, -ray.dir.z};
+                    }
+
+                    rocket->impacted = true;
+                    rocket->terminated = true;
+                    rocket->active = false;
+                    rocket->impactTime = 5.0f;
+                    rocket->exposureSampleTime = 5.0f;
+
+                    // Build the splash diagnostic once, at the moment the
+                    // rocket impacts. This deliberately does not apply damage.
+                    TF2Bridge_BuildRocketExplosionDiagnostics(rocket);
+
+                    // BFBB is authoritative for world collision. Tell the
+                    // actual TF2 rocket to terminate at this exact impact
+                    // point; this is still not an explosion/damage event.
+                    iTF2BridgeSendRocketImpact(entIndex, rocket->impact.x,
+                                               rocket->impact.y, rocket->impact.z);
+
+                    printf("bfbb: tf2bridge -- rocket %d impact source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) radius=%.2f\n",
+                        entIndex,
+                        (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
+                        (double)in->rocketPos[i][2],
+                        (double)rocket->impact.x, (double)rocket->impact.y,
+                        (double)rocket->impact.z, (double)rocket->radius);
+                }
+            }
+        }
+
+        rocket->pos = pos;
+        rocket->prevPos = pos;
+        rocket->hasPrevious = true;
+    }
+
+    // A rocket no longer present in the TF2 packet is no longer drawn as a
+    // live diagnostic. An impact marker, if one exists, is allowed to finish
+    // its configured lifetime.
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        if (sRocketDebug[i].entIndex != 0 && !seen[i])
+        {
+            // The entity has disappeared from TF2's projectile list. This is
+            // the point at which its diagnostic track may finally be reused.
+            sRocketDebug[i] = {};
+        }
+    }
+
+    // Numeric source/BFBB comparison, throttled so one fast rocket does not
+    // flood the console.
+    if (count > 0)
+    {
+        sRocketDebugPrintTimer -= gSceneUpdateTime;
+        if (sRocketDebugPrintTimer <= 0.0f)
+        {
+            const uint32_t i = 0;
+            const xVec3 bfbbPos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
+                                             in->rocketPos[i][2], in->scale);
+            printf("bfbb: tf2bridge -- rocket %d source=(%.2f %.2f %.2f) bfbb=(%.3f %.3f %.3f) radius=%.2f\n",
+                in->rocketEntIndex[i],
+                (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
+                (double)in->rocketPos[i][2],
+                (double)bfbbPos.x, (double)bfbbPos.y, (double)bfbbPos.z,
+                (double)(in->rocketRadius[i] / in->scale));
+            sRocketDebugPrintTimer = 0.25f;
+        }
+    }
+}
+
+void zTF2Bridge_Frame()
+{
+
+    static bool sInited = false;
+    if (!sInited)
+    {
+        sInited = true;
+        iTF2BridgeInit();
+    }
+
+    if (!iTF2BridgeActive())
+    {
+        return;
+    }
+
+    iTF2BridgePoll();
+
+    const bool playing = zGameModeGet() == eGameMode_Game;
+
+    // Temporary combat bridge: prefer the real TF2 weapon-fire event when
+    // present, but retain the old attack-edge path as a fallback for weapons
+    // that do not yet report through the common weapon bases. A packet with
+    // BRIDGE_WEAPON_FIRED is consumed instead of the attack edge, so one TF2
+    // attack cannot produce two BFBB hits.
+    static uint32_t sLastIntentSeq = 0;
+    static bool sLastAttack = false;
+    const BridgeIntentPacket* attackIn = iTF2BridgeGetIntent();
+    if (playing && attackIn != NULL && attackIn->seq != sLastIntentSeq)
+    {
+        const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
+        const bool fired = (attackIn->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
+
+        TF2Bridge_ProcessRocketDiagnostics(attackIn);
+
+        if (attackIn->hitscanCount > 0)
+        {
+            const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
+                ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
+            sHitscanDebugCount = count;
+            sHitscanDebugTime = 2.0f;
+
+            // One diagnostic line per hitscan packet. This compares the exact
+            // Source fire point/direction with the BFBB coordinates used by
+            // collision and with the camera that BFBB is actually rendering.
+            const xVec3 debugOrigin = FromSource(attackIn->hitscanOrigin[0],
+                attackIn->hitscanOrigin[1], attackIn->hitscanOrigin[2], attackIn->scale);
+            const xVec3 debugDir = FromSource(attackIn->hitscanDir[0][0],
+                attackIn->hitscanDir[0][1], attackIn->hitscanDir[0][2], 1.0f);
+            const xMat4x3& debugCam = globals.camera.mat;
+            printf("bfbb: tf2bridge -- hitscan debug sourceOrigin %.2f %.2f %.2f sourceDir %.3f %.3f %.3f\\n",
+                (double)attackIn->hitscanOrigin[0], (double)attackIn->hitscanOrigin[1],
+                (double)attackIn->hitscanOrigin[2], (double)attackIn->hitscanDir[0][0],
+                (double)attackIn->hitscanDir[0][1], (double)attackIn->hitscanDir[0][2]);
+            printf("bfbb: tf2bridge -- hitscan debug bfbbOrigin %.2f %.2f %.2f bfbbDir %.3f %.3f %.3f camera %.2f %.2f %.2f at %.3f %.3f %.3f\\n",
+                (double)debugOrigin.x, (double)debugOrigin.y, (double)debugOrigin.z,
+                (double)debugDir.x, (double)debugDir.y, (double)debugDir.z,
+                (double)debugCam.pos.x, (double)debugCam.pos.y, (double)debugCam.pos.z,
+                (double)debugCam.at.x, (double)debugCam.at.y, (double)debugCam.at.z);
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const xVec3 origin = FromSource(attackIn->hitscanOrigin[0],
+                    attackIn->hitscanOrigin[1], attackIn->hitscanOrigin[2], attackIn->scale);
+                const xVec3 dir = FromSource(attackIn->hitscanDir[i][0],
+                    attackIn->hitscanDir[i][1], attackIn->hitscanDir[i][2], 1.0f);
+                sHitscanDebugRays[i].origin = origin;
+                sHitscanDebugRays[i].end.x = origin.x + dir.x * (attackIn->hitscanRange / attackIn->scale);
+                sHitscanDebugRays[i].end.y = origin.y + dir.y * (attackIn->hitscanRange / attackIn->scale);
+                sHitscanDebugRays[i].end.z = origin.z + dir.z * (attackIn->hitscanRange / attackIn->scale);
+                TF2Bridge_FireHitscanRay(attackIn, attackIn->hitscanOrigin,
+                    attackIn->hitscanDir[i], attackIn->hitscanRange, i);
+            }
+        }
+        else if (fired)
+        {
+            TF2Bridge_FireAtNPCs(attackIn);
+        }
+        else if (attack && !sLastAttack)
+        {
+            TF2Bridge_FireAtNPCs(attackIn);
+        }
+        sLastAttack = attack;
+        sLastIntentSeq = attackIn->seq;
+    }
+
+    const BridgeIntentPacket* in = iTF2BridgeGetIntent();
+    if (playing && in != NULL && !(in->flags & BRIDGE_INTENT_OWNS_MOVE))
+    {
+        WalkStickFromView(in);
+    }
+    else
+    {
+        iTF2BridgeSetStick(FALSE, 0.0f, 0.0f);
+    }
+
+    BridgeStatePacket st = {};
+    st.flags = 0;
+
+    if (playing && globals.player.ent.frame != NULL)
+    {
+        const xMat4x3& m = globals.player.ent.frame->mat;
+        st.x = m.pos.x;
+        st.y = m.pos.y;
+        st.z = m.pos.z;
+        // Facing: atan2(at.x, at.z), degrees, 0 = BFBB +Z. Same number as TF2's yaw.
+        st.yaw = atan2f(m.at.x, m.at.z) * (180.0f / 3.14159265f);
+        st.health = (int32_t)globals.player.Health;
+        st.sceneId = globals.sceneCur != NULL ? globals.sceneCur->sceneID : 0;
+        st.flags |= BRIDGE_STATE_GAMEPLAY;
+        if (BfbbOwnsPlayerNow())
+        {
+            st.flags |= BRIDGE_STATE_CONTROL_OFF;
+        }
+
+        // Once per scene, on the first frame it is in play.
+        static uint32_t sDumpedScene = 0xFFFFFFFFu;
+        if (st.sceneId != sDumpedScene)
+        {
+            sDumpedScene = st.sceneId;
+            DumpSceneCollision(st.sceneId);
+        }
+    }
+
+    iTF2BridgeSendState(&st);
+}
+
+// ---------------------------------------------------------------------------
+// TF2 weapon bridge (first combat milestone).
+//
+// TF2 already sends the user's IN_ATTACK bit with BridgeIntentPacket, so we can
+// keep the first weapon test deliberately small: on the attack edge, trace the
+// same aim ray through BFBB's live NPC bounds and hand the hit to BFBB's normal
+// NPC damage system. This keeps health, hurt/death goals, rewards and scripts
+// on the BFBB side instead of inventing a second health system in TF2.
+//
+// The first pass uses DMGTYP_SIDE as a generic robot hit. The damage amount is
+// therefore still BFBB's normal one-hit/one-damage progression; crits,
+// projectiles, knockback and weapon-specific damage will be layered on later.
+static bool IsTF2BridgeRobot(const zNPCCommon* npc)
+{
+    if (npc == NULL)
+        return false;
+
+    switch (npc->SelfType())
+    {
+    case NPC_TYPE_FODDER:
+    case NPC_TYPE_FODDERTOUGH:
+    case NPC_TYPE_FODBOMB:
+    case NPC_TYPE_CHOMPER:
+    case NPC_TYPE_FODBZZT:
+    case NPC_TYPE_HAMMER:
+    case NPC_TYPE_HAMSPIN:    case NPC_TYPE_TARTAR:
+    case NPC_TYPE_GLOVE:
+    case NPC_TYPE_MONSOON:
+    case NPC_TYPE_SLEEPY:
+    case NPC_TYPE_ARFDOG:
+    case NPC_TYPE_ARFARF:
+    case NPC_TYPE_CHUCK:
+    case NPC_TYPE_TUBELET:
+    case NPC_TYPE_TUBESLAVE:
+    case NPC_TYPE_SLICK:
+    case NPC_TYPE_SLICK_TOUHOU:
+    case NPC_TYPE_DUPLOTRON:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float sourceOrigin[3],
+    const float sourceDir[3], float sourceRange, uint32_t debugIndex)
+{
+    if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
+        return;
+
+    const xVec3 origin = FromSource(sourceOrigin[0], sourceOrigin[1], sourceOrigin[2], in->scale);
+    xVec3 dir = FromSource(sourceDir[0], sourceDir[1], sourceDir[2], 1.0f);
+
+    xRay3 ray;
+    ray.origin = origin;
+    ray.dir = dir;
+    ray.min_t = 0.0f;
+    ray.max_t = sourceRange / in->scale;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    // Let BFBB perform the world trace against the same environment collision
+    // it uses for gameplay. On PC levels this is the JSP collision tree, so this
+    // is not a second copy of the level geometry and it stays authoritative to
+    // BFBB. Keep the normal requested now as groundwork for projectile bounces.
+    xCollis worldHit;
+    memset(&worldHit, 0, sizeof(worldHit));
+    worldHit.flags = k_HIT_0x200;
+    const bool hitWorld = iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0;
+    const F32 worldDist = hitWorld ? worldHit.dist : FLOAT_MAX;
+
+    // Make the diagnostic ray stop at the first BFBB world surface. This makes
+    // walls/ground immediately visible in the temporary debug renderer.
+    if (debugIndex < BRIDGE_MAX_HITSCAN_RAYS && hitWorld)
+    {
+        sHitscanDebugRays[debugIndex].end.x = origin.x + dir.x * worldDist;
+        sHitscanDebugRays[debugIndex].end.y = origin.y + dir.y * worldDist;
+        sHitscanDebugRays[debugIndex].end.z = origin.z + dir.z * worldDist;
+    }
+
+    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+    if (npclist == NULL)
+        return;
+
+    zNPCCommon* best = NULL;
+    F32 bestDist = FLOAT_MAX;
+    for (S32 i = 0; i < npclist->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+        if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
+            continue;
+
+        xCollis hit;
+        memset(&hit, 0, sizeof(hit));
+        hit.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+        xRayHitsBound(&ray, &npc->bound, &hit);
+        if ((hit.flags & 0x1) && hit.dist < bestDist)
+        {
+            bestDist = hit.dist;
+            best = npc;
+        }
+    }
+
+    // The BFBB environment is opaque to a hitscan shot. If the first JSP/world
+    // surface is at or before the first NPC bound, the shot stops there.
+    if (best == NULL || worldDist <= bestDist)
+    {
+        if (hitWorld)
+        {
+            printf("bfbb: tf2bridge -- hitscan ray blocked by world at %.2f mat %u\n",
+                (double)worldDist, (unsigned)worldHit.oid);
+        }
+        else
+        {
+            printf("bfbb: tf2bridge -- hitscan ray no NPC hit dir %.3f %.3f %.3f range %.1f\n",
+                (double)dir.x, (double)dir.y, (double)dir.z, (double)sourceRange);
+        }
+        return;
+    }
+
+    best->Damage(DMGTYP_SIDE, NULL, &dir);
+    printf("bfbb: tf2bridge -- hitscan ray hit NPC type %d at %.2f dir %.3f %.3f %.3f\n",
+        (int)best->SelfType(), (double)bestDist,
+        (double)dir.x, (double)dir.y, (double)dir.z);
+}
+
+static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
+{
+    if (in == NULL || !(in->buttons & BRIDGE_IN_ATTACK) || globals.sceneCur == NULL)
+        return;
+
+    // Use the TF2 eye transform that is already driving BFBB's camera. This
+    // means the bullet goes exactly where the player is looking in TF2.
+    const xVec3 origin = FromSource(in->ex, in->ey, in->ez, in->scale);
+    const float yaw = in->yaw * kDegToRad;
+    const float pitch = in->pitch * kDegToRad;
+    const float cp = cosf(pitch);
+    xVec3 dir;
+    dir.x = cp * sinf(yaw);
+    dir.y = -sinf(pitch);
+    dir.z = cp * cosf(yaw);
+
+    xRay3 ray;
+    ray.origin = origin;
+    ray.dir = dir;
+    ray.min_t = 0.0f;
+    // Melee is deliberately short-range; ranged weapons keep the original
+    // proof-of-concept long trace until their own projectile/hitscan paths land.
+    ray.max_t = (in->weaponflags & BRIDGE_WEAPON_MELEE) ? (110.0f / in->scale) : 1000.0f;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+    if (npclist == NULL)
+        return;
+
+    zNPCCommon* best = NULL;
+    F32 bestDist = FLOAT_MAX;
+    for (S32 i = 0; i < npclist->cnt; i++)
+    {
+        zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+        if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
+            continue;
+
+        xCollis hit;
+        memset(&hit, 0, sizeof(hit));
+        hit.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+        xRayHitsBound(&ray, &npc->bound, &hit);
+        if ((hit.flags & 0x1) && hit.dist < bestDist)
+        {
+            bestDist = hit.dist;
+            best = npc;
+        }
+    }
+
+    if (best == NULL)
+        return;
+
+    // BFBB's robot damage code expects the hit vector to describe the incoming
+    // direction, not an absolute world position. Let its normal damage path do
+    // the rest (HP, damage goal, death animation, rewards, etc.).
+    best->Damage(DMGTYP_SIDE, NULL, &dir);
+    printf("bfbb: tf2bridge -- shot hit NPC type %d at %.2f\n", (int)best->SelfType(),
+           (double)bestDist);
+}
+
+// Called from zGameLoop right after the player entity updated. When TF2 is
+// running the movement, put the player where TF2 says he is.
+void zTF2Bridge_AfterPlayerUpdate()
+{
+    const BridgeIntentPacket* in = PuppetIntent();
+    if (in == NULL)
+    {
+        return;
+    }
+
+    xEnt& e = globals.player.ent;
+    if (e.frame == NULL || e.model == NULL)
+    {
+        return;
+    }
+
+    const xVec3 p = FromSource(in->px, in->py, in->pz, in->scale);
+
+    e.frame->mat.pos = p;
+    e.frame->oldmat.pos = p;
+    *xEntGetPos(&e) = p; // the model's own matrix
+
+    // TF2 owns the motion; BFBB's player must not also integrate any of his own.
+    e.frame->vel.x = e.frame->vel.y = e.frame->vel.z = 0.0f;
+    e.frame->dpos.x = e.frame->dpos.y = e.frame->dpos.z = 0.0f;
+    e.frame->dvel.x = e.frame->dvel.y = e.frame->dvel.z = 0.0f;
+
+    // Face where TF2 faces (heading only).
+    const float yaw = in->yaw * kDegToRad;
+    xMat4x3& m = e.frame->mat;
+    m.at.x = sinf(yaw);
+    m.at.y = 0.0f;
+    m.at.z = cosf(yaw);
+    m.up.x = 0.0f;
+    m.up.y = 1.0f;
+    m.up.z = 0.0f;
+    m.right.x = cosf(yaw);
+    m.right.y = 0.0f;
+    m.right.z = -sinf(yaw);
+
+    xBoundUpdate(&e.bound);
+}
+
+// Called from zGameLoop right after zCameraUpdate and before the camera is
+// handed to the renderer. When TF2 is running the movement, look through TF2's
+// eyes (first person).
+void zTF2Bridge_AfterCameraUpdate()
+{
+    const BridgeIntentPacket* in = PuppetIntent();
+    if (in == NULL || globals.camera.lo_cam == NULL)
+    {
+        return;
+    }
+
+    const float yaw = in->yaw * kDegToRad;
+    const float pitch = in->pitch * kDegToRad; // positive looks down
+
+    // Forward, then right = up x at (so an unrotated camera has right = +X,
+    // which the renderer shows on screen-left; that is how it is meant to be),
+    // then up = at x right.
+    const float cp = cosf(pitch);
+    float at[3] = { cp * sinf(yaw), -sinf(pitch), cp * cosf(yaw) };
+
+    float right[3] = { at[2], 0.0f, -at[0] }; // (0,1,0) x at
+    const float rl = sqrtf(right[0] * right[0] + right[2] * right[2]);
+    if (rl < 0.0001f)
+    {
+        return; // looking straight up or down
+    }
+    right[0] /= rl;
+    right[2] /= rl;
+
+    float up[3] = { at[1] * right[2] - at[2] * right[1], at[2] * right[0] - at[0] * right[2],
+                    at[0] * right[1] - at[1] * right[0] };
+
+    xMat4x3& cm = globals.camera.mat;
+    cm.right.x = right[0];
+    cm.right.y = right[1];
+    cm.right.z = right[2];
+    cm.up.x = up[0];
+    cm.up.y = up[1];
+    cm.up.z = up[2];
+    cm.at.x = at[0];
+    cm.at.y = at[1];
+    cm.at.z = at[2];
+    cm.pos = FromSource(in->ex, in->ey, in->ez, in->scale);
+
+    iCameraUpdatePos(globals.camera.lo_cam, &cm);
+}
+
+
+void zTF2Bridge_DebugRenderRockets()
+{
+    bool any = false;
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        if (sRocketDebug[i].active || (sRocketDebug[i].impacted && sRocketDebug[i].impactTime > 0.0f))
+        {
+            any = true;
+            break;
+        }
+    }
+
+    if (!any)
+        return;
+
+    void* oldTexture = NULL;
+    void* oldSrcBlend = NULL;
+    void* oldDstBlend = NULL;
+    void* oldVertexAlpha = NULL;
+    void* oldZWrite = NULL;
+    void* oldZTest = NULL;
+    RwRenderStateGet(rwRENDERSTATETEXTURERASTER, &oldTexture);
+    RwRenderStateGet(rwRENDERSTATESRCBLEND, &oldSrcBlend);
+    RwRenderStateGet(rwRENDERSTATEDESTBLEND, &oldDstBlend);
+    RwRenderStateGet(rwRENDERSTATEVERTEXALPHAENABLE, &oldVertexAlpha);
+    RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, &oldZWrite);
+    RwRenderStateGet(rwRENDERSTATEZTESTENABLE, &oldZTest);
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+
+    const float pi2 = 6.283185307f;
+    const float marker = 1.5f;
+
+    // Each rocket gets a small cross while alive. An impacted rocket becomes
+    // a persistent impact cross plus three orthogonal radius rings.
+    for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
+    {
+        TF2BridgeDebugRocket& rocket = sRocketDebug[i];
+
+        if (rocket.sweepTime > 0.0f)
+        {
+            const float endpointMarker = 0.65f;
+            RwIm3DVertex endpoints[12];
+
+            const xVec3& a = rocket.sweepStart;
+            const xVec3& b = rocket.sweepEnd;
+
+            RwIm3DVertexSetPos(&endpoints[0], a.x - endpointMarker, a.y, a.z);
+            RwIm3DVertexSetPos(&endpoints[1], a.x + endpointMarker, a.y, a.z);
+            RwIm3DVertexSetPos(&endpoints[2], a.x, a.y - endpointMarker, a.z);
+            RwIm3DVertexSetPos(&endpoints[3], a.x, a.y + endpointMarker, a.z);
+            RwIm3DVertexSetPos(&endpoints[4], a.x, a.y, a.z - endpointMarker);
+            RwIm3DVertexSetPos(&endpoints[5], a.x, a.y, a.z + endpointMarker);
+
+            RwIm3DVertexSetPos(&endpoints[6], b.x - endpointMarker, b.y, b.z);
+            RwIm3DVertexSetPos(&endpoints[7], b.x + endpointMarker, b.y, b.z);
+            RwIm3DVertexSetPos(&endpoints[8], b.x, b.y - endpointMarker, b.z);
+            RwIm3DVertexSetPos(&endpoints[9], b.x, b.y + endpointMarker, b.z);
+            RwIm3DVertexSetPos(&endpoints[10], b.x, b.y, b.z - endpointMarker);
+            RwIm3DVertexSetPos(&endpoints[11], b.x, b.y, b.z + endpointMarker);
+
+            const uint8_t cr = rocket.sweepHit ? 255 : 80;
+            const uint8_t cg = rocket.sweepHit ? 80 : 220;
+            const uint8_t cb = rocket.sweepHit ? 80 : 255;
+            for (int v = 0; v < 12; ++v)
+                RwIm3DVertexSetRGBA(&endpoints[v], cr, cg, cb, 255);
+
+            if (RwIm3DTransform(endpoints, 12, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            RwIm3DVertex sweep[2];
+            RwIm3DVertexSetPos(&sweep[0], rocket.sweepStart.x, rocket.sweepStart.y, rocket.sweepStart.z);
+            RwIm3DVertexSetRGBA(&sweep[0],
+                rocket.sweepHit ? 255 : 80,
+                rocket.sweepHit ? 80 : 220,
+                rocket.sweepHit ? 80 : 255, 255);
+            RwIm3DVertexSetPos(&sweep[1], rocket.sweepEnd.x, rocket.sweepEnd.y, rocket.sweepEnd.z);
+            RwIm3DVertexSetRGBA(&sweep[1],
+                rocket.sweepHit ? 255 : 80,
+                rocket.sweepHit ? 80 : 220,
+                rocket.sweepHit ? 80 : 255, 255);
+
+            if (RwIm3DTransform(sweep, 2, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            rocket.sweepTime -= gSceneUpdateTime;
+            if (rocket.sweepTime < 0.0f)
+                rocket.sweepTime = 0.0f;
+        }
+
+        if (rocket.active && !rocket.impacted)
+        {
+            RwIm3DVertex verts[6];
+            const xVec3& p = rocket.pos;
+
+            RwIm3DVertexSetPos(&verts[0], p.x - marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&verts[0], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[1], p.x + marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&verts[1], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[2], p.x, p.y - marker, p.z);
+            RwIm3DVertexSetRGBA(&verts[2], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[3], p.x, p.y + marker, p.z);
+            RwIm3DVertexSetRGBA(&verts[3], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[4], p.x, p.y, p.z - marker);
+            RwIm3DVertexSetRGBA(&verts[4], 255, 220, 0, 255);
+            RwIm3DVertexSetPos(&verts[5], p.x, p.y, p.z + marker);
+            RwIm3DVertexSetRGBA(&verts[5], 255, 220, 0, 255);
+
+            if (RwIm3DTransform(verts, 6, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+        }
+
+        if (rocket.impacted && rocket.impactTime > 0.0f)
+        {
+            const xVec3& p = rocket.impact;
+            RwIm3DVertex cross[6];
+
+            RwIm3DVertexSetPos(&cross[0], p.x - marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&cross[0], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[1], p.x + marker, p.y, p.z);
+            RwIm3DVertexSetRGBA(&cross[1], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[2], p.x, p.y - marker, p.z);
+            RwIm3DVertexSetRGBA(&cross[2], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[3], p.x, p.y + marker, p.z);
+            RwIm3DVertexSetRGBA(&cross[3], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[4], p.x, p.y, p.z - marker);
+            RwIm3DVertexSetRGBA(&cross[4], 255, 80, 80, 255);
+            RwIm3DVertexSetPos(&cross[5], p.x, p.y, p.z + marker);
+            RwIm3DVertexSetRGBA(&cross[5], 255, 80, 80, 255);
+
+            if (RwIm3DTransform(cross, 6, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            // Exposure sample markers:
+            //   green  = visible to the explosion
+            //   red    = inside the blast but directly blocked
+            //   cyan   = direct ray blocked, but a bounded alternate path exists
+            //   yellow = inside the NPC bound but outside the blast radius
+            // These deliberately last five seconds so the individual sample
+            // distribution can be inspected in screenshots.
+            if (rocket.exposureSampleTime > 0.0f)
+            {
+                const float sampleMarker = 0.18f;
+                for (uint32_t s = 0; s < rocket.exposureSampleCount; ++s)
+                {
+                    const xVec3& q = rocket.exposureSamplePos[s];
+                    uint8_t cr = 120, cg = 120, cb = 120;
+                    if (rocket.exposureSampleState[s] == 1)
+                    {
+                        cr = 255; cg = 220; cb = 40;
+                    }
+                    else if (rocket.exposureSampleState[s] == 2)
+                    {
+                        cr = 255; cg = 60; cb = 60;
+                    }
+                    else if (rocket.exposureSampleState[s] == 3)
+                    {
+                        cr = 60; cg = 255; cb = 80;
+                    }
+                    else if (rocket.exposureSampleState[s] == 4)
+                    {
+                        cr = 40; cg = 255; cb = 255;
+                    }
+
+                    RwIm3DVertex sampleVerts[6];
+                    RwIm3DVertexSetPos(&sampleVerts[0], q.x - sampleMarker, q.y, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[0], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[1], q.x + sampleMarker, q.y, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[1], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[2], q.x, q.y - sampleMarker, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[2], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[3], q.x, q.y + sampleMarker, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[3], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[4], q.x, q.y, q.z - sampleMarker);
+                    RwIm3DVertexSetRGBA(&sampleVerts[4], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[5], q.x, q.y, q.z + sampleMarker);
+                    RwIm3DVertexSetRGBA(&sampleVerts[5], cr, cg, cb, 255);
+
+                    if (RwIm3DTransform(sampleVerts, 6, NULL,
+                                        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+                    {
+                        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                        RwIm3DEnd();
+                    }
+                }
+            }
+
+            // Explosion target markers: cyan means the NPC is
+            // inside the blast radius and visible from the impact; orange
+            // means the blast radius reaches it but BFBB world geometry blocks
+            // the diagnostic line of sight.
+            for (uint32_t t = 0; t < rocket.explosionTargetCount; ++t)
+            {
+                const TF2BridgeDebugExplosionTarget& target = rocket.explosionTargets[t];
+                const xVec3& q = target.pos;
+                const float targetMarker = 0.75f;
+                const uint8_t r = target.visible ? 80 : 255;
+                const uint8_t g = target.visible ? 220 : 150;
+                const uint8_t b = target.visible ? 255 : 40;
+
+                RwIm3DVertex targetCross[6];
+                RwIm3DVertexSetPos(&targetCross[0], q.x - targetMarker, q.y, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[0], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[1], q.x + targetMarker, q.y, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[1], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[2], q.x, q.y - targetMarker, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[2], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[3], q.x, q.y + targetMarker, q.z);
+                RwIm3DVertexSetRGBA(&targetCross[3], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[4], q.x, q.y, q.z - targetMarker);
+                RwIm3DVertexSetRGBA(&targetCross[4], r, g, b, 255);
+                RwIm3DVertexSetPos(&targetCross[5], q.x, q.y, q.z + targetMarker);
+                RwIm3DVertexSetRGBA(&targetCross[5], r, g, b, 255);
+
+                if (RwIm3DTransform(targetCross, 6, NULL,
+                                    rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+                {
+                    RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                    RwIm3DEnd();
+                }
+            }
+
+            const int segments = 32;
+            RwIm3DVertex rings[segments * 6];
+            int n = 0;
+            for (int s = 0; s < segments; ++s)
+            {
+                const float a0 = pi2 * (float)s / (float)segments;
+                const float a1 = pi2 * (float)(s + 1) / (float)segments;
+                const float c0 = cosf(a0);
+                const float s0 = sinf(a0);
+                const float c1 = cosf(a1);
+                const float s1 = sinf(a1);
+
+                // XY plane.
+                RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
+                                   p.y + s0 * rocket.radius, p.z);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
+                                   p.y + s1 * rocket.radius, p.z);                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+
+                // XZ plane.
+                RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
+                                   p.y, p.z + s0 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
+                                   p.y, p.z + s1 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+
+                // YZ plane.
+                RwIm3DVertexSetPos(&rings[n], p.x, p.y + c0 * rocket.radius,
+                                   p.z + s0 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x, p.y + c1 * rocket.radius,
+                                   p.z + s1 * rocket.radius);
+                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+            }
+
+            if (RwIm3DTransform(rings, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+            {
+                RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                RwIm3DEnd();
+            }
+
+            rocket.impactTime -= gSceneUpdateTime;
+            rocket.exposureSampleTime -= gSceneUpdateTime;
+            if (rocket.impactTime <= 0.0f)
+            {
+                rocket.impactTime = 0.0f;
+                rocket.impacted = false;
+                rocket.active = false;
+                rocket.hasPrevious = false;
+                // Keep entIndex/terminated until TF2 stops reporting this
+                // entity. This prevents a lingering projectile from being
+                // mistaken for a fresh trajectory after the marker expires.
+            }
+        }
+    }
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, oldTexture);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, oldSrcBlend);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, oldDstBlend);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
+}
+
+void zTF2Bridge_DebugRenderHitscan()
+{
+    if (sHitscanDebugCount == 0)
+        return;
+
+    // Diagnostic only. Do not try to make the full 8192-unit ray look pretty
+    // yet; first prove that the fire origin and direction agree with BFBB's
+    // actual camera. The origin and camera get bright cross markers, and the
+    // first ray gets a short, easy-to-see direction stub.
+    const TF2BridgeDebugRay& ray = sHitscanDebugRays[0];
+    const xMat4x3& cam = globals.camera.mat;
+
+    void* oldTexture = NULL;
+    void* oldSrcBlend = NULL;
+    void* oldDstBlend = NULL;
+    void* oldVertexAlpha = NULL;
+    void* oldZWrite = NULL;
+    void* oldZTest = NULL;
+    RwRenderStateGet(rwRENDERSTATETEXTURERASTER, &oldTexture);
+    RwRenderStateGet(rwRENDERSTATESRCBLEND, &oldSrcBlend);
+    RwRenderStateGet(rwRENDERSTATEDESTBLEND, &oldDstBlend);
+    RwRenderStateGet(rwRENDERSTATEVERTEXALPHAENABLE, &oldVertexAlpha);
+    RwRenderStateGet(rwRENDERSTATEZWRITEENABLE, &oldZWrite);
+    RwRenderStateGet(rwRENDERSTATEZTESTENABLE, &oldZTest);
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+
+    // Three visual tests:
+    //   1. yellow cross = exact TF2 fire origin after Source -> BFBB mapping
+    //   2. cyan cross   = BFBB camera position currently used for rendering
+    //   3. red stub    = first TF2 ray direction, only 8 BFBB units long
+    //
+    // A fourth, longer yellow line connects camera -> fire origin. This lets us
+    // immediately see whether the Source fire point is merely a muzzle/eye
+    // offset rather than being wildly displaced.
+    const float markerOrigin = 2.5f;
+    const float markerCamera = 2.5f;
+    const float stubLength = 20.0f;
+
+    RwIm3DVertex verts[20];
+    int n = 0;
+
+    const xVec3 o = ray.origin;
+    const xVec3 c = cam.pos;
+
+    const float vx = ray.end.x - o.x;
+    const float vy = ray.end.y - o.y;
+    const float vz = ray.end.z - o.z;
+    const float len = sqrtf(vx * vx + vy * vy + vz * vz);
+    const float invLen = len > 0.000001f ? 1.0f / len : 0.0f;
+
+    const xVec3 d = {
+        o.x + vx * stubLength * invLen,
+        o.y + vy * stubLength * invLen,
+        o.z + vz * stubLength * invLen
+    };
+
+    // The current BFBB camera is rebuilt from the TF2 eye every frame.
+
+    // Origin cross: yellow.
+    RwIm3DVertexSetPos(&verts[n], o.x - markerOrigin, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x + markerOrigin, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y - markerOrigin, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y + markerOrigin, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z - markerOrigin);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z + markerOrigin);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+
+    // Camera cross: cyan.
+    RwIm3DVertexSetPos(&verts[n], c.x - markerCamera, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x + markerCamera, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y - markerCamera, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y + markerCamera, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z - markerCamera);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z + markerCamera);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+
+    // Camera -> fire-origin connector: magenta.
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
+
+    // Full hitscan ray: red. The endpoint is the actual 8192-Source-unit
+    // endpoint (about 204.8 BFBB units at the current scale of 40).
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], ray.end.x, ray.end.y, ray.end.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
+
+    if (RwIm3DTransform(verts, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    {
+        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+        RwIm3DEnd();
+    }
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, oldTexture);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, oldSrcBlend);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, oldDstBlend);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
+
+    if (sHitscanDebugTime > 0.0f)
+    {
+        sHitscanDebugTime -= gSceneUpdateTime;
+        if (sHitscanDebugTime <= 0.0f)
+        {
+            sHitscanDebugTime = 0.0f;
+            sHitscanDebugCount = 0;
+        }
+    }
+}
