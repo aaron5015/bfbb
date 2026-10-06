@@ -470,128 +470,158 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     return !validHit;
 }
 
-static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
-    const xVec3& sample, F32 blastRadius)
+static void TF2Bridge_RocketAddTargetPoint(xVec3* points, int* count, int maxCount, const xVec3& p)
 {
-    const F32 dx = sample.x - origin.x;
-    const F32 dy = sample.y - origin.y;
-    const F32 dz = sample.z - origin.z;
-    const F32 sampleDistanceSq = dx * dx + dy * dy + dz * dz;
-    if (sampleDistanceSq <= 0.000001f || blastRadius <= 0.000001f)
-        return false;
+    if (*count >= maxCount)
+        return;
 
-    const F32 sampleDistance = sqrtf(sampleDistanceSq);
-    const F32 invDistance = 1.0f / sampleDistance;
-    const F32 dirX = dx * invDistance;
-    const F32 dirY = dy * invDistance;
-    const F32 dirZ = dz * invDistance;
+    // Avoid duplicating the center/nearest point when a bound is very small.
+    for (int i = 0; i < *count; ++i)
+    {
+        const F32 dx = points[i].x - p.x;
+        const F32 dy = points[i].y - p.y;
+        const F32 dz = points[i].z - p.z;
+        if (dx * dx + dy * dy + dz * dz <= 0.000001f)
+            return;
+    }
 
-    // First recover the actual surface that blocked the direct explosion ray.
-    // Alternate routes are allowed to go around that surface, but never to
-    // start on the opposite side of it. This prevents the waypoint search from
-    // effectively teleporting the blast through a wall.
-    F32 blockerDistance = -1.0f;
-    xVec3 blockerNormal;
-    blockerNormal.x = 0.0f;
-    blockerNormal.y = 0.0f;
-    blockerNormal.z = 0.0f;
+    points[*count] = p;
+    ++*count;
+}
 
-    if (TF2Bridge_RocketSampleVisible(origin, sample,
-        &blockerDistance, NULL, NULL, NULL, NULL, &blockerNormal))
-        return false;
+static int TF2Bridge_RocketBuildTargetPoints(const xBound& bound, xVec3* points, int maxCount)
+{
+    if (points == NULL || maxCount <= 0)
+        return 0;
 
-    const F32 blockerNormalSq =
-        blockerNormal.x * blockerNormal.x +
-        blockerNormal.y * blockerNormal.y +
-        blockerNormal.z * blockerNormal.z;
+    xBox box;
+    xBoundGetBox(box, bound);
 
-    if (blockerDistance < 0.0f || blockerNormalSq <= 0.000001f)
-        return false;
+    const bool obb = bound.type == XBOUND_TYPE_OBB && bound.mat != NULL;
 
-    // RocketSampleVisible starts its collision ray rayEpsilon units forward
-    // from origin, so worldHit.dist is measured from that offset origin.
-    const F32 rayEpsilon = 0.05f;
-    const xVec3 blockerPoint = {
-        origin.x + dirX * (rayEpsilon + blockerDistance),
-        origin.y + dirY * (rayEpsilon + blockerDistance),
-        origin.z + dirZ * (rayEpsilon + blockerDistance)
+    xVec3 localLower = box.lower;
+    xVec3 localUpper = box.upper;
+    xVec3 localCenter;
+    localCenter.x = 0.5f * (localLower.x + localUpper.x);
+    localCenter.y = 0.5f * (localLower.y + localUpper.y);
+    localCenter.z = 0.5f * (localLower.z + localUpper.z);
+
+    auto ToWorld = [&](const xVec3& p) -> xVec3
+    {
+        xVec3 out = p;
+        if (obb)
+            xMat4x3Toworld(&out, bound.mat, &p);
+        return out;
     };
 
-    const F32 explosionSideX = origin.x - blockerPoint.x;
-    const F32 explosionSideY = origin.y - blockerPoint.y;
-    const F32 explosionSideZ = origin.z - blockerPoint.z;
-    const F32 explosionSide =
-        explosionSideX * blockerNormal.x +
-        explosionSideY * blockerNormal.y +
-        explosionSideZ * blockerNormal.z;
+    int count = 0;
 
-    if (fabsf(explosionSide) <= 0.000001f)
-        return false;
-
-    // Search the actual blast volume rather than a fixed 26-direction shell.
-    // A route is valid only when both legs are clear, the total path stays
-    // inside the spherical blast radius, and the waypoint remains on the
-    // explosion-facing side of the surface that blocked the direct ray.
-    const F32 radialFractions[] = { 0.20f, 0.40f, 0.60f, 0.80f, 0.95f };
-    const int radialCount = (int)(sizeof(radialFractions) / sizeof(radialFractions[0]));
-    const int latitudeCount = 7;
-    const int longitudeCount = 16;
-
-    for (int r = 0; r < radialCount; ++r)
+    if (bound.type == XBOUND_TYPE_SPHERE)
     {
-        const F32 waypointDistance = blastRadius * radialFractions[r];
-        if (waypointDistance <= 0.000001f)
-            continue;
+        const xVec3 center = bound.sph.center;
+        TF2Bridge_RocketAddTargetPoint(points, &count, maxCount, center);
 
-        for (int lat = 0; lat < latitudeCount; ++lat)
+        const F32 axisRadius = bound.sph.r;
+        const xVec3 axes[6] = {
+            { center.x + axisRadius, center.y, center.z },
+            { center.x - axisRadius, center.y, center.z },
+            { center.x, center.y + axisRadius, center.z },
+            { center.x, center.y - axisRadius, center.z },
+            { center.x, center.y, center.z + axisRadius },
+            { center.x, center.y, center.z - axisRadius }
+        };
+
+        for (int i = 0; i < 6; ++i)
+            TF2Bridge_RocketAddTargetPoint(points, &count, maxCount, axes[i]);
+
+        return count;
+    }
+
+    // For boxes, use the nearest point plus the center, six face centers, and
+    // the eight corners. These are representative target locations on the
+    // actual NPC bound; unlike the old 8x8x8 grid, they do not turn a single
+    // blocked lip into a percentage-of-volume occlusion rule.
+    const xVec3 center = ToWorld(localCenter);
+
+    TF2Bridge_RocketAddTargetPoint(points, &count, maxCount, center);
+
+    const xVec3 facePoints[6] = {
+        { localUpper.x, localCenter.y, localCenter.z },
+        { localLower.x, localCenter.y, localCenter.z },
+        { localCenter.x, localUpper.y, localCenter.z },
+        { localCenter.x, localLower.y, localCenter.z },
+        { localCenter.x, localCenter.y, localUpper.z },
+        { localCenter.x, localCenter.y, localLower.z }
+    };
+
+    for (int i = 0; i < 6; ++i)
+        TF2Bridge_RocketAddTargetPoint(points, &count, maxCount, ToWorld(facePoints[i]));
+
+    for (int ix = 0; ix < 2; ++ix)
+    {
+        for (int iy = 0; iy < 2; ++iy)
         {
-            const F32 v = -1.0f + 2.0f * (F32)lat / (F32)(latitudeCount - 1);
-            const F32 horizontal = sqrtf(fmaxf(0.0f, 1.0f - v * v));
-
-            for (int lon = 0; lon < longitudeCount; ++lon)
+            for (int iz = 0; iz < 2; ++iz)
             {
-                const F32 angle = 6.283185307f * (F32)lon / (F32)longitudeCount;
-                const F32 c = cosf(angle);
-                const F32 s = sinf(angle);
-
-                const xVec3 waypoint = {
-                    origin.x + horizontal * c * waypointDistance,
-                    origin.y + v * waypointDistance,
-                    origin.z + horizontal * s * waypointDistance
+                const xVec3 corner = {
+                    ix ? localUpper.x : localLower.x,
+                    iy ? localUpper.y : localLower.y,
+                    iz ? localUpper.z : localLower.z
                 };
-
-                const F32 waypointSide =
-                    (waypoint.x - blockerPoint.x) * blockerNormal.x +
-                    (waypoint.y - blockerPoint.y) * blockerNormal.y +
-                    (waypoint.z - blockerPoint.z) * blockerNormal.z;
-
-                // The waypoint must remain on the same side of the actual
-                // blocking surface as the explosion. A waypoint on the target
-                // side would be an artificial shortcut through the cover.
-                if (waypointSide * explosionSide < 0.0f)
-                    continue;
-
-                if (!TF2Bridge_RocketSampleVisible(origin, waypoint))
-                    continue;
-
-                const F32 waypointToSampleX = sample.x - waypoint.x;
-                const F32 waypointToSampleY = sample.y - waypoint.y;
-                const F32 waypointToSampleZ = sample.z - waypoint.z;
-                const F32 waypointToSample = sqrtf(
-                    waypointToSampleX * waypointToSampleX +
-                    waypointToSampleY * waypointToSampleY +
-                    waypointToSampleZ * waypointToSampleZ);
-
-                if (waypointDistance + waypointToSample > blastRadius + 0.001f)
-                    continue;
-
-                if (TF2Bridge_RocketSampleVisible(waypoint, sample))
-                    return true;
+                TF2Bridge_RocketAddTargetPoint(points, &count, maxCount, ToWorld(corner));
             }
         }
     }
 
-    return false;
+    return count;
+}
+
+static xVec3 TF2Bridge_RocketNearestBoundPoint(const xBound& bound, const xVec3& point)
+{
+    if (bound.type == XBOUND_TYPE_SPHERE)
+    {
+        const xVec3 center = bound.sph.center;
+        const F32 dx = point.x - center.x;
+        const F32 dy = point.y - center.y;
+        const F32 dz = point.z - center.z;
+        const F32 lenSq = dx * dx + dy * dy + dz * dz;
+
+        if (lenSq <= 0.000001f || lenSq <= bound.sph.r * bound.sph.r)
+            return center;
+
+        const F32 invLen = bound.sph.r / sqrtf(lenSq);
+        return {
+            center.x + dx * invLen,
+            center.y + dy * invLen,
+            center.z + dz * invLen
+        };
+    }
+
+    xBox box;
+    xBoundGetBox(box, bound);
+
+    xVec3 localPoint = point;
+    const bool obb = bound.type == XBOUND_TYPE_OBB && bound.mat != NULL;
+    if (obb)
+        xMat4x3Tolocal(&localPoint, bound.mat, &point);
+
+    xVec3 nearest = {
+        localPoint.x < box.lower.x ? box.lower.x :
+            (localPoint.x > box.upper.x ? box.upper.x : localPoint.x),
+        localPoint.y < box.lower.y ? box.lower.y :
+            (localPoint.y > box.upper.y ? box.upper.y : localPoint.y),
+        localPoint.z < box.lower.z ? box.lower.z :
+            (localPoint.z > box.upper.z ? box.upper.z : localPoint.z)
+    };
+
+    if (obb)
+    {
+        xVec3 worldPoint;
+        xMat4x3Toworld(&worldPoint, bound.mat, &nearest);
+        return worldPoint;
+    }
+
+    return nearest;
 }
 
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
@@ -610,7 +640,6 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
     const F32 baseDamage = rocket->damage;
     const F32 radius = rocket->radius;
     const F32 radiusSq = radius * radius;
-    const F32 exposureThreshold = TF2Bridge_RocketExposureThreshold();
     const bool applyDamage = TF2Bridge_RocketApplyDamage();
 
     for (S32 i = 0; i < npclist->cnt; ++i)
@@ -619,16 +648,13 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
             continue;
 
-        xBox sampleBox;
-        xBoundGetBox(sampleBox, npc->bound);
-
         const xVec3* center = xBoundCenter(&npc->bound);
         if (center == NULL)
             continue;
 
-        // The broad-phase bound test is only a cheap way to reject NPCs that
-        // cannot possibly overlap the blast.  The actual exposure decision
-        // below is made from the sampled bound volume.
+        // First do the real spherical broad-phase. This is the same basic
+        // separation Source uses: being in the splash radius is independent
+        // of whether the world blocks the eventual target trace.
         xSphere blastSphere;
         blastSphere.center = rocket->impact;
         blastSphere.r = radius;
@@ -637,8 +663,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         memset(&blastHit, 0, sizeof(blastHit));
         blastHit.flags = k_HIT_0x200;
 
-        xSphereHitsBound(&blastSphere, &npc->bound, &blastHit);
-        if ((blastHit.flags & 0x1) == 0)
+        if (!xSphereHitsBound(&blastSphere, &npc->bound, &blastHit))
             continue;
 
         if (rocket->explosionTargetCount >= BRIDGE_MAX_ROCKETS)
@@ -648,150 +673,108 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
         target.pos = *center;
-        target.distance = 0.0f;
+        target.distance = radius;
         target.npcType = (int32_t)npc->SelfType();
         target.visible = false;
 
-        // Sample the NPC's actual bound volume.  A sample only contributes to
-        // splash exposure if it is BOTH inside the rocket's radius and visible
-        // from the explosion.  This prevents a large NPC bound from producing
-        // 100% exposure when the actual robot is outside the blast sphere.
-        S32 blastSamples = 0;
-        S32 visibleSamples = 0;
-        S32 alternatePathSamples = 0;
-        S32 totalSamples = 0;
-        F32 nearestVisibleDistance = FLOAT_MAX;
+        // The old implementation sampled 512 points through the entire bound
+        // and then required 35% of those points to see the explosion. That is
+        // useful for a generic "exposure" effect, but it is not what we want
+        // here: a small lip could hide enough arbitrary interior samples to
+        // make an otherwise exposed robot immune.
+        //
+        // Instead, treat the NPC bound as a collection of meaningful target
+        // locations. Any target point inside the splash sphere that has a
+        // direct, unobstructed ray from the explosion is enough to expose the
+        // NPC. There are no alternate blast paths and no percentage threshold.
+        xVec3 targetPoints[16];
+        int targetPointCount = TF2Bridge_RocketBuildTargetPoints(
+            npc->bound, targetPoints, 16);
 
-        const F32 sampleFrac[8] = {
-            0.0625f, 0.1875f, 0.3125f, 0.4375f,
-            0.5625f, 0.6875f, 0.8125f, 0.9375f
-        };
-
-        for (S32 sx = 0; sx < 8; ++sx)
+        // Always include the actual nearest point to the explosion. This is the
+        // closest analogue to Source's CollisionProp::CalcNearestPoint() and
+        // catches the important "rocket hits the top of a small rock, robot is
+        // exposed beside it" case without inventing a path around the rock.
+        if (targetPointCount < 16)
         {
-            for (S32 sy = 0; sy < 8; ++sy)
+            const xVec3 nearest = TF2Bridge_RocketNearestBoundPoint(
+                npc->bound, rocket->impact);
+            TF2Bridge_RocketAddTargetPoint(
+                targetPoints, &targetPointCount, 16, nearest);
+        }
+
+        // The impact is on JSP collision. Start the splash traces just outside
+        // that exact surface so the triangle containing the impact does not
+        // immediately occlude every target point.
+        const F32 kSplashOriginEpsilon = 0.02f;
+        xVec3 splashOrigin = rocket->impact;
+        splashOrigin.x += rocket->impactNormal.x * kSplashOriginEpsilon;
+        splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
+        splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
+
+        F32 nearestVisibleDistance = FLOAT_MAX;
+        int visiblePointCount = 0;
+        int insidePointCount = 0;
+
+        for (int p = 0; p < targetPointCount; ++p)
+        {
+            const xVec3& sample = targetPoints[p];
+
+            const F32 dx = sample.x - rocket->impact.x;
+            const F32 dy = sample.y - rocket->impact.y;
+            const F32 dz = sample.z - rocket->impact.z;
+            const F32 sampleDistSq = dx * dx + dy * dy + dz * dz;
+
+            if (sampleDistSq > radiusSq)
+                continue;
+
+            ++insidePointCount;
+
+            uint8_t state = 2; // inside blast, directly blocked
+            const bool visible = TF2Bridge_RocketSampleVisible(
+                splashOrigin, sample);
+
+            if (visible)
             {
-                for (S32 sz = 0; sz < 8; ++sz)
-                {
-                    xVec3 sample;
-                    sample.x = sampleBox.lower.x +
-                        (sampleBox.upper.x - sampleBox.lower.x) * sampleFrac[sx];
-                    sample.y = sampleBox.lower.y +
-                        (sampleBox.upper.y - sampleBox.lower.y) * sampleFrac[sy];
-                    sample.z = sampleBox.lower.z +
-                        (sampleBox.upper.z - sampleBox.lower.z) * sampleFrac[sz];
+                ++visiblePointCount;
+                state = 3;
 
-                    xCollis inside;
-                    memset(&inside, 0, sizeof(inside));
-                    xVecHitsBound(&sample, &npc->bound, &inside);
+                const F32 sampleDistance = sqrtf(sampleDistSq);
+                if (sampleDistance < nearestVisibleDistance)
+                    nearestVisibleDistance = sampleDistance;
+            }
 
-                    if ((inside.flags & 0x1) == 0)
-                        continue;
-
-                    const uint32_t sampleIndex = totalSamples;
-                    if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                    {
-                        rocket->exposureSamplePos[sampleIndex] = sample;
-                        rocket->exposureSampleState[sampleIndex] = 1; // outside blast
-                        rocket->exposureSampleCount = sampleIndex + 1;
-                    }
-
-                    ++totalSamples;                    const F32 dx = sample.x - rocket->impact.x;
-                    const F32 dy = sample.y - rocket->impact.y;
-                    const F32 dz = sample.z - rocket->impact.z;
-                    const F32 sampleDistSq = dx * dx + dy * dy + dz * dz;
-
-                    if (sampleDistSq > radiusSq)
-                        continue;
-
-                    ++blastSamples;
-
-                    if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                        rocket->exposureSampleState[sampleIndex] = 2; // blocked
-
-                    // The rocket impact lies on the collision surface.
-                    // Start splash visibility just outside that exact surface
-                    // using the triangle's collision normal. This avoids
-                    // starting rays inside floors, rocks, walls, or other JSP
-                    // triangles when the projectile strikes at an angle.
-                    const F32 kSplashOriginEpsilon = 0.02f;
-                    xVec3 splashOrigin = rocket->impact;
-                    splashOrigin.x += rocket->impactNormal.x * kSplashOriginEpsilon;
-                    splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
-                    splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
-
-                    const bool sampleVisible =
-                        TF2Bridge_RocketSampleVisible(splashOrigin, sample);
-
-                    if (sampleVisible)
-                    {
-                        ++visibleSamples;
-
-                        if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                            rocket->exposureSampleState[sampleIndex] = 3;
-
-                        const F32 sampleDistance = sqrtf(sampleDistSq);
-                        if (sampleDistance < nearestVisibleDistance)
-                            nearestVisibleDistance = sampleDistance;
-                    }
-                    else
-                    {
-                        const bool hasAlternatePath =
-                            TF2Bridge_RocketSampleHasAlternatePath(
-                                splashOrigin, sample, radius);
-                        if (hasAlternatePath)
-                        {
-                            ++alternatePathSamples;
-                            ++visibleSamples;
-                            if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                                rocket->exposureSampleState[sampleIndex] = 4;
-
-                            const F32 sampleDistance = sqrtf(sampleDistSq);
-                            if (sampleDistance < nearestVisibleDistance)
-                                nearestVisibleDistance = sampleDistance;
-                        }
-                    }
-                }
+            if (rocket->exposureSampleCount <
+                TF2BridgeDebugRocket::kMaxExposureSamples)
+            {
+                const uint32_t index = rocket->exposureSampleCount++;
+                rocket->exposureSamplePos[index] = sample;
+                rocket->exposureSampleState[index] = state;
             }
         }
 
-        // Exposure is the visible fraction of the NPC volume that is actually
-        // inside the blast. Samples outside the radius must not count as hidden
-        // splash exposure.
-        const F32 exposure =
-            blastSamples > 0
-                ? (F32)visibleSamples / (F32)blastSamples
-                : 0.0f;
-
-        printf("bfbb: tf2bridge -- rocket alternate-path target type %d samples=%d/%d\n",
-            (int)target.npcType, (int)alternatePathSamples, (int)blastSamples);
-
+        // Keep the nearest point as the diagnostic/damage distance. If none of
+        // the representative target points is visible, the NPC is fully
+        // occluded for our BFBB adaptation of TF2 splash.
         target.distance =
             nearestVisibleDistance < FLOAT_MAX
                 ? nearestVisibleDistance
                 : radius;
 
-        if (totalSamples == 0 || blastSamples == 0 || exposure <= exposureThreshold)
+        if (insidePointCount == 0 || visiblePointCount == 0)
         {
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED threshold=%.1f%% damage=0\n",
+            printf(
+                "bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f "
+                "targetPoints=%d/%d visible=0 BLOCKED damage=0\n",
                 (int)target.npcType, (double)target.distance,
-                (int)visibleSamples, (int)blastSamples,
-                (double)(exposure * 100.0f),
-                (int)blastSamples, (int)totalSamples,
-                (double)(exposureThreshold * 100.0f));
+                visiblePointCount, insidePointCount);
             continue;
         }
 
-        // Any exposed portion of the target is a valid splash hit. Fully
-        // occluded targets still fail the check above, while partial exposure
-        // is preserved instead of being discarded by a hard 35% gate.
         target.visible = true;
 
         // TF2 RadiusDamage uses linear distance falloff:
         // damage - distance * (damage / radius).
-        // Use the nearest actually exposed point of the sampled bound rather
-        // than the NPC center, which may be outside the blast while part of
-        // the NPC is legitimately inside it.
         F32 t = radius > 0.0001f
             ? target.distance / radius
             : 1.0f;
@@ -804,18 +787,20 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (damage > 0.0f && applyDamage)
             npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
 
-        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
+        printf(
+            "bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f "
+            "targetPoints=%d/%d visible=%d (any-visible) damage=%.2f scale=%.3f "
+            "VISIBLE applyDamage=%d\n",
             (int)target.npcType, (double)target.distance,
-            (int)visibleSamples, (int)blastSamples,
-            (double)(exposure * 100.0f),
-            (int)blastSamples, (int)totalSamples,
+            visiblePointCount, insidePointCount, visiblePointCount,
             (double)damage, (double)damageScale,
             applyDamage ? 1 : 0);
     }
 
-    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f exposureThreshold=%.1f%% applyDamage=%d targets=%u\n",
+    printf(
+        "bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f "
+        "occlusion=direct-target-points applyDamage=%d targets=%u\n",
         (double)radius, (double)baseDamage,
-        (double)(exposureThreshold * 100.0f),
         applyDamage ? 1 : 0,
         (unsigned)rocket->explosionTargetCount);
 }
