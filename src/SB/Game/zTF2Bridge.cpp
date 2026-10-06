@@ -888,16 +888,6 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
             sRocketDebug[i].impactTime = 0.0f;
             sRocketDebug[i].entIndex = 0;
             sRocketDebug[i].hasPrevious = false;
-
-    if (in->rocketDebugLifetime <= 0.0f)
-    {
-        for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
-        {
-            sRocketDebug[i].active = false;
-            sRocketDebug[i].impacted = false;
-            sRocketDebug[i].impactTime = 0.0f;
-            sRocketDebug[i].entIndex = 0;
-            sRocketDebug[i].hasPrevious = false;
             sRocketDebug[i].sweepTime = 0.0f;
         }
         return;
