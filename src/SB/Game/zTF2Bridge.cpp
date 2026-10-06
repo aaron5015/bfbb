@@ -427,6 +427,20 @@ static bool TF2Bridge_RocketSampleVisibleAroundCover(const xVec3& origin, const 
     n.y *= invNLen;
     n.z *= invNLen;
 
+    // Do not wrap a blast onto the protected side of the surface that was
+    // actually struck. This is the distinction between going around a wall's
+    // edge and going underneath the top of a ledge: the latter crosses the
+    // impact plane and should remain blocked.
+    const xVec3 toSample = {
+        sample.x - origin.x,
+        sample.y - origin.y,
+        sample.z - origin.z
+    };
+    const F32 sampleSide = toSample.x * n.x + toSample.y * n.y + toSample.z * n.z;
+    const F32 sideEpsilon = 0.05f;
+    if (sampleSide < -sideEpsilon)
+        return false;
+
     xVec3 helper;
     if (fabsf(n.y) < 0.9f)
     {
