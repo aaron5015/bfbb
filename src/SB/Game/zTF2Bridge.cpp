@@ -482,54 +482,57 @@ static bool TF2Bridge_RocketSampleHasAlternatePath(const xVec3& origin,
 
     const F32 sampleDistance = sqrtf(sampleDistanceSq);
 
-    // Diagnostic-only alternate blast paths. Stop at the first valid route;
-    // we only care whether one exists.
-    const F32 directions[26][3] = {
-        {-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f, 0.0f}, {-1.0f, -1.0f, 1.0f},
-        {-1.0f,  0.0f, -1.0f}, {-1.0f,  0.0f, 0.0f}, {-1.0f,  0.0f, 1.0f},
-        {-1.0f,  1.0f, -1.0f}, {-1.0f,  1.0f, 0.0f}, {-1.0f,  1.0f, 1.0f},
-        { 0.0f, -1.0f, -1.0f}, { 0.0f, -1.0f, 0.0f}, { 0.0f, -1.0f, 1.0f},
-        { 0.0f,  0.0f, -1.0f},                         { 0.0f,  0.0f, 1.0f},
-        { 0.0f,  1.0f, -1.0f}, { 0.0f,  1.0f, 0.0f}, { 0.0f,  1.0f, 1.0f},
-        { 1.0f, -1.0f, -1.0f}, { 1.0f, -1.0f, 0.0f}, { 1.0f, -1.0f, 1.0f},
-        { 1.0f,  0.0f, -1.0f}, { 1.0f,  0.0f, 0.0f}, { 1.0f,  0.0f, 1.0f},
-        { 1.0f,  1.0f, -1.0f}, { 1.0f,  1.0f, 0.0f}, { 1.0f,  1.0f, 1.0f}
-    };
+    // Search the actual blast volume rather than a fixed 26-direction shell.
+    // A route is valid only when both legs are clear and the total path stays
+    // inside the spherical blast radius. Multiple radial depths keep the test
+    // from depending on one arbitrary waypoint distance.
+    const F32 radialFractions[] = { 0.20f, 0.40f, 0.60f, 0.80f, 0.95f };
+    const int radialCount = (int)(sizeof(radialFractions) / sizeof(radialFractions[0]));
+    const int latitudeCount = 7;
+    const int longitudeCount = 16;
 
-    const F32 waypointDistance = 0.5f * fminf(blastRadius, sampleDistance);
-    if (waypointDistance <= 0.000001f)
-        return false;
-
-    for (int i = 0; i < 26; ++i)
+    for (int r = 0; r < radialCount; ++r)
     {
-        const F32 len = sqrtf(
-            directions[i][0] * directions[i][0] +
-            directions[i][1] * directions[i][1] +
-            directions[i][2] * directions[i][2]);
-        const F32 invLen = len > 0.000001f ? 1.0f / len : 0.0f;
-
-        const xVec3 waypoint = {
-            origin.x + directions[i][0] * invLen * waypointDistance,
-            origin.y + directions[i][1] * invLen * waypointDistance,
-            origin.z + directions[i][2] * invLen * waypointDistance
-        };
-
-        if (!TF2Bridge_RocketSampleVisible(origin, waypoint))
+        const F32 waypointDistance = blastRadius * radialFractions[r];
+        if (waypointDistance <= 0.000001f)
             continue;
 
-        const F32 waypointToSampleX = sample.x - waypoint.x;
-        const F32 waypointToSampleY = sample.y - waypoint.y;
-        const F32 waypointToSampleZ = sample.z - waypoint.z;
-        const F32 waypointToSample =
-            sqrtf(waypointToSampleX * waypointToSampleX +
-                  waypointToSampleY * waypointToSampleY +
-                  waypointToSampleZ * waypointToSampleZ);
+        for (int lat = 0; lat < latitudeCount; ++lat)
+        {
+            // Uniformly spaced latitude bands over the sphere.
+            const F32 v = -1.0f + 2.0f * (F32)lat / (F32)(latitudeCount - 1);
+            const F32 horizontal = sqrtf(fmaxf(0.0f, 1.0f - v * v));
 
-        if (waypointDistance + waypointToSample > blastRadius + 0.001f)
-            continue;
+            for (int lon = 0; lon < longitudeCount; ++lon)
+            {
+                const F32 angle = 6.283185307f * (F32)lon / (F32)longitudeCount;
+                const F32 c = cosf(angle);
+                const F32 s = sinf(angle);
 
-        if (TF2Bridge_RocketSampleVisible(waypoint, sample))
-            return true;
+                const xVec3 waypoint = {
+                    origin.x + horizontal * c * waypointDistance,
+                    origin.y + v * waypointDistance,
+                    origin.z + horizontal * s * waypointDistance
+                };
+
+                if (!TF2Bridge_RocketSampleVisible(origin, waypoint))
+                    continue;
+
+                const F32 waypointToSampleX = sample.x - waypoint.x;
+                const F32 waypointToSampleY = sample.y - waypoint.y;
+                const F32 waypointToSampleZ = sample.z - waypoint.z;
+                const F32 waypointToSample = sqrtf(
+                    waypointToSampleX * waypointToSampleX +
+                    waypointToSampleY * waypointToSampleY +
+                    waypointToSampleZ * waypointToSampleZ);
+
+                if (waypointDistance + waypointToSample > blastRadius + 0.001f)
+                    continue;
+
+                if (TF2Bridge_RocketSampleVisible(waypoint, sample))
+                    return true;
+            }
+        }
     }
 
     return false;
