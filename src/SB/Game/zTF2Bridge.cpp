@@ -498,7 +498,6 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     }
 
                     ++totalSamples;
-
                     const F32 dx = sample.x - rocket->impact.x;
                     const F32 dy = sample.y - rocket->impact.y;
                     const F32 dz = sample.z - rocket->impact.z;
@@ -670,7 +669,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
             {
                 rocket->sweepStart = rocket->prevPos;
                 rocket->sweepEnd = pos;
-                rocket->sweepTime = 2.0f;
+                rocket->sweepTime = 5.0f;
                 rocket->sweepHit = false;
 
                 xRay3 ray;
@@ -786,7 +785,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     rocket->impacted = true;
                     rocket->terminated = true;
                     rocket->active = false;
-                    rocket->impactTime = in->rocketDebugLifetime;
+                    rocket->impactTime = 5.0f;
                     rocket->exposureSampleTime = 5.0f;
 
                     // Build the splash diagnostic once, at the moment the
@@ -997,8 +996,7 @@ static bool IsTF2BridgeRobot(const zNPCCommon* npc)
     case NPC_TYPE_FODDERTOUGH:
     case NPC_TYPE_FODBOMB:
     case NPC_TYPE_CHOMPER:
-    case NPC_TYPE_FODBZZT:
-    case NPC_TYPE_HAMMER:
+    case NPC_TYPE_FODBZZT:    case NPC_TYPE_HAMMER:
     case NPC_TYPE_HAMSPIN:
     case NPC_TYPE_TARTAR:
     case NPC_TYPE_GLOVE:
@@ -1497,8 +1495,7 @@ void zTF2Bridge_DebugRenderRockets()
 
                 // XY plane.
                 RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
-                                   p.y + s0 * rocket.radius, p.z);
-                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                                   p.y + s0 * rocket.radius, p.z);                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
                 RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
                                    p.y + s1 * rocket.radius, p.z);
                 RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
