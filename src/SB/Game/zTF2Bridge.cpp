@@ -504,6 +504,34 @@ static xVec3 TF2Bridge_RocketNearestBoundPoint(const xBound& bound, const xVec3&
 
     return nearest;
 }
+
+// BFBB NPCs use a simple sphere as their active collision bound. Keep the
+// nearest point for the TF2-style radius broadphase, but use a body target at
+// the NPC's collision height for visibility. This lets the target move toward
+// the explosion around side cover without moving vertically over a ledge.
+static xVec3 TF2Bridge_RocketBodyTargetPoint(
+    const xBound& bound, const xVec3& point)
+{
+    if (bound.type != XBOUND_TYPE_SPHERE)
+        return *xBoundCenter(&bound);
+
+    const xVec3 center = bound.sph.center;
+    const F32 dx = point.x - center.x;
+    const F32 dz = point.z - center.z;
+    const F32 horizontalDistSq = dx * dx + dz * dz;
+
+    if (horizontalDistSq <= 0.000001f)
+        return center;
+
+    const F32 horizontalDist = sqrtf(horizontalDistSq);
+    const F32 scale = bound.sph.r / horizontalDist;
+
+    return {
+        center.x + dx * scale,
+        center.y,
+        center.z + dz * scale
+    };
+}
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
@@ -557,17 +585,20 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         TF2BridgeDebugExplosionTarget& target =
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
-        // Keep the target point on the NPC's collision bound, but choose the
-        // point nearest to the explosion instead of forcing visibility through
-        // the bound center. This is a deliberately small BFBB adaptation of
-        // TF2's nearest-point radius test: there is still exactly one visibility
-        // ray, with no sample grid, exposure percentage, or alternate route.
-        target.pos = nearest;
-        target.distance = sqrtf(nearestDistSq);
+        // TF2 uses the nearest collision point for the radius broadphase,
+        // not as the visibility target. BFBB NPCs use a simple sphere bound,
+        // so aim the visibility ray at the closest horizontal point on the
+        // NPC while keeping its normal collision height.
+        const xVec3 targetPoint = TF2Bridge_RocketBodyTargetPoint(
+            npc->bound, splashOrigin);
+
+        target.pos = targetPoint;
+        target.distance = sqrtf(
+            SQR(targetPoint.x - splashOrigin.x) +
+            SQR(targetPoint.y - splashOrigin.y) +
+            SQR(targetPoint.z - splashOrigin.z));
         target.npcType = (int32_t)npc->SelfType();
         target.visible = false;
-
-        const xVec3 targetPoint = nearest;
 
         F32 targetDx = targetPoint.x - splashOrigin.x;
         F32 targetDy = targetPoint.y - splashOrigin.y;
