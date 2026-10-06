@@ -474,7 +474,32 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     ++blastSamples;
 
-                    if (TF2Bridge_RocketSampleVisible(rocket->impact, sample))
+                    // The rocket impact lies on the collision surface. Start splash visibility
+                    // just on the incoming/projectile side of that surface so the
+                    // impact triangle does not immediately occlude every sample.
+                    const F32 kSplashOriginEpsilon = 0.02f;
+                    xVec3 splashOrigin = rocket->impact;
+                    if (rocket->hasPrevious)
+                    {
+                        const xVec3 incoming = {
+                            rocket->pos.x - rocket->prevPos.x,
+                            rocket->pos.y - rocket->prevPos.y,
+                            rocket->pos.z - rocket->prevPos.z
+                        };
+                        const F32 incomingLen = sqrtf(
+                            incoming.x * incoming.x +
+                            incoming.y * incoming.y +
+                            incoming.z * incoming.z);
+
+                        if (incomingLen > 0.0001f)
+                        {
+                            splashOrigin.x -= incoming.x / incomingLen * kSplashOriginEpsilon;
+                            splashOrigin.y -= incoming.y / incomingLen * kSplashOriginEpsilon;
+                            splashOrigin.z -= incoming.z / incomingLen * kSplashOriginEpsilon;
+                        }
+                    }
+
+                    if (TF2Bridge_RocketSampleVisible(splashOrigin, sample))
                     {
                         ++visibleSamples;
 
