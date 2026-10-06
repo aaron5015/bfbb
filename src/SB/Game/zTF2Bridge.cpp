@@ -58,6 +58,8 @@ struct TF2BridgeDebugExplosionTarget
 
 struct TF2BridgeDebugRocket
 {
+    static const uint32_t kMaxExposureSamples = 64;
+
     int32_t entIndex;
     xVec3 pos;
     xVec3 prevPos;
@@ -72,6 +74,13 @@ struct TF2BridgeDebugRocket
     bool sweepHit;
     uint32_t explosionTargetCount;
     TF2BridgeDebugExplosionTarget explosionTargets[BRIDGE_MAX_ROCKETS];
+
+    // Per-sample exposure visualization:
+    // 0 = outside NPC bound, 1 = outside blast, 2 = blocked, 3 = visible.
+    uint32_t exposureSampleCount;
+    xVec3 exposureSamplePos[kMaxExposureSamples];
+    uint8_t exposureSampleState[kMaxExposureSamples];
+    float exposureSampleTime;
     bool active;
     bool hasPrevious;
     bool impacted;
@@ -396,6 +405,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         return;
 
     rocket->explosionTargetCount = 0;
+    rocket->exposureSampleCount = 0;
+    rocket->exposureSampleTime = 5.0f;
 
     st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
     if (npclist == NULL)
@@ -478,6 +489,14 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     if ((inside.flags & 0x1) == 0)
                         continue;
 
+                    const uint32_t sampleIndex = totalSamples;
+                    if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
+                    {
+                        rocket->exposureSamplePos[sampleIndex] = sample;
+                        rocket->exposureSampleState[sampleIndex] = 1; // outside blast
+                        rocket->exposureSampleCount = sampleIndex + 1;
+                    }
+
                     ++totalSamples;
 
                     const F32 dx = sample.x - rocket->impact.x;
@@ -489,6 +508,9 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                         continue;
 
                     ++blastSamples;
+
+                    if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
+                        rocket->exposureSampleState[sampleIndex] = 2; // blocked
 
                     // The rocket impact lies on the collision surface.
                     // Start splash visibility just outside that exact surface
@@ -504,6 +526,9 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     if (TF2Bridge_RocketSampleVisible(splashOrigin, sample))
                     {
                         ++visibleSamples;
+
+                        if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
+                            rocket->exposureSampleState[sampleIndex] = 3; // visible
 
                         const F32 sampleDistance = sqrtf(sampleDistSq);
                         if (sampleDistance < nearestVisibleDistance)
@@ -762,6 +787,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     rocket->terminated = true;
                     rocket->active = false;
                     rocket->impactTime = in->rocketDebugLifetime;
+                    rocket->exposureSampleTime = 5.0f;
 
                     // Build the splash diagnostic once, at the moment the
                     // rocket impacts. This deliberately does not apply damage.
@@ -1373,6 +1399,55 @@ void zTF2Bridge_DebugRenderRockets()
                 RwIm3DEnd();
             }
 
+            // Exposure sample markers:
+            //   green = visible to the explosion
+            //   red   = inside the blast but blocked by world geometry
+            //   yellow = inside the NPC bound but outside the blast radius
+            // These deliberately last five seconds so the individual sample
+            // distribution can be inspected in screenshots.
+            if (rocket.exposureSampleTime > 0.0f)
+            {
+                const float sampleMarker = 0.18f;
+                for (uint32_t s = 0; s < rocket.exposureSampleCount; ++s)
+                {
+                    const xVec3& q = rocket.exposureSamplePos[s];
+                    uint8_t cr = 120, cg = 120, cb = 120;
+                    if (rocket.exposureSampleState[s] == 1)
+                    {
+                        cr = 255; cg = 220; cb = 40;
+                    }
+                    else if (rocket.exposureSampleState[s] == 2)
+                    {
+                        cr = 255; cg = 60; cb = 60;
+                    }
+                    else if (rocket.exposureSampleState[s] == 3)
+                    {
+                        cr = 60; cg = 255; cb = 80;
+                    }
+
+                    RwIm3DVertex sampleVerts[6];
+                    RwIm3DVertexSetPos(&sampleVerts[0], q.x - sampleMarker, q.y, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[0], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[1], q.x + sampleMarker, q.y, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[1], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[2], q.x, q.y - sampleMarker, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[2], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[3], q.x, q.y + sampleMarker, q.z);
+                    RwIm3DVertexSetRGBA(&sampleVerts[3], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[4], q.x, q.y, q.z - sampleMarker);
+                    RwIm3DVertexSetRGBA(&sampleVerts[4], cr, cg, cb, 255);
+                    RwIm3DVertexSetPos(&sampleVerts[5], q.x, q.y, q.z + sampleMarker);
+                    RwIm3DVertexSetRGBA(&sampleVerts[5], cr, cg, cb, 255);
+
+                    if (RwIm3DTransform(sampleVerts, 6, NULL,
+                                        rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+                    {
+                        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+                        RwIm3DEnd();
+                    }
+                }
+            }
+
             // Explosion target markers: cyan means the NPC is
             // inside the blast radius and visible from the impact; orange
             // means the blast radius reaches it but BFBB world geometry blocks
@@ -1452,6 +1527,7 @@ void zTF2Bridge_DebugRenderRockets()
             }
 
             rocket.impactTime -= gSceneUpdateTime;
+            rocket.exposureSampleTime -= gSceneUpdateTime;
             if (rocket.impactTime <= 0.0f)
             {
                 rocket.impactTime = 0.0f;
