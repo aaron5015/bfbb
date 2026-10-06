@@ -510,12 +510,32 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                         iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
                         envHit.dist >= 0.0f && envHit.dist <= len;
 
-                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f start=(%.3f %.3f %.3f) end=(%.3f %.3f %.3f) sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f\n",
+                    // Diagnostic-only long probe. Keep the actual rocket sweep unchanged;
+                    // this tells us whether the JSP query can see the same surface when given
+                    // a longer segment from the exact same starting point and direction.
+                    const float probeLen = 8.0f;
+                    xRay3 probeRay;
+                    probeRay.origin = rocket->prevPos;
+                    probeRay.dir = ray.dir;
+                    probeRay.min_t = 0.0f;
+                    probeRay.max_t = probeLen;
+                    probeRay.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+                    xCollis probeHit;
+                    memset(&probeHit, 0, sizeof(probeHit));
+                    probeHit.flags = k_HIT_0x200;
+
+                    const bool probeHitEnv =
+                        iRayHitsEnv(&probeRay, globals.sceneCur->env, &probeHit) != 0 &&
+                        probeHit.dist >= 0.0f && probeHit.dist <= probeLen;
+
+                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f start=(%.3f %.3f %.3f) end=(%.3f %.3f %.3f) sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f longProbe=%s probeDist=%.3f\n",
                         entIndex, (double)len,
                         (double)rocket->sweepStart.x, (double)rocket->sweepStart.y, (double)rocket->sweepStart.z,
                         (double)rocket->sweepEnd.x, (double)rocket->sweepEnd.y, (double)rocket->sweepEnd.z,
                         (unsigned)sceneHit.flags, (double)sceneHit.dist,
-                        hitEnv ? "HIT" : "MISS", hitEnv ? (double)envHit.dist : -1.0);
+                        hitEnv ? "HIT" : "MISS", hitEnv ? (double)envHit.dist : -1.0,
+                        probeHitEnv ? "HIT" : "MISS", probeHitEnv ? (double)probeHit.dist : -1.0);
                 }
 
                 if (hitScene)
