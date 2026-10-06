@@ -683,8 +683,13 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                         if (hasAlternatePath)
                         {
                             ++alternatePathSamples;
+                            ++visibleSamples;
                             if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
                                 rocket->exposureSampleState[sampleIndex] = 4;
+
+                            const F32 sampleDistance = sqrtf(sampleDistSq);
+                            if (sampleDistance < nearestVisibleDistance)
+                                nearestVisibleDistance = sampleDistance;
                         }
                     }
                 }
