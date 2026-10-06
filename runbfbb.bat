@@ -16,5 +16,7 @@ rem
 rem The first build of a fresh directory also compiles wxWidgets, which the
 rem settings program is drawn in. See tools\pcbuild.bat.
 cd bin
+BFBB_TF2BRIDGE=1
+BFBB_TF2BRIDGE_DIR=D:\bfbbpc\bfbb\bin\here
 bfbb.exe
 @pause
