@@ -319,6 +319,8 @@ static float TF2Bridge_GetBoundRadius(const xBound& bound)
     return sqrtf(ex * ex + ey * ey + ez * ez);
 }
 
+static bool IsTF2BridgeRobot(const zNPCCommon* npc);
+
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
