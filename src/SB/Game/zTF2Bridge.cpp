@@ -73,6 +73,7 @@ struct TF2BridgeDebugRocket
     bool active;
     bool hasPrevious;
     bool impacted;
+    bool terminated;
 };
 
 static TF2BridgeDebugRocket sRocketDebug[BRIDGE_MAX_ROCKETS] = {};
@@ -544,6 +545,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     rocket->impact.y = rocket->prevPos.y + ray.dir.y * sceneHit.dist;
                     rocket->impact.z = rocket->prevPos.z + ray.dir.z * sceneHit.dist;
                     rocket->impacted = true;
+                    rocket->terminated = true;
                     rocket->active = false;
                     rocket->impactTime = in->rocketDebugLifetime;
 
@@ -578,7 +580,11 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
     for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
     {
         if (sRocketDebug[i].entIndex != 0 && !seen[i])
-            sRocketDebug[i].active = false;
+        {
+            // The entity has disappeared from TF2's projectile list. This is
+            // the point at which its diagnostic track may finally be reused.
+            sRocketDebug[i] = {};
+        }
     }
 
     // Numeric source/BFBB comparison, throttled so one fast rocket does not
@@ -1236,9 +1242,11 @@ void zTF2Bridge_DebugRenderRockets()
             {
                 rocket.impactTime = 0.0f;
                 rocket.impacted = false;
-                rocket.entIndex = 0;
                 rocket.active = false;
                 rocket.hasPrevious = false;
+                // Keep entIndex/terminated until TF2 stops reporting this
+                // entity. This prevents a lingering projectile from being
+                // mistaken for a fresh trajectory after the marker expires.
             }
         }
     }
