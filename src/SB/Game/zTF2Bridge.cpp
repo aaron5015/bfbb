@@ -76,7 +76,8 @@ struct TF2BridgeDebugRocket
     TF2BridgeDebugExplosionTarget explosionTargets[BRIDGE_MAX_ROCKETS];
 
     // Per-sample exposure visualization:
-    // 0 = outside NPC bound, 1 = outside blast, 2 = blocked, 3 = visible.
+    // 0 = outside NPC bound, 1 = outside blast, 2 = blocked, 3 = visible,
+    // 4 = reached through an alternate splash path.
     uint32_t exposureSampleCount;
     xVec3 exposureSamplePos[kMaxExposureSamples];
     uint8_t exposureSampleState[kMaxExposureSamples];
@@ -403,6 +404,82 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     return worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
 }
 
+static bool TF2Bridge_RocketSampleVisibleAroundCover(const xVec3& origin, const xVec3& normal,
+    const xVec3& sample, F32 radius)
+{
+    if (radius <= 0.0001f)
+        return false;
+
+    xVec3 n = normal;
+    const F32 nLenSq = n.x * n.x + n.y * n.y + n.z * n.z;
+    if (nLenSq <= 0.000001f)
+        return false;
+
+    const F32 invNLen = 1.0f / sqrtf(nLenSq);
+    n.x *= invNLen;
+    n.y *= invNLen;
+    n.z *= invNLen;
+
+    xVec3 helper;
+    if (fabsf(n.y) < 0.9f)
+    {
+        helper.x = 0.0f; helper.y = 1.0f; helper.z = 0.0f;
+    }
+    else
+    {
+        helper.x = 1.0f; helper.y = 0.0f; helper.z = 0.0f;
+    }
+
+    xVec3 tangentA;
+    tangentA.x = n.y * helper.z - n.z * helper.y;
+    tangentA.y = n.z * helper.x - n.x * helper.z;
+    tangentA.z = n.x * helper.y - n.y * helper.x;
+    const F32 tangentLenSq = tangentA.x * tangentA.x + tangentA.y * tangentA.y + tangentA.z * tangentA.z;
+    if (tangentLenSq <= 0.000001f)
+        return false;
+
+    const F32 invTangentLen = 1.0f / sqrtf(tangentLenSq);
+    tangentA.x *= invTangentLen; tangentA.y *= invTangentLen; tangentA.z *= invTangentLen;
+
+    xVec3 tangentB;
+    tangentB.x = n.y * tangentA.z - n.z * tangentA.y;
+    tangentB.y = n.z * tangentA.x - n.x * tangentA.z;
+    tangentB.z = n.x * tangentA.y - n.y * tangentA.x;
+
+    F32 detour = radius * 0.35f;
+    if (detour > 1.25f) detour = 1.25f;
+    if (detour < 0.05f) detour = 0.05f;
+
+    const F32 outward = detour * 0.75f;
+    const F32 kTwoPi = 6.283185307f;
+    const F32 rayEpsilon = 0.02f;
+    xVec3 splashOrigin = origin;
+    splashOrigin.x += n.x * rayEpsilon;
+    splashOrigin.y += n.y * rayEpsilon;
+    splashOrigin.z += n.z * rayEpsilon;
+
+    // Eight straight two-segment paths around the local impact surface. This
+    // gives splash a limited way around rounded cover without allowing a ray
+    // to simply pass through a wall.
+    for (S32 i = 0; i < 8; ++i)
+    {
+        const F32 angle = kTwoPi * ((F32)i / 8.0f);
+        const F32 ca = cosf(angle);
+        const F32 sa = sinf(angle);
+
+        xVec3 waypoint;
+        waypoint.x = origin.x + n.x * outward + (tangentA.x * ca + tangentB.x * sa) * detour;
+        waypoint.y = origin.y + n.y * outward + (tangentA.y * ca + tangentB.y * sa) * detour;
+        waypoint.z = origin.z + n.z * outward + (tangentA.z * ca + tangentB.z * sa) * detour;
+
+        if (TF2Bridge_RocketSampleVisible(splashOrigin, waypoint) &&
+            TF2Bridge_RocketSampleVisible(waypoint, sample))
+            return true;
+    }
+
+    return false;
+}
+
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
@@ -525,12 +602,22 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
                     splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
 
-                    if (TF2Bridge_RocketSampleVisible(splashOrigin, sample))
+                    bool sampleVisible = TF2Bridge_RocketSampleVisible(splashOrigin, sample);
+                    bool sampleWrapped = false;
+
+                    if (!sampleVisible)
+                    {
+                        sampleWrapped = TF2Bridge_RocketSampleVisibleAroundCover(
+                            rocket->impact, rocket->impactNormal, sample, radius);
+                        sampleVisible = sampleWrapped;
+                    }
+
+                    if (sampleVisible)
                     {
                         ++visibleSamples;
 
                         if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                            rocket->exposureSampleState[sampleIndex] = 3; // visible
+                            rocket->exposureSampleState[sampleIndex] = sampleWrapped ? 4 : 3;
 
                         const F32 sampleDistance = sqrtf(sampleDistSq);
                         if (sampleDistance < nearestVisibleDistance)
@@ -1424,6 +1511,10 @@ void zTF2Bridge_DebugRenderRockets()
                     else if (rocket.exposureSampleState[s] == 3)
                     {
                         cr = 60; cg = 255; cb = 80;
+                    }
+                    else if (rocket.exposureSampleState[s] == 4)
+                    {
+                        cr = 40; cg = 220; cb = 255;
                     }
 
                     RwIm3DVertex sampleVerts[6];
