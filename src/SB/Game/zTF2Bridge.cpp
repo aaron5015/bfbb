@@ -387,6 +387,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
     const F32 baseDamage = rocket->damage;
     const F32 radius = rocket->radius;
+    const F32 radiusSq = radius * radius;
     const F32 exposureThreshold = TF2Bridge_RocketExposureThreshold();
     const bool applyDamage = TF2Bridge_RocketApplyDamage();
 
@@ -403,10 +404,9 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (center == NULL)
             continue;
 
-        // Candidate inclusion is a sphere-vs-bound test, not a center-distance
-        // approximation.  The center can be outside the blast while the bound
-        // still intersects it, or the center can be inside the visual radius
-        // while the relevant bound is actually outside it.
+        // The broad-phase bound test is only a cheap way to reject NPCs that
+        // cannot possibly overlap the blast.  The actual exposure decision
+        // below is made from the sampled bound volume.
         xSphere blastSphere;
         blastSphere.center = rocket->impact;
         blastSphere.r = radius;
@@ -419,11 +419,6 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if ((blastHit.flags & 0x1) == 0)
             continue;
 
-        const F32 dx = center->x - rocket->impact.x;
-        const F32 dy = center->y - rocket->impact.y;
-        const F32 dz = center->z - rocket->impact.z;
-        const F32 centerDistSq = dx * dx + dy * dy + dz * dz;
-
         if (rocket->explosionTargetCount >= BRIDGE_MAX_ROCKETS)
             break;
 
@@ -431,17 +426,18 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
         target.pos = *center;
-        target.distance = sqrtf(centerDistSq);
+        target.distance = 0.0f;
         target.npcType = (int32_t)npc->SelfType();
         target.visible = false;
 
-        // Sample the NPC's actual bound volume rather than asking a single
-        // center-to-center ray to decide whether the entire robot is exposed.
-        // Four-by-four-by-four interior samples give us enough vertical and
-        // horizontal resolution to wrap around small lips and rocks while
-        // still treating a substantial wall or pillar as an obstruction.
+        // Sample the NPC's actual bound volume.  A sample only contributes to
+        // splash exposure if it is BOTH inside the rocket's radius and visible
+        // from the explosion.  This prevents a large NPC bound from producing
+        // 100% exposure when the actual robot is outside the blast sphere.
+        S32 blastSamples = 0;
         S32 visibleSamples = 0;
         S32 totalSamples = 0;
+        F32 nearestVisibleDistance = FLOAT_MAX;
 
         const F32 sampleFrac[4] = { 0.125f, 0.375f, 0.625f, 0.875f };
 
@@ -468,54 +464,73 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     ++totalSamples;
 
+                    const F32 dx = sample.x - rocket->impact.x;
+                    const F32 dy = sample.y - rocket->impact.y;
+                    const F32 dz = sample.z - rocket->impact.z;
+                    const F32 sampleDistSq = dx * dx + dy * dy + dz * dz;
+
+                    if (sampleDistSq > radiusSq)
+                        continue;
+
+                    ++blastSamples;
+
                     if (TF2Bridge_RocketSampleVisible(rocket->impact, sample))
+                    {
                         ++visibleSamples;
+
+                        const F32 sampleDistance = sqrtf(sampleDistSq);
+                        if (sampleDistance < nearestVisibleDistance)
+                            nearestVisibleDistance = sampleDistance;
+                    }
                 }
             }
         }
 
-        if (totalSamples == 0)
+        const F32 exposure =
+            totalSamples > 0
+                ? (F32)visibleSamples / (F32)totalSamples
+                : 0.0f;
+
+        target.distance =
+            nearestVisibleDistance < FLOAT_MAX
+                ? nearestVisibleDistance
+                : radius;
+
+        if (totalSamples == 0 || blastSamples == 0 || exposure < exposureThreshold)
         {
-            // This should not normally happen, but don't let an unusual bound
-            // become an automatic full-exposure hit.
-            target.visible = false;
-        }
-        else
-        {
-            const F32 exposure = (F32)visibleSamples / (F32)totalSamples;
-            target.visible = exposure >= exposureThreshold;
-
-            if (!target.visible)
-            {
-                printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) BLOCKED threshold=%.1f%% damage=0\n",
-                    (int)target.npcType, (double)target.distance,
-                    (int)visibleSamples, (int)totalSamples,
-                    (double)(exposure * 100.0f),
-                    (double)(exposureThreshold * 100.0f));
-                continue;
-            }
-
-            // TF2's RadiusDamage uses falloff = damage / radius and then
-            // subtracts distance * falloff. Because BFBB's radius and
-            // distance use the same converted world scale, this reduces to
-            // the same linear damage fraction here.
-            F32 t = radius > 0.0001f ? target.distance / radius : 1.0f;
-            if (t < 0.0f) t = 0.0f;
-            if (t > 1.0f) t = 1.0f;
-
-            const F32 damageScale = 1.0f - t;
-            const F32 damage = baseDamage * damageScale;
-
-            if (damage > 0.0f && applyDamage)
-                npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
-
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
+            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d BLOCKED threshold=%.1f%% damage=0\n",
                 (int)target.npcType, (double)target.distance,
                 (int)visibleSamples, (int)totalSamples,
                 (double)(exposure * 100.0f),
-                (double)damage, (double)damageScale,
-                applyDamage ? 1 : 0);
+                (int)blastSamples,
+                (double)(exposureThreshold * 100.0f));
+            continue;
         }
+
+        // TF2 RadiusDamage uses linear distance falloff:
+        // damage - distance * (damage / radius).
+        // Use the nearest actually exposed point of the sampled bound rather
+        // than the NPC center, which may be outside the blast while part of
+        // the NPC is legitimately inside it.
+        F32 t = radius > 0.0001f
+            ? target.distance / radius
+            : 1.0f;
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+
+        const F32 damageScale = 1.0f - t;
+        const F32 damage = baseDamage * damageScale;
+
+        if (damage > 0.0f && applyDamage)
+            npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
+
+        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
+            (int)target.npcType, (double)target.distance,
+            (int)visibleSamples, (int)totalSamples,
+            (double)(exposure * 100.0f),
+            (int)blastSamples,
+            (double)damage, (double)damageScale,
+            applyDamage ? 1 : 0);
     }
 
     printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f exposureThreshold=%.1f%% applyDamage=%d targets=%u\n",
