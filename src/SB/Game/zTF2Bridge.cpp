@@ -469,6 +469,59 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     return !validHit;
 }
 
+static void TF2Bridge_LogRocketCollisionNeighborhood(uint32_t hitTriIndex)
+{
+    if (globals.sceneCur == NULL || globals.sceneCur->env == NULL ||
+        globals.sceneCur->env->geom == NULL || globals.sceneCur->env->geom->jsp == NULL ||
+        globals.sceneCur->env->geom->jsp->colltree == NULL || hitTriIndex == 0xffffffffu)
+        return;
+
+    const xClumpCollBSPTree* tree = globals.sceneCur->env->geom->jsp->colltree;
+    if (hitTriIndex >= tree->numTriangles)
+        return;
+
+    const xClumpCollBSPTriangle& base = tree->triangles[hitTriIndex];
+    if (base.v.p == NULL)
+        return;
+
+    const float kSharedVertexEpsilonSq = 0.0001f;
+    int logged = 0;
+    printf("bfbb: tf2bridge -- rocket collision neighborhood base=%u flags=0x%02x mat=%u\\n",
+        (unsigned)hitTriIndex, (unsigned)base.flags, (unsigned)base.matIndex);
+
+    for (uint32_t i = 0; i < tree->numTriangles && logged < 16; ++i)
+    {
+        if (i == hitTriIndex)
+            continue;
+        const xClumpCollBSPTriangle& t = tree->triangles[i];
+        if (t.v.p == NULL)
+            continue;
+        bool sharesVertex = false;
+        for (int a = 0; a < 3 && !sharesVertex; ++a)
+        {
+            for (int b = 0; b < 3; ++b)
+            {
+                const float dx = base.v.p[a].x - t.v.p[b].x;
+                const float dy = base.v.p[a].y - t.v.p[b].y;
+                const float dz = base.v.p[a].z - t.v.p[b].z;
+                if (dx * dx + dy * dy + dz * dz <= kSharedVertexEpsilonSq)
+                {
+                    sharesVertex = true;
+                    break;
+                }
+            }
+        }
+        if (!sharesVertex)
+            continue;
+        printf("bfbb: tf2bridge --   tri=%u flags=0x%02x mat=%u v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
+            (unsigned)i, (unsigned)t.flags, (unsigned)t.matIndex,
+            t.v.p[0].x, t.v.p[0].y, t.v.p[0].z,
+            t.v.p[1].x, t.v.p[1].y, t.v.p[1].z,
+            t.v.p[2].x, t.v.p[2].y, t.v.p[2].z);
+        ++logged;
+    }
+}
+
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
@@ -612,6 +665,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     if (!sampleVisible && exposureRayDebugCount < 12)
                     {
+                        if (exposureHitTriIndex != 0xffffffffu)
+                            TF2Bridge_LogRocketCollisionNeighborhood(exposureHitTriIndex);
                         const F32 rayInvDistance =
                             exposureRayDistance > 0.000001f ? 1.0f / exposureRayDistance : 0.0f;
                         const xVec3 exposureHitPos = {
