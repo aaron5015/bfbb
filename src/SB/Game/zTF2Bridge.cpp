@@ -396,17 +396,20 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     memset(&worldHit, 0, sizeof(worldHit));
     worldHit.flags = k_HIT_0x200;
 
-    if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) == 0)
-    {
-        if (outHitDistance != NULL)
-            *outHitDistance = -1.0f;
-        return true;
-    }
+    const bool hitEnv = iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) != 0;
 
-    const bool visible = worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
+    // iRayHitsEnv can leave a non-useful/sentinel distance when the query does
+    // not produce a collision within the requested segment. Never interpret a
+    // huge distance as visibility through the world; only a finite hit inside
+    // this exact ray segment can block the sample.
+    const F32 hitDistance = worldHit.dist;
+    const bool validHit = hitEnv && isfinite(hitDistance) &&
+        hitDistance >= 0.0f && hitDistance < ray.max_t - 0.01f;
+
     if (outHitDistance != NULL)
-        *outHitDistance = visible ? -1.0f : worldHit.dist;
-    return visible;
+        *outHitDistance = validHit ? hitDistance : -1.0f;
+
+    return !validHit;
 }
 
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
