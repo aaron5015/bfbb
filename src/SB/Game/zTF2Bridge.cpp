@@ -1891,3 +1891,76 @@ void zTF2Bridge_DebugRenderHitscan()
     const float vz = ray.end.z - o.z;
     const float len = sqrtf(vx * vx + vy * vy + vz * vz);
     const float invLen = len > 0.000001f ? 1.0f / len : 0.0f;
+
+    const xVec3 d = {
+        o.x + vx * stubLength * invLen,
+        o.y + vy * stubLength * invLen,
+        o.z + vz * stubLength * invLen
+    };
+
+    // The current BFBB camera is rebuilt from the TF2 eye every frame.
+
+    // Origin cross: yellow.
+    RwIm3DVertexSetPos(&verts[n], o.x - markerOrigin, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x + markerOrigin, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y - markerOrigin, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y + markerOrigin, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z - markerOrigin);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z + markerOrigin);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 255, 0, 255); n++;
+
+    // Camera cross: cyan.
+    RwIm3DVertexSetPos(&verts[n], c.x - markerCamera, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x + markerCamera, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y - markerCamera, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y + markerCamera, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z - markerCamera);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z + markerCamera);
+    RwIm3DVertexSetRGBA(&verts[n], 0, 255, 255, 255); n++;
+
+    // Camera -> fire-origin connector: magenta.
+    RwIm3DVertexSetPos(&verts[n], c.x, c.y, c.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 255, 255); n++;
+
+    // Full hitscan ray: red. The endpoint is the actual 8192-Source-unit
+    // endpoint (about 204.8 BFBB units at the current scale of 40).
+    RwIm3DVertexSetPos(&verts[n], o.x, o.y, o.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
+    RwIm3DVertexSetPos(&verts[n], ray.end.x, ray.end.y, ray.end.z);
+    RwIm3DVertexSetRGBA(&verts[n], 255, 0, 0, 255); n++;
+
+    if (RwIm3DTransform(verts, n, NULL, rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA) != NULL)
+    {
+        RwIm3DRenderPrimitive(rwPRIMTYPELINELIST);
+        RwIm3DEnd();
+    }
+
+    RwRenderStateSet(rwRENDERSTATETEXTURERASTER, oldTexture);
+    RwRenderStateSet(rwRENDERSTATESRCBLEND, oldSrcBlend);
+    RwRenderStateSet(rwRENDERSTATEDESTBLEND, oldDstBlend);
+    RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, oldVertexAlpha);
+    RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, oldZWrite);
+    RwRenderStateSet(rwRENDERSTATEZTESTENABLE, oldZTest);
+
+    if (sHitscanDebugTime > 0.0f)
+    {
+        sHitscanDebugTime -= gSceneUpdateTime;
+        if (sHitscanDebugTime <= 0.0f)
+        {
+            sHitscanDebugTime = 0.0f;
+            sHitscanDebugCount = 0;
+        }
+    }
+}
