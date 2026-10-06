@@ -497,8 +497,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                         rocket->exposureSampleCount = sampleIndex + 1;
                     }
 
-                    ++totalSamples;
-                    const F32 dx = sample.x - rocket->impact.x;
+                    ++totalSamples;                    const F32 dx = sample.x - rocket->impact.x;
                     const F32 dy = sample.y - rocket->impact.y;
                     const F32 dz = sample.z - rocket->impact.z;
                     const F32 sampleDistSq = dx * dx + dy * dy + dz * dz;
@@ -996,9 +995,9 @@ static bool IsTF2BridgeRobot(const zNPCCommon* npc)
     case NPC_TYPE_FODDERTOUGH:
     case NPC_TYPE_FODBOMB:
     case NPC_TYPE_CHOMPER:
-    case NPC_TYPE_FODBZZT:    case NPC_TYPE_HAMMER:
-    case NPC_TYPE_HAMSPIN:
-    case NPC_TYPE_TARTAR:
+    case NPC_TYPE_FODBZZT:
+    case NPC_TYPE_HAMMER:
+    case NPC_TYPE_HAMSPIN:    case NPC_TYPE_TARTAR:
     case NPC_TYPE_GLOVE:
     case NPC_TYPE_MONSOON:
     case NPC_TYPE_SLEEPY:
@@ -1495,10 +1494,10 @@ void zTF2Bridge_DebugRenderRockets()
 
                 // XY plane.
                 RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
-                                   p.y + s0 * rocket.radius, p.z);                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
-                RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
-                                   p.y + s1 * rocket.radius, p.z);
+                                   p.y + s0 * rocket.radius, p.z);
                 RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
+                RwIm3DVertexSetPos(&rings[n], p.x + c1 * rocket.radius,
+                                   p.y + s1 * rocket.radius, p.z);                RwIm3DVertexSetRGBA(&rings[n], 80, 255, 120, 220); n++;
 
                 // XZ plane.
                 RwIm3DVertexSetPos(&rings[n], p.x + c0 * rocket.radius,
