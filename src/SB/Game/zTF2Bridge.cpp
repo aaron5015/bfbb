@@ -358,7 +358,8 @@ static bool TF2Bridge_RocketApplyDamage()
 
 static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample,
     F32* outHitDistance = NULL, int* outQueryResult = NULL, uint32_t* outHitFlags = NULL,
-    F32* outRayDistance = NULL)
+    F32* outRayDistance = NULL, uint32_t* outHitOid = NULL, xVec3* outHitNormal = NULL,
+    uint32_t* outHitTriIndex = NULL, F32* outHitTriR = NULL, F32* outHitTriD = NULL)
 {
     const F32 dx = sample.x - origin.x;
     const F32 dy = sample.y - origin.y;
@@ -376,6 +377,16 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
         *outHitFlags = 0;
     if (outRayDistance != NULL)
         *outRayDistance = distance;
+    if (outHitOid != NULL)
+        *outHitOid = 0;
+    if (outHitNormal != NULL)
+        *outHitNormal = xVec3(0.0f, 0.0f, 0.0f);
+    if (outHitTriIndex != NULL)
+        *outHitTriIndex = 0;
+    if (outHitTriR != NULL)
+        *outHitTriR = 0.0f;
+    if (outHitTriD != NULL)
+        *outHitTriD = 0.0f;
 
     const F32 rayEpsilon = 0.05f;
     if (distance <= rayEpsilon)
@@ -412,6 +423,16 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
         *outQueryResult = queryResult;
     if (outHitFlags != NULL)
         *outHitFlags = worldHit.flags;
+    if (outHitOid != NULL)
+        *outHitOid = worldHit.oid;
+    if (outHitNormal != NULL)
+        *outHitNormal = worldHit.norm;
+    if (outHitTriIndex != NULL)
+        *outHitTriIndex = worldHit.tri.index;
+    if (outHitTriR != NULL)
+        *outHitTriR = worldHit.tri.r;
+    if (outHitTriD != NULL)
+        *outHitTriD = worldHit.tri.d;
 
     // iRayHitsEnv can leave a non-useful/sentinel distance when the query does
     // not produce a collision within the requested segment. Never interpret a
@@ -557,9 +578,16 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     uint32_t exposureHitFlags = 0;
                     F32 exposureHitDistance = -1.0f;
                     F32 exposureRayDistance = 0.0f;
+                    uint32_t exposureHitOid = 0;
+                    xVec3 exposureHitNormal = { 0.0f, 0.0f, 0.0f };
+                    uint32_t exposureHitTriIndex = 0;
+                    F32 exposureHitTriR = 0.0f;
+                    F32 exposureHitTriD = 0.0f;
                     const bool sampleVisible = TF2Bridge_RocketSampleVisible(
                         splashOrigin, sample, &exposureHitDistance,
-                        &exposureQueryResult, &exposureHitFlags, &exposureRayDistance);
+                        &exposureQueryResult, &exposureHitFlags, &exposureRayDistance,
+                        &exposureHitOid, &exposureHitNormal, &exposureHitTriIndex,
+                        &exposureHitTriR, &exposureHitTriD);
 
                     if (!sampleVisible && exposureRayDebugCount < 12)
                     {
