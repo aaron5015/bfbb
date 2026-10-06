@@ -380,9 +380,11 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     if (outHitOid != NULL)
         *outHitOid = 0;
     if (outHitNormal != NULL)
+    {
         outHitNormal->x = 0.0f;
         outHitNormal->y = 0.0f;
         outHitNormal->z = 0.0f;
+    }
     if (outHitTriIndex != NULL)
         *outHitTriIndex = 0;
     if (outHitTriR != NULL)
@@ -604,13 +606,18 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                         printf("bfbb: tf2bridge -- rocket exposure-ray target=%d sample=%u "
                             "result=%d flags=0x%08x rayDist=%.3f hitDist=%.3f "
                             "origin=(%.3f %.3f %.3f) hit=(%.3f %.3f %.3f) "
-                            "sample=(%.3f %.3f %.3f)\\n",
+                            "sample=(%.3f %.3f %.3f) oid=%u triIndex=%u triR=%.3f triD=%.3f "
+                            "normal=(%.3f %.3f %.3f)\\n",
                             (int)target.npcType, (unsigned)sampleIndex,
                             exposureQueryResult, (unsigned)exposureHitFlags,
                             (double)exposureRayDistance, (double)exposureHitDistance,
                             (double)splashOrigin.x, (double)splashOrigin.y, (double)splashOrigin.z,
                             (double)exposureHitPos.x, (double)exposureHitPos.y, (double)exposureHitPos.z,
-                            (double)sample.x, (double)sample.y, (double)sample.z);
+                            (double)sample.x, (double)sample.y, (double)sample.z,
+                            (unsigned)exposureHitOid, (unsigned)exposureHitTriIndex,
+                            (double)exposureHitTriR, (double)exposureHitTriD,
+                            (double)exposureHitNormal.x, (double)exposureHitNormal.y,
+                            (double)exposureHitNormal.z);
                         ++exposureRayDebugCount;
                     }
 
