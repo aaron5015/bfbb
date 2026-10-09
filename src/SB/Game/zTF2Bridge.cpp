@@ -65,6 +65,8 @@ struct TF2BridgeDebugRocket
     xVec3 prevPos;
     xVec3 impact;
     xVec3 impactNormal;
+    uint32_t impactTriIndex;
+    bool impactIsEnv;
     float radius;
     float damage;
     float impactTime;
@@ -937,15 +939,38 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                         (double)sceneHit.dist);
                 }
 
+                xCollis impactEnvHit;
+                memset(&impactEnvHit, 0, sizeof(impactEnvHit));
+                impactEnvHit.flags = k_HIT_0x200;
+                const bool impactHitEnv =
+                    iRayHitsEnv(&ray, globals.sceneCur->env, &impactEnvHit) != 0 &&
+                    impactEnvHit.dist >= 0.0f && impactEnvHit.dist <= len;
+                const bool environmentWins = impactHitEnv &&
+                    (!hitScene || impactEnvHit.dist <= sceneHit.dist + 0.001f);
+
+                // Recover the exact JSP triangle separately. xRayHitsScene()
+                // compares environment/entity distances, but only copies the
+                // winning distance and entity identifiers, discarding the
+                // environment triangle pointer and normal.
+                uint32_t impactEnvTriIndex = 0xffffffffu;
+                if (environmentWins && globals.sceneCur != NULL &&
+                    globals.sceneCur->env != NULL &&
+                    globals.sceneCur->env->geom != NULL &&
+                    globals.sceneCur->env->geom->jsp != NULL)
+                {
+                    const xClumpCollBSPTree* tree =
+                        globals.sceneCur->env->geom->jsp->colltree;
+                    const xClumpCollBSPTriangle* hitTri =
+                        (const xClumpCollBSPTriangle*)(uintptr_t)impactEnvHit.tri.index;
+                    if (tree != NULL && hitTri >= tree->triangles &&
+                        hitTri < tree->triangles + tree->numTriangles)
+                        impactEnvTriIndex = (uint32_t)(hitTri - tree->triangles);
+                }
+
                 if (!hitScene)
                 {
-                    xCollis envHit;
-                    memset(&envHit, 0, sizeof(envHit));
-                    envHit.flags = k_HIT_0x200;
-
-                    const bool hitEnv =
-                        iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
-                        envHit.dist >= 0.0f && envHit.dist <= len;
+                    const bool hitEnv = impactHitEnv;
+                    const xCollis& envHit = impactEnvHit;
 
                     // Diagnostic-only long probe. Keep the actual rocket sweep unchanged;
                     // this tells us whether the JSP query can see the same surface when given
@@ -984,7 +1009,9 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     // Keep the actual JSP collision normal. Splash visibility
                     // should begin just outside the surface we struck, not
                     // merely along the projectile's incoming direction.
-                    rocket->impactNormal = sceneHit.norm;
+                    rocket->impactIsEnv = environmentWins;
+                    rocket->impactTriIndex = environmentWins ? impactEnvTriIndex : 0xffffffffu;
+                    rocket->impactNormal = environmentWins ? impactEnvHit.norm : sceneHit.norm;
                     const F32 normalLen = sqrtf(
                         rocket->impactNormal.x * rocket->impactNormal.x +
                         rocket->impactNormal.y * rocket->impactNormal.y +
@@ -1029,12 +1056,16 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     iTF2BridgeSendRocketImpact(entIndex, rocket->impact.x,
                                                rocket->impact.y, rocket->impact.z);
 
-                    printf("bfbb: tf2bridge -- rocket %d impact source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) radius=%.2f\n",
+                    printf("bfbb: tf2bridge -- rocket %d impact source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) radius=%.2f surface=%s tri=%u normal=(%.3f %.3f %.3f)\n",
                         entIndex,
                         (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
                         (double)in->rocketPos[i][2],
                         (double)rocket->impact.x, (double)rocket->impact.y,
-                        (double)rocket->impact.z, (double)rocket->radius);
+                        (double)rocket->impact.z, (double)rocket->radius,
+                        rocket->impactIsEnv ? "env" : "entity",
+                        (unsigned)rocket->impactTriIndex,
+                        (double)rocket->impactNormal.x, (double)rocket->impactNormal.y,
+                        (double)rocket->impactNormal.z);
                 }
             }
         }
