@@ -740,7 +740,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                 printf(
                     "bfbb: tf2bridge -- rocket splash compare type=%d bodyVisible=%d "
-                    "centerVisible=%d body=(%.3f %.3f %.3f) center=(%.3f %.3f %.3f)\\n",
+                    "centerVisible=%d body=(%.3f %.3f %.3f) center=(%.3f %.3f %.3f)\n",
                     (int)target.npcType, visible ? 1 : 0, centerVisible ? 1 : 0,
                     (double)targetPoint.x, (double)targetPoint.y, (double)targetPoint.z,
                     (double)center.x, (double)center.y, (double)center.z);
