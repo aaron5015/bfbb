@@ -345,7 +345,8 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     F32* outHitDistance = NULL, int* outQueryResult = NULL, uint32_t* outHitFlags = NULL,
     F32* outRayDistance = NULL, uint32_t* outHitOid = NULL, xVec3* outHitNormal = NULL,
     uint32_t* outHitTriIndex = NULL, F32* outHitTriR = NULL, F32* outHitTriD = NULL,
-    int32_t debugTargetType = -1, const char* debugTargetRole = "body")
+    int32_t debugTargetType = -1, const char* debugTargetRole = "body",
+    const xVec3* impactPoint = NULL, const xVec3* impactNormal = NULL)
 {
     const F32 dx = sample.x - origin.x;
     const F32 dy = sample.y - origin.y;
@@ -503,12 +504,23 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
                 worldHit.norm.x * (sample.x - hit.x) +
                 worldHit.norm.y * (sample.y - hit.y) +
                 worldHit.norm.z * (sample.z - hit.z);
+            const F32 impactSurfaceDot = impactNormal != NULL
+                ? worldHit.norm.x * impactNormal->x +
+                  worldHit.norm.y * impactNormal->y +
+                  worldHit.norm.z * impactNormal->z
+                : 0.0f;
+            const F32 hitToImpact = impactPoint != NULL
+                ? sqrtf(SQR(hit.x - impactPoint->x) +
+                        SQR(hit.y - impactPoint->y) +
+                        SQR(hit.z - impactPoint->z))
+                : -1.0f;
 
             printf(
                 "bfbb: tf2bridge -- rocket splash BLOCKER targetType=%d role=%s tri=%u flags=0x%02x mat=%u "
                 "hit=(%.3f %.3f %.3f) hitDist=%.3f rayDist=%.3f "
                 "normal=(%.3f %.3f %.3f) edgeDist=(%.3f %.3f %.3f) "
-                "side=(%.3f %.3f) origin=(%.3f %.3f %.3f) target=(%.3f %.3f %.3f) "
+                "side=(%.3f %.3f) impactDot=%.3f hitToImpact=%.3f "
+                "origin=(%.3f %.3f %.3f) target=(%.3f %.3f %.3f) "
                 "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\n",
                 (int)debugTargetType, debugTargetRole != NULL ? debugTargetRole : "unknown",
                 (unsigned)(tri - tree->triangles), (unsigned)tri->flags,
@@ -518,6 +530,7 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
                 (double)worldHit.norm.x, (double)worldHit.norm.y, (double)worldHit.norm.z,
                 (double)edgeAB, (double)edgeBD, (double)edgeDA,
                 (double)sideOrigin, (double)sideTarget,
+                (double)impactSurfaceDot, (double)hitToImpact,
                 (double)origin.x, (double)origin.y, (double)origin.z,
                 (double)sample.x, (double)sample.y, (double)sample.z,
                 (double)a.x, (double)a.y, (double)a.z,
@@ -725,7 +738,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             // the blast without adding arbitrary wraparound or sampling rules.
             const bool visible = TF2Bridge_RocketSampleVisible(
                 splashOrigin, targetPoint, NULL, NULL, NULL, NULL, NULL, NULL,
-                NULL, NULL, NULL, (int32_t)target.npcType, "body");
+                NULL, NULL, NULL, (int32_t)target.npcType, "body",
+                &rocket->impact, &rocket->impactNormal);
 
             // Diagnostic A/B only: compare the selected horizontal body point
             // with the actual bound center. This does not affect damage. It
@@ -736,7 +750,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                 const xVec3 center = *xBoundCenter(&npc->bound);
                 const bool centerVisible = TF2Bridge_RocketSampleVisible(
                     splashOrigin, center, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, (int32_t)target.npcType, "center");
+                    NULL, NULL, NULL, (int32_t)target.npcType, "center",
+                    &rocket->impact, &rocket->impactNormal);
 
                 int surfaceMask = 0;
                 if (npc->bound.type == XBOUND_TYPE_SPHERE)
@@ -755,7 +770,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                         if (TF2Bridge_RocketSampleVisible(
                             splashOrigin, surfacePoints[p], NULL, NULL, NULL,
                             NULL, NULL, NULL, NULL, NULL, NULL,
-                            (int32_t)target.npcType, "surface"))
+                            (int32_t)target.npcType, "surface",
+                            &rocket->impact, &rocket->impactNormal))
                             surfaceMask |= 1 << p;
                     }
                 }
