@@ -451,6 +451,85 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     if (outHitDistance != NULL)
         *outHitDistance = validHit ? hitDistance : -1.0f;
 
+    // Diagnostic only: describe the exact JSP surface that blocks a rocket
+    // splash visibility ray. One ray is issued per in-radius robot, so this
+    // emits at most one record per blocked target, not per projectile segment.
+    if (validHit)
+    {
+        const xClumpCollBSPTree* tree =
+            globals.sceneCur != NULL && globals.sceneCur->env != NULL &&
+            globals.sceneCur->env->geom != NULL && globals.sceneCur->env->geom->jsp != NULL
+                ? globals.sceneCur->env->geom->jsp->colltree
+                : NULL;
+        const xClumpCollBSPTriangle* tri =
+            (const xClumpCollBSPTriangle*)(uintptr_t)worldHit.tri.index;
+
+        if (tree != NULL && tri >= tree->triangles &&
+            tri < tree->triangles + tree->numTriangles && tri->v.p != NULL)
+        {
+            const xVec3 hit = {
+                ray.origin.x + dirX * hitDistance,
+                ray.origin.y + dirY * hitDistance,
+                ray.origin.z + dirZ * hitDistance
+            };
+            const xVec3 a = { tri->v.p[0].x, tri->v.p[0].y, tri->v.p[0].z };
+            const xVec3 b = { tri->v.p[1].x, tri->v.p[1].y, tri->v.p[1].z };
+            const xVec3 d = { tri->v.p[2].x, tri->v.p[2].y, tri->v.p[2].z };
+
+            // Point-to-segment distance: indicates whether the ray hit close
+            // to a triangle edge or well inside its face.
+            const auto edgeDistance = [&hit](const xVec3& p0, const xVec3& p1) -> F32
+            {
+                const F32 ex = p1.x - p0.x, ey = p1.y - p0.y, ez = p1.z - p0.z;
+                const F32 px = hit.x - p0.x, py = hit.y - p0.y, pz = hit.z - p0.z;
+                const F32 lenSq = ex * ex + ey * ey + ez * ez;
+                F32 t = lenSq > 0.000001f ? (px * ex + py * ey + pz * ez) / lenSq : 0.0f;
+                if (t < 0.0f) t = 0.0f;
+                if (t > 1.0f) t = 1.0f;
+                const F32 qx = p0.x + ex * t, qy = p0.y + ey * t, qz = p0.z + ez * t;
+                const F32 dx = hit.x - qx, dy = hit.y - qy, dz = hit.z - qz;
+                return sqrtf(dx * dx + dy * dy + dz * dz);
+            };
+
+            const F32 edgeAB = edgeDistance(a, b);
+            const F32 edgeBD = edgeDistance(b, d);
+            const F32 edgeDA = edgeDistance(d, a);
+            const F32 sideOrigin =
+                worldHit.norm.x * (origin.x - hit.x) +
+                worldHit.norm.y * (origin.y - hit.y) +
+                worldHit.norm.z * (origin.z - hit.z);
+            const F32 sideTarget =
+                worldHit.norm.x * (sample.x - hit.x) +
+                worldHit.norm.y * (sample.y - hit.y) +
+                worldHit.norm.z * (sample.z - hit.z);
+
+            printf(
+                "bfbb: tf2bridge -- rocket splash BLOCKER tri=%u flags=0x%02x mat=%u "
+                "hit=(%.3f %.3f %.3f) hitDist=%.3f rayDist=%.3f "
+                "normal=(%.3f %.3f %.3f) edgeDist=(%.3f %.3f %.3f) "
+                "side=(%.3f %.3f) origin=(%.3f %.3f %.3f) target=(%.3f %.3f %.3f) "
+                "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
+                (unsigned)(tri - tree->triangles), (unsigned)tri->flags,
+                (unsigned)tri->matIndex,
+                (double)hit.x, (double)hit.y, (double)hit.z,
+                (double)hitDistance, (double)distance,
+                (double)worldHit.norm.x, (double)worldHit.norm.y, (double)worldHit.norm.z,
+                (double)edgeAB, (double)edgeBD, (double)edgeDA,
+                (double)sideOrigin, (double)sideTarget,
+                (double)origin.x, (double)origin.y, (double)origin.z,
+                (double)sample.x, (double)sample.y, (double)sample.z,
+                (double)a.x, (double)a.y, (double)a.z,
+                (double)b.x, (double)b.y, (double)b.z,
+                (double)d.x, (double)d.y, (double)d.z);
+        }
+        else
+        {
+            printf("bfbb: tf2bridge -- rocket splash BLOCKER hitDist=%.3f rayDist=%.3f "
+                   "triangle=unavailable flags=0x%08x\\n",
+                   (double)hitDistance, (double)distance, (unsigned)worldHit.flags);
+        }
+    }
+
     return !validHit;
 }
 
