@@ -509,7 +509,7 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
                 "hit=(%.3f %.3f %.3f) hitDist=%.3f rayDist=%.3f "
                 "normal=(%.3f %.3f %.3f) edgeDist=(%.3f %.3f %.3f) "
                 "side=(%.3f %.3f) origin=(%.3f %.3f %.3f) target=(%.3f %.3f %.3f) "
-                "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
+                "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\n",
                 (int)debugTargetType, (unsigned)(tri - tree->triangles), (unsigned)tri->flags,
                 (unsigned)tri->matIndex,
                 (double)hit.x, (double)hit.y, (double)hit.z,
@@ -687,7 +687,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                 "bfbb: tf2bridge -- rocket splash targetGeom type=%d boundType=%u "
                 "center=(%.3f %.3f %.3f) nearest=(%.3f %.3f %.3f) "
                 "body=(%.3f %.3f %.3f) bodyOffset=(%.3f %.3f %.3f) "
-                "sphereRadius=%.3f\\n",
+                "sphereRadius=%.3f\n",
                 (int)npc->SelfType(), (unsigned)npc->bound.type,
                 (double)center.x, (double)center.y, (double)center.z,
                 (double)nearest.x, (double)nearest.y, (double)nearest.z,
