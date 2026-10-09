@@ -344,7 +344,8 @@ static bool TF2Bridge_RocketApplyDamage()
 static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample,
     F32* outHitDistance = NULL, int* outQueryResult = NULL, uint32_t* outHitFlags = NULL,
     F32* outRayDistance = NULL, uint32_t* outHitOid = NULL, xVec3* outHitNormal = NULL,
-    uint32_t* outHitTriIndex = NULL, F32* outHitTriR = NULL, F32* outHitTriD = NULL)
+    uint32_t* outHitTriIndex = NULL, F32* outHitTriR = NULL, F32* outHitTriD = NULL,
+    int32_t debugTargetType = -1)
 {
     const F32 dx = sample.x - origin.x;
     const F32 dy = sample.y - origin.y;
@@ -504,12 +505,12 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
                 worldHit.norm.z * (sample.z - hit.z);
 
             printf(
-                "bfbb: tf2bridge -- rocket splash BLOCKER tri=%u flags=0x%02x mat=%u "
+                "bfbb: tf2bridge -- rocket splash BLOCKER targetType=%d tri=%u flags=0x%02x mat=%u "
                 "hit=(%.3f %.3f %.3f) hitDist=%.3f rayDist=%.3f "
                 "normal=(%.3f %.3f %.3f) edgeDist=(%.3f %.3f %.3f) "
                 "side=(%.3f %.3f) origin=(%.3f %.3f %.3f) target=(%.3f %.3f %.3f) "
                 "v0=(%.3f %.3f %.3f) v1=(%.3f %.3f %.3f) v2=(%.3f %.3f %.3f)\\n",
-                (unsigned)(tri - tree->triangles), (unsigned)tri->flags,
+                (int)debugTargetType, (unsigned)(tri - tree->triangles), (unsigned)tri->flags,
                 (unsigned)tri->matIndex,
                 (double)hit.x, (double)hit.y, (double)hit.z,
                 (double)hitDistance, (double)distance,
@@ -671,6 +672,30 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         const xVec3 targetPoint = TF2Bridge_RocketBodyTargetPoint(
             npc->bound, splashOrigin);
 
+        // Focused geometry diagnostics for the common robot type used in the
+        // cave, rock, and ledge regression tests. Keep other NPCs out of this
+        // line so simultaneous test targets cannot be confused.
+        const bool logTargetGeometry = npc->SelfType() == 1314148924;
+        if (logTargetGeometry)
+        {
+            const xVec3 center = *xBoundCenter(&npc->bound);
+            const F32 cx = targetPoint.x - center.x;
+            const F32 cy = targetPoint.y - center.y;
+            const F32 cz = targetPoint.z - center.z;
+
+            printf(
+                "bfbb: tf2bridge -- rocket splash targetGeom type=%d boundType=%u "
+                "center=(%.3f %.3f %.3f) nearest=(%.3f %.3f %.3f) "
+                "body=(%.3f %.3f %.3f) bodyOffset=(%.3f %.3f %.3f) "
+                "sphereRadius=%.3f\\n",
+                (int)npc->SelfType(), (unsigned)npc->bound.type,
+                (double)center.x, (double)center.y, (double)center.z,
+                (double)nearest.x, (double)nearest.y, (double)nearest.z,
+                (double)targetPoint.x, (double)targetPoint.y, (double)targetPoint.z,
+                (double)cx, (double)cy, (double)cz,
+                (double)(npc->bound.type == XBOUND_TYPE_SPHERE ? npc->bound.sph.r : -1.0f));
+        }
+
         target.pos = targetPoint;
         target.distance = sqrtf(
             SQR(targetPoint.x - splashOrigin.x) +
@@ -698,7 +723,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             // whether an exposed part of the BFBB collision bound can receive
             // the blast without adding arbitrary wraparound or sampling rules.
             const bool visible = TF2Bridge_RocketSampleVisible(
-                splashOrigin, targetPoint);
+                splashOrigin, targetPoint, NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, (int32_t)target.npcType);
 
             if (!visible)
             {
