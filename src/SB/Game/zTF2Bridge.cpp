@@ -601,16 +601,14 @@ static xVec3 TF2Bridge_RocketNearestBoundPoint(const xBound& bound, const xVec3&
     return nearest;
 }
 
-// TF2 CTFRadiusDamageInfo::ApplyToEntity traces to BodyTarget(vecSrc, false).
-// The base BodyTarget implementation uses WorldSpaceCenter; xBoundCenter is
-// the closest available equivalent for BFBB NPCs. Do not move the target to
-// the nearest horizontal point on the sphere: that changes both visibility
-// and falloff, and can let splash leak around ledges.
+// Source's radius-damage trace ends at the target entity's collision surface
+// when it reaches that entity. BFBB's environment-only ray cannot hit the NPC
+// itself, so use the nearest point on its bound as the equivalent endpoint.
+// This is a 3D closest point (including height), not a horizontal side point.
 static xVec3 TF2Bridge_RocketBodyTargetPoint(
     const xBound& bound, const xVec3& point)
 {
-    (void)point;
-    return *xBoundCenter(&bound);
+    return TF2Bridge_RocketNearestBoundPoint(bound, point);
 }
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
@@ -665,9 +663,10 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         TF2BridgeDebugExplosionTarget& target =
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
-        // Match TF2 RadiusDamage's separation of concerns: the nearest
-        // bound point is only for the radius broadphase; visibility and
-        // non-player falloff use the BodyTarget point (WorldSpaceCenter).
+        // The nearest bound point serves as both the radius broadphase point
+        // and the visibility-ray endpoint. Source's trace would terminate on
+        // the NPC collision surface; our environment-only trace must emulate
+        // that endpoint explicitly.
         const xVec3 targetPoint = TF2Bridge_RocketBodyTargetPoint(
             npc->bound, splashOrigin);
 
@@ -717,10 +716,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         }
         else
         {
-            // Trace directly to the nearest point on the NPC bound. This is
-            // intentionally not exact Source BodyTarget behavior; it tests
-            // whether an exposed part of the BFBB collision bound can receive
-            // the blast without adding arbitrary wraparound or sampling rules.
+            // Trace to the nearest point on the NPC bound, emulating the
+            // endpoint Source's trace would reach on the target collision prop.
             const bool visible = TF2Bridge_RocketSampleVisible(
                 splashOrigin, targetPoint, NULL, NULL, NULL, NULL, NULL, NULL,
                 NULL, NULL, NULL, (int32_t)target.npcType, "body",
