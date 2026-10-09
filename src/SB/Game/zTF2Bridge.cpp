@@ -946,7 +946,7 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                     iRayHitsEnv(&ray, globals.sceneCur->env, &impactEnvHit) != 0 &&
                     impactEnvHit.dist >= 0.0f && impactEnvHit.dist <= len;
                 const bool environmentWins = impactHitEnv &&
-                    (!hitScene || impactEnvHit.dist <= sceneHit.dist + 0.001f);
+                    (!hitScene || impactEnvHit.dist <= sceneHit.dist);
 
                 // Recover the exact JSP triangle separately. xRayHitsScene()
                 // compares environment/entity distances, but only copies the
