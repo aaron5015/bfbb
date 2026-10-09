@@ -738,10 +738,34 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     splashOrigin, center, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, (int32_t)target.npcType, "center");
 
+                int surfaceMask = 0;
+                if (npc->bound.type == XBOUND_TYPE_SPHERE)
+                {
+                    const F32 r = npc->bound.sph.r;
+                    const xVec3 surfacePoints[6] = {
+                        { center.x + r, center.y, center.z },
+                        { center.x - r, center.y, center.z },
+                        { center.x, center.y + r, center.z },
+                        { center.x, center.y - r, center.z },
+                        { center.x, center.y, center.z + r },
+                        { center.x, center.y, center.z - r }
+                    };
+                    for (int p = 0; p < 6; ++p)
+                    {
+                        if (TF2Bridge_RocketSampleVisible(
+                            splashOrigin, surfacePoints[p], NULL, NULL, NULL,
+                            NULL, NULL, NULL, NULL, NULL, NULL,
+                            (int32_t)target.npcType, "surface"))
+                            surfaceMask |= 1 << p;
+                    }
+                }
+
                 printf(
                     "bfbb: tf2bridge -- rocket splash compare type=%d bodyVisible=%d "
-                    "centerVisible=%d body=(%.3f %.3f %.3f) center=(%.3f %.3f %.3f)\n",
+                    "centerVisible=%d surfaceMask=0x%02x body=(%.3f %.3f %.3f) "
+                    "center=(%.3f %.3f %.3f)\\n",
                     (int)target.npcType, visible ? 1 : 0, centerVisible ? 1 : 0,
+                    surfaceMask,
                     (double)targetPoint.x, (double)targetPoint.y, (double)targetPoint.z,
                     (double)center.x, (double)center.y, (double)center.z);
             }
