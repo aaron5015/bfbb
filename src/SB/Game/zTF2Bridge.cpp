@@ -601,32 +601,16 @@ static xVec3 TF2Bridge_RocketNearestBoundPoint(const xBound& bound, const xVec3&
     return nearest;
 }
 
-// BFBB NPCs use a simple sphere as their active collision bound. Keep the
-// nearest point for the TF2-style radius broadphase, but use a body target at
-// the NPC's collision height for visibility. This lets the target move toward
-// the explosion around side cover without moving vertically over a ledge.
+// TF2 CTFRadiusDamageInfo::ApplyToEntity traces to BodyTarget(vecSrc, false).
+// The base BodyTarget implementation uses WorldSpaceCenter; xBoundCenter is
+// the closest available equivalent for BFBB NPCs. Do not move the target to
+// the nearest horizontal point on the sphere: that changes both visibility
+// and falloff, and can let splash leak around ledges.
 static xVec3 TF2Bridge_RocketBodyTargetPoint(
     const xBound& bound, const xVec3& point)
 {
-    if (bound.type != XBOUND_TYPE_SPHERE)
-        return *xBoundCenter(&bound);
-
-    const xVec3 center = bound.sph.center;
-    const F32 dx = point.x - center.x;
-    const F32 dz = point.z - center.z;
-    const F32 horizontalDistSq = dx * dx + dz * dz;
-
-    if (horizontalDistSq <= 0.000001f)
-        return center;
-
-    const F32 horizontalDist = sqrtf(horizontalDistSq);
-    const F32 scale = bound.sph.r / horizontalDist;
-
-    return {
-        center.x + dx * scale,
-        center.y,
-        center.z + dz * scale
-    };
+    (void)point;
+    return *xBoundCenter(&bound);
 }
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
 {
@@ -681,10 +665,9 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         TF2BridgeDebugExplosionTarget& target =
             rocket->explosionTargets[rocket->explosionTargetCount++];
 
-        // TF2 uses the nearest collision point for the radius broadphase,
-        // not as the visibility target. BFBB NPCs use a simple sphere bound,
-        // so aim the visibility ray at the closest horizontal point on the
-        // NPC while keeping its normal collision height.
+        // Match TF2 RadiusDamage's separation of concerns: the nearest
+        // bound point is only for the radius broadphase; visibility and
+        // non-player falloff use the BodyTarget point (WorldSpaceCenter).
         const xVec3 targetPoint = TF2Bridge_RocketBodyTargetPoint(
             npc->bound, splashOrigin);
 
