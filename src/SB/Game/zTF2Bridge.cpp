@@ -499,16 +499,11 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
                         rocket->exposureSampleState[sampleIndex] = 2; // blocked
 
-                    // The rocket impact lies on the collision surface.
-                    // Start splash visibility just outside that exact surface
-                    // using the triangle's collision normal. This avoids
-                    // starting rays inside floors, rocks, walls, or other JSP
-                    // triangles when the projectile strikes at an angle.
-                    const F32 kSplashOriginEpsilon = 0.02f;
-                    xVec3 splashOrigin = rocket->impact;
-                    splashOrigin.x += rocket->impactNormal.x * kSplashOriginEpsilon;
-                    splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
-                    splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
+                    // Start from the exact impact point. The visibility helper
+                    // advances each ray toward its own target sample, avoiding
+                    // a shared normal offset that can push the origin behind
+                    // the surface relative to targets on the opposite side.
+                    const xVec3 splashOrigin = rocket->impact;
 
                     xCollis sampleBlocker;
                     memset(&sampleBlocker, 0, sizeof(sampleBlocker));
@@ -547,11 +542,9 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         // Compare the sampled-bound visibility approximation with TF2's
         // single BodyTarget-style point. This is diagnostic only; it does not
         // alter which targets receive damage.
-        xVec3 centerSplashOrigin = rocket->impact;
-        const F32 kCenterSplashOriginEpsilon = 0.02f;
-        centerSplashOrigin.x += rocket->impactNormal.x * kCenterSplashOriginEpsilon;
-        centerSplashOrigin.y += rocket->impactNormal.y * kCenterSplashOriginEpsilon;
-        centerSplashOrigin.z += rocket->impactNormal.z * kCenterSplashOriginEpsilon;
+        // Use the same exact impact origin as the sample rays; the helper
+        // applies its epsilon along the center-directed ray.
+        const xVec3 centerSplashOrigin = rocket->impact;
         xCollis centerBlocker;
         memset(&centerBlocker, 0, sizeof(centerBlocker));
         const bool centerVisible =
