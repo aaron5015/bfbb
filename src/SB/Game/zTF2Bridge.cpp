@@ -560,6 +560,31 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             (double)centerBlocker.dist, (unsigned)centerBlocker.oid,
             (double)centerBlocker.norm.x, (double)centerBlocker.norm.y, (double)centerBlocker.norm.z);
 
+        // Approximate TF2's nearest-point radius check with the nearest point
+        // on the NPC's AABB. This also tests the actual bound surface rather
+        // than relying exclusively on interior grid samples.
+        xVec3 nearestBoundPoint;
+        nearestBoundPoint.x = rocket->impact.x < sampleBox.lower.x ? sampleBox.lower.x :
+            (rocket->impact.x > sampleBox.upper.x ? sampleBox.upper.x : rocket->impact.x);
+        nearestBoundPoint.y = rocket->impact.y < sampleBox.lower.y ? sampleBox.lower.y :
+            (rocket->impact.y > sampleBox.upper.y ? sampleBox.upper.y : rocket->impact.y);
+        nearestBoundPoint.z = rocket->impact.z < sampleBox.lower.z ? sampleBox.lower.z :
+            (rocket->impact.z > sampleBox.upper.z ? sampleBox.upper.z : rocket->impact.z);
+        const F32 nearestDx = nearestBoundPoint.x - rocket->impact.x;
+        const F32 nearestDy = nearestBoundPoint.y - rocket->impact.y;
+        const F32 nearestDz = nearestBoundPoint.z - rocket->impact.z;
+        const F32 nearestBoundDistance = sqrtf(nearestDx * nearestDx + nearestDy * nearestDy + nearestDz * nearestDz);
+        const bool nearestBoundInRadius = nearestBoundDistance <= radius;
+        const bool nearestBoundVisible = nearestBoundInRadius &&
+            TF2Bridge_RocketSampleVisible(rocket->impact, nearestBoundPoint);
+        if (nearestBoundVisible && nearestBoundDistance < nearestVisibleDistance)
+            nearestVisibleDistance = nearestBoundDistance;
+        printf("bfbb: tf2bridge -- rocket splash nearest-bound target=%d point=(%.3f %.3f %.3f) dist=%.3f inRadius=%d visible=%d\n",
+            (int)target.npcType,
+            (double)nearestBoundPoint.x, (double)nearestBoundPoint.y, (double)nearestBoundPoint.z,
+            (double)nearestBoundDistance, nearestBoundInRadius ? 1 : 0,
+            nearestBoundVisible ? 1 : 0);
+
         // Exposure is the visible fraction of the NPC volume that is actually
         // inside the blast. Samples outside the radius must not count as hidden
         // splash exposure.
@@ -579,7 +604,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         // arbitrary fraction of the NPC's interior samples to be exposed can
         // reject a visible robot when its bound intersects nearby level
         // collision (for example, on a curved rock).
-        if (totalSamples == 0 || blastSamples == 0 || visibleSamples == 0)
+        if (totalSamples == 0 || blastSamples == 0 || (visibleSamples == 0 && !nearestBoundVisible))
         {
             printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED no-visible-target-point damage=0\n",
                 (int)target.npcType, (double)target.distance,
