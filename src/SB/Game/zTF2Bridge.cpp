@@ -517,13 +517,12 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     if (!sampleVisible && visibleSamples == 0 && blastSamples == 1)
                     {
-                        printf("bfbb: tf2bridge -- rocket splash first-blocker target=%d impact=(%.3f %.3f %.3f) normal=(%.3f %.3f %.3f) sample=(%.3f %.3f %.3f) hitDist=%.4f hitOid=%u tri=%u hitNormal=(%.3f %.3f %.3f) rayMax=%.3f\n",
+                        printf("bfbb: tf2bridge -- rocket splash first-blocker target=%d impact=(%.3f %.3f %.3f) normal=(%.3f %.3f %.3f) sample=(%.3f %.3f %.3f) hitDist=%.4f hitOid=%u hitNormal=(%.3f %.3f %.3f) rayMax=%.3f\n",
                             (int)target.npcType,
                             (double)rocket->impact.x, (double)rocket->impact.y, (double)rocket->impact.z,
                             (double)rocket->impactNormal.x, (double)rocket->impactNormal.y, (double)rocket->impactNormal.z,
                             (double)sample.x, (double)sample.y, (double)sample.z,
                             (double)sampleBlocker.dist, (unsigned)sampleBlocker.oid,
-                            (unsigned)sampleBlocker.tri.index,
                             (double)sampleBlocker.norm.x, (double)sampleBlocker.norm.y, (double)sampleBlocker.norm.z,
                             (double)(sqrtf((sample.x - splashOrigin.x) * (sample.x - splashOrigin.x) +
                                            (sample.y - splashOrigin.y) * (sample.y - splashOrigin.y) +
@@ -544,6 +543,29 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                 }
             }
         }
+
+        // Compare the sampled-bound visibility approximation with TF2's
+        // single BodyTarget-style point. This is diagnostic only; it does not
+        // alter which targets receive damage.
+        xVec3 centerSplashOrigin = rocket->impact;
+        const F32 kCenterSplashOriginEpsilon = 0.02f;
+        centerSplashOrigin.x += rocket->impactNormal.x * kCenterSplashOriginEpsilon;
+        centerSplashOrigin.y += rocket->impactNormal.y * kCenterSplashOriginEpsilon;
+        centerSplashOrigin.z += rocket->impactNormal.z * kCenterSplashOriginEpsilon;
+        xCollis centerBlocker;
+        memset(&centerBlocker, 0, sizeof(centerBlocker));
+        const bool centerVisible =
+            TF2Bridge_RocketSampleVisible(centerSplashOrigin, *center, &centerBlocker);
+        const F32 centerDx = center->x - rocket->impact.x;
+        const F32 centerDy = center->y - rocket->impact.y;
+        const F32 centerDz = center->z - rocket->impact.z;
+        const F32 centerDistance = sqrtf(centerDx * centerDx + centerDy * centerDy + centerDz * centerDz);
+        printf("bfbb: tf2bridge -- rocket splash center-check target=%d center=(%.3f %.3f %.3f) centerDist=%.3f visible=%d blockerDist=%.4f blockerOid=%u blockerNormal=(%.3f %.3f %.3f)\n",
+            (int)target.npcType,
+            (double)center->x, (double)center->y, (double)center->z,
+            (double)centerDistance, centerVisible ? 1 : 0,
+            (double)centerBlocker.dist, (unsigned)centerBlocker.oid,
+            (double)centerBlocker.norm.x, (double)centerBlocker.norm.y, (double)centerBlocker.norm.z);
 
         // Exposure is the visible fraction of the NPC volume that is actually
         // inside the blast. Samples outside the radius must not count as hidden
