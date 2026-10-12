@@ -585,6 +585,44 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             (double)nearestBoundDistance, nearestBoundInRadius ? 1 : 0,
             nearestBoundVisible ? 1 : 0);
 
+        // Try the six face centers of the bound as additional BodyTarget
+        // candidates. The closest AABB point can lie behind a rock even when
+        // the robot's upper/front surface is exposed. These are candidate
+        // visibility points only; each must still pass the same world ray.
+        bool boundFaceVisible = false;
+        F32 nearestFaceDistance = FLOAT_MAX;
+        xVec3 nearestVisibleFace = nearestBoundPoint;
+        const xBox& b = sampleBox;
+        const xVec3 facePoints[6] = {
+            { b.lower.x, 0.5f * (b.lower.y + b.upper.y), 0.5f * (b.lower.z + b.upper.z) },
+            { b.upper.x, 0.5f * (b.lower.y + b.upper.y), 0.5f * (b.lower.z + b.upper.z) },
+            { 0.5f * (b.lower.x + b.upper.x), b.lower.y, 0.5f * (b.lower.z + b.upper.z) },
+            { 0.5f * (b.lower.x + b.upper.x), b.upper.y, 0.5f * (b.lower.z + b.upper.z) },
+            { 0.5f * (b.lower.x + b.upper.x), 0.5f * (b.lower.y + b.upper.y), b.lower.z },
+            { 0.5f * (b.lower.x + b.upper.x), 0.5f * (b.lower.y + b.upper.y), b.upper.z }
+        };
+        for (S32 face = 0; face < 6; ++face)
+        {
+            const F32 fdx = facePoints[face].x - rocket->impact.x;
+            const F32 fdy = facePoints[face].y - rocket->impact.y;
+            const F32 fdz = facePoints[face].z - rocket->impact.z;
+            const F32 faceDist = sqrtf(fdx * fdx + fdy * fdy + fdz * fdz);
+            if (faceDist > radius || faceDist >= nearestFaceDistance)
+                continue;
+            if (TF2Bridge_RocketSampleVisible(rocket->impact, facePoints[face]))
+            {
+                boundFaceVisible = true;
+                nearestFaceDistance = faceDist;
+                nearestVisibleFace = facePoints[face];
+            }
+        }
+        if (boundFaceVisible && nearestFaceDistance < nearestVisibleDistance)
+            nearestVisibleDistance = nearestFaceDistance;
+        printf("bfbb: tf2bridge -- rocket splash bound-faces target=%d visible=%d nearestDist=%.3f point=(%.3f %.3f %.3f)\n",
+            (int)target.npcType, boundFaceVisible ? 1 : 0,
+            (double)(boundFaceVisible ? nearestFaceDistance : -1.0f),
+            (double)nearestVisibleFace.x, (double)nearestVisibleFace.y, (double)nearestVisibleFace.z);
+
         // Exposure is the visible fraction of the NPC volume that is actually
         // inside the blast. Samples outside the radius must not count as hidden
         // splash exposure.
@@ -604,7 +642,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         // arbitrary fraction of the NPC's interior samples to be exposed can
         // reject a visible robot when its bound intersects nearby level
         // collision (for example, on a curved rock).
-        if (totalSamples == 0 || blastSamples == 0 || (visibleSamples == 0 && !nearestBoundVisible))
+        if (totalSamples == 0 || blastSamples == 0 || (visibleSamples == 0 && !nearestBoundVisible && !boundFaceVisible))
         {
             printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED no-visible-target-point damage=0\n",
                 (int)target.npcType, (double)target.distance,
