@@ -585,7 +585,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                 const bool offsetVisible = TF2Bridge_RocketSampleVisible(
                     centerSplashOrigin, *center, &offsetBlocker, offsets[offsetIndex]);
                 const bool offsetHit = (offsetBlocker.flags & 1) != 0;
-                printf("bfbb: tf2bridge -- rocket splash offset-probe target=%d offset=%.2f visible=%d hit=%d hitDist=%.4f hitOid=%u normal=(%.3f %.3f %.3f)\\n",
+                printf("bfbb: tf2bridge -- rocket splash offset-probe target=%d offset=%.2f visible=%d hit=%d hitDist=%.4f hitOid=%u normal=(%.3f %.3f %.3f)\n",
                     (int)target.npcType, (double)offsets[offsetIndex],
                     offsetVisible ? 1 : 0, offsetHit ? 1 : 0,
                     (double)offsetBlocker.dist, (unsigned)offsetBlocker.oid,
