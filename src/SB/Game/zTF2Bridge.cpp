@@ -340,7 +340,7 @@ static bool TF2Bridge_RocketApplyDamage()
     return true;
 }
 
-static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample)
+static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample, xCollis* blocker = NULL)
 {
     const F32 dx = sample.x - origin.x;
     const F32 dy = sample.y - origin.y;
@@ -383,7 +383,10 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
     if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) == 0)
         return true;
 
-    return worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
+    const bool visible = worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
+    if (!visible && blocker != NULL)
+        *blocker = worldHit;
+    return visible;
 }
 
 static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
@@ -507,7 +510,27 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                     splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
                     splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
 
-                    if (TF2Bridge_RocketSampleVisible(splashOrigin, sample))
+                    xCollis sampleBlocker;
+                    memset(&sampleBlocker, 0, sizeof(sampleBlocker));
+                    const bool sampleVisible =
+                        TF2Bridge_RocketSampleVisible(splashOrigin, sample, &sampleBlocker);
+
+                    if (!sampleVisible && visibleSamples == 0 && blastSamples == 1)
+                    {
+                        printf("bfbb: tf2bridge -- rocket splash first-blocker target=%d impact=(%.3f %.3f %.3f) normal=(%.3f %.3f %.3f) sample=(%.3f %.3f %.3f) hitDist=%.4f hitOid=%u tri=%u hitNormal=(%.3f %.3f %.3f) rayMax=%.3f\n",
+                            (int)target.npcType,
+                            (double)rocket->impact.x, (double)rocket->impact.y, (double)rocket->impact.z,
+                            (double)rocket->impactNormal.x, (double)rocket->impactNormal.y, (double)rocket->impactNormal.z,
+                            (double)sample.x, (double)sample.y, (double)sample.z,
+                            (double)sampleBlocker.dist, (unsigned)sampleBlocker.oid,
+                            (unsigned)sampleBlocker.tri.index,
+                            (double)sampleBlocker.norm.x, (double)sampleBlocker.norm.y, (double)sampleBlocker.norm.z,
+                            (double)(sqrtf((sample.x - splashOrigin.x) * (sample.x - splashOrigin.x) +
+                                           (sample.y - splashOrigin.y) * (sample.y - splashOrigin.y) +
+                                           (sample.z - splashOrigin.z) * (sample.z - splashOrigin.z)) - 0.05f));
+                    }
+
+                    if (sampleVisible)
                     {
                         ++visibleSamples;
 
