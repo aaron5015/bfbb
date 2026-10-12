@@ -340,7 +340,7 @@ static bool TF2Bridge_RocketApplyDamage()
     return true;
 }
 
-static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample, xCollis* blocker = NULL)
+static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample, xCollis* blocker = NULL, F32 rayEpsilon = 0.05f)
 {
     const F32 dx = sample.x - origin.x;
     const F32 dy = sample.y - origin.y;
@@ -352,7 +352,6 @@ static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& samp
 
     const F32 distance = sqrtf(distanceSq);
 
-    const F32 rayEpsilon = 0.05f;
     if (distance <= rayEpsilon)
         return true;
 
@@ -572,6 +571,27 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             (double)centerDistance, centerVisible ? 1 : 0,
             (double)centerBlocker.dist, (unsigned)centerBlocker.oid,
             (double)centerBlocker.norm.x, (double)centerBlocker.norm.y, (double)centerBlocker.norm.z);
+
+        // Diagnose whether the explosion's initial position is embedded in a
+        // JSP surface. Keep the damage decision unchanged: only compare trace
+        // results for the same center-directed ray with different start offsets.
+        {
+            const F32 offsets[] = { 0.0f, 0.05f, 0.15f, 0.30f };
+            for (U32 offsetIndex = 0; offsetIndex < sizeof(offsets) / sizeof(offsets[0]); ++offsetIndex)
+            {
+                xCollis offsetBlocker;
+                memset(&offsetBlocker, 0, sizeof(offsetBlocker));
+                offsetBlocker.flags = k_HIT_0x200;
+                const bool offsetVisible = TF2Bridge_RocketSampleVisible(
+                    centerSplashOrigin, *center, &offsetBlocker, offsets[offsetIndex]);
+                const bool offsetHit = (offsetBlocker.flags & 1) != 0;
+                printf("bfbb: tf2bridge -- rocket splash offset-probe target=%d offset=%.2f visible=%d hit=%d hitDist=%.4f hitOid=%u normal=(%.3f %.3f %.3f)\\n",
+                    (int)target.npcType, (double)offsets[offsetIndex],
+                    offsetVisible ? 1 : 0, offsetHit ? 1 : 0,
+                    (double)offsetBlocker.dist, (unsigned)offsetBlocker.oid,
+                    (double)offsetBlocker.norm.x, (double)offsetBlocker.norm.y, (double)offsetBlocker.norm.z);
+            }
+        }
 
         // Approximate TF2's nearest-point radius check with the nearest point
         // on the NPC's AABB. This also tests the actual bound surface rather
