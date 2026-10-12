@@ -331,19 +331,6 @@ static float TF2Bridge_GetBoundRadius(const xBound& bound)
 
 static bool IsTF2BridgeRobot(const zNPCCommon* npc);
 
-static F32 TF2Bridge_RocketExposureThreshold()
-{
-    const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_EXPOSURE_THRESHOLD");
-    if (value != NULL && value[0] != '\0')
-    {
-        const F32 threshold = (F32)atof(value);
-        if (threshold >= 0.0f && threshold <= 1.0f)
-            return threshold;
-    }
-
-    return 0.35f;
-}
-
 static bool TF2Bridge_RocketApplyDamage()
 {
     const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_APPLY_DAMAGE");
@@ -415,7 +402,6 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
     const F32 baseDamage = rocket->damage;
     const F32 radius = rocket->radius;
     const F32 radiusSq = radius * radius;
-    const F32 exposureThreshold = TF2Bridge_RocketExposureThreshold();
     const bool applyDamage = TF2Bridge_RocketApplyDamage();
 
     for (S32 i = 0; i < npclist->cnt; ++i)
@@ -549,20 +535,25 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
                 ? nearestVisibleDistance
                 : radius;
 
-        if (totalSamples == 0 || blastSamples == 0 || exposure < exposureThreshold)
+        // TF2 RadiusDamage traces to BodyTarget and accepts the target when
+        // that target point is visible. Approximate BodyTarget with the nearest
+        // visible in-radius point from the sampled BFBB bound. Requiring an
+        // arbitrary fraction of the NPC's interior samples to be exposed can
+        // reject a visible robot when its bound intersects nearby level
+        // collision (for example, on a curved rock).
+        if (totalSamples == 0 || blastSamples == 0 || visibleSamples == 0)
         {
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED threshold=%.1f%% damage=0\n",
+            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED no-visible-target-point damage=0\\n",
                 (int)target.npcType, (double)target.distance,
                 (int)visibleSamples, (int)blastSamples,
                 (double)(exposure * 100.0f),
-                (int)blastSamples, (int)totalSamples,
-                (double)(exposureThreshold * 100.0f));
+                (int)blastSamples, (int)totalSamples);
             continue;
         }
 
-        // This target passed the splash exposure threshold, so mark it as
-        // a valid splash hit for the diagnostic renderer. The actual damage
-        // decision remains controlled by the exposure threshold above.
+        // At least one in-radius target point is visible, matching TF2's
+        // line-of-sight acceptance rule. Use the nearest visible point for
+        // distance falloff and the diagnostic target marker.
         target.visible = true;
 
         // TF2 RadiusDamage uses linear distance falloff:
@@ -591,9 +582,8 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             applyDamage ? 1 : 0);
     }
 
-    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f exposureThreshold=%.1f%% applyDamage=%d targets=%u\n",
+    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f visibility=TF2-body-target-approximation applyDamage=%d targets=%u\\n",
         (double)radius, (double)baseDamage,
-        (double)(exposureThreshold * 100.0f),
         applyDamage ? 1 : 0,
         (unsigned)rocket->explosionTargetCount);
 }
