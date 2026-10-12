@@ -543,7 +543,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         // collision (for example, on a curved rock).
         if (totalSamples == 0 || blastSamples == 0 || visibleSamples == 0)
         {
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED no-visible-target-point damage=0\\n",
+            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED no-visible-target-point damage=0\n",
                 (int)target.npcType, (double)target.distance,
                 (int)visibleSamples, (int)blastSamples,
                 (double)(exposure * 100.0f),
@@ -582,7 +582,7 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
             applyDamage ? 1 : 0);
     }
 
-    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f visibility=TF2-body-target-approximation applyDamage=%d targets=%u\\n",
+    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f visibility=TF2-body-target-approximation applyDamage=%d targets=%u\n",
         (double)radius, (double)baseDamage,
         applyDamage ? 1 : 0,
         (unsigned)rocket->explosionTargetCount);
