@@ -512,12 +512,13 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
                     if (!sampleVisible && visibleSamples == 0 && blastSamples == 1)
                     {
-                        printf("bfbb: tf2bridge -- rocket splash first-blocker target=%d impact=(%.3f %.3f %.3f) normal=(%.3f %.3f %.3f) sample=(%.3f %.3f %.3f) hitDist=%.4f hitOid=%u hitNormal=(%.3f %.3f %.3f) rayMax=%.3f\n",
+                        printf("bfbb: tf2bridge -- rocket splash first-blocker target=%d impact=(%.3f %.3f %.3f) normal=(%.3f %.3f %.3f) sample=(%.3f %.3f %.3f) hitDist=%.4f hitOid=%u hitTri=%u hitFlags=0x%08x hitNormal=(%.3f %.3f %.3f) rayMax=%.3f\n",
                             (int)target.npcType,
                             (double)rocket->impact.x, (double)rocket->impact.y, (double)rocket->impact.z,
                             (double)rocket->impactNormal.x, (double)rocket->impactNormal.y, (double)rocket->impactNormal.z,
                             (double)sample.x, (double)sample.y, (double)sample.z,
                             (double)sampleBlocker.dist, (unsigned)sampleBlocker.oid,
+                            (unsigned)sampleBlocker.tri.index, (unsigned)sampleBlocker.flags,
                             (double)sampleBlocker.norm.x, (double)sampleBlocker.norm.y, (double)sampleBlocker.norm.z,
                             (double)(sqrtf((sample.x - splashOrigin.x) * (sample.x - splashOrigin.x) +
                                            (sample.y - splashOrigin.y) * (sample.y - splashOrigin.y) +
