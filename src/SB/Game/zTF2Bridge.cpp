@@ -702,86 +702,95 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         target.npcType = (int32_t)npc->SelfType();
         target.visible = false;
 
-        F32 targetDx = targetPoint.x - splashOrigin.x;
-        F32 targetDy = targetPoint.y - splashOrigin.y;
-        F32 targetDz = targetPoint.z - splashOrigin.z;
-        const F32 targetDistSq = targetDx * targetDx +
-            targetDy * targetDy + targetDz * targetDz;
-        const F32 targetDistance = sqrtf(targetDistSq);
+        // Exposure is evaluated over the collision bound rather than relying
+        // on one center/nearest-point ray. For spheres, sample all 26 unique
+        // directions of a 3x3x3 neighborhood on the sphere, plus the center.
+        // The closest visible sample supplies the distance-falloff point.
+        // This is a geometric approximation, not a percentage-based damage
+        // multiplier: an occluded sample contributes nothing.
+        xVec3 bestVisiblePoint = targetPoint;
+        F32 bestVisibleDistanceSq = FLT_MAX;
+        uint32_t visibleSampleCount = 0;
+        const xVec3 center = *xBoundCenter(&npc->bound);
+        const bool sphereBound = npc->bound.type == XBOUND_TYPE_SPHERE;
+        const F32 sphereRadius = sphereBound ? npc->bound.sph.r : 0.0f;
 
-        if (targetDistance <= 0.000001f)
+        const xVec3 centerDelta = {
+            center.x - splashOrigin.x,
+            center.y - splashOrigin.y,
+            center.z - splashOrigin.z
+        };
+        const F32 centerDistanceSq = centerDelta.x * centerDelta.x +
+            centerDelta.y * centerDelta.y + centerDelta.z * centerDelta.z;
+        if (TF2Bridge_RocketSampleVisible(
+            splashOrigin, center, NULL, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, (int32_t)target.npcType, "center",
+            &rocket->impact, &rocket->impactNormal))
         {
-            target.visible = true;
-            target.distance = 0.0f;
+            bestVisiblePoint = center;
+            bestVisibleDistanceSq = centerDistanceSq;
+            ++visibleSampleCount;
         }
-        else
+
+        if (sphereBound && sphereRadius > 0.0001f)
         {
-            // Trace to the nearest point on the NPC bound, emulating the
-            // endpoint Source's trace would reach on the target collision prop.
-            const bool visible = TF2Bridge_RocketSampleVisible(
-                splashOrigin, targetPoint, NULL, NULL, NULL, NULL, NULL, NULL,
-                NULL, NULL, NULL, (int32_t)target.npcType, "body",
-                &rocket->impact, &rocket->impactNormal);
-
-            // Diagnostic A/B only: compare the selected horizontal body point
-            // with the actual bound center. This does not affect damage. It
-            // helps distinguish a bad target point from missing/incorrect
-            // collision coverage around the ledge or rock.
-            if (npc->SelfType() == 1314148924 || npc->SelfType() == 1314148912)
+            for (int sx = -1; sx <= 1; ++sx)
             {
-                const xVec3 center = *xBoundCenter(&npc->bound);
-                const bool centerVisible = TF2Bridge_RocketSampleVisible(
-                    splashOrigin, center, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, (int32_t)target.npcType, "center",
-                    &rocket->impact, &rocket->impactNormal);
-
-                int surfaceMask = 0;
-                if (npc->bound.type == XBOUND_TYPE_SPHERE)
+                for (int sy = -1; sy <= 1; ++sy)
                 {
-                    const F32 r = npc->bound.sph.r;
-                    const xVec3 surfacePoints[6] = {
-                        { center.x + r, center.y, center.z },
-                        { center.x - r, center.y, center.z },
-                        { center.x, center.y + r, center.z },
-                        { center.x, center.y - r, center.z },
-                        { center.x, center.y, center.z + r },
-                        { center.x, center.y, center.z - r }
-                    };
-                    for (int p = 0; p < 6; ++p)
+                    for (int sz = -1; sz <= 1; ++sz)
                     {
-                        if (TF2Bridge_RocketSampleVisible(
-                            splashOrigin, surfacePoints[p], NULL, NULL, NULL,
-                            NULL, NULL, NULL, NULL, NULL, NULL,
+                        if (sx == 0 && sy == 0 && sz == 0)
+                            continue;
+
+                        const F32 lenSq = (F32)(sx * sx + sy * sy + sz * sz);
+                        const F32 scale = sphereRadius / sqrtf(lenSq);
+                        const xVec3 sample = {
+                            center.x + (F32)sx * scale,
+                            center.y + (F32)sy * scale,
+                            center.z + (F32)sz * scale
+                        };
+                        const F32 dx = sample.x - splashOrigin.x;
+                        const F32 dy = sample.y - splashOrigin.y;
+                        const F32 dz = sample.z - splashOrigin.z;
+                        const F32 distSq = dx * dx + dy * dy + dz * dz;
+
+                        if (!TF2Bridge_RocketSampleVisible(
+                            splashOrigin, sample, NULL, NULL, NULL, NULL,
+                            NULL, NULL, NULL, NULL, NULL,
                             (int32_t)target.npcType, "surface",
                             &rocket->impact, &rocket->impactNormal))
-                            surfaceMask |= 1 << p;
+                            continue;
+
+                        ++visibleSampleCount;
+                        if (distSq < bestVisibleDistanceSq)
+                        {
+                            bestVisibleDistanceSq = distSq;
+                            bestVisiblePoint = sample;
+                        }
                     }
                 }
-
-                printf(
-                    "bfbb: tf2bridge -- rocket splash compare type=%d bodyVisible=%d "
-                    "centerVisible=%d surfaceMask=0x%02x body=(%.3f %.3f %.3f) "
-                    "center=(%.3f %.3f %.3f)\\n",
-                    (int)target.npcType, visible ? 1 : 0, centerVisible ? 1 : 0,
-                    surfaceMask,
-                    (double)targetPoint.x, (double)targetPoint.y, (double)targetPoint.z,
-                    (double)center.x, (double)center.y, (double)center.z);
             }
-
-            if (!visible)
-            {
-                printf(
-                    "bfbb: tf2bridge -- rocket explosion target type %d "
-                    "nearest=%.2f body=%.2f BLOCKED damage=0\\n",
-                    (int)target.npcType, (double)sqrtf(nearestDistSq),
-                    (double)targetDistance);
-                continue;
-            }
-
-            target.visible = true;
-            // Use the visible target point as the falloff distance.
-            target.distance = targetDistance;
         }
+
+        if (visibleSampleCount == 0)
+        {
+            printf(
+                "bfbb: tf2bridge -- rocket explosion target type %d "
+                "nearest=%.2f BLOCKED samples=0 damage=0\\n",
+                (int)target.npcType, (double)sqrtf(nearestDistSq));
+            continue;
+        }
+
+        target.visible = true;
+        target.pos = bestVisiblePoint;
+        target.distance = sqrtf(bestVisibleDistanceSq);
+
+        printf(
+            "bfbb: tf2bridge -- rocket explosion target type %d "
+            "nearest=%.2f visibleSamples=%u falloffDist=%.2f VISIBLE\\n",
+            (int)target.npcType, (double)sqrtf(nearestDistSq),
+            (unsigned)visibleSampleCount, (double)target.distance);
 
         F32 t = radius > 0.0001f
             ? target.distance / radius
