@@ -1,0 +1,8 @@
+# Jellyfish Caves (jf02) at 640x480 on Direct3D 9, booted straight into the scene.
+# SpongeBob's talk box is up by 240. B leaves it; the shot is 120 frames
+# later.
+
+wait 600
+press b
+wait 120
+shot reg_jf02 0
