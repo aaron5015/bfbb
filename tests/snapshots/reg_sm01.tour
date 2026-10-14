@@ -1,0 +1,8 @@
+# The Sand Mountain ski lodge (sm01) at 640x480 on Direct3D 9, booted straight into the scene.
+# The fly-through ends in SpongeBob's talk box by 720. B leaves it; the shot
+# is 120 frames later.
+
+wait 960
+press b
+wait 120
+shot reg_sm01 0
