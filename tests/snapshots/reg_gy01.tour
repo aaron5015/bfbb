@@ -1,0 +1,5 @@
+# Graveyard Lake (gy01) at 640x480 on Direct3D 9, booted straight into the scene.
+# The fly-through ends by 660.
+
+wait 900
+shot reg_gy01 0
