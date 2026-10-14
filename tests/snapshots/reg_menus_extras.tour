@@ -1,0 +1,20 @@
+# The main menu's Credits and Extras at 640x480 on Direct3D 9. Credits is
+# four down from New Game, Extras five.
+
+wait 900
+press start
+wait 180
+press down
+press down
+press down
+press down
+press down
+press a
+wait 120
+shot reg_extras 0
+press b
+wait 60
+press up
+press a
+wait 300
+shot reg_credits 0
