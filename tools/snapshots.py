@@ -18,11 +18,12 @@ images are left in the scratch folder, which is printed.
 
 Usage:
   snapshots.py                     run every case
-  snapshots.py <case> [<case>...]  run only these
+  snapshots.py <case> [<case>...]  run only these; a case may be a glob, 'reg_*'
   snapshots.py --update            write shots that are new or differ
   snapshots.py --exe build/bfbb.exe
 """
 import argparse
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -128,10 +129,12 @@ def main():
                  "beside the executable")
 
     all_cases = sorted(n[:-5] for n in os.listdir(CASES) if n.endswith(".tour"))
-    cases = args.cases or all_cases
-    for c in cases:
-        if c not in all_cases:
-            sys.exit("no case %s; have %s" % (c, ", ".join(all_cases)))
+    cases = []
+    for pattern in args.cases or ["*"]:
+        matched = fnmatch.filter(all_cases, pattern)
+        if not matched:
+            sys.exit("no case %s; have %s" % (pattern, ", ".join(all_cases)))
+        cases += [c for c in matched if c not in cases]
 
     scratch = tempfile.mkdtemp(prefix="bfbb_snapshots_")
     failed = 0
