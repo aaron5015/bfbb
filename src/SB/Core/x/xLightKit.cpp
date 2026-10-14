@@ -5,6 +5,10 @@
 #endif
 #include "xMath.h"
 
+#if defined(PS2)
+#include "iModel.h"
+#endif
+
 #include <types.h>
 #include <string.h>
 
@@ -34,7 +38,7 @@ xLightKit* xLightKit_Prepare(void* data)
 
     for (int i = 0; i < lkit->lightCount; currlight++, i++)
     {
-        if (currlight->platLight != NULL)
+        if (currlight->platLight)
         {
             return lkit;
         }
@@ -175,6 +179,9 @@ void xLightKit_Enable(xLightKit* lkit, RpWorld* world)
         {
             iModelHack_DisablePrelight = 0;
         }
+#if defined(PS2)
+        iModel_SetLightKit(lkit);
+#endif
     }
 }
 

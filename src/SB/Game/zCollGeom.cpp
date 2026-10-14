@@ -84,7 +84,7 @@ void zCollGeom_Init()
 
     if (sNumTables)
     {
-        U32 tmpsize, i, k;
+        U32 tmpsize, i, k, j;
         void* data;
 
         for (k = 0; k < sNumTables; k++)
@@ -133,10 +133,13 @@ void zCollGeom_Init()
                         (RpAtomic*)xSTFindAsset((U32)(UPtr)sTableList[k][i].baseModel, NULL);
                 }
 
-                if ((U32)(UPtr)sTableList[k][i].colModel[0])
+                for (j = 0; j < 1; j++)
                 {
-                    sTableList[k][i].colModel[0] =
-                        (RpAtomic*)xSTFindAsset((U32)(UPtr)sTableList[k][i].colModel[0], NULL);
+                    if ((U32)(UPtr)sTableList[k][i].colModel[j])
+                    {
+                        sTableList[k][i].colModel[j] =
+                            (RpAtomic*)xSTFindAsset((U32)(UPtr)sTableList[k][i].colModel[j], NULL);
+                    }
                 }
 
                 if (!sTableList[k][i].colModel[0])

@@ -4,7 +4,11 @@
 #include "xBase.h"
 #include "xListItem.h"
 #include "xFactory.h"
+#if defined(PS2)
+struct xScene;
+#else
 #include "xScene.h"
+#endif
 
 enum en_GOALSTATE
 {
@@ -108,10 +112,7 @@ struct xPsyche : RyzMemData
     xGoal* GIDInStack(S32 gid) const;
     S32 GIDOfActive() const;
     S32 GIDOfPending() const;
-    S32 GIDOfSafety() const
-    {
-        return gid_safegoal;
-    }
+    S32 GIDOfSafety() const;
     xGoal* GetPrevRecovery(S32 gid) const;
     S32 Timestep(F32 dt, void* updCtxt);
     S32 ParseTranRequest(en_trantype trantyp, S32 trangid);
@@ -155,21 +156,10 @@ struct xPsyche : RyzMemData
     {
         return this->clt_owner;
     }
-    S32 ExpTranIsOn()
-    {
-        return !(this->flg_psyche & 4);
-    }
-    void ExpTranOff()
-    {
-        this->flg_psyche |= 4;
-    }
-    void ExpTranOn()
-    {
-        this->flg_psyche &= ~4;
-    }
-    void DBG_HistAdd(S32 gid)
-    {
-    }
+    S32 ExpTranIsOn();
+    void ExpTranOff();
+    void ExpTranOn();
+    void DBG_HistAdd(S32 gid);
 
     void ImmTranOn()
     {
@@ -346,5 +336,20 @@ xGoal* xListItem<xGoal>::Head()
     return node;
 }
  */
+
+inline S32 xPsyche::IndexInStack(const xGoal* gid) const
+{
+    return IndexInStack(gid->GetID());
+}
+
+inline void xGoal::AddFlags(S32 flags)
+{
+    this->flg_able |= flags;
+}
+
+inline xPsyche* xGoal::GetPsyche() const
+{
+    return psyche;
+}
 
 #endif

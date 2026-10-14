@@ -1,3 +1,8 @@
+#if defined(PS2)
+#include <rwcore.h>
+#include <rwim2d.h>
+#include <rwim3d.h>
+#endif
 #include "xCM.h"
 #include "xEvent.h"
 #include "xFont.h"
@@ -11,11 +16,34 @@
 #include <stdio.h>
 #include <types.h>
 
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+enum
+{
+    CREDITS_SCREEN_WIDTH = 640,
+    CREDITS_SCREEN_HEIGHT = 528
+};
+#elif defined(VERSION_SLES_51968) || defined(VERSION_SLES_51970)
+enum
+{
+    CREDITS_SCREEN_WIDTH = 512,
+    CREDITS_SCREEN_HEIGHT = 512
+};
+#elif defined(PS2)
+enum
+{
+    CREDITS_SCREEN_WIDTH = 640,
+    CREDITS_SCREEN_HEIGHT = 448
+};
+#else
+enum
+{
+    CREDITS_SCREEN_WIDTH = 640,
+    CREDITS_SCREEN_HEIGHT = 480
+};
+#endif
+
 void __deadstripped_rodata()
 {
-    const xVec3 dead0 = {};
-    const xVec3 dead1 = {};
-    const xVec3 dead2 = {};
     const xVec3 dead3 = {};
     const U8 dead4[0x28] = {};
     const U8 dead5[0x28] = {};
@@ -99,14 +127,27 @@ static void xCMprep(xCreditsData* data)
     hdr->state = hdr->state == 0 ? 1 : 0;
 }
 
+#ifdef PS2
+struct xColorUnpack
+{
+    U8 a, b, g, r;
+};
+#endif
+
 static iColor_tag xCMcolor_scale(iColor_tag color, F32 t)
 {
-    F32 r = (F32)color.r;
-    F32 g = (F32)color.g;
-    F32 b = (F32)color.b;
-    F32 a = (F32)color.a * t;
-
+#ifdef PS2
     iColor_tag ret;
+    xColorUnpack c = *(xColorUnpack*)&color;
+#else
+    iColor_tag ret = color;
+    iColor_tag c = color;
+#endif
+    F32 r = c.r;
+    F32 g = c.g;
+    F32 b = c.b;
+    F32 a = c.a;
+    a *= t;
     xColorInit(&ret, (U8)r, (U8)g, (U8)b, (U8)a);
     return ret;
 }
@@ -181,11 +222,23 @@ static U32 xCMrender(F32 time, xCreditsData* data)
                     F32 y1;
                     F32 x1;
                     F32 y0;
+                    F32 ty;
+                    F32 tx;
 
-                    x0 = xScreenUIx(tex->x);
-                    y0 = xScreenUIy(tex->y);
-                    x1 = xScreenUIx(tex->x + tex->w);
-                    y1 = xScreenUIy(tex->y + tex->h);
+                    tx = tex->x;
+                    ty = tex->y;
+
+#ifdef PLATFORM_PC
+                    x0 = xScreenUIx(tx);
+                    y0 = xScreenUIy(ty);
+                    x1 = xScreenUIx(tx + tex->w);
+                    y1 = xScreenUIy(ty + tex->h);
+#else
+                    x0 = (F32)CREDITS_SCREEN_WIDTH * tx;
+                    y0 = (F32)CREDITS_SCREEN_HEIGHT * ty;
+                    x1 = (F32)CREDITS_SCREEN_WIDTH * (tx + tex->w);
+                    y1 = (F32)CREDITS_SCREEN_HEIGHT * (ty + tex->h);
+#endif
                     Im2DRenderQuad(x0, y0, x1, y1, 0.0f, 1000000.0f, 0.5f);
                     xprintf("tex %6.2f,%6.2f - %6.2f,%6.2f\n", x0, y0, x1, y1);
                     break;

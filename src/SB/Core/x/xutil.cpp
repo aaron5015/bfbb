@@ -3,20 +3,97 @@
 #include "xMath.h"
 
 #include <ctype.h>
-#ifdef __MWERKS__
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
-#else
+#if defined(PS2) || defined(XBOX)
 #include <stdlib.h>
-#endif
-#ifdef __MWERKS__
+#include <stdio.h>
+#elif defined(__MWERKS__)
+#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
 #include <PowerPC_EABI_Support/MSL_C/MSL_Common/ctype_api.h>
 #else
+#include <stdlib.h>
 #include <ctype.h>
 #endif
 
 static S32 g_xutilinit;
 static S32 g_crc_needinit = 1;
 static U32 g_crc32_table[256] = {};
+
+#if defined(PS2)
+static U16 ascii_table[3][2] = { { 0x824f, '0' }, { 0x8260, 'A' }, { 0x8281, 'a' } };
+static U16 ascii_k_table[33] = {
+    0x8140, 0x8149, 0x8168, 0x8194, 0x8190, 0x8193, 0x8195, 0x8166, 0x8169, 0x816a, 0x8196,
+    0x817b, 0x8143, 0x817c, 0x8144, 0x815e, 0x8146, 0x8147, 0x8171, 0x8181, 0x8172, 0x8148,
+    0x8197, 0x816d, 0x818f, 0x816e, 0x814f, 0x8151, 0x8165, 0x816f, 0x8162, 0x8170, 0x8150,
+};
+
+void strtosjis(U8* string, U8* dest)
+{
+    S32 i;
+    S32 sjis_code;
+    S32 ascii_code;
+    U8 stmp2 = '0';
+    U8 stmp;
+    U8* dest2 = dest;
+
+    for (i = 0; i < 32; i++)
+    {
+        *dest2++ = 0;
+        *dest2++ = 0;
+    }
+
+    while (*string)
+    {
+        stmp = 0;
+        ascii_code = *string++;
+        if (ascii_code >= 0x20 && ascii_code < 0x30)
+            stmp = 1;
+        else if (ascii_code >= 0x30 && ascii_code < 0x3a)
+            stmp2 = 0;
+        else if (ascii_code >= 0x3a && ascii_code < 0x41)
+            stmp = 11;
+        else if (ascii_code >= 0x41 && ascii_code < 0x5b)
+            stmp2 = 1;
+        else if (ascii_code >= 0x5b && ascii_code < 0x61)
+            stmp = 37;
+        else if (ascii_code >= 0x61 && ascii_code < 0x7b)
+            stmp2 = 2;
+        else if (ascii_code >= 0x7b && ascii_code < 0x7f)
+            stmp = 63;
+        else
+        {
+            printf("bad ASCII code 0x%x\n", ascii_code);
+            exit(1);
+        }
+
+        if (stmp)
+            sjis_code = ascii_k_table[(ascii_code - 0x20) - (stmp - 1)];
+        else
+            sjis_code = ascii_code + ascii_table[stmp2][0] - ascii_table[stmp2][1];
+
+        *dest++ = (sjis_code & 0xff00) >> 8;
+        *dest++ = sjis_code;
+    }
+}
+
+U8 BCDtoi(U8 hex)
+{
+    char c[16];
+    sprintf(c, "%x", hex);
+    return atoi(c);
+}
+
+U8 itoBCD(U16 dec)
+{
+    S32 ones = dec % 10;
+    return ones + (((dec % 100 - ones) / 10) << 4);
+}
+
+U8 itoBCD(U8 dec)
+{
+    S32 ones = dec % 10;
+    return ones + (((dec % 100 - ones) / 10) << 4);
+}
+#endif
 
 S32 xUtilStartup()
 {
@@ -94,6 +171,10 @@ char* xUtil_idtag2string(U32 srctag, S32 bufidx)
         strptr[2] = isprint(XUTIL_PRINTIDX(uc[2])) ? uc[2] : '?';
         strptr[3] = isprint(XUTIL_PRINTIDX(uc[3])) ? uc[3] : '?';
         break;
+    case 0:
+    case 1:
+    case 2:
+    case 3:
     case 6:
     default:
         strptr[0] = isprint(XUTIL_PRINTIDX(uc[3])) ? uc[3] : '?';
@@ -131,7 +212,7 @@ U32 xUtil_crc_init()
 
             for (j = 0; j < 8; j++)
             {
-                if (crc_accum & 0x80000000)
+                if (crc_accum & 0x80000000L)
                 {
                     crc_accum = (crc_accum << 1) ^ 0x04C11DB7;
                 }
@@ -161,7 +242,12 @@ U32 xUtil_crc_update(U32 crc_accum, char* data, S32 datasize)
 
     for (i = 0; i < datasize; i++)
     {
+#if defined(PS2)
+        j = crc_accum >> 24;
+        j = (j ^ *data++) & 0xff;
+#else
         j = ((crc_accum >> 24) ^ *data++) & 0xff;
+#endif
         crc_accum = (crc_accum << 8) ^ g_crc32_table[j];
     }
 
@@ -170,6 +256,21 @@ U32 xUtil_crc_update(U32 crc_accum, char* data, S32 datasize)
 
 S32 xUtil_yesno(F32 wt_yes)
 {
+#if defined(XBOX)
+    // Retail embeds the shared LCG and float scaling in this body.
+    if (wt_yes == 0.0f)
+    {
+        return 0;
+    }
+
+    if (wt_yes != 1.0f)
+    {
+        F32 random = xrand() * 2.3283064e-10f;
+        return random <= wt_yes;
+    }
+
+    return 1;
+#else
     if (0.0f == wt_yes)
     {
         return 0;
@@ -180,12 +281,14 @@ S32 xUtil_yesno(F32 wt_yes)
         return 1;
     }
 
-    return (xurand() <= wt_yes);
+    F32 random = xurand();
+    return random <= wt_yes;
+#endif
 }
 
 void xUtil_wtadjust(F32* wts, S32 cnt, F32 arbref)
 {
-    const volatile F32 ZERO = 0.0f;
+    const F32 ZERO = 0.0f;
 
     S32 i;
     F32 sum = 0.0f, fac;

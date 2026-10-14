@@ -28,16 +28,18 @@
 #include "xSnd.h"
 #include "xCollide.h"
 #include "zNPCTypes.h"
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <string.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cstring>
 #else
 #include <cstring>
 #endif
 #include <stdio.h>
-#ifdef __MWERKS__
-#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
-#else
+#if defined(PS2) || !defined(__MWERKS__)
 #include <stdlib.h>
+#else
+#include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
 #endif
 
 void zEntInit(zEnt* ent, xEntAsset* asset, U32 type)
@@ -782,7 +784,7 @@ char* zParamGetString(xModelAssetParam* param, U32 size, char* tok, char* def)
 {
     U32 hash = xStrHash(tok);
 
-    while (param != NULL && size != 0)
+    while (param && size)
     {
         if (param->HashID == hash)
         {
@@ -791,7 +793,7 @@ char* zParamGetString(xModelAssetParam* param, U32 size, char* tok, char* def)
 
         // S32 i = param->WordLength * 4;
         size -= param->WordLength * 4 + 8;
-        param = (xModelAssetParam*)((char*)param + (param->WordLength * 4 + 8));
+        param = (xModelAssetParam*)((char*)param + param->WordLength * 4 + 8);
     }
     return def;
 }
@@ -804,11 +806,7 @@ S32 zParamGetInt(xModelAssetParam* param, U32 size, const char* tok, S32 def)
 S32 zParamGetInt(xModelAssetParam* param, U32 size, char* tok, S32 def)
 {
     char* str = zParamGetString(param, size, tok, NULL);
-    if (str != NULL)
-    {
-        return atoi(str);
-    }
-    return def;
+    return str ? atoi(str) : def;
 }
 
 F32 zParamGetFloat(xModelAssetParam* param, U32 size, const char* tok, F32 def)
@@ -819,11 +817,7 @@ F32 zParamGetFloat(xModelAssetParam* param, U32 size, const char* tok, F32 def)
 F32 zParamGetFloat(xModelAssetParam* param, U32 size, char* tok, F32 def)
 {
     char* str = zParamGetString(param, size, tok, NULL);
-    if (str != NULL)
-    {
-        return xatof(str);
-    }
-    return def;
+    return str ? xatof(str) : def;
 }
 
 S32 zParamGetFloatList(xModelAssetParam* param, U32 size, const char* tok, S32 count, F32* def,
@@ -946,6 +940,7 @@ void zEntGetShadowParams(xEnt* ent, xVec3* center, F32* radius, xEntShadow::radi
     }
 }
 
+#if !defined(PS2)
 void xModelAnimCollStop(xModelInstance& m)
 {
     m.Flags = m.Flags & 0xe7ff;
@@ -955,8 +950,9 @@ xMat4x3* xEntGetFrame(const xEnt* ent)
 {
     return xModelGetFrame(ent->model);
 }
+#endif
 
-#ifdef XSNDPLAY3D_OUT_OF_LINE
+#if defined(XSNDPLAY3D_OUT_OF_LINE) && !defined(PS2)
 void xSndPlay3D(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, const xVec3* pos, F32 radius,
                 sound_category category, F32 delay)
 {
@@ -964,7 +960,9 @@ void xSndPlay3D(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, const xVec3
 }
 #endif
 
+#if !defined(PS2)
 S32 xNPCBasic::SelfType() const
 {
     return myNPCType;
 };
+#endif

@@ -41,6 +41,7 @@ void xDebugTimestampScreen()
     // Redacted. :}
 }
 
+#if !defined(PS2)
 void __deadstripped_xDebug(F32 f, iColor_tag col)
 {
     basic_rect<F32> r1;
@@ -56,3 +57,4 @@ void __deadstripped_xDebug(F32 f, iColor_tag col)
     xtextbox textbox = xtextbox::create(font, r1, 0, f, f, f, f);
     textbox.render(true);
 }
+#endif

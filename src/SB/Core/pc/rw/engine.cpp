@@ -81,9 +81,9 @@ RwError* RwErrorGet(RwError* code)
 // main memory, so it can be used as a texture. xShadow does this to read back
 // the shadow buffer. A host renderer renders to a texture directly and has
 // nothing to flush.
-void RwGameCubeCameraTextureFlush(RwRaster* ras, RwUInt32 param)
+void RwGameCubeCameraTextureFlush(RwRaster* ras, RwBool boxFilter)
 {
-    (void)param;
+    (void)boxFilter;
 
     // BFBB_DUMPSHADOW: write the shadow buffer out, once, as a TGA.
     //

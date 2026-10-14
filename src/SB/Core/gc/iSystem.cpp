@@ -1,4 +1,6 @@
 #include "iSystem.h"
+#include "iFile.h"
+#include "iTime.h"
 
 #include <stdio.h>
 
@@ -654,8 +656,8 @@ static size_t dlFread(void* addr, size_t size, size_t count, void* fptr)
                         memcpy(addr, fp->readBuffer, readSize);
                         numBytesToRead -= readSize;
                         uVar1 += readSize;
-                        posTmp += readSize;
                         addr = (char*)addr + readSize;
+                        posTmp += readSize;
                     }
                     else
                     {
@@ -779,7 +781,7 @@ static char* dlFgets(char* buffer, S32 maxLen, void* fptr)
             i++;
             buffer[i] = '\0';
             i -= numBytesRead;
-            dlFseek(fp, i, 1);
+            dlFseek(fptr, i, 1);
             return buffer;
         }
         if (buffer[i] == '\r')

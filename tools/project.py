@@ -54,6 +54,7 @@ class Object:
             "asflags": None,
             "asm_dir": None,
             "cflags": None,
+            "extab_padding": None,
             "extra_asflags": [],
             "extra_cflags": [],
             "extra_clang_flags": [],
@@ -91,6 +92,7 @@ class Object:
         set_default("add_to_all", True)
         set_default("asflags", config.asflags)
         set_default("asm_dir", config.asm_dir)
+        set_default("extab_padding", None)
         set_default("host", False)
         set_default("mw_version", config.linker_version)
         set_default("scratch_preset_id", config.scratch_preset_id)
@@ -161,6 +163,7 @@ class ProjectConfig:
         self.build_rels: bool = True  # Build REL files
         self.check_sha_path: Optional[Path] = None  # Path to version.sha1
         self.config_path: Optional[Path] = None  # Path to config.yml
+        self.dol_file_alignment: Optional[int] = None  # Retail file padding beyond sections
         self.generate_map: bool = False  # Generate map file(s)
         self.asflags: Optional[List[str]] = None  # Assembler flags
         self.ldflags: Optional[List[str]] = None  # Linker flags
@@ -203,6 +206,7 @@ class ProjectConfig:
         self.progress_each_module: bool = (
             False  # Include individual modules, disable for large numbers of modules
         )
+        self.progress_report_args: List[str] = []  # Extra arguments for objdiff report
         self.progress_categories: List[ProgressCategory] = []  # Additional categories
         self.print_progress_categories: Union[bool, List[str]] = (
             True  # Print additional progress categories in the CLI progress output
@@ -407,7 +411,10 @@ def generate_build_ninja(
     n.variable("ninja_required_version", "1.3")
     n.newline()
 
-    configure_script = Path(os.path.relpath(os.path.abspath(sys.argv[0])))
+    configure_entry = sys.argv[0]
+    if configure_entry in {"", "-"} or not Path(configure_entry).exists():
+        configure_entry = "configure.py"
+    configure_script = Path(os.path.relpath(os.path.abspath(configure_entry)))
     python_lib = Path(os.path.relpath(__file__))
     python_lib_dir = python_lib.parent
     n.comment("The arguments passed to configure.py, for rerunning it.")
@@ -641,6 +648,16 @@ def generate_build_ninja(
     mwcc_sjis_cmd = f"{wrapper_cmd}{sjiswrap} {mwcc} $cflags -MMD -c $in -o $basedir"
     mwcc_sjis_implicit: List[Optional[Path]] = [*mwcc_implicit, sjiswrap]
 
+    # MWCC with extab post-processing
+    mwcc_extab_cmd = (
+        f'{CHAIN}{mwcc_cmd} && {dtk} extab clean --padding "$extab_padding" $out $out'
+    )
+    mwcc_extab_implicit: List[Optional[Path]] = [*mwcc_implicit, dtk]
+    mwcc_sjis_extab_cmd = (
+        f'{CHAIN}{mwcc_sjis_cmd} && {dtk} extab clean --padding "$extab_padding" $out $out'
+    )
+    mwcc_sjis_extab_implicit: List[Optional[Path]] = [*mwcc_sjis_implicit, dtk]
+
     # MWLD
     mwld = compiler_path / "mwldeppc.exe"
     mwld_cmd = f"{wrapper_cmd}{mwld} $ldflags -o $out @$out.rsp"
@@ -672,9 +689,15 @@ def generate_build_ninja(
     n.newline()
 
     n.comment("Generate DOL")
+    dol_command = f"{dtk} elf2dol $in $out"
+    dol_dependencies = [dtk]
+    if config.dol_file_alignment is not None:
+        pad_script = config.tools_dir / "pad_dol.py"
+        dol_command = f"{CHAIN}{dol_command} && $python {pad_script} $out --alignment {config.dol_file_alignment}"
+        dol_dependencies.append(pad_script)
     n.rule(
         name="elf2dol",
-        command=f"{dtk} elf2dol $in $out",
+        command=dol_command,
         description="DOL $out",
     )
     n.newline()
@@ -703,6 +726,26 @@ def generate_build_ninja(
     n.rule(
         name="mwcc_sjis",
         command=mwcc_sjis_cmd,
+        description="MWCC $out",
+        depfile="$basefile.d",
+        deps="gcc",
+    )
+    n.newline()
+
+    n.comment("MWCC build (with extab post-processing)")
+    n.rule(
+        name="mwcc_extab",
+        command=mwcc_extab_cmd,
+        description="MWCC $out",
+        depfile="$basefile.d",
+        deps="gcc",
+    )
+    n.newline()
+
+    n.comment("MWCC build (with UTF-8 to Shift JIS wrapper & extab post-processing)")
+    n.rule(
+        name="mwcc_sjis_extab",
+        command=mwcc_sjis_extab_cmd,
         description="MWCC $out",
         depfile="$basefile.d",
         deps="gcc",
@@ -920,18 +963,29 @@ def generate_build_ninja(
             if ("prodg" in obj.options["mw_version"].lower()):
                 fakerule = "prodg"
                 fakeimplicit = ngccc_implicit
+            variables = {
+                "mw_version": Path(obj.options["mw_version"]),
+                "cflags": cflags_str,
+                "basedir": os.path.dirname(obj.src_obj_path),
+                "basefile": obj.src_obj_path.with_suffix(""),
+            }
+            if obj.options["extab_padding"] is not None:
+                if obj.options["shift_jis"]:
+                    fakerule = "mwcc_sjis_extab"
+                    fakeimplicit = mwcc_sjis_extab_implicit
+                elif fakerule == "mwcc":
+                    fakerule = "mwcc_extab"
+                    fakeimplicit = mwcc_extab_implicit
+                variables["extab_padding"] = "".join(
+                    f"{i:02x}" for i in obj.options["extab_padding"]
+                )
             lib_name = obj.options["lib"]
             n.comment(f"{obj.name}: {lib_name} (linked {obj.completed})")
             n.build(
                 outputs=obj.src_obj_path,
                 rule=fakerule,
                 inputs=src_path,
-                variables={
-                    "mw_version": Path(obj.options["mw_version"]),
-                    "cflags": cflags_str,
-                    "basedir": os.path.dirname(obj.src_obj_path),
-                    "basefile": obj.src_obj_path.with_suffix(""),
-                },
+                variables=variables,
                 implicit=(
                     fakeimplicit
                 ),
@@ -1129,7 +1183,7 @@ def generate_build_ninja(
             outputs=link_steps[0].output(),
             rule="elf2dol",
             inputs=link_steps[0].partial_output(),
-            implicit=dtk,
+            implicit=dol_dependencies,
             order_only="post-link",
         )
 
@@ -1266,15 +1320,20 @@ def generate_build_ninja(
         # Generate progress report
         ###
         n.comment("Generate progress report")
+        report_args = (
+            f" {' '.join(config.progress_report_args)}"
+            if config.progress_report_args
+            else ""
+        )
         n.rule(
             name="report",
-            command=f"{objdiff} report generate -o $out",
+            command=f"{objdiff} report generate{report_args} -o $out",
             description="REPORT",
         )
         n.build(
             outputs=report_path,
             rule="report",
-            implicit=[objdiff, "all_source"],
+            implicit=[objdiff, "objdiff.json", "all_source"],
             order_only="post-build",
         )
 
@@ -1436,6 +1495,12 @@ def generate_objdiff_config(
         # Locally patched 2.0p1 (tools/patch_compiler.py); decomp.me only has
         # the stock build, so scratches fall back to it.
         "GC/2.0p1a": "mwcc_247_92p1",
+        "GC/2.0p1b": "mwcc_247_92p1",  # 2.0p1a + tools/patch_compiler_rw.py
+        "GC/2.0p1c": "mwcc_247_92p1",  # 2.0p1b + R3 (tools/patch_compiler_rw.py --r3)
+        "GC/2.0p1d": "mwcc_247_92p1",  # 2.0p1c + R4 + address-taken gate (--p1d)
+        "GC/2.0p1e": "mwcc_247_92p1",  # 2.0p1d + 2.5 const-pointee alias (--p1e)
+        "GC/2.0p1f": "mwcc_247_92p1",  # 2.0p1e + 3.0a no-propagate into address-taken local (--p1f)
+        "GC/2.0p1g": "mwcc_247_92p1",  # 2.0p1f + stock store/store order for indirect stores (--p1g)
         "GC/2.5": "mwcc_247_105",
         "GC/2.6": "mwcc_247_107",
         "GC/2.7": "mwcc_247_108",
@@ -1478,9 +1543,10 @@ def generate_objdiff_config(
             "symbol_mappings": None,
         }
 
-        # Preserve existing symbol mappings
+        # Preserve interactive mappings only for the same target object,
+        # never across version switches.
         existing_unit = existing_units.get(name)
-        if existing_unit is not None:
+        if existing_unit is not None and existing_unit.get("target_path") == str(obj_path):
             unit_config["symbol_mappings"] = existing_unit.get("symbol_mappings")
 
         obj = objects.get(obj_name)

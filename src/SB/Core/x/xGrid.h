@@ -182,18 +182,56 @@ struct grid_index
 {
     U16 x;
     U16 z;
+#ifdef XGRID_DEFER_BOUND_HELPERS
+    grid_index& operator=(const grid_index& other);
+#endif
 };
 
-inline grid_index get_grid_index(const xGrid& grid, F32 x, F32 z)
+#ifdef XGRID_DEFER_BOUND_HELPERS
+grid_index get_grid_index(const xGrid& grid, F32 x, F32 z);
+template <class T>
+inline void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd, T cb);
+#endif
+
+#endif // XGRID_H
+
+// xScene emits this helper group explicitly in retail order. Ordinary callers
+// retain the same definitions here; the opt-in only defers their definitions.
+#if !defined(XGRID_DEFER_BOUND_HELPERS) && !defined(XGRID_GET_INDEX_DEFINED)
+#define XGRID_GET_INDEX_DEFINED
+
+#ifdef XGRID_WEAK_GET_INDEX
+__declspec(weak)
+#else
+inline
+#endif
+grid_index get_grid_index(const xGrid& grid, F32 x, F32 z)
 {
-    grid_index index;
-    index.x = range_limit<U16>((U16)((x - grid.minx) * grid.inv_csizex), 0, grid.nx - 1);
-    index.z = range_limit<U16>((U16)((z - grid.minz) * grid.inv_csizez), 0, grid.nz - 1);
+    grid_index index = {};
+    x = (x - grid.minx) * grid.inv_csizex;
+    z = (z - grid.minz) * grid.inv_csizez;
+    index.x = range_limit<U16>((U16)x, 0, grid.nx - 1);
+    index.z = range_limit<U16>((U16)z, 0, grid.nz - 1);
     return index;
 }
 
+#endif // XGRID_GET_INDEX_DEFINED
+
+#if (!defined(XGRID_DEFER_BOUND_HELPERS) || defined(XGRID_BOUND_CALLBACK)) &&                      \
+    !defined(XGRID_BOUND_CHECK_DEFINED)
+#define XGRID_BOUND_CHECK_DEFINED
+
+#ifdef XGRID_BOUND_CALLBACK
+template <>
+void xGridCheckBound<XGRID_BOUND_CALLBACK>(xGrid& grid, const xBound& bound, const xQCData& qcd,
+                                           XGRID_BOUND_CALLBACK cb)
+#else
 template <class T>
-inline void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd, T cb)
+#ifndef XGRID_BOUND_HELPER_OUT_OF_LINE
+inline
+#endif
+    void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd, T cb)
+#endif
 {
     xGridIterator it;
 
@@ -246,4 +284,4 @@ inline void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd
     }
 }
 
-#endif
+#endif // XGRID_BOUND_CHECK_DEFINED

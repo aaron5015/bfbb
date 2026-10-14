@@ -1,13 +1,23 @@
+#include <types.h>
+
+struct xModelAssetParam;
+
+// Retail keeps private copies of these specializations in this translation unit.
+// Declare their internal linkage before the shared headers.
+namespace auto_tweak
+{
+    template <class T1, class T2>
+    static void load_param(T1&, T2, T2, T2, xModelAssetParam*, U32, const char*);
+}
 
 #include "zNPCTypeBossSB2.h"
-#ifdef __MWERKS__
-#include "PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new.h"
-#else
+#ifndef __MWERKS__
 #include <new>
+#elif !defined(PS2)
+#include "PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new.h"
 #endif
 #include "xLightKit.h"
 #include "zNPCGoalCommon.h"
-#include <types.h>
 #include "string.h"
 #include "iModel.h"
 #include "xCollide.h"
@@ -87,6 +97,22 @@ U8 xOBBHitsOBB(const xBox& a, const xMat4x3& amat, const xBox& b, const xMat4x3&
 
 zNPCB_SB2* zNPCB_SB2::_singleton;
 
+// These discarded inline copies contribute the retail floating-point literals.
+#if !defined(PS2)
+inline F32 xVec3::length() const
+{
+    return xsqrt(this->length2());
+}
+#endif
+
+#if !defined(PS2)
+inline xVec3& xVec3::normalize()
+{
+    *this /= length();
+    return *this;
+}
+#endif
+
 namespace
 {
     struct node
@@ -109,12 +135,12 @@ namespace
         void init(u32 values, const void* curve, u32 nodes, const char*, const char**,
                   const tweak_callback*, void*);
 
-        void eval_linear(F32 t, F32* value);
+        inline void eval_linear(F32 t, F32* value);
         void find_active_node(F32 t);
-        void eval_smooth(F32 t, F32* value);
+        inline void eval_smooth(F32 t, F32* value);
         F32 clamp_t(F32 t) const;
         F32 end_t() const;
-        inode* get_node(u32 index) const;
+        inode* get_node(size_t index) const;
         F32 start_t() const;
     };
 
@@ -168,7 +194,7 @@ namespace
 
     static char* sound_asset_names[10][4];
     static U32 sound_asset_ids[10][4];
-    static S32 sound_asset_names_size[10];
+    static U32 sound_asset_names_size[10];
     static sound_data_type sound_data[10];
 
     struct sound_property
@@ -351,23 +377,52 @@ namespace
     };
 
     static const node_hook node_hooks[9] = {
-        { "SB_NODE_05", 3, false, 3,
+        { "SB_NODE_05",
+          3,
+          false,
+          3,
           { { 3.167f, 7.652f, 2.051f }, { 2.423f, 7.988f, 2.058f }, { 3.555f, 8.631f, 2.058f } } },
-        { "SB_NODE_06", 3, true, 3,
-          { { 3.993f, 14.411f, 2.019f }, { 2.816f, 14.778f, 2.019f }, { 3.899f, 14.949f, 2.019f } } },
-        { "SB_NODE_07", 3, false, 2,
+        { "SB_NODE_06",
+          3,
+          true,
+          3,
+          { { 3.993f, 14.411f, 2.019f },
+            { 2.816f, 14.778f, 2.019f },
+            { 3.899f, 14.949f, 2.019f } } },
+        { "SB_NODE_07",
+          3,
+          false,
+          2,
           { { 4.377f, 10.433f, -0.135f }, { 4.542f, 11.823f, -0.267f }, { 0.0f, 0.0f, 0.0f } } },
-        { "SB_NODE_04", 1, false, 2,
+        { "SB_NODE_04",
+          1,
+          false,
+          2,
           { { 9.769f, 6.602f, 0.119f }, { 9.769f, 6.602f, 1.281f }, { 0.0f, 0.0f, 0.0f } } },
-        { "SB_NODE_01", 3, false, 3,
+        { "SB_NODE_01",
+          3,
+          false,
+          3,
           { { -3.102f, 7.363f, 2.051f }, { -3.304f, 8.16f, 2.055f }, { -2.493f, 7.565f, 2.051f } } },
-        { "SB_NODE_02", 3, true, 3,
+        { "SB_NODE_02",
+          3,
+          true,
+          3,
           { { -4.01f, 13.799f, 2.091f }, { -4.009f, 15.017f, 2.11f }, { -3.392f, 14.42f, 2.11f } } },
-        { "SB_NODE_03", 3, false, 2,
+        { "SB_NODE_03",
+          3,
+          false,
+          2,
           { { -4.486f, 10.148f, -0.174f }, { -4.486f, 11.007f, -0.109f }, { 0.0f, 0.0f, 0.0f } } },
-        { "SB_NODE_08", 2, false, 2,
+        { "SB_NODE_08",
+          2,
+          false,
+          2,
           { { -9.769f, 6.602f, 0.119f }, { -9.769f, 6.602f, 1.281f }, { 0.0f, 0.0f, 0.0f } } },
-        { "SB_NODE_09", 3, false, 2,
+        { "SB_NODE_09",
+          3,
+          false,
+          2,
           { { -0.002f, 11.142f, 4.366f }, { -0.002f, 11.616f, 4.203f }, { 0.0f, 0.0f, 0.0f } } },
     };
 
@@ -400,7 +455,9 @@ namespace
     };
 
     static const platform_hook slug_hooks[3] = {
-        { "SB_SLUG_KAH" }, { "SB_SLUG_RAH" }, { "SB_SLUG_TAY" },
+        { "SB_SLUG_KAH" },
+        { "SB_SLUG_RAH" },
+        { "SB_SLUG_TAY" },
     };
 
     static const zNPCNewsFish::say_enum say_intro[1] = { zNPCNewsFish::SAY_B302_INTRO };
@@ -436,9 +493,8 @@ namespace
     };
 
     static const zNPCNewsFish::say_enum say_vuln[7] = {
-        zNPCNewsFish::SAY_SB_VULN_1,   zNPCNewsFish::SAY_SB_VULN_2,
-        zNPCNewsFish::SAY_SB_VULN_3,   zNPCNewsFish::SAY_SB_VULN_4,
-        zNPCNewsFish::SAY_SB_VULN_5,   zNPCNewsFish::SAY_ROBOT_VULN_1,
+        zNPCNewsFish::SAY_SB_VULN_1,    zNPCNewsFish::SAY_SB_VULN_2, zNPCNewsFish::SAY_SB_VULN_3,
+        zNPCNewsFish::SAY_SB_VULN_4,    zNPCNewsFish::SAY_SB_VULN_5, zNPCNewsFish::SAY_ROBOT_VULN_1,
         zNPCNewsFish::SAY_ROBOT_VULN_2,
     };
 
@@ -456,10 +512,9 @@ namespace
     static const zNPCNewsFish::say_enum say_fall[1] = { zNPCNewsFish::SAY_SB_HIT_FAIL_2 };
 
     static const say_group say_set[13] = {
-        { say_intro, 1 },      { say_hit_player, 6 }, { say_hit_boss_1, 4 },
-        { say_hit_boss_2, 3 }, { say_hit_boss_3, 1 }, { say_hit_fail, 1 },
-        { say_hit_last, 1 },   { say_spun, 2 },       { say_vuln, 7 },
-        { say_stun, 4 },       { say_return, 1 },     { say_tactics, 1 },
+        { say_intro, 1 },      { say_hit_player, 6 }, { say_hit_boss_1, 4 }, { say_hit_boss_2, 3 },
+        { say_hit_boss_3, 1 }, { say_hit_fail, 1 },   { say_hit_last, 1 },   { say_spun, 2 },
+        { say_vuln, 7 },       { say_stun, 4 },       { say_return, 1 },     { say_tactics, 1 },
         { say_fall, 1 },
     };
 
@@ -469,7 +524,7 @@ namespace
     {
         memset(sound_asset_names_size, 0, sizeof(sound_asset_names_size));
 
-        for (S32 i = 0; i < 12; i++)
+        for (U32 i = 0; i < 12; i++)
         {
             const sound_asset& asset = sound_assets[i];
             if (asset.name == NULL)
@@ -477,7 +532,7 @@ namespace
                 continue;
             }
 
-            S32& total = sound_asset_names_size[asset.group];
+            U32& total = sound_asset_names_size[asset.group];
             sound_asset_names[asset.group][total] = asset.name;
             sound_asset_ids[asset.group][total] = i;
             total++;
@@ -641,7 +696,6 @@ namespace
         return f1;
     }
 
-
 } // namespace
 
 xAnimTable* ZNPC_AnimTable_BossSB2()
@@ -764,7 +818,7 @@ xAnimTable* ZNPC_AnimTable_BossSB2()
 
 void zNPCB_SB2::Init(xEntAsset* asset)
 {
-    xModelInstance * m;
+    xModelInstance* m;
 
     _singleton = this;
     boss_cam.init();
@@ -833,6 +887,8 @@ namespace
 
     void tweak_group::register_tweaks(bool init, xModelAssetParam* ap, U32 apsize, const char*)
     {
+        xVec3 V0 = { 0.0f, 0.0f, 0.0f };
+
         if (init)
         {
             accel = 2.0f;
@@ -931,7 +987,8 @@ namespace
         if (init)
         {
             spin.vel = 5.0f;
-            auto_tweak::load_param<F32, F32>(spin.vel, 1.0f, 0.0f, 100000.0f, ap, apsize, "spin.vel");
+            auto_tweak::load_param<F32, F32>(spin.vel, 1.0f, 0.0f, 100000.0f, ap, apsize,
+                                             "spin.vel");
         }
         if (init)
         {
@@ -1588,9 +1645,16 @@ namespace
 
 } // namespace
 
+// Retail retains this comparison literal from discarded code before the later
+// integer-conversion constants. Its original helper has not been recovered.
+static F32 __deadstripped_zNPCTypeBossSB2()
+{
+    return -1e-5f;
+}
+
 void zNPCB_SB2::Setup()
 {
-    xEnt* ent; 
+    xEnt* ent;
     xSphere o;
 
     this->create_glow_light();
@@ -1656,16 +1720,16 @@ void zNPCB_SB2::SelfSetup()
 
 void zNPCB_SB2::Reset()
 {
-    if(this->newsfish != 0)
+    if (this->newsfish != 0)
     {
         this->newsfish->Reset();
     }
-    
+
     reset_sound();
     zNPCCommon::Reset();
-    memset(&flag.face_player, 0 , 0x10);
+    memset(&flag.face_player, 0, 0x10);
 
-    for (S32 i = 0;  i < 9; i++)
+    for (S32 i = 0; i < 9; i++)
     {
         if (nodes[i].ent != NULL)
         {
@@ -1702,7 +1766,6 @@ void zNPCB_SB2::Reset()
     zCameraDisableTracking(CO_BOSS);
     boss_cam.start(globals.camera);
     psy_instinct->GoalSet(NPC_GOAL_BOSSSB2INTRO, 0);
-
 }
 
 void zNPCB_SB2::Destroy()
@@ -1714,14 +1777,10 @@ void zNPCB_SB2::Destroy()
 U32 zNPCB_SB2::AnimPick(S32 animID, en_NPC_GOAL_SPOT gspot, xGoal* goal)
 {
     static const S32 idle_table[8][2] = {
-        { ANIM_Dizzy01, ANIM_ReturnIdle01 },
-        { ANIM_KarateLoop, ANIM_KarateEnd },
-        { ANIM_ChopLeftLoop, ANIM_ChopLeftEnd },
-        { ANIM_ChopRightLoop, ANIM_ChopRightEnd },
-        { ANIM_SwipeLeftBegin, ANIM_SwipeLeftEnd },
-        { ANIM_SwipeRightBegin, ANIM_SwipeRightEnd },
-        { ANIM_SwipeLeftLoop, ANIM_SwipeLeftEnd },
-        { ANIM_SwipeRightLoop, ANIM_SwipeRightEnd },
+        { ANIM_Dizzy01, ANIM_ReturnIdle01 },        { ANIM_KarateLoop, ANIM_KarateEnd },
+        { ANIM_ChopLeftLoop, ANIM_ChopLeftEnd },    { ANIM_ChopRightLoop, ANIM_ChopRightEnd },
+        { ANIM_SwipeLeftBegin, ANIM_SwipeLeftEnd }, { ANIM_SwipeRightBegin, ANIM_SwipeRightEnd },
+        { ANIM_SwipeLeftLoop, ANIM_SwipeLeftEnd },  { ANIM_SwipeRightLoop, ANIM_SwipeRightEnd },
     };
 
     S32 index;
@@ -1815,8 +1874,7 @@ void zNPCB_SB2::Process(xScene* xscn, F32 dt)
 {
     if (this->flag.updated == FALSE)
     {
-        boss_cam.set_targets((xVec3&)globals.player.ent.model->Mat->pos, location(),
-                             5.0f);
+        boss_cam.set_targets((xVec3&)globals.player.ent.model->Mat->pos, location(), 5.0f);
         this->flag.updated = TRUE;
     }
 
@@ -1907,12 +1965,11 @@ void zNPCB_SB2::reset_speed()
 
 zNPCB_SB2::platform_data* zNPCB_SB2::player_platform()
 {
-    xEntCollis* collis = globals.player.ent.collis;
+    xCollis& coll = globals.player.ent.collis->colls[0];
 
     xEnt* ent;
 
-    if (!(collis->colls->flags & 1) || (ent = (xEnt*)collis->colls->optr) == NULL ||
-        ent->baseType != eBaseTypePlatform)
+    if (!(coll.flags & 1) || (ent = (xEnt*)coll.optr) == NULL || ent->baseType != eBaseTypePlatform)
     {
         return NULL;
     }
@@ -1969,6 +2026,13 @@ bool zNPCB_SB2::player_on_ground() const
     d.y = dz;
 
     return d.length2() < tweak.ground_radius * tweak.ground_radius;
+}
+
+// This discarded helper preserves the retail first-use order of the location
+// and vector-add inlines. Its original name and body have not been recovered.
+static void __deadstripped_move_location(zNPCB_SB2& npc, const xVec2& loc, const xVec2& offset)
+{
+    npc.set_location(loc + offset);
 }
 
 void zNPCB_SB2::emit_slug(zNPCB_SB2::slug_enum which)
@@ -2085,18 +2149,8 @@ void zNPCB_SB2::abandon_slugs()
     slug_data* pLastSlug = &pCurSlug[3];
     for (; pCurSlug != pLastSlug; pCurSlug++)
     {
-         pCurSlug->abandoned = 1;
+        pCurSlug->abandoned = 1;
     }
-}
-
-bool zNPCB_SB2::player_damaged() const
-{
-    return player_damage_timer > 0.0f;
-}
-
-S32 zNPCB_SB2::platform_index(const zNPCB_SB2::platform_data& p) const
-{
-    return &p - platforms;
 }
 
 S32 zNPCB_SB2::next_goal()
@@ -2198,7 +2252,7 @@ void zNPCB_SB2::update_turn(F32 dt)
 
     F32 yaw = start;
 
-    diff += yaw;
+    diff = yaw + diff;
 
     xAccelMove(yaw, turn.vel, turn.accel, dt, diff, turn.max_vel);
     set_yaw_matrix(frame->mat, yaw);
@@ -2409,9 +2463,7 @@ void zNPCB_SB2::move_nodes()
 {
     for (S32 i = 0; i < 9; i++)
     {
-        node_data& n = nodes[i];
-
-        if (n.ent == NULL)
+        if (nodes[i].ent == NULL)
         {
             continue;
         }
@@ -2419,24 +2471,24 @@ void zNPCB_SB2::move_nodes()
         xVec3 loc;
         xVec3 norm;
         xVec3 uploc;
-        RpAtomic* m = n.skin_model;
-        RwMatrixTag* skin_mat = n.skin_mat;
+        RpAtomic* m = nodes[i].skin_model;
+        RwMatrixTag* skin_mat = nodes[i].skin_mat;
 
         if (node_hooks[i].points == 3)
         {
             xVec3 rightloc;
 
-            iModelTagEval(m, &n.v3.tag[0], skin_mat, &loc);
-            iModelTagEval(m, &n.v3.tag[1], skin_mat, &uploc);
-            iModelTagEval(m, &n.v3.tag[2], skin_mat, &rightloc);
+            iModelTagEval(m, &nodes[i].v3.tag[0], skin_mat, &loc);
+            iModelTagEval(m, &nodes[i].v3.tag[1], skin_mat, &uploc);
+            iModelTagEval(m, &nodes[i].v3.tag[2], skin_mat, &rightloc);
 
             norm = (rightloc - loc).cross(uploc - loc);
             norm.up_normalize();
         }
         else
         {
-            iModelTagEval(m, &n.v2n1.tag, skin_mat, &loc, &norm);
-            iModelTagEval(m, &n.v2n1.uptag, skin_mat, &uploc);
+            iModelTagEval(m, &nodes[i].v2n1.tag, skin_mat, &loc, &norm);
+            iModelTagEval(m, &nodes[i].v2n1.uptag, skin_mat, &uploc);
         }
 
         xMat4x3 mat;
@@ -2455,7 +2507,7 @@ void zNPCB_SB2::move_nodes()
             mat.pos = loc;
         }
 
-        xEntReposition(*n.ent, mat);
+        xEntReposition(*nodes[i].ent, mat);
     }
 }
 
@@ -2563,8 +2615,8 @@ void zNPCB_SB2::setup_node_tags()
         {
             xVec3 loc1 = node_hooks[i].pos[1];
 
-            iModelTagSetup(&nodes[i].v2n1.tag, m, node_hooks[i].pos[0].x,
-                           node_hooks[i].pos[0].y, node_hooks[i].pos[0].z);
+            iModelTagSetup(&nodes[i].v2n1.tag, m, node_hooks[i].pos[0].x, node_hooks[i].pos[0].y,
+                           node_hooks[i].pos[0].z);
             iModelTagSetup(&nodes[i].v2n1.uptag, m, loc1.x, loc1.y, loc1.z);
         }
     }
@@ -2819,7 +2871,8 @@ void zNPCB_SB2::update_platforms(F32 dt)
             continue;
         }
 
-        xAccelMove(it->spin.ang, it->spin.vel, it->spin.accel, dt, it->spin.end_ang, it->spin.max_vel);
+        xAccelMove(it->spin.ang, it->spin.vel, it->spin.accel, dt, it->spin.end_ang,
+                   it->spin.max_vel);
         it->spin.ang = xfmod(it->spin.ang, 1.0f);
 
         if (it->spin.vel >= it->spin.max_vel)
@@ -3121,9 +3174,8 @@ void zNPCB_SB2::update_fire_slug(zNPCB_SB2::slug_data& slug, F32 dt)
     }
     else if (slug.dist > tweak.karate.fade_dist)
     {
-        slug.ent->model->Alpha =
-            1.0f - (slug.dist - tweak.karate.fade_dist) /
-                       (tweak.karate.kill_dist - tweak.karate.fade_dist);
+        slug.ent->model->Alpha = 1.0f - (slug.dist - tweak.karate.fade_dist) /
+                                            (tweak.karate.kill_dist - tweak.karate.fade_dist);
     }
     else
     {
@@ -3181,11 +3233,13 @@ namespace
 
     void response_curve::find_active_node(F32 t)
     {
-        u32 stride = values * sizeof(F32) + sizeof(node);
+        U32 stride = values * sizeof(F32) + sizeof(node);
         U8* it = (U8*)curve + stride * active_node;
 
         while (true)
         {
+            inode& next = *(inode*)(it + stride);
+
             if (t < ((inode*)it)->t)
             {
                 it -= stride;
@@ -3193,7 +3247,7 @@ namespace
                 continue;
             }
 
-            if (t > ((inode*)(it + stride))->t)
+            if (t > next.t)
             {
                 it += stride;
                 active_node++;
@@ -3202,26 +3256,6 @@ namespace
 
             return;
         }
-    }
-
-    F32 response_curve::clamp_t(F32 t) const
-    {
-        return range_limit(t, start_t(), end_t());
-    }
-
-    inode* response_curve::get_node(u32 index) const
-    {
-        return (inode*)((U8*)curve + index * (sizeof(node) + values * sizeof(F32)));
-    }
-
-    F32 response_curve::start_t() const
-    {
-        return curve->t;
-    }
-
-    F32 response_curve::end_t() const
-    {
-        return get_node(nodes - 1)->t;
     }
 
     void response_curve::eval_smooth(F32 t, F32* value)
@@ -3285,13 +3319,33 @@ namespace
             {
                 F32 ca = cm + c0;
 
-                for (F32 *a = n0->value, *b = n1->value, *p = curve[index + 2].value;
-                     value != end; value++, a++, b++, p++)
+                for (F32 *a = n0->value, *b = n1->value, *p = curve[index + 2].value; value != end;
+                     value++, a++, b++, p++)
                 {
                     *value = ca * *a + c1 * *b + cp * *p;
                 }
             }
         }
+    }
+
+    F32 response_curve::clamp_t(F32 t) const
+    {
+        return range_limit(t, start_t(), end_t());
+    }
+
+    F32 response_curve::end_t() const
+    {
+        return get_node(nodes - 1)->t;
+    }
+
+    inode* response_curve::get_node(size_t index) const
+    {
+        return (inode*)((U8*)curve + index * (sizeof(node) + values * sizeof(F32)));
+    }
+
+    F32 response_curve::start_t() const
+    {
+        return curve->t;
     }
 } // namespace
 
@@ -3511,6 +3565,12 @@ S32 zNPCGoalBossSB2Intro::Enter(F32 dt, void* updCtxt)
     return zNPCGoalCommon::Enter(dt, updCtxt);
 }
 
+S32 zNPCGoalBossSB2Intro::Exit(F32 dt, void* updCtxt)
+{
+    zEntPlayerControlOn(CONTROL_OWNER_BOSS);
+    return xGoal::Exit(dt, updCtxt);
+}
+
 S32 zNPCGoalBossSB2Intro::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
 {
     if (owner.delay >= tweak.intro_time)
@@ -3520,12 +3580,6 @@ S32 zNPCGoalBossSB2Intro::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
     }
 
     return 0;
-}
-
-S32 zNPCGoalBossSB2Intro::Exit(F32 dt, void* updCtxt)
-{
-    zEntPlayerControlOn(CONTROL_OWNER_BOSS);
-    return xGoal::Exit(dt, updCtxt);
 }
 
 xFactoryInst* zNPCGoalBossSB2Idle::create(S32 who, RyzMemGrow* grow, void* info)
@@ -3581,9 +3635,14 @@ xFactoryInst* zNPCGoalBossSB2Taunt::create(S32 who, RyzMemGrow* grow, void* info
 
 S32 zNPCGoalBossSB2Taunt::Enter(F32 dt, void* updCtxt)
 {
-    play_sound(0, &owner.sound_loc.mouth , 1.0f);
+    play_sound(0, &owner.sound_loc.mouth, 1.0f);
     owner.flag.face_player = 1;
     return zNPCGoalCommon::Enter(dt, updCtxt);
+}
+
+S32 zNPCGoalBossSB2Taunt::Exit(F32 dt, void* updCtxt)
+{
+    return xGoal::Exit(dt, updCtxt);
 }
 
 S32 zNPCGoalBossSB2Taunt::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
@@ -3595,11 +3654,6 @@ S32 zNPCGoalBossSB2Taunt::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
     }
 
     return 0;
-}
-
-S32 zNPCGoalBossSB2Taunt::Exit(F32 dt, void* updCtxt)
-{
-    return xGoal::Exit(dt, updCtxt);
 }
 
 xFactoryInst* zNPCGoalBossSB2Dizzy::create(S32 who, RyzMemGrow* grow, void* info)
@@ -3620,7 +3674,7 @@ S32 zNPCGoalBossSB2Dizzy::Exit(F32 dt, void* updCtxt)
 {
     S32 tempDizzy;
     owner.set_vulnerable(true);
-    if (sicked != false && owner.player_on_ground() == 0)  //Not compared correctly
+    if (sicked != false && owner.player_on_ground() == 0) //Not compared correctly
     {
         owner.plankton->here_boy();
     }
@@ -3657,7 +3711,7 @@ xFactoryInst* zNPCGoalBossSB2Hit::create(S32 who, RyzMemGrow* grow, void* info)
     return new (who, grow) zNPCGoalBossSB2Hit(who, *(zNPCB_SB2*)info);
 }
 
-S32 zNPCGoalBossSB2Hit::Enter(F32 dt, void* updCtxt) 
+S32 zNPCGoalBossSB2Hit::Enter(F32 dt, void* updCtxt)
 {
     owner.flag.face_player = 1;
     owner.set_vulnerable(false);
@@ -3688,11 +3742,6 @@ S32 zNPCGoalBossSB2Hit::Exit(F32 dt, void* updCtxt)
     return xGoal::Exit(dt, updCtxt);
 }
 
-xFactoryInst* zNPCGoalBossSB2Hunt::create(S32 who, RyzMemGrow* grow, void* info)
-{
-    return new (who, grow) zNPCGoalBossSB2Hunt(who, *(zNPCB_SB2*)info);
-}
-
 S32 zNPCGoalBossSB2Hit::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
 {
     if (owner.AnimTimeRemain(NULL) < dt + 0.001f)
@@ -3714,6 +3763,11 @@ S32 zNPCGoalBossSB2Hit::Process(en_trantype* trantype, F32 dt, void* updCtxt, xS
     }
 
     return 0;
+}
+
+xFactoryInst* zNPCGoalBossSB2Hunt::create(S32 who, RyzMemGrow* grow, void* info)
+{
+    return new (who, grow) zNPCGoalBossSB2Hunt(who, *(zNPCB_SB2*)info);
 }
 
 S32 zNPCGoalBossSB2Hunt::Enter(F32 dt, void* updCtxt)
@@ -4183,7 +4237,7 @@ namespace auto_tweak
 {
     template <>
     inline void load_param<S32, S32>(S32& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
+                                     U32 apsize, const char* name)
     {
         S32 v = zParamGetInt(ap, apsize, name, value);
 
@@ -4203,22 +4257,21 @@ namespace auto_tweak
 
     template <>
     inline void load_param<bool, S32>(bool& value, S32, S32, S32, xModelAssetParam* ap, U32 apsize,
-                               const char* name)
+                                      const char* name)
     {
         value = zParamGetInt(ap, apsize, name, value) != 0;
     }
 
     template <>
-    inline void load_param<xVec3, S32>(xVec3& value, S32, S32, S32, xModelAssetParam* ap, U32 apsize,
-                                const char* name)
+    inline void load_param<xVec3, S32>(xVec3& value, S32, S32, S32, xModelAssetParam* ap,
+                                       U32 apsize, const char* name)
     {
-        xVec3 def = value;
-        zParamGetVector(ap, apsize, name, def, &value);
+        zParamGetVector(ap, apsize, name, value, &value);
     }
 
     template <>
     inline void load_param<F32, F32>(F32& value, F32 scale, F32 lo, F32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
+                                     U32 apsize, const char* name)
     {
         value = zParamGetFloat(ap, apsize, name, value);
 
@@ -4234,47 +4287,3 @@ namespace auto_tweak
         value = value * scale;
     }
 } // namespace auto_tweak
-
-void zNPCB_SB2::choose_hand()
-{
-    S32 r = xrand();
-    S32 b = (r >> 13) & 1;
-    this->active_hand = (b == 0 ? LEFT_HAND : RIGHT_HAND);
-}
-
-xVec3& zNPCB_SB2::location() const
-{
-    return reinterpret_cast<xVec3&>(this->model->Mat->pos);
-}
-
-void zNPCB_SB2::render_debug()
-{
-}
-
-xVec3& zNPCB_SB2::get_home() const
-{
-    return reinterpret_cast<xVec3&>(this->asset->pos);
-}
-
-void zNPCB_SB2::set_location(const xVec2& loc)
-{
-    // Retail really does splat the scalar through xVec3::operator=(F32) here, and
-    // really does aim the second one at &pos.z rather than at &pos.
-    (xVec3&)model->Mat->pos.x = frame->mat.pos.x = loc.x;
-    (xVec3&)model->Mat->pos.z = frame->mat.pos.z = loc.y;
-}
-
-void zNPCB_SB2::set_location(const xVec3& loc)
-{
-    (xVec3&)model->Mat->pos = frame->mat.pos = loc;
-}
-
-xVec3& zNPCB_SB2::start_location() const
-{
-    return reinterpret_cast<xVec3&>(this->asset->pos);
-}
-
-xVec3& zNPCB_SB2::facing() const
-{
-    return reinterpret_cast<xVec3&>(this->model->Mat->at);
-}

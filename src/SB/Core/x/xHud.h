@@ -3,7 +3,7 @@
 
 #include "xBase.h"
 #include "xVec3.h"
-#include "xDynAsset.h"
+#include "xHudAsset.h"
 #include "xModel.h"
 
 typedef struct asset;
@@ -58,17 +58,6 @@ namespace xhud
         F32 a;
     };
 
-    struct asset : xDynAsset
-    {
-        xVec3 loc;
-        xVec3 size;
-
-        static const char* type_name()
-        {
-            return "hud";
-        }
-    };
-
     struct motive;
     struct motive_node;
 
@@ -90,13 +79,25 @@ namespace xhud
             MAX_ACT
         } activity;
 
-        virtual void destroy() {}
+        virtual void destroy()
+        {
+        }
         virtual U32 type() const;
         virtual bool is(U32 id) const;
-        virtual void init() {}
-        virtual void setup() { presetup(); }
-        virtual void update(F32 dt) { updater(dt); }
-        virtual void render() {}
+        virtual void init()
+        {
+        }
+        virtual void setup()
+        {
+            presetup();
+        }
+        virtual void update(F32 dt)
+        {
+            updater(dt);
+        }
+        virtual void render()
+        {
+        }
         virtual void dispatch(xBase* b1, U32 event, const F32* toParam, xBase* b2)
         {
             dispatcher(b1, event, toParam, b2);
@@ -110,7 +111,9 @@ namespace xhud
         static void setup_all();
         static void update_all(F32 dt);
         static void render_all();
-        static void debug_render();
+        static void debug_render()
+        {
+        }
 
         static void init_base(xBase&, const xBaseAsset&, unsigned long);
         static S32 cb_dispatch(xBase*, xBase*, U32, const F32*, xBase*);
@@ -121,7 +124,6 @@ namespace xhud
         void updater(F32 dt);
         void dispatcher(xBase*, U32, const F32*, xBase*);
 
-
         void disable()
         {
             flag.enabled = 0;
@@ -129,7 +131,6 @@ namespace xhud
 
         void add_tweaks()
         {
-
         }
 
         void enable()
@@ -166,7 +167,7 @@ namespace xhud
         static block_allocator* motive_allocator();
     };
 
-    typedef bool (motive_proc)(widget&, motive&, F32);
+    typedef bool(motive_proc)(widget&, motive&, F32);
 
     struct motive
     {
@@ -186,7 +187,8 @@ namespace xhud
         F32 step_time;
 #endif
 
-        motive(F32* value, F32 delta, F32 max_offset, F32 accel, bool (*fp_update)(xhud::widget&, motive&, F32), void* context)
+        motive(F32* value, F32 delta, F32 max_offset, F32 accel,
+               bool (*fp_update)(xhud::widget&, motive&, F32), void* context)
         {
             this->value = value;
             this->delta = delta;

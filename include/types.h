@@ -3,19 +3,31 @@
 
 #include "macros.h"
 
+#ifdef XBOX
+#include <stddef.h>
+#endif
+
 // Note: only include this header inside BFBB-related headers/source code files.
 // Don't include this in any RenderWare, system, bink, etc. files
 
-#ifdef GAMECUBE
+#if defined(GAMECUBE) || defined(PS2) || defined(XBOX)
 typedef signed char S8;
 typedef signed short S16;
 typedef signed int S32;
+#ifdef _MSC_VER
+typedef signed __int64 S64;
+#else
 typedef signed long long S64;
+#endif
 
 typedef unsigned char U8;
 typedef unsigned short U16;
 typedef unsigned int U32;
+#ifdef _MSC_VER
+typedef unsigned __int64 U64;
+#else
 typedef unsigned long long U64;
+#endif
 
 typedef float F32;
 typedef double F64;
@@ -122,9 +134,10 @@ typedef intptr_t SPtr;
 // sites left in src/SB are all inside `#ifdef __MWERKS__` or `#ifdef GAMECUBE`,
 // and DECL_SECTION/DECL_WEAK in macros.h already have host spellings.
 //
-// The stub stays for a compiler with neither define -- clangd parsing src/gc,
-// src/dolphin and src/bink, which do write __declspec(section) unguarded.
-#if !defined(__MWERKS__) && !defined(PLATFORM_PC)
+// The stub stays for a compiler with none of these defines -- clangd parsing
+// src/gc, src/dolphin and src/bink, which do write __declspec(section)
+// unguarded. MSVC parses __declspec natively.
+#if !defined(__MWERKS__) && !defined(PLATFORM_PC) && !defined(_MSC_VER)
 #define __declspec(x)
 // #define asm
 #endif
@@ -210,13 +223,33 @@ typedef intptr_t SPtr;
 #if defined(GAMECUBE) || defined(__MWERKS__)
 typedef signed char s8;
 typedef signed short s16;
+#if defined(PS2)
+typedef signed int s32;
+#else
 typedef signed long s32;
+#endif
+#ifdef _MSC_VER
+typedef signed __int64 s64;
+#else
 typedef signed long long s64;
+#endif
 typedef unsigned char u8;
 typedef unsigned short u16;
+#if defined(PS2)
+typedef unsigned int u32;
+#else
 typedef unsigned long u32;
+#endif
+#if defined(PS2)
+typedef unsigned int size_t;
+#elif !defined(XBOX)
 typedef unsigned long size_t;
+#endif
+#ifdef _MSC_VER
+typedef unsigned __int64 u64;
+#else
 typedef unsigned long long u64;
+#endif
 #else
 // `long` is 32-bit on the GameCube ABI and 64-bit on LP64 hosts, so the
 // spellings above are only correct there. size_t is the host's, not ours --

@@ -1,6 +1,22 @@
+#include <types.h>
+
+struct xModelAssetParam;
+
+// Retail keeps private copies of the parameter loaders in this translation unit.
+namespace auto_tweak
+{
+    template <class T1, class T2>
+    static void load_param(T1&, T2, T2, T2, xModelAssetParam*, U32, const char*);
+}
+
 #include "zNPCTypePrawn.h"
 
+#include "auto_tweak.h"
 #include "rwcore.h"
+#if defined(PS2)
+#include <rwim2d.h>
+#include <rwim3d.h>
+#endif
 #include "xDebug.h"
 
 #include "xMemMgr.h"
@@ -37,7 +53,22 @@
 
 U32 xSndPlay3DFade(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, const xVec3* pos,
                    F32 innerRadius, F32 outerRadius, sound_category category, F32 fade, F32 delay);
-void xDebugAddTweak(const char*, xVec3*, const tweak_callback*, void*, U32);
+
+// Retail emits these inline vector helpers here; the linker keeps their earlier copies.
+#if !defined(PS2)
+inline F32 xVec3::length() const
+{
+    return xsqrt(length2());
+}
+#endif
+
+#if !defined(PS2)
+inline xVec3& xVec3::normalize()
+{
+    *this /= length();
+    return *this;
+}
+#endif
 
 namespace
 {
@@ -50,13 +81,13 @@ namespace
     };
 
     const sound_asset_type sound_assets[14] = {
-        { 0, "Prawn_hit", 0, 0 },          { 0, "Prawn_FF_hit", 0, 0 },
-        { 1, "B101_SC_jump", 0, 0 },       { 1, "Prawn_FF_hit", 0, 0 },
-        { 1, "fanfare", 0, 0 },            { 1, "sax", 0, 0 },
-        { 1, "Mon_alert", 0, 0 },          { 2, "RP_whirr_loop", 0, 3 },
-        { 2, "PR_attack_loop", 0, 3 },     { 2, "Prawn_Attack_loop", 0, 3 },
-        { 2, "Crystals_loop", 0, 3 },      { 2, "RSB_foot_loop", 0, 3 },
-        { 3, "PR_attack_loop", 0, 1 },     { 3, "Prawn_Attack_loop", 0, 1 },
+        { 0, "Prawn_hit", 0, 0 },      { 0, "Prawn_FF_hit", 0, 0 },
+        { 1, "B101_SC_jump", 0, 0 },   { 1, "Prawn_FF_hit", 0, 0 },
+        { 1, "fanfare", 0, 0 },        { 1, "sax", 0, 0 },
+        { 1, "Mon_alert", 0, 0 },      { 2, "RP_whirr_loop", 0, 3 },
+        { 2, "PR_attack_loop", 0, 3 }, { 2, "Prawn_Attack_loop", 0, 3 },
+        { 2, "Crystals_loop", 0, 3 },  { 2, "RSB_foot_loop", 0, 3 },
+        { 3, "PR_attack_loop", 0, 1 }, { 3, "Prawn_Attack_loop", 0, 1 },
     };
 
     const char* sound_asset_names[4][6];
@@ -296,7 +327,7 @@ bool aqua_beam::hits_sphere(const xSphere& o) const
         F32 maxdist = hit_radius * (grow * ring.dist + 1.0f) + radius;
         xVec3 delta = center - *(xVec3*)&ring.model->Mat->pos;
 
-        if (!(delta.length2() > maxdist * maxdist) && FABS(delta.dot(ring.mat.at)) < maxdist)
+        if (!(delta.length2() > maxdist * maxdist) && xabs(delta.dot(ring.mat.at)) < maxdist)
         {
             return true;
         }
@@ -326,7 +357,7 @@ void aqua_beam::update_rings(F32 dt)
             ++it;
         }
 
-        while (!ring.queue.empty() && FABS(ring.queue.back().dist) >= cfg.ring.kill_dist)
+        while (!ring.queue.empty() && xabs(ring.queue.back().dist) >= cfg.ring.kill_dist)
         {
             kill_ring();
         }
@@ -397,7 +428,7 @@ void aqua_beam::render_ring(aqua_beam::ring_segment& r)
     xModelInstance* model = r.model;
     model->Alpha = cfg.ring.alpha;
 
-    F32 fade_dist = FABS(r.dist) - cfg.ring.fade_dist;
+    F32 fade_dist = xabs(r.dist) - cfg.ring.fade_dist;
     if (fade_dist > 0.0f)
     {
         F32 max_fade_dist = cfg.ring.kill_dist - cfg.ring.fade_dist;
@@ -414,6 +445,119 @@ void aqua_beam::render_ring(aqua_beam::ring_segment& r)
     xModelRender(r.model);
 }
 
+namespace
+{
+    struct television
+    {
+        RwCamera* cam;
+        RwRaster* raster;
+        RwRaster* bgraster;
+        RpWorld* world;
+        RwTexture* texture;
+        U32 vert_buffer_used;
+        RwRGBA bgcolor;
+        F32 rcz;
+        F32 w;
+        F32 h;
+
+        bool create(S32 width, S32 height)
+        {
+            cam = NULL;
+            bgraster = NULL;
+            raster = NULL;
+            world = NULL;
+            memset(&bgcolor, 0x0, sizeof(bgcolor));
+
+            w = (float)width;
+            h = (float)height;
+            cam = RwCameraCreate();
+            if (cam == NULL)
+            {
+                destroy();
+                return FALSE;
+            }
+
+            RwBBox worldBbox;
+            worldBbox.sup.z = 100000.f;
+            worldBbox.sup.y = 100000.f;
+            worldBbox.sup.x = 100000.f;
+
+            worldBbox.inf.z = -100000.f;
+            worldBbox.inf.y = -100000.f;
+            worldBbox.inf.x = -100000.f;
+
+            world = RpWorldCreate(&worldBbox);
+            if (world == NULL)
+            {
+                destroy();
+                return FALSE;
+            }
+
+            RpWorldAddCamera(world, cam);
+            _rwObjectHasFrameSetFrame(cam, RwFrameCreate());
+
+            const xVec2 windowSize = { 1.0f, 1.0f };
+            RwCameraSetViewWindow(cam, (const RwV2d*)&windowSize);
+            RwCameraSetProjection(cam, rwPERSPECTIVE);
+
+            if (cam->object.object.parent == NULL)
+            {
+                destroy();
+                return FALSE;
+            }
+
+            raster = RwRasterCreate(width, height, 32, rwRASTERTYPECAMERATEXTURE);
+            if (raster == NULL)
+            {
+                destroy();
+                return FALSE;
+            }
+            cam->frameBuffer = raster;
+            if (cam == NULL)
+            {
+                destroy();
+                return FALSE;
+            }
+            texture = RwTextureCreate(raster);
+            if (texture == NULL)
+            {
+                destroy();
+                return FALSE;
+            }
+            texture->filterAddressing = (texture->filterAddressing & 0xFFFFFF00) | rwFILTERLINEAR;
+
+            RwCameraSetNearClipPlane(cam, 0.3f);
+            RwCameraSetFarClipPlane(cam, 10000.0f);
+
+            return TRUE;
+        }
+
+#if defined(PS2)
+        inline
+#endif
+            void destroy();
+        void set_background(iColor_tag);
+#if defined(PS2)
+        inline
+#endif
+            void set_model_texture(xModelInstance&);
+#if defined(PS2)
+        inline
+#endif
+            void update(xModelInstance&, xLightKit*);
+        void render_static();
+        void render_background();
+#if defined(PS2)
+        inline
+#endif
+            void set_vert(RwIm2DVertex&, F32, F32, F32, F32);
+#if defined(PS2)
+        inline
+#endif
+            void move(const xVec3&, const xVec3&);
+    };
+} // namespace
+
 xAnimTable* ZNPC_AnimTable_Prawn()
 {
     // clang-format off
@@ -424,11 +568,10 @@ xAnimTable* ZNPC_AnimTable_Prawn()
         ANIM_Taunt01,
         ANIM_AttackWindup01,
         ANIM_AttackLoop01,
-        ANIM_AttackLoop01,
         ANIM_AttackEnd01,
         ANIM_Damage01,
-        ANIM_Damage02 NPCC_ANIM_LIST_END
-
+        ANIM_Damage02,
+        0
     };
     // clang-format on
     xAnimTable* table = xAnimTableNew("zNPCPrawn", NULL, 0);
@@ -471,29 +614,6 @@ zNPCPrawn::zNPCPrawn(S32 myType) : zNPCSubBoss(myType)
 
 namespace
 {
-    struct television
-    {
-        RwCamera* cam;
-        RwRaster* raster;
-        RwRaster* bgraster;
-        RpWorld* world;
-        RwTexture* texture;
-        U32 vert_buffer_used;
-        RwRGBA bgcolor;
-        F32 rcz;
-        F32 w;
-        F32 h;
-
-        bool create(S32, S32);
-        void destroy();
-        void set_background(iColor_tag);
-        void set_model_texture(xModelInstance&);
-        void update(xModelInstance&, xLightKit*);
-        void render_static();
-        void render_background();
-        void set_vert(rwGameCube2DVertex&, F32, F32, F32, F32);
-        void move(const xVec3&, const xVec3&);
-    };
 
     static television closeup;
 
@@ -531,78 +651,6 @@ void zNPCPrawn::Init(xEntAsset* asset)
 
 namespace
 {
-    bool television::create(S32 width, S32 height)
-    {
-        cam = NULL;
-        bgraster = NULL;
-        raster = NULL;
-        world = NULL;
-        memset(&bgcolor, 0x0, sizeof(bgcolor));
-
-        w = (float)width;
-        h = (float)height;
-        cam = RwCameraCreate();
-        if (cam == NULL)
-        {
-            destroy();
-            return FALSE;
-        }
-
-        RwBBox worldBbox;
-        worldBbox.sup.z = 100000.f;
-        worldBbox.sup.y = 100000.f;
-        worldBbox.sup.x = 100000.f;
-
-        worldBbox.inf.z = -100000.f;
-        worldBbox.inf.y = -100000.f;
-        worldBbox.inf.x = -100000.f;
-
-        world = RpWorldCreate(&worldBbox);
-        if (world == NULL)
-        {
-            destroy();
-            return FALSE;
-        }
-
-        RpWorldAddCamera(world, cam);
-        _rwObjectHasFrameSetFrame(cam, RwFrameCreate());
-
-        xVec2 windowSize = { 1.0f, 1.0f };
-        RwCameraSetViewWindow(cam, (const RwV2d*)&windowSize);
-        RwCameraSetProjection(cam, rwPERSPECTIVE);
-
-        if (cam->object.object.parent == NULL)
-        {
-            destroy();
-            return FALSE;
-        }
-
-        raster =
-            RwRasterCreate(width, height, 32, rwRASTERGAMMACORRECTED | rwRASTERPIXELLOCKEDWRITE);
-        if (raster == NULL)
-        {
-            destroy();
-            return FALSE;
-        }
-        cam->frameBuffer = raster;
-        if (cam == NULL)
-        {
-            destroy();
-            return FALSE;
-        }
-        texture = RwTextureCreate(raster);
-        if (texture == NULL)
-        {
-            destroy();
-            return FALSE;
-        }
-        texture->filterAddressing = (texture->filterAddressing & 0xFFFFFF00) | rwFILTERLINEAR;
-
-        RwCameraSetNearClipPlane(cam, 0.3f);
-        RwCameraSetFarClipPlane(cam, 10000.0f);
-
-        return TRUE;
-    }
 
     void television::destroy()
     {
@@ -1246,7 +1294,7 @@ void zNPCPrawn::Render()
     zNPCPrawn::render_debug();
 }
 
-void zNPCPrawn::update_round()
+inline void zNPCPrawn::update_round()
 {
     S32 life = this->life;
     if (life == 0)
@@ -1273,6 +1321,10 @@ void zNPCPrawn::update_round()
     }
 }
 
+#if defined(PS2)
+// Retail retains calls to this body from Reset and the death goal's Enter.
+#pragma dont_inline on
+#endif
 void zNPCPrawn::decompose()
 {
     vanish();
@@ -1298,6 +1350,9 @@ void zNPCPrawn::decompose()
         boss_cam.stop();
     }
 }
+#if defined(PS2)
+#pragma dont_inline off
+#endif
 
 zNPCSpawner* zNPCPrawn::make_spawner(S32 i)
 {
@@ -1351,12 +1406,30 @@ namespace
     }
 } // namespace
 
+#if defined(PS2)
+// Retail compares the representation sign, including negative zero.
+#define PRAWN_SAME_SIGN(a, b) ((*(const U32*)&(a) & 0x80000000) == (*(const U32*)&(b) & 0x80000000))
+#define PRAWN_TURN_MAX_VEL this->turn.max_vel
+#else
+#define PRAWN_TURN_MAX_VEL max_vel
+#endif
+
 void zNPCPrawn::update_turn(F32 dt)
 {
+#if defined(PS2)
+    // Original DWARF retains all three planar locals and their initializers.
+    xVec3& player_loc3 = *xEntGetPos(&globals.player.ent);
+    xVec3& loc3 = *xEntGetPos(this);
+    xVec3& start3 = get_facing();
+    xVec2 player_loc = { player_loc3.x, player_loc3.z };
+    xVec2 loc = { loc3.x, loc3.z };
+    xVec2 facing = { start3.x, start3.z };
+#else
     get_center();
 
     RwMatrix* mat = this->model->Mat;
     xVec2 facing = { mat->at.x, mat->at.z };
+#endif
 
     if (!turning())
     {
@@ -1375,12 +1448,12 @@ void zNPCPrawn::update_turn(F32 dt)
         diff += 6.2831855f;
     }
 
-    bool decel = true;
-
-    if (!(FABS(this->turn.vel) < 0.001f) && (diff < 0.0f ? 1 : 0) == (this->turn.vel < 0.0f ? 1 : 0))
-    {
-        decel = false;
-    }
+    bool decel = xabs(this->turn.vel) < 0.001f ||
+#if defined(PS2)
+                 !PRAWN_SAME_SIGN(diff, this->turn.vel);
+#else
+                 (diff < 0.0f ? 1 : 0) != (this->turn.vel < 0.0f ? 1 : 0);
+#endif
 
     if (decel)
     {
@@ -1391,7 +1464,7 @@ void zNPCPrawn::update_turn(F32 dt)
         time_to_target = diff / this->turn.vel;
     }
 
-    F32 time_to_stop = FABS(this->turn.vel / this->turn.accel);
+    F32 time_to_stop = xabs(this->turn.vel / this->turn.accel);
 
     F32 dir = (time_to_target > time_to_stop) ? 1.0f : -1.0f;
     F32 sign = (diff >= 0.0f) ? 1.0f : -1.0f;
@@ -1399,17 +1472,23 @@ void zNPCPrawn::update_turn(F32 dt)
     F32 accel = this->turn.accel * (dir * sign);
     F32 dvel = accel * dt;
     F32 vel = this->turn.vel + dvel;
+#if !defined(PS2)
     F32 max_vel = this->turn.max_vel;
+#endif
 
-    if (FABS(vel) <= max_vel)
+    if (xabs(vel) <= PRAWN_TURN_MAX_VEL)
     {
         this->turn.vel = vel;
     }
-    else if (FABS(this->turn.vel) <= max_vel)
+    else if (xabs(this->turn.vel) <= PRAWN_TURN_MAX_VEL)
     {
-        this->turn.vel = range_limit<F32>(vel, -max_vel, max_vel);
+        this->turn.vel = range_limit<F32>(vel, -PRAWN_TURN_MAX_VEL, PRAWN_TURN_MAX_VEL);
     }
+#if defined(PS2)
+    else if (!PRAWN_SAME_SIGN(vel, dvel))
+#else
     else if ((vel < 0.0f ? 1 : 0) != (dvel < 0.0f ? 1 : 0))
+#endif
     {
         this->turn.vel = vel;
     }
@@ -1417,20 +1496,42 @@ void zNPCPrawn::update_turn(F32 dt)
     F32 step = this->turn.vel * dt;
     if (time_to_target > time_to_stop)
     {
-        if ((step < 0.0f ? 1 : 0) == (diff < 0.0f ? 1 : 0) && FABS(step) > FABS(diff))
+#if defined(PS2)
+        if (PRAWN_SAME_SIGN(step, diff) && xabs(step) > xabs(diff))
+#else
+        if ((step < 0.0f ? 1 : 0) == (diff < 0.0f ? 1 : 0) && xabs(step) > xabs(diff))
+#endif
         {
+#if defined(PS2)
+            step = diff;
+            this->turn.vel = 0.0f;
+#else
             this->turn.vel = 0.0f;
             step = diff;
+#endif
         }
     }
+#if defined(PS2)
+    else if (!PRAWN_SAME_SIGN(step, diff))
+#else
     else if ((step < 0.0f ? 1 : 0) != (diff < 0.0f ? 1 : 0))
+#endif
     {
+#if defined(PS2)
+        step = diff;
+        this->turn.vel = 0.0f;
+#else
         this->turn.vel = 0.0f;
         step = diff;
+#endif
     }
 
     set_yaw_matrix(*(xMat3x3*)this->frame, cur + step);
 }
+#if defined(PS2)
+#undef PRAWN_SAME_SIGN
+#endif
+#undef PRAWN_TURN_MAX_VEL
 
 void zNPCPrawn::update_animation(F32 dt)
 {
@@ -1720,7 +1821,9 @@ namespace
         if (globalCamera != NULL)
         {
             RwCameraEndUpdate(globalCamera);
+#if !defined(PS2)
             RwGameCubeCameraTextureFlush(globalCamera->frameBuffer, 0);
+#endif
         }
         if (this->bgraster == NULL)
         {
@@ -1760,7 +1863,9 @@ namespace
         }
         render_static();
         RwCameraEndUpdate(this->cam);
+#if !defined(PS2)
         RwGameCubeCameraTextureFlush(this->cam->frameBuffer, 0);
+#endif
         if (globalCamera != NULL)
         {
             RwCameraBeginUpdate(globalCamera);
@@ -1776,7 +1881,7 @@ namespace
         zRenderState(SDRS_Fill);
         RwRenderStateSet(rwRENDERSTATETEXTURERASTER, this->bgraster);
 
-        rwGameCube2DVertex* vert = (rwGameCube2DVertex*)xMemPushTemp(6 * sizeof(*vert));
+        RwIm2DVertex* vert = (RwIm2DVertex*)xMemPushTemp(6 * sizeof(*vert));
 
         set_vert(vert[0], 0.0f, 0.0f, 0.0f, 0.0f);
         set_vert(vert[1], 0.0f, this->h, 0.0f, 1.0f);
@@ -1789,8 +1894,17 @@ namespace
         xMemPopTemp(vert);
     }
 
-    void television::set_vert(rwGameCube2DVertex& vert, F32 x, F32 y, F32 u, F32 v)
+    void television::set_vert(RwIm2DVertex& vert, F32 x, F32 y, F32 u, F32 v)
     {
+#if defined(PS2)
+        RwIm2DVertexSetScreenX(&vert, x);
+        RwIm2DVertexSetScreenY(&vert, y);
+        RwIm2DVertexSetScreenZ(&vert, 1.0f);
+        RwIm2DVertexSetRecipCameraZ(&vert, 1.0f / 0.3f);
+        RwIm2DVertexSetU(&vert, u, 0);
+        RwIm2DVertexSetV(&vert, v, 0);
+        RwIm2DVertexSetIntRGBA(&vert, 255, 255, 255, 255);
+#else
         vert.x = x;
         vert.y = y;
         vert.z = 1.0f;
@@ -1800,6 +1914,7 @@ namespace
         vert.emissiveColor.green = 0xff;
         vert.emissiveColor.blue = 0xff;
         vert.emissiveColor.alpha = 0xff;
+#endif
     }
 
     void television::move(const xVec3& v1, const xVec3& v2)
@@ -2228,119 +2343,3 @@ S32 zNPCGoalPrawnDeath::Process(en_trantype* trantype, float dt, void* updCtxt, 
 {
     return xGoal::Process(trantype, dt, updCtxt, xscn);
 }
-
-void xDebugAddTweak(const char*, xVec3*, const tweak_callback*, void*, U32)
-{
-}
-
-xVec3& zNPCPrawn::get_center() const
-{
-    return reinterpret_cast<xVec3&>(this->model->Mat->pos);
-}
-
-void zNPCPrawn::render_debug()
-{
-}
-
-bool zNPCPrawn::turning() const
-{
-    bool result = false;
-    xVec2 facing = { 0.0f, 0.0f };
-    RwMatrix* mat = this->model->Mat;
-
-    facing.x = mat->at.x;
-    facing.y = mat->at.z;
-
-    if (!(this->turn.vel >= -1.0e-05f && this->turn.vel <= 1.0e-05f) ||
-        (!(this->turn.accel >= -1.0e-05f && this->turn.accel <= 1.0e-05f) &&
-         (!(this->look_dir.x > this->look_dir.y) ||
-          !(FABS(this->look_dir.x - facing.x) < 0.001f)) &&
-         (!(this->look_dir.x < this->look_dir.y) || !(FABS(this->look_dir.y - facing.y) < 0.001f))))
-    {
-        result = true;
-    }
-
-    return result;
-}
-
-bool aqua_beam::active() const
-{
-    return firing || !ring.queue.empty();
-}
-
-void aqua_beam::move(const xVec3& new_loc, const xVec3& new_dir)
-{
-    loc = new_loc;
-    dir = new_dir;
-}
-
-xVec3& zNPCPrawn::get_facing() const
-{
-    return reinterpret_cast<xVec3&>(this->model->Mat->at);
-}
-
-U8 zNPCPrawn::ColChkFlags() const
-{
-    return 0;
-}
-
-U8 zNPCPrawn::ColPenFlags() const
-{
-    return 0;
-}
-
-U8 zNPCPrawn::ColChkByFlags() const
-{
-    return 16;
-}
-
-U8 zNPCPrawn::ColPenByFlags() const
-{
-    return 16;
-}
-
-U8 zNPCPrawn::PhysicsFlags() const
-{
-    return 3;
-}
-
-S32 zNPCPrawn::IsAlive()
-{
-    return this->life > 0;
-}
-
-namespace auto_tweak
-{
-    template <>
-    inline void load_param<F32, F32>(F32& value, F32 scale, F32 lo, F32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
-    {
-        value = zParamGetFloat(ap, apsize, name, value);
-        if (value < lo)
-        {
-            value = lo;
-        }
-        else if (value > hi)
-        {
-            value = hi;
-        }
-        value = value * scale;
-    }
-
-    template <>
-    inline void load_param<S32, S32>(S32& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
-    {
-        S32 result = zParamGetInt(ap, apsize, name, value);
-        if (result < lo)
-        {
-            result = lo;
-        }
-        else if (result > hi)
-        {
-            result = hi;
-        }
-        result *= scale;
-        value = result;
-    }
-} // namespace auto_tweak

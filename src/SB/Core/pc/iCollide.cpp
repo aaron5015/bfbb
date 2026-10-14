@@ -2,6 +2,7 @@
 
 #include <types.h>
 
+#include "iTime.h"
 #include "xMathInlines.h"
 
 #include "xClumpColl.h"

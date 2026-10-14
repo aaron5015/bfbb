@@ -8,7 +8,13 @@
 
 #include "xShadowSimple.h"
 
+#if defined(PS2)
+#include "xJSP.h"
+#include <rwsdk/rpcollis.h>
+#include <rwim3d.h>
+#else
 #include "rpcollis.h"
+#endif
 #include "xMath3.h"
 #include "xQuickCull.h"
 #include "zGlobals.h"
@@ -31,11 +37,6 @@ static RwRaster* sShadRasters[64];
 static RwRaster* sShadRaster;
 static u32 sShadVertCount;
 static RwMatrixTag* sModelMat;
-
-inline void xQuickCullForLine(xQCData* q, const xLine3* ln)
-{
-    xQuickCullForLine(&xqc_def_ctrl, q, ln);
-}
 
 static RpCollisionTriangle* shadowRayCB(RpIntersection*, RpWorldSector*, RpCollisionTriangle* tri,
                                         F32 dist, void* data)
@@ -411,10 +412,9 @@ void xShadowSimple_CacheInit(xShadowSimpleCache* cache, xEnt* ent, U8 alpha)
     {
         sst = (zSimpleShadowTableHeader*)xSTFindAssetByType('SHDW', i, &size);
 
-        zSimpleShadowTableEntry* entries = (zSimpleShadowTableEntry*)(sst + 1);
-
         for (j = 0; j < sst->num; j++)
         {
+            zSimpleShadowTableEntry* entries = (zSimpleShadowTableEntry*)(sst + 1);
             if (ent->model->modelID == entries[j].modelID)
             {
                 tex = (RwTexture*)xSTFindAsset(entries[j].assetID, NULL);
@@ -497,10 +497,9 @@ void xShadowSimple_Add(xShadowSimpleCache* cache, xEnt* ent, F32 radius, F32 ecc
 
         if (1e38f != cache->shadowHeight && (moved || cache->castOnEnt != NULL))
         {
-            castOnEnt = cache->castOnEnt;
-
-            if (castOnEnt != NULL)
+            if (cache->castOnEnt != NULL)
             {
+                castOnEnt = cache->castOnEnt;
                 xMat4x3Toworld(&xformvert[0], (xMat4x3*)castOnEnt->model->Mat,
                                &cache->poly.vert[0]);
                 xMat4x3Toworld(&xformvert[1], (xMat4x3*)castOnEnt->model->Mat,
@@ -536,10 +535,10 @@ void xShadowSimple_Add(xShadowSimpleCache* cache, xEnt* ent, F32 radius, F32 ecc
                 vert = cache->poly.vert;
             }
 
-            for (j = 0; j < 3; j++)
+            for (i = 0; i < 3; i++)
             {
-                v0 = &vert[j];
-                v1 = &vert[(j == 2) ? 0 : j + 1];
+                v0 = &vert[i];
+                v1 = &vert[(i == 2) ? 0 : i + 1];
 
                 pdot = (v0->z - v1->z) * (ent->model->Mat->pos.x - v0->x) +
                        (v1->x - v0->x) * (ent->model->Mat->pos.z - v0->z);

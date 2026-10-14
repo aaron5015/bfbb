@@ -150,9 +150,10 @@ RwFrame* RwFrameOrthoNormalize(RwFrame* frame)
 // subtree, clears the dirty bits, and empties the list. The one difference is
 // where the list lives -- RWSRCGLOBAL(dirtyFrameList) against rw::engine->
 // frameDirtyList -- and nothing on this side of the seam can tell.
-void _rwFrameSyncDirty(void)
+RwBool _rwFrameSyncDirty(void)
 {
     rw::Frame::syncDirty();
+    return TRUE;
 }
 
 // The frame HIERARCHY calls, which iModel.cpp needs to build and tear down a

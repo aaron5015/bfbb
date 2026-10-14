@@ -6,10 +6,13 @@
 #include "iFMV.h"
 #include <bink/include/rad3d.h>
 
-static int D3D_surface_type[5];
-static unsigned int Pixel_info[5];
+static int D3D_surface_type[RAD3DSURFACECOUNT];
+static u32 Pixel_info[RAD3DSURFACECOUNT];
 
 static int Built_tables;
+
+#define RAD3D_BYTES_PER_PIXEL_MASK 0xff
+#define RAD3D_ALPHA_PIXELS 0x80000000
 
 static void Setup_surface_array()
 {
@@ -18,62 +21,62 @@ static void Setup_surface_array()
         return;
     }
 
-    D3D_surface_type[0] = 6;
-    D3D_surface_type[1] = 6;
-    D3D_surface_type[2] = 4;
-    D3D_surface_type[3] = 5;
-    D3D_surface_type[4] = -1;
+    D3D_surface_type[RAD3DSURFACE32] = GX_TF_RGBA8;
+    D3D_surface_type[RAD3DSURFACE32A] = GX_TF_RGBA8;
+    D3D_surface_type[RAD3DSURFACE565] = GX_TF_RGB565;
+    D3D_surface_type[RAD3DSURFACE4444] = GX_TF_RGB5A3;
+    D3D_surface_type[RAD3DSURFACEYUY2] = -1;
 
-    Pixel_info[0] = 0x00000004;
-    Pixel_info[1] = 0x80000004;
-    Pixel_info[2] = 0x00000002;
-    Pixel_info[3] = 0x80000002;
-    Pixel_info[4] = 0x00000002;
+    Pixel_info[RAD3DSURFACE32] = 4;
+    Pixel_info[RAD3DSURFACE32A] = RAD3D_ALPHA_PIXELS | 4;
+    Pixel_info[RAD3DSURFACE565] = 2;
+    Pixel_info[RAD3DSURFACE4444] = RAD3D_ALPHA_PIXELS | 2;
+    Pixel_info[RAD3DSURFACEYUY2] = 2;
 
     Built_tables = 1;
 }
 
 struct RAD3DIMAGE
 {
-    U32 width;
-    U32 height;
-    S32 alpha_pixels;
-    U32 bytes_per_pixel;
-    U32 surface_type;
+    u32 width;
+    u32 height;
+    s32 alpha_pixels;
+    u32 bytes_per_pixel;
+    u32 surface_format;
     void* pixels;
-    U32 buffer_size;
-    GXTexObj tex_obj;
+    u32 buffer_size;
+    GXTexObj texobj;
 };
 
-HRAD3DIMAGE Open_RAD_3D_image(HRAD3D rad_3d, U32 width, U32 height, U32 rad3d_surface_format)
+HRAD3DIMAGE Open_RAD_3D_image(HRAD3D rad_3d, u32 width, u32 height, u32 rad3d_surface_format)
 {
-    struct RAD3DIMAGE* image;
-    U32 bytes_per_pixel;
+    RAD3DIMAGE* image;
+    u32 bytes_per_pixel;
 
     Setup_surface_array();
 
-    bytes_per_pixel = Pixel_info[rad3d_surface_format] & 0xff;
-
-    image = (struct RAD3DIMAGE*)iFMVmalloc(sizeof(struct RAD3DIMAGE));
+    bytes_per_pixel = Pixel_info[rad3d_surface_format] & RAD3D_BYTES_PER_PIXEL_MASK;
+    image = (RAD3DIMAGE*)iFMVmalloc(sizeof(RAD3DIMAGE));
     if (image == 0)
     {
         return 0;
     }
-
-    image->width = width;
-    image->height = height;
-    image->alpha_pixels = Pixel_info[rad3d_surface_format] >> 31;
-    image->bytes_per_pixel = bytes_per_pixel;
-    image->surface_type = rad3d_surface_format;
-
-    image->buffer_size = GXGetTexBufferSize(
-        width, height, D3D_surface_type[rad3d_surface_format], GX_FALSE, 0);
-    image->pixels = iFMVmalloc(image->buffer_size);
-
-    GXInitTexObj(&image->tex_obj, image->pixels, width, height,
-                 (GXTexFmt)D3D_surface_type[rad3d_surface_format], GX_CLAMP, GX_CLAMP, GX_FALSE);
-    GXInitTexObjLOD(&image->tex_obj, GX_LINEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE,
-                    GX_ANISO_1);
+    else
+    {
+        image->width = width;
+        image->height = height;
+        image->alpha_pixels = Pixel_info[rad3d_surface_format] >> 31;
+        image->bytes_per_pixel = bytes_per_pixel;
+        image->surface_format = rad3d_surface_format;
+        const GXTexFmt format = (GXTexFmt)D3D_surface_type[rad3d_surface_format];
+        image->buffer_size = GXGetTexBufferSize((u16)width, (u16)height, format, GX_FALSE, 0);
+        image->pixels = iFMVmalloc(image->buffer_size);
+        GXInitTexObj(&image->texobj, image->pixels, (u16)width, (u16)height,
+                     (GXTexFmt)D3D_surface_type[rad3d_surface_format],
+                     GX_CLAMP, GX_CLAMP, GX_FALSE);
+        GXInitTexObjLOD(&image->texobj, GX_LINEAR, GX_NEAR, 0.0f, 0.0f, 0.0f,
+                        GX_FALSE, GX_FALSE, GX_ANISO_1);
+    }
 
     return image;
 }
@@ -91,8 +94,8 @@ void Close_RAD_3D_image(struct RAD3DIMAGE* image)
     }
 }
 
-S32 Lock_RAD_3D_image(HRAD3DIMAGE rad_image, void* out_pixel_buffer, U32* out_buffer_pitch,
-                      U32* arg3)
+s32 Lock_RAD_3D_image(HRAD3DIMAGE rad_image, void* out_pixel_buffer, u32* out_buffer_pitch,
+                      u32* out_surface_format)
 {
     if (rad_image == 0)
     {
@@ -109,9 +112,9 @@ S32 Lock_RAD_3D_image(HRAD3DIMAGE rad_image, void* out_pixel_buffer, U32* out_bu
         *out_buffer_pitch = rad_image->width * rad_image->bytes_per_pixel;
     }
 
-    if (arg3 != 0)
+    if (out_surface_format != 0)
     {
-        *arg3 = rad_image->surface_type;
+        *out_surface_format = rad_image->surface_format;
     }
 
     return 1;
@@ -125,8 +128,6 @@ void Unlock_RAD_3D_image(HRAD3DIMAGE rad_image)
     }
 }
 
-// The 5th and 6th parameters were `S32` in the original, which RAD's radbase.h
-// defined as `signed long`; the mangled name records `l`, not `i`.
 static void Submit_vertices(F32 x_offset, F32 y_offset, F32 x_scale, F32 y_scale, long width,
                             long height, F32 alpha_level)
 {
@@ -203,7 +204,7 @@ void Blit_RAD_3D_image(HRAD3DIMAGE rad_image, F32 x_offset, F32 y_offset, F32 x_
         }
     }
 
-    GXLoadTexObj(&rad_image->tex_obj, GX_TEXMAP0);
+    GXLoadTexObj(&rad_image->texobj, GX_TEXMAP0);
 
     PSMTXScale(tex_mtx, 1.0f / rad_image->width, 1.0f / rad_image->height, 1.0f);
     PSMTXScale(tex_mtx, 1.0f, 1.0f, 1.0f);
@@ -213,9 +214,9 @@ void Blit_RAD_3D_image(HRAD3DIMAGE rad_image, F32 x_offset, F32 y_offset, F32 x_
     GXSetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_TEXMTX0);
 
     // Retail ignores the caller's offsets and scales and always covers the
-    // whole 640x480 screen.
+    // whole regional framebuffer.
     screen_width = 640.0f;
-    screen_height = 480.0f;
+    screen_height = (F32)FMV_SCREEN_HEIGHT;
     Submit_vertices(0.0f, 0.0f, 1.0f, 1.0f, screen_width, screen_height, alpha_level);
 
     GXSetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);

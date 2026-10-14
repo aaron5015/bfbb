@@ -10,6 +10,8 @@
 #include "zParEmitter.h"
 #include "zParPTank.h"
 
+extern const U32 gPTankDisable;
+
 _tagClimate* sClimate;
 
 float snow_life = 3.0f;
@@ -42,8 +44,9 @@ void xClimateInit(_tagClimate* climate)
 void xClimateInitAsset(_tagClimate* climate, xEnvAsset* easset)
 {
     sClimate = climate;
-    climate->wind.strength = 0.0f;
-    xClimateVecFromAngle(climate->wind.angle, &climate->wind.dir);
+    _tagWind* w = &climate->wind;
+    w->strength = 0.0f;
+    xClimateVecFromAngle(w->angle, &w->dir);
 
     if (easset->climateFlags == 0)
     {
@@ -87,8 +90,6 @@ static void GetPosBigDogWhattupFool(xVec3* vec)
     vec->z = 10.0f * camera->mat.at.z + camera->mat.pos.z;
 }
 
-// NOTE (Square): I think it's equivalent but it's very hard to tell. Our compiler is optimizing the float ops
-// much more aggresively and it's throwing the regalloc off.
 static void UpdateRain(_tagClimate* climate, float seconds)
 {
     _tagRain* r = &climate->rain;
@@ -116,13 +117,6 @@ static void UpdateRain(_tagClimate* climate, float seconds)
     GetPosBigDogWhattupFool(&fool);
     if (gPTankDisable)
     {
-        F32 dvx = snow_dvel.x;
-        F32 vx = snow_vel.x;
-        F32 dvy = snow_dvel.y;
-        F32 vy = snow_vel.y;
-        F32 dvz = snow_dvel.z;
-        F32 vz = snow_vel.z;
-
         for (S32 i = 0; i < total_snow_flakes; i++)
         {
             info.pos = fool;
@@ -131,11 +125,12 @@ static void UpdateRain(_tagClimate* climate, float seconds)
 
             F32 xx = info.pos.x - fool.x;
             F32 zz = info.pos.z - fool.z;
-            F32 perc = 1.0f - xx * zz / 506.25f;
+            F32 perc = xx * zz / 506.25f;
+            perc = 1.0f - perc;
 
-            info.vel.x = dvx * xurand() + vx;
-            info.vel.y = dvy * xurand() + vy;
-            info.vel.z = dvz * xurand() + vz;
+            info.vel.x = snow_dvel.x * xurand() + snow_vel.x;
+            info.vel.y = snow_dvel.y * xurand() + snow_vel.y;
+            info.vel.z = snow_dvel.z * xurand() + snow_vel.z;
 
             info.pos.y += 4.0f * perc + 4.0f;
             info.life.val[0] = snow_life * perc + snow_life;
@@ -159,33 +154,25 @@ static void UpdateRain(_tagClimate* climate, float seconds)
         xVec3* vel = pos + num;
         if (pos != NULL)
         {
-            F32 dvx = snow_dvel.x;
-            F32 vx = snow_vel.x;
-            F32 dvy = snow_dvel.y;
-            F32 vy = snow_vel.y;
-            F32 dvz = snow_dvel.z;
-            F32 vz = snow_vel.z;
             xVec3* p = pos;
             xVec3* v = vel;
 
-            for (S32 i = 0; i < num; i++)
+            for (S32 i = 0; i < num; i++, p++, v++)
             {
                 *p = fool;
                 p->x += 45.0f * xurand() - 22.5f;
                 p->z += 45.0f * xurand() - 22.5f;
 
-                F32 zz = p->z - fool.z;
                 F32 xx = p->x - fool.x;
-                float perc = (1.0f - (xx * xx + zz * zz) / 506.25f);
+                F32 zz = p->z - fool.z;
+                float perc = (xx * xx + zz * zz) / 506.25f;
+                perc = 1.0f - perc;
 
                 p->y += 4.0f * perc + 4.0f;
 
-                v->x = dvx * xurand() + vx;
-                v->y = dvy * xurand() + vy;
-                v->z = dvz * xurand() + vz;
-
-                p++;
-                v++;
+                v->x = snow_dvel.x * xurand() + snow_vel.x;
+                v->y = snow_dvel.y * xurand() + snow_vel.y;
+                v->z = snow_dvel.z * xurand() + snow_vel.z;
             }
 
             zParPTankSpawnSnow(pos, vel, num);
@@ -205,19 +192,25 @@ void xClimateUpdate(_tagClimate* climate, F32 seconds)
     UpdateWind(climate, seconds);
 }
 
+#if !defined(PS2) && !defined(XBOX)
 void xVec3Init(xVec3* vec, F32 x, F32 y, F32 z)
 {
     vec->x = x;
     vec->y = y;
     vec->z = z;
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 void xMat3x3Identity(xMat3x3* matrix)
 {
     xMat3x3Copy(matrix, &g_I3);
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 void xMat3x3Copy(xMat3x3* m1, const xMat3x3* m2)
 {
     memcpy(m1, m2, sizeof(xMat3x3));
 }
+#endif

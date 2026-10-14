@@ -21,13 +21,18 @@
 
 #define ALIGN(x) __attribute__((aligned(x)))
 #define ATTRIBUTE_ALIGN(x) __attribute__((aligned(x)))
+// DECL_COMMON: a global that several units define, which CodeWarrior's
+// `-common on` merges into one common symbol. A host linker has no common
+// symbols to merge, so there it is a C++17 inline variable instead.
 #ifdef __MWERKS__
 #define DECL_SECTION(x) __declspec(section x)
 #define DECL_WEAK __declspec(weak)
+#define DECL_COMMON
 #define DONT_INLINE __attribute__((never_inline))
 #else
 #define DECL_SECTION(x)
 #define DECL_WEAK __attribute__((weak))
+#define DECL_COMMON inline
 #define DONT_INLINE __attribute__((noinline))
 #endif
 
@@ -65,8 +70,12 @@
     }
 #define ASM asm
 #else
+// The Xbox compiler predates variadic macro support; these MW layout helpers
+// are not used by Xbox sources.
+#ifndef XBOX
 #define CW_FORCE_BSS(module, ...)
 #define CW_FORCE_STRINGS(module, ...)
+#endif
 #define ASM
 #endif
 

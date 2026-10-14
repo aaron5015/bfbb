@@ -1,4 +1,8 @@
+#if defined(XBOX) || defined(PS2)
+#include <iMath3.h>
+#else
 #include "iMath3.h"
+#endif
 
 #include "xMath.h"
 #include "xMath2.h"
@@ -10,7 +14,16 @@ void iMath3Init()
 {
 }
 
-void iSphereIsectVec(const xSphere* s, const xVec3* v, xIsect* isx)
+#ifdef PS2
+void iMath3Exit()
+{
+}
+#endif
+
+#if defined(XBOX)
+inline
+#endif
+    void iSphereIsectVec(const xSphere* s, const xVec3* v, xIsect* isx)
 {
     xVec3Sub(&isx->norm, v, &s->center);
 
@@ -124,31 +137,34 @@ void iSphereBoundVec(xSphere* o, const xSphere* s, const xVec3* v)
         {
             memcpy(o, s, sizeof(xSphere));
         }
+        return;
+    }
+
+    if (usetemp)
+    {
+        tp = &temp;
     }
     else
     {
-        if (usetemp)
-        {
-            tp = &temp;
-        }
-        else
-        {
-            tp = o;
-        }
+        tp = o;
+    }
 
-        xVec3Copy(&tp->center, &isx.norm);
+    xVec3Copy(&tp->center, &isx.norm);
 
-        scale = (isx.dist - s->r) / (2.0f * isx.dist);
+    scale = (isx.dist - s->r) / (2.0f * isx.dist);
 
-        xVec3SMul(&tp->center, &tp->center, scale);
-        xVec3Add(&tp->center, &tp->center, &s->center);
+#if defined(XBOX)
+    xVec3SMul(&tp->center, &isx.norm, scale);
+#else
+    xVec3SMul(&tp->center, &tp->center, scale);
+#endif
+    xVec3Add(&tp->center, &tp->center, &s->center);
 
-        tp->r = 0.5f * (isx.dist + s->r);
+    tp->r = 0.5f * (isx.dist + s->r);
 
-        if (usetemp)
-        {
-            memcpy(o, tp, sizeof(xSphere));
-        }
+    if (usetemp)
+    {
+        memcpy(o, tp, sizeof(xSphere));
     }
 }
 
@@ -467,7 +483,10 @@ static U32 ClipPlane(F32 denom, F32 numer, F32* t_in, F32* t_out)
     return (numer <= 0.0f);
 }
 
-static U32 ClipBox(const xVec3* r3, const xVec3* r4, const xVec3* r5, F32* t_in, F32* t_out)
+#if defined(PS2)
+inline
+#endif
+    static U32 ClipBox(const xVec3* r3, const xVec3* r4, const xVec3* r5, F32* t_in, F32* t_out)
 {
     return (ClipPlane(r5->x, -r4->x - r3->x, t_in, t_out) &&
             ClipPlane(-r5->x, r4->x - r3->x, t_in, t_out) &&
@@ -492,28 +511,21 @@ void iBoxIsectRay(const xBox* b, const xRay3* r, xIsect* isx)
         ((xRay3*)r)->max_t = 1.0f;
     }
 
-    // non-matching: incorrect instruction order
-
     t_in = -9.9999997e37f;
     t_out = 9.9999997e37f;
 
     var_14.x = b->upper.x - b->lower.x;
     var_14.y = b->upper.y - b->lower.y;
     var_14.z = b->upper.z - b->lower.z;
-
-    var_20.x = b->lower.x + b->upper.x;
-    var_20.y = b->lower.y + b->upper.y;
-
     var_14.x *= 0.5f;
     var_14.y *= 0.5f;
     var_14.z *= 0.5f;
-
+    var_20.x = b->lower.x + b->upper.x;
+    var_20.y = b->lower.y + b->upper.y;
     var_20.z = b->lower.z + b->upper.z;
-
     var_20.x *= -0.5f;
     var_20.y *= -0.5f;
     var_20.z *= -0.5f;
-
     var_20.x += r->origin.x;
     var_20.y += r->origin.y;
     var_20.z += r->origin.z;
@@ -561,39 +573,100 @@ void iBoxIsectRay(const xBox* b, const xRay3* r, xIsect* isx)
 void iBoxIsectSphere(const xBox* box, const xSphere* p, xIsect* isx)
 {
     U32 xcode, ycode, zcode;
-    F32 lo, hi;
-
-    lo = p->center.x - p->r;
-    hi = p->center.x + p->r;
-
-    if (lo < box->lower.x)
+#if defined(PS2)
     {
-        if (hi < box->lower.x)
-        {
-            xcode = 2;
-        }
-        else if (hi > box->upper.x)
-        {
-            xcode = 0;
-        }
-        else
-        {
-            xcode = 1;
-        }
+        const F32 lo = p->center.x - p->r;
+        const F32 hi = p->center.x + p->r;
+        xcode = (lo < box->lower.x) ? ((hi < box->lower.x) ? 2 : !(hi > box->upper.x)) :
+                                      ((lo > box->upper.x) ? 5 : ((hi > box->upper.x) ? 4 : 3));
     }
-    else
+    if (xcode % 3 == 2)
     {
-        if (lo > box->upper.x)
+        isx->penned = 1.0f;
+        return;
+    }
+    {
+        const F32 lo = p->center.y - p->r;
+        const F32 hi = p->center.y + p->r;
+        ycode = (lo < box->lower.y) ? ((hi < box->lower.y) ? 2 : !(hi > box->upper.y)) :
+                                      ((lo > box->upper.y) ? 5 : ((hi > box->upper.y) ? 4 : 3));
+    }
+    if (ycode % 3 == 2)
+    {
+        isx->penned = 1.0f;
+        return;
+    }
+    {
+        const F32 lo = p->center.z - p->r;
+        const F32 hi = p->center.z + p->r;
+        zcode = (lo < box->lower.z) ? ((hi < box->lower.z) ? 2 : !(hi > box->upper.z)) :
+                                      ((lo > box->upper.z) ? 5 : ((hi > box->upper.z) ? 4 : 3));
+    }
+    if (zcode % 3 == 2)
+    {
+        isx->penned = 1.0f;
+        return;
+    }
+#else
+#if defined(XBOX)
+    const F32& radius = p->r;
+#else
+    F32 center = p->center.x;
+    const F32 radius = p->r;
+#endif
+    {
+#if defined(XBOX)
+        const F32& center = p->center.x;
+        const F32& lower = box->lower.x;
+        const F32 lo = center - radius;
+#else
+        const F32 lower = box->lower.x;
+#endif
+        const F32 hi = center + radius;
+
+#if defined(XBOX)
+        if (lo < lower)
+#else
+        if (center - radius < lower)
+#endif
         {
-            xcode = 5;
-        }
-        else if (hi > box->upper.x)
-        {
-            xcode = 4;
+            if (hi < lower)
+            {
+                xcode = 2;
+            }
+            else if (hi > box->upper.x)
+            {
+                xcode = 0;
+            }
+            else
+            {
+                xcode = 1;
+            }
         }
         else
         {
-            xcode = 3;
+#if defined(XBOX)
+            if (lo > box->upper.x)
+#else
+            const F32 upper = box->upper.x;
+
+            if (center - radius > upper)
+#endif
+            {
+                xcode = 5;
+            }
+#if defined(XBOX)
+            else if (hi > box->upper.x)
+#else
+            else if (hi > upper)
+#endif
+            {
+                xcode = 4;
+            }
+            else
+            {
+                xcode = 3;
+            }
         }
     }
 
@@ -603,37 +676,62 @@ void iBoxIsectSphere(const xBox* box, const xSphere* p, xIsect* isx)
         return;
     }
 
-    lo = p->center.y - p->r;
-    hi = p->center.y + p->r;
+#if !defined(XBOX)
+    center = p->center.y;
+#endif
+    {
+#if defined(XBOX)
+        const F32& center = p->center.y;
+        const F32& lower = box->lower.y;
+        const F32 lo = center - radius;
+#else
+        const F32 lower = box->lower.y;
+#endif
+        const F32 hi = center + radius;
 
-    if (lo < box->lower.y)
-    {
-        if (hi < box->lower.y)
+#if defined(XBOX)
+        if (lo < lower)
+#else
+        if (center - radius < lower)
+#endif
         {
-            ycode = 2;
-        }
-        else if (hi > box->upper.y)
-        {
-            ycode = 0;
-        }
-        else
-        {
-            ycode = 1;
-        }
-    }
-    else
-    {
-        if (lo > box->upper.y)
-        {
-            ycode = 5;
-        }
-        else if (hi > box->upper.y)
-        {
-            ycode = 4;
+            if (hi < lower)
+            {
+                ycode = 2;
+            }
+            else if (hi > box->upper.y)
+            {
+                ycode = 0;
+            }
+            else
+            {
+                ycode = 1;
+            }
         }
         else
         {
-            ycode = 3;
+#if defined(XBOX)
+            if (lo > box->upper.y)
+#else
+            const F32 upper = box->upper.y;
+
+            if (center - radius > upper)
+#endif
+            {
+                ycode = 5;
+            }
+#if defined(XBOX)
+            else if (hi > box->upper.y)
+#else
+            else if (hi > upper)
+#endif
+            {
+                ycode = 4;
+            }
+            else
+            {
+                ycode = 3;
+            }
         }
     }
 
@@ -643,37 +741,62 @@ void iBoxIsectSphere(const xBox* box, const xSphere* p, xIsect* isx)
         return;
     }
 
-    lo = p->center.z - p->r;
-    hi = p->center.z + p->r;
+#if !defined(XBOX)
+    center = p->center.z;
+#endif
+    {
+#if defined(XBOX)
+        const F32& center = p->center.z;
+        const F32& lower = box->lower.z;
+        const F32 lo = center - radius;
+#else
+        const F32 lower = box->lower.z;
+#endif
+        const F32 hi = center + radius;
 
-    if (lo < box->lower.z)
-    {
-        if (hi < box->lower.z)
+#if defined(XBOX)
+        if (lo < lower)
+#else
+        if (center - radius < lower)
+#endif
         {
-            zcode = 2;
-        }
-        else if (hi > box->upper.z)
-        {
-            zcode = 0;
-        }
-        else
-        {
-            zcode = 1;
-        }
-    }
-    else
-    {
-        if (lo > box->upper.z)
-        {
-            zcode = 5;
-        }
-        else if (hi > box->upper.z)
-        {
-            zcode = 4;
+            if (hi < lower)
+            {
+                zcode = 2;
+            }
+            else if (hi > box->upper.z)
+            {
+                zcode = 0;
+            }
+            else
+            {
+                zcode = 1;
+            }
         }
         else
         {
-            zcode = 3;
+#if defined(XBOX)
+            if (lo > box->upper.z)
+#else
+            const F32 upper = box->upper.z;
+
+            if (center - radius > upper)
+#endif
+            {
+                zcode = 5;
+            }
+#if defined(XBOX)
+            else if (hi > box->upper.z)
+#else
+            else if (hi > upper)
+#endif
+            {
+                zcode = 4;
+            }
+            else
+            {
+                zcode = 3;
+            }
         }
     }
 
@@ -682,6 +805,8 @@ void iBoxIsectSphere(const xBox* box, const xSphere* p, xIsect* isx)
         isx->penned = 1.0f;
         return;
     }
+
+#endif
 
     iBoxIsectVec(box, &p->center, isx);
 
@@ -719,7 +844,10 @@ void iBoxBoundVec(xBox* o, const xBox* b, const xVec3* v)
     xVec3Init(&o->upper, MAX(v->x, b->upper.x), MAX(v->y, b->upper.y), MAX(v->z, b->upper.z));
 }
 
-F32 xVec2Dist(F32 x1, F32 y1, F32 x2, F32 y2)
+#if defined(XBOX)
+inline
+#endif
+    F32 xVec2Dist(F32 x1, F32 y1, F32 x2, F32 y2)
 {
     F32 x = x1 - x2;
     F32 y = y1 - y2;

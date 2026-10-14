@@ -3,6 +3,9 @@
 #include "xDrawDist.h"
 
 #include <types.h>
+#if defined(PS2)
+#include <rwplcore.h>
+#endif
 
 struct zSimpleMgr
 {
@@ -24,19 +27,12 @@ static xEnt** sSimpleCustomList;
 
 void zEntSimpleObj_MgrInit(zEntSimpleObj** entList, U32 entCount)
 {
-    zEntSimpleObj** tempEntPtr;
     u32 i;
     zEntSimpleObj** tempEntList;
     u32 tempEntCount;
     u32 custEntCount;
     u32 trailerHash;
     zSimpleMgr* smgr;
-    s32 custIndex;
-    s32 sflags;
-    u8 moreFlags;
-    zEntSimpleObj* ent;
-    zEntSimpleObj* ent3;
-    zEntSimpleObj* ent2;
 
     sMgrCount = 0;
     sMgrList = NULL;
@@ -48,56 +44,47 @@ void zEntSimpleObj_MgrInit(zEntSimpleObj** entList, U32 entCount)
         tempEntCount = 0;
         custEntCount = 0;
         trailerHash = xStrHash("trailer_hitch\0xEntAutoEventSimple");
-        tempEntPtr = tempEntList;
-        i = 0U;
-        while (i < entCount)
+        for (i = 0; i < entCount; i++)
         {
-            ent = entList[i];
-            sflags = ent->sflags;
-            if (!(sflags & 0x10))
+            if (entList[i]->sflags & 0x10)
             {
-                if ((ent->update != (xEntUpdateCallback)zEntSimpleObj_Update) ||
-                    (ent->render != zEntSimpleObj_Render) ||
-                    (ent->eventFunc != (xBaseEventCB)zEntSimpleObjEventCB) ||
-                    (ent->move != NULL) ||
-                    (moreFlags = ent->moreFlags, (((moreFlags & 8) == 0) == 0)) ||
-                    (moreFlags & 0x20) || (ent->miscflags & 1) || (ent->atbl != NULL) ||
-                    (sflags & 4) || (sflags & 8) || (trailerHash == ent->asset->modelInfoID) ||
-                    (ent->baseType == eBaseTypeTrackPhysics) || (ent->driver != NULL))
+                continue;
+            }
+
+            if (entList[i]->update != (xEntUpdateCallback)zEntSimpleObj_Update ||
+                entList[i]->render != zEntSimpleObj_Render ||
+                entList[i]->eventFunc != (xBaseEventCB)zEntSimpleObjEventCB ||
+                entList[i]->move != NULL || (entList[i]->moreFlags & 8) ||
+                (entList[i]->moreFlags & 0x20) || (entList[i]->miscflags & 1) ||
+                entList[i]->atbl != NULL || (entList[i]->sflags & 4) || (entList[i]->sflags & 8) ||
+                trailerHash == entList[i]->asset->modelInfoID ||
+                entList[i]->baseType == eBaseTypeTrackPhysics || entList[i]->driver != NULL)
+            {
+                tempEntList[(entCount - 1) - (S32)custEntCount] = entList[i];
+                custEntCount++;
+
+                if (entList[i]->driver != NULL && entList[i]->move == NULL)
                 {
-                    custIndex = entCount;
-                    custIndex -= 1;
-                    custIndex -= custEntCount;
-                    custEntCount += 1;
-                    tempEntList[custIndex] = ent;
-                    ent2 = entList[i];
-                    if ((ent2->driver != NULL) && (ent2->move == NULL))
-                    {
-                        ent2->move = zEntSimpleObj_Move;
-                        ent3 = entList[i];
-                        ent3->pflags |= 1;
-                        entList[i]->frame = (xEntFrame*)xMemAlloc(gActiveHeap, 0xE4U, 0);
-                    }
-                }
-                else
-                {
-                    tempEntCount += 1;
-                    ent->baseFlags |= 0x80;
-                    *tempEntPtr = entList[i];
-                    tempEntPtr += 1;
+                    entList[i]->move = zEntSimpleObj_Move;
+                    entList[i]->pflags |= 1;
+                    entList[i]->frame = (xEntFrame*)xMemAlloc(gActiveHeap, sizeof(xEntFrame), 0);
                 }
             }
-            i += 1;
+            else
+            {
+                entList[i]->baseFlags |= 0x80;
+                tempEntList[tempEntCount] = entList[i];
+                tempEntCount++;
+            }
         }
 
         if (custEntCount != 0)
         {
             sSimpleCustomCount = custEntCount;
-            sSimpleCustomList =
-                (xEnt**)xMemAlloc(gActiveHeap, custEntCount * sizeof(xEnt*), 0);
+            sSimpleCustomList = (xEnt**)xMemAlloc(gActiveHeap, custEntCount * sizeof(xEnt*), 0);
             for (i = 0; i < custEntCount; i++)
             {
-                sSimpleCustomList[i] = (xEnt*)tempEntList[(entCount - 1) - i];
+                sSimpleCustomList[i] = (xEnt*)tempEntList[(entCount - 1) - (S32)i];
             }
         }
         else
@@ -112,16 +99,15 @@ void zEntSimpleObj_MgrInit(zEntSimpleObj** entList, U32 entCount)
         }
         sMgrCount = tempEntCount;
         sMgrList = (zSimpleMgr*)xMemAlloc(gActiveHeap, tempEntCount * sizeof(zSimpleMgr), 0x40);
-        tempEntPtr = tempEntList;
         i = 0U;
         smgr = sMgrList;
         while (i < tempEntCount)
         {
-            RpAtomic* model = (*tempEntPtr)->model->Data;
+            RpAtomic* model = tempEntList[i]->model->Data;
             RwSphere oldbound = model->boundingSphere;
 
             model->boundingSphere.radius *= 1.1f;
-            iModelCull(model, (*tempEntPtr)->model->Mat);
+            iModelCull(model, tempEntList[i]->model->Mat);
             model->boundingSphere = oldbound;
 
             smgr->worldBound.center.x = model->worldBoundingSphere.center.x;
@@ -129,10 +115,10 @@ void zEntSimpleObj_MgrInit(zEntSimpleObj** entList, U32 entCount)
             smgr->worldBound.center.z = model->worldBoundingSphere.center.z;
             smgr->worldBound.r = model->worldBoundingSphere.radius;
 
-            zLODTable* lod = zLOD_Get(*tempEntPtr);
+            zLODTable* lod = zLOD_Get(tempEntList[i]);
             if (lod != NULL)
             {
-                RwMatrixTag* m = (*tempEntPtr)->model->Mat;
+                RwMatrixTag* m = tempEntList[i]->model->Mat;
                 F32 distscale = SQR(m->right.x) + SQR(m->right.y) + SQR(m->right.z);
 
                 if (distscale < 0.0001f)
@@ -176,21 +162,20 @@ void zEntSimpleObj_MgrInit(zEntSimpleObj** entList, U32 entCount)
                 smgr->lodDist[2] = 1e38f;
                 smgr->lodDist[3] = 1e38f;
 
-                smgr->lodBucket[0] = (*tempEntPtr)->model->Bucket;
+                smgr->lodBucket[0] = tempEntList[i]->model->Bucket;
                 smgr->lodBucket[1] = NULL;
                 smgr->lodBucket[2] = NULL;
                 smgr->lodBucket[3] = NULL;
             }
 
-            smgr->entFlags = (*tempEntPtr)->flags;
-            smgr->mat = (*tempEntPtr)->model->Mat;
-            smgr->ent = *tempEntPtr;
+            smgr->entFlags = tempEntList[i]->flags;
+            smgr->mat = tempEntList[i]->model->Mat;
+            smgr->ent = tempEntList[i];
             smgr->lastlod = 0xFF;
 
-            xEntUpdate(*tempEntPtr, globals.sceneCur, 0.0f);
+            xEntUpdate(tempEntList[i], globals.sceneCur, 0.0f);
 
             smgr++;
-            tempEntPtr += 1;
             i += 1;
         }
         RwFree(tempEntList);
@@ -226,13 +211,13 @@ void zEntSimpleObj_MgrUpdateRender(RpWorld* world, F32 dt)
                 picklod = 0;
                 if (camdist2 > smgr->lodDist[0])
                 {
-                    picklod = 1;
+                    picklod++;
                     if (camdist2 > smgr->lodDist[1])
                     {
-                        picklod = 2;
+                        picklod++;
                         if (camdist2 > smgr->lodDist[2])
                         {
-                            picklod = 3;
+                            picklod++;
                         }
                     }
                 }
@@ -359,27 +344,22 @@ void zEntSimpleObj_Init(void* ent, void* asset)
 
 void zEntSimpleObj_Init(zEntSimpleObj* ent, xEntAsset* asset, bool physparams)
 {
-    U32 tmpsize;
-    void* animData;
-    RpAtomic* modelData;
-    U32 temp_r3_4;
-    U32 animBoneCount;
-    xModelInstance* temp_r3;
-    xAnimPlay* temp_r3_2;
-    xAnimPlay* temp_r3_3;
-    xAnimTable* temp_r4;
     xSimpleObjAsset* sasset;
+    U32 tmpsize;
+    RpAtomic* modelData;
+    void* animData;
+    U32 animBoneCount;
 
     zEntInit((zEnt*)ent, asset, 0x53494D50U);
 
-    if (physparams != 0)
+    if (physparams)
     {
         ent->baseType = 0x3F;
     }
 
     // Deliberate: both arms are identical. The original picked between two asset layouts
     // that begin at the same offset, so the target emits no branch here.
-    if (physparams != 0)
+    if (physparams)
     {
         sasset = (xSimpleObjAsset*)(asset + 1);
     }
@@ -404,9 +384,9 @@ void zEntSimpleObj_Init(zEntSimpleObj* ent, xEntAsset* asset, bool physparams)
     ent->update = (xEntUpdateCallback)zEntSimpleObj_Update;
     ent->eventFunc = (xBaseEventCB)zEntSimpleObjEventCB;
     ent->render = zEntSimpleObj_Render;
-    if ((u8)ent->linkCount != 0)
+    if (ent->linkCount)
     {
-        if (physparams != 0)
+        if (physparams)
         {
             ent->link = (xLinkAsset*)((char*)ent->asset + 0x9C);
         }
@@ -422,25 +402,20 @@ void zEntSimpleObj_Init(zEntSimpleObj* ent, xEntAsset* asset, bool physparams)
     ent->eventFunc = (xBaseEventCB)zEntSimpleObjEventCB;
     modelData = (RpAtomic*)xSTFindAsset(asset->modelInfoID, &tmpsize);
     animData = NULL;
-    if (!(ent->miscflags & 1) && (ent->asset->modelInfoID != 0U) &&
-        (temp_r3 = ent->model, ((temp_r3 == NULL) == 0)) &&
-        (temp_r3_2 = temp_r3->Anim, ((temp_r3_2 == NULL) == 0)) &&
-        (temp_r4 = temp_r3_2->Table, ((temp_r4 == NULL) == 0)) &&
-        (strcmp(&"trailer_hitch\0xEntAutoEventSimple"[0xE], temp_r4->Name) == 0))
+    if (!(ent->miscflags & 1) && ent->asset->modelInfoID && ent->model && ent->model->Anim &&
+        ent->model->Anim->Table &&
+        strcmp(&"trailer_hitch\0xEntAutoEventSimple"[0xE], ent->model->Anim->Table->Name) == 0)
     {
-        temp_r3_3 = ent->model->Anim;
-        xAnimPlaySetState(temp_r3_3->Single, temp_r3_3->Table->StateList, 0.0f);
+        xAnimPlaySetState(ent->model->Anim->Single, ent->model->Anim->Table->StateList, 0.0f);
         ent->miscflags |= 1;
     }
-    else
+    else if (asset->animListID && !ent->atbl)
     {
-        temp_r3_4 = asset->animListID;
-        if ((temp_r3_4 != 0) && (ent->atbl == NULL))
+        animData = xSTFindAsset(asset->animListID, &tmpsize);
+        if (animData)
         {
-            animData = xSTFindAsset(temp_r3_4, &tmpsize);
-            if ((animData != NULL) &&
-                ((animBoneCount = iAnimBoneCount(animData), ((animBoneCount == 0U) != 0)) ||
-                 (animBoneCount != iModelNumBones(modelData))))
+            animBoneCount = iAnimBoneCount(animData);
+            if (!animBoneCount || animBoneCount != iModelNumBones(modelData))
             {
                 animData = NULL;
             }
@@ -505,8 +480,6 @@ void zEntSimpleObj_Load(zEntSimpleObj* ent, xSerial* s)
 
 void zEntSimpleObj_Reset(zEntSimpleObj* ent, xScene* scene)
 {
-    xEntBoundUpdateCallback temp_r12;
-
     zEntReset((zEnt*)ent);
     ent->animTime = 0.0f;
     ent->chkby &= 0xE3;
@@ -514,13 +487,15 @@ void zEntSimpleObj_Reset(zEntSimpleObj* ent, xScene* scene)
     {
         ent->chkby |= 0x18;
     }
-    temp_r12 = ent->bupdate;
-    if (temp_r12 != NULL)
+
+    if (ent->bupdate)
     {
-        temp_r12(ent, (xVec3*)&ent->model->Mat->pos);
-        return;
+        ent->bupdate(ent, (xVec3*)&ent->model->Mat->pos);
     }
-    xEntDefaultBoundUpdate((xEnt*)ent, (xVec3*)&ent->model->Mat->pos);
+    else
+    {
+        xEntDefaultBoundUpdate(ent, (xVec3*)&ent->model->Mat->pos);
+    }
 }
 
 s32 zEntSimpleObjEventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* base3)

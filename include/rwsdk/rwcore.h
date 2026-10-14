@@ -34,7 +34,6 @@ typedef struct RwBBox RwBBox;
 typedef struct RwFrustumPlane RwFrustumPlane;
 typedef struct RwCamera RwCamera;
 
-
 typedef struct RxObjSpace3DVertex RxObjSpace3DVertex;
 struct RxObjSpace3DVertex
 {
@@ -76,41 +75,75 @@ struct RxObjSpace3DVertex
 typedef RxObjSpace3DVertex RxObjSpace3DLitVertex;
 typedef RxObjSpace3DLitVertex RwIm3DVertex;
 
-#define RwIm3DVertexSetPos(_vert, _imx, _imy, _imz)                                               \
-MACRO_START                                                                                       \
-{                                                                                                 \
-    (_vert)->x = _imx;                                                                            \
-    (_vert)->y = _imy;                                                                            \
-    (_vert)->z = _imz;                                                                            \
-}                                                                                                 \
-MACRO_STOP
+#define RxObjSpace3DVertexSetPos(_vert, _pos)                                                      \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        (_vert)->x = (_pos)->x;                                                                    \
+        (_vert)->y = (_pos)->y;                                                                    \
+        (_vert)->z = (_pos)->z;                                                                    \
+    }                                                                                              \
+    MACRO_STOP
 
-#define RwIm3DVertexSetNormal(_vert, _imx, _imy, _imz)                                            \
-MACRO_START                                                                                       \
-{                                                                                                 \
-    (_vert)->nx = _imx;                                                                           \
-    (_vert)->ny = _imy;                                                                           \
-    (_vert)->nz = _imz;                                                                           \
-}                                                                                                 \
-MACRO_STOP
+#define RwIm3DVertexSetPos(_vert, _imx, _imy, _imz)                                                \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwV3d tmp;                                                                                 \
+        tmp.x = (_imx);                                                                            \
+        tmp.y = (_imy);                                                                            \
+        tmp.z = (_imz);                                                                            \
+        RxObjSpace3DVertexSetPos(_vert, &tmp);                                                     \
+    }                                                                                              \
+    MACRO_STOP
 
-#define RwIm3DVertexSetRGBA(_vert, _r, _g, _b, _a)                                                \
-MACRO_START                                                                                       \
-{                                                                                                 \
-    (_vert)->r = _r;                                                                              \
-    (_vert)->g = _g;                                                                              \
-    (_vert)->b = _b;                                                                              \
-    (_vert)->a = _a;                                                                              \
-}                                                                                                 \
-MACRO_STOP
+#define RxObjSpace3DVertexSetNormal(_vert, _normal)                                                \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        (_vert)->nx = (_normal)->x;                                                                \
+        (_vert)->ny = (_normal)->y;                                                                \
+        (_vert)->nz = (_normal)->z;                                                                \
+    }                                                                                              \
+    MACRO_STOP
 
-#define RwIm3DVertexSetUV(_vert, _u, _v)                                                          \
-MACRO_START                                                                                       \
-{                                                                                                 \
-    (_vert)->u = _u;                                                                              \
-    (_vert)->v = _v;                                                                              \
-}                                                                                                 \
-MACRO_STOP
+#define RwIm3DVertexSetNormal(_vert, _imx, _imy, _imz)                                             \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwV3d tmp;                                                                                 \
+        tmp.x = (_imx);                                                                            \
+        tmp.y = (_imy);                                                                            \
+        tmp.z = (_imz);                                                                            \
+        RxObjSpace3DVertexSetNormal(_vert, &tmp);                                                  \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RxObjSpace3DVertexSetPreLitColor(_vert, _col)                                              \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        (_vert)->r = (_col)->red;                                                                  \
+        (_vert)->g = (_col)->green;                                                                \
+        (_vert)->b = (_col)->blue;                                                                 \
+        (_vert)->a = (_col)->alpha;                                                                \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RwIm3DVertexSetRGBA(_vert, _r, _g, _b, _a)                                                 \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        RwRGBA col;                                                                                \
+        col.red = (_r);                                                                            \
+        col.green = (_g);                                                                          \
+        col.blue = (_b);                                                                           \
+        col.alpha = (_a);                                                                          \
+        RxObjSpace3DVertexSetPreLitColor(_vert, &col);                                             \
+    }                                                                                              \
+    MACRO_STOP
+
+#define RwIm3DVertexSetUV(_vert, _u, _v)                                                           \
+    MACRO_START                                                                                    \
+    {                                                                                              \
+        (_vert)->u = _u;                                                                           \
+        (_vert)->v = _v;                                                                           \
+    }                                                                                              \
+    MACRO_STOP
 
 enum RwIm3DTransformFlags
 {
@@ -1021,7 +1054,7 @@ extern RwRaster* RwRasterCreate(RwInt32 width, RwInt32 height, RwInt32 depth, Rw
 extern RwUInt8* RwRasterLock(RwRaster* raster, RwUInt8 level, RwInt32 lockMode);
 extern RwImage* RwImageResample(RwImage* dstImage, const RwImage* srcImage);
 extern RwImage* RwImageCreateResample(const RwImage* srcImage, RwInt32 width, RwInt32 height);
-extern void _rwFrameSyncDirty(void);
+extern RwBool _rwFrameSyncDirty(void);
 extern RwBool RwTextureSetReadCallBack(RwTextureCallBackRead callBack);
 extern RwBool RwTextureSetMipmapping(RwBool enable);
 extern RwBool RwTextureGetMipmapping(void);
@@ -1080,7 +1113,7 @@ extern RxHeap* RxHeapCreate(RwUInt32 size);
 extern RxRenderStateVector*
 RxRenderStateVectorSetDefaultRenderStateVector(RxRenderStateVector* rsvp);
 extern RxRenderStateVector* RxRenderStateVectorLoadDriverState(RxRenderStateVector* rsvp);
-extern void RwGameCubeCameraTextureFlush(RwRaster* ras, RwUInt32 param);
+extern void RwGameCubeCameraTextureFlush(RwRaster* ras, RwBool boxFilter);
 
 #ifdef __cplusplus
 }

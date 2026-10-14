@@ -11,6 +11,12 @@
 
 #include "xMath.h"
 
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+#define SURFACE_FRAME_TIME (1.0f / 50.0f)
+#else
+#define SURFACE_FRAME_TIME (1.0f / 60.0f)
+#endif
+
 #define MAX_MAPPER 1
 
 static zSurfaceProps* zsps;
@@ -215,7 +221,7 @@ U8 zSurfaceOutOfBounds(const xSurface& s)
 {
     if (s.moprops)
     {
-        return ((zSurfaceProps*)s.moprops)->asset->phys_flags >> 4 & 1;
+        return (((zSurfaceProps*)s.moprops)->asset->phys_flags & 0x10) != 0;
     }
     return 0;
 }
@@ -237,6 +243,13 @@ F32 zSurfaceGetSlideStopAngle(const xSurface* surf)
     }
 
     return DEG2RAD(10);
+}
+
+// Layout-only reference reproduces the conversion literal left by stripped code.
+// The original stripped routine is unknown; this stub does not enter the DOL.
+F32 __deadstripped_zSurface_signed_conversion(S32 value)
+{
+    return (F32)value;
 }
 
 U32 zSurfaceGetMatchOrient(const xSurface* surf)
@@ -396,10 +409,10 @@ void zSurfaceUpdate(xBase* to, xScene* sc, F32 dt)
                 moprops->uvfx[j].scale.x = isin(uvTime);
                 moprops->uvfx[j].scale.y = isin(uvTime);
 #else
-                moprops->uvfx[j].trans.x = isin(2.0f * gFrameCount * (1.0f/60));
-                moprops->uvfx[j].trans.y = isin(2.0f * gFrameCount * (1.0f/60));
-                moprops->uvfx[j].scale.x = isin(2.0f * gFrameCount * (1.0f/60));
-                moprops->uvfx[j].scale.y = isin(2.0f * gFrameCount * (1.0f/60));
+                moprops->uvfx[j].trans.x = isin(2.0f * gFrameCount * SURFACE_FRAME_TIME);
+                moprops->uvfx[j].trans.y = isin(2.0f * gFrameCount * SURFACE_FRAME_TIME);
+                moprops->uvfx[j].scale.x = isin(2.0f * gFrameCount * SURFACE_FRAME_TIME);
+                moprops->uvfx[j].scale.y = isin(2.0f * gFrameCount * SURFACE_FRAME_TIME);
 #endif
                 break;
             }

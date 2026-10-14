@@ -67,8 +67,7 @@ BOOL ROMFont::Init()
         ROMFont::mFontData = (OSFontHeader*)OSAllocFromHeap(__OSCurrHeap, 0x20120);
     }
 
-    OSFontHeader* volatile& hack = ROMFont::mFontData;
-    return OSInitFont(hack);
+    return OSInitFont(ROMFont::mFontData);
 }
 
 void ROMFont::InitDisplay(_GXRenderModeObj* InRenderMode)
@@ -312,14 +311,14 @@ void ROMFont::DrawTextBox(S32 x, S32 y, S32 width, S32 height, char* str)
         while (word != NULL && y + height > cursor_y)
         {
             tokWidth = GetWidth(word);
-            if (cursor_x + tokWidth > x + width)
+            if (cursor_x + tokWidth > width + x)
             {
                 cursor_y += mFontData->cellHeight;
                 cursor_x = x;
             }
             DrawString(cursor_x, cursor_y, word);
             word = strtok(NULL, " ");
-            cursor_x += tokWidth + baseWidth;
+            cursor_x += baseWidth + tokWidth;
         }
         RenderEnd();
     }

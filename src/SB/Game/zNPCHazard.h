@@ -21,7 +21,15 @@ struct UVAModelInfo
 
     void Hemorrage();
     void Clear();
+#if defined(PS2)
+    void UVVelSet(float x, float y)
+    {
+        offset_vel.x = x;
+        offset_vel.y = y;
+    }
+#else
     void UVVelSet(float, float);
+#endif
     S32 GetUV(RwTexCoords*& coords, S32& numVertices, RpAtomic* model) const;
     S32 CloneUV(RwTexCoords*& coords, S32& numVertices, RpAtomic* model) const;
     void SetColor(iColor_tag);
@@ -94,12 +102,19 @@ struct HAZCollide : HAZTypical
     xVec3 pos_collide;
     xVec3 dir_normal;
     xParabola parabinfo;
+#if defined(PS2)
+    // MW PS2 omits storage for this anonymous struct extension.
+    S32 flg_collide : 8;
+    S32 flg_result : 8;
+    S32 flg_unused : 16;
+#else
     struct
     {
         S32 flg_collide : 8;
         S32 flg_result : 8;
         S32 flg_unused : 16;
     };
+#endif
     S32 cnt_skipcol;
     en_hazcol idx_rotateCol;
 };
@@ -273,7 +288,14 @@ struct NPCHazard
     void FreeModel();
     void SetNPCOwner(zNPCCommon* owner);
     void Start(const xVec3* pos, F32 tym);
+#if defined(PS2)
+    void MarkForRecycle()
+    {
+        this->flg_hazard |= 4;
+    }
+#else
     void MarkForRecycle();
+#endif
     void Kill();
     void Cleanup();
     void WipeIt();
@@ -394,5 +416,20 @@ S32 HAZ_AvailablePool();
 void HAZ_Iterate(bool (*fp)(NPCHazard&, void*), void* context, S32 flag_filter);
 
 F32 xVec2Length2(const xVec2* v);
+
+inline void NPCHazard::SetNPCOwner(zNPCCommon* owner)
+{
+    this->npc_owner = owner;
+}
+
+inline void NPCHazard::NotifyCBSet(HAZNotify* noter)
+{
+    this->cb_notify = noter;
+}
+
+inline S32 HAZNotify::Notify(en_haznote note, NPCHazard* haz)
+{
+    return 0;
+}
 
 #endif

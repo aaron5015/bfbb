@@ -84,8 +84,8 @@ S32 zNPCGoalPushAnim::Resume(F32 dt, void* updCtxt)
 
 S32 zNPCGoalPushAnim::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* scene)
 {
-    S32 nextgoal = 0;
     zNPCCommon* npc = (zNPCCommon*)psyche->clt_owner;
+    S32 nextgoal = 0;
 
     F32 anim_time = npc->AnimTimeCurrent();
 
@@ -266,7 +266,7 @@ void zNPCGoalLoopAnim::UnmolestAnim()
 
 void zNPCGoalLoopAnim::LoopCountSet(S32 num)
 {
-    cnt_loop = (num >= 1) ? num : 1;
+    cnt_loop = (num < 1) ? 1 : num;
     flg_info |= (1 << 4);
 }
 
@@ -386,18 +386,18 @@ S32 zNPCGoalIdle::Resume(F32 dt, void* updCtxt)
 
 S32 zNPCGoalIdle::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* scene)
 {
-    zNPCCommon* npc = (zNPCCommon*)psyche->clt_owner;
     S32 nextgoal = 0;
+    zNPCCommon* npc = (zNPCCommon*)psyche->clt_owner;
 
     if (npc->nav_dest != NULL && npc->npcset.allowPatrol)
     {
-        *trantype = GOAL_TRAN_PUSH;
         nextgoal = NPC_GOAL_PATROL;
-    }
-    else if (!(flg_idle & (1 << 0)) && npc->tmr_fidget < 0.0f)
-    {
         *trantype = GOAL_TRAN_PUSH;
+    }
+    else if (!(flg_idle & (1 << 0)) && ((npc->tmr_fidget < 0.0f) ? 1 : 0))
+    {
         nextgoal = NPC_GOAL_FIDGET;
+        *trantype = GOAL_TRAN_PUSH;
     }
     else
     {
@@ -405,8 +405,8 @@ S32 zNPCGoalIdle::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* 
         if (npc->npcset.allowWander && nav_curr != NULL && nav_curr->Delay() > 0.0f &&
             nav_curr->RadiusZone() > 0.0f)
         {
-            *trantype = GOAL_TRAN_PUSH;
             nextgoal = NPC_GOAL_WANDER;
+            *trantype = GOAL_TRAN_PUSH;
         }
     }
 
@@ -518,7 +518,7 @@ S32 zNPCGoalPatrol::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene
         {
             npc->VelStop();
             tmr_wait = MAX(-1.0f, tmr_wait - dt);
-            if (tmr_wait < 0.0f)
+            if ((tmr_wait < 0.0f) ? 1 : 0)
             {
                 if (npc->nav_dest == NULL && npc->MvptCycle() == 0)
                 {
@@ -871,20 +871,6 @@ void zNPCGoalPatrol::Chk_AutoSmooth()
     }
 }
 
-F32 NPCC_DstSq(const xVec3* pos_a, const xVec3* pos_b, xVec3* dir)
-{
-    xVec3 tmp;
-
-    if (dir == NULL)
-    {
-        dir = &tmp;
-    }
-
-    xVec3Sub(dir, pos_b, pos_a);
-
-    return xVec3Length2(dir);
-}
-
 void zNPCGoalPatrol::MoveAutoSmooth(F32 dt)
 {
     zNPCCommon* npc = (zNPCCommon*)psyche->clt_owner;
@@ -1068,6 +1054,7 @@ S32 zNPCGoalFidget::Exit(F32 dt, void* updCtxt)
 S32 zNPCGoalWander::Enter(F32 dt, void* updCtxt)
 {
     zNPCCommon* npc = (zNPCCommon*)psyche->clt_owner;
+    xVec3 vec = { 0.0f, 0.0f, 0.0f };
 
     npc->tmr_fidget =
         npc->cfg_npc->tym_fidget * (0.25f * (xurand() - 0.5f)) + npc->cfg_npc->tym_fidget;
@@ -1139,7 +1126,7 @@ S32 zNPCGoalWander::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene
 
     xVec3 delta;
 
-    if (tmr_minwalk < 0.0f)
+    if ((tmr_minwalk < 0.0f) ? 1 : 0)
     {
         xVec3Sub(&delta, &pos_home, xEntGetPos(npc));
 
@@ -1149,7 +1136,7 @@ S32 zNPCGoalWander::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene
         {
             needdir = 1;
         }
-        else if (tmr_newdir < 0.0f)
+        else if ((tmr_newdir < 0.0f) ? 1 : 0)
         {
             needdir = 1;
         }
@@ -1160,7 +1147,7 @@ S32 zNPCGoalWander::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene
         }
     }
 
-    if (tmr_remain < 0.0f)
+    if ((tmr_remain < 0.0f) ? 1 : 0)
     {
         zMovePoint* nav = npc->nav_curr;
         if (nav == NULL)
@@ -1178,12 +1165,12 @@ S32 zNPCGoalWander::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene
         }
     }
 
-    if (tmr_remain < 0.0f)
+    if ((tmr_remain < 0.0f) ? 1 : 0)
     {
         nextgoal = 1;
         *trantype = GOAL_TRAN_POP;
     }
-    else if (!(flg_wand & (1 << 0)) && npc->tmr_fidget < 0.0f)
+    else if (!(flg_wand & (1 << 0)) && ((npc->tmr_fidget < 0.0f) ? 1 : 0))
     {
         *trantype = GOAL_TRAN_PUSH;
         nextgoal = NPC_GOAL_FIDGET;
@@ -1394,14 +1381,14 @@ S32 zNPCGoalWaiting::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScen
     zNPCCommon* npc = (zNPCCommon*)psyche->clt_owner;
     npc->VelStop();
 
-    if (tmr_waiting < 0.0f)
+    if ((tmr_waiting < 0.0f) ? 1 : 0)
     {
         TriggerExit();
     }
-    else if (!(flg_waiting & (1 << 0)) && npc->tmr_fidget < 0.0f)
+    else if (!(flg_waiting & (1 << 0)) && ((npc->tmr_fidget < 0.0f) ? 1 : 0))
     {
-        *trantype = GOAL_TRAN_PUSH;
         nextgoal = NPC_GOAL_FIDGET;
+        *trantype = GOAL_TRAN_PUSH;
     }
     else
     {
@@ -1486,8 +1473,8 @@ S32 zNPCGoalLimbo::NPCMessage(NPCMsg* mail)
         }
         break;
     }
-    case NPC_MID_RESPAWN:
     case NPC_MID_DAMAGE:
+    case NPC_MID_RESPAWN:
         break;
     default:
         handled = 0;
@@ -1531,6 +1518,8 @@ S32 zNPCGoalDEVAnimCycle::NPCMessage(NPCMsg* mail)
 
     switch (mail->msgid)
     {
+    case NPC_MID_DEV_ANIMCYCLE:
+        break;
     case NPC_MID_DEV_ANIMSPIN:
         psyche->GoalSet(NPC_GOAL_DEVANIMCYCLE, 0);
         break;
@@ -1539,8 +1528,6 @@ S32 zNPCGoalDEVAnimCycle::NPCMessage(NPCMsg* mail)
         break;
     case NPC_MID_DEV_DONE:
         psyche->GoalSet(psyche->GIDOfSafety(), 0);
-        break;
-    case NPC_MID_DEV_ANIMCYCLE:
         break;
     default:
         handled = 1;
@@ -1604,13 +1591,13 @@ S32 zNPCGoalDEVAnimSpin::NPCMessage(NPCMsg* mail)
     case NPC_MID_DEV_ANIMCYCLE:
         psyche->GoalSet(NPC_GOAL_DEVANIMSPIN, 0);
         break;
+    case NPC_MID_DEV_ANIMSPIN:
+        break;
     case NPC_MID_DEV_HEROMODE:
         psyche->GoalSet(NPC_GOAL_DEVANIMHERO, 0);
         break;
     case NPC_MID_DEV_DONE:
         psyche->GoalSet(psyche->GIDOfSafety(), 0);
-        break;
-    case NPC_MID_DEV_ANIMSPIN:
         break;
     default:
         handled = 1;
@@ -1680,10 +1667,10 @@ S32 zNPCGoalDEVHero::NPCMessage(NPCMsg* mail)
     case NPC_MID_DEV_ANIMSPIN:
         psyche->GoalSet(NPC_GOAL_DEVANIMCYCLE, 0);
         break;
+    case NPC_MID_DEV_HEROMODE:
+        break;
     case NPC_MID_DEV_DONE:
         psyche->GoalSet(psyche->GIDOfSafety(), 0);
-        break;
-    case NPC_MID_DEV_HEROMODE:
         break;
     default:
         handled = 1;

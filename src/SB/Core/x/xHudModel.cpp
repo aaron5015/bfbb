@@ -2,7 +2,9 @@
 #include "xHud.h"
 #include "xString.h"
 
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <new.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C++\MSL_Common\Include\new.h>
 #else
 #include <new>

@@ -8,6 +8,10 @@
 #include "xMorph.h"
 #include "xScreen.h"
 
+#if defined(PS2)
+#include <rwplcore.h>
+#endif
+
 #include <types.h>
 #include <string.h>
 

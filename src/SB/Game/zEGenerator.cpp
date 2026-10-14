@@ -6,6 +6,7 @@
 #include "zCollGeom.h"
 #include "zGlobals.h"
 #include "zThrown.h"
+#include "xstransvc.h"
 
 #include <types.h>
 
@@ -20,7 +21,7 @@ void zEGenerator_Init(zEGenerator* egen, xEntAsset* asset)
     zEntInit((zEnt*)egen, (xEntAsset*)asset, 'EGEN');
     zEGenAsset* zasset = (zEGenAsset*)asset;
     egen->zasset = zasset;
-    if (egen->linkCount != 0)
+    if (egen->linkCount > 0)
     {
         egen->link = (xLinkAsset*)((U8*)asset + sizeof(zEGenAsset));
     }
@@ -233,7 +234,7 @@ found:
     _tagLightningAdd add;
     memset(&add, 0, sizeof(_tagLightningAdd));
     add.type = 3;
-    add.total_points = (xrand() << 1) & 6;
+    add.total_points = (xrand() % 4) * 2;
     add.total_points += 8;
     add.start = &egen->src_pos;
     add.end = &egen->dst_pos;

@@ -1,5 +1,10 @@
 #include "xBound.h"
 
+#if defined(PS2)
+#include "xCollideGeometry.h"
+#include "iMath3.h"
+#endif
+
 #include "xMath.h"
 #include "xMathInlines.h"
 #include "xDraw.h"
@@ -85,29 +90,6 @@ void xBoundGetSphere(xSphere& o, const xBound& bound)
     }
 }
 
-F32 xsqrt(F32 x)
-{
-    const F32 half = 0.5f;
-    const F32 three = 3.0f;
-
-    if (x <= 0.0f || isinf(x))
-    {
-        return x;
-    }
-
-    // non-matching: frsp instruction
-
-    F32 guess = __frsqrte(x);
-    guess = half * guess * (three - guess * guess * x);
-
-    if (guess > 0.0000099999997f)
-    {
-        return 1.0f / guess;
-    }
-
-    return 100000.0f;
-}
-
 U32 xBoundSphereHitsOBB(const xSphere* s, const xBox* b, const xMat4x3* m, xCollis* coll)
 {
     return xSphereHitsOBB_nu(s, b, m, coll);
@@ -167,19 +149,18 @@ static void xBoundOBBIsectRay(const xBox* b, const xMat4x3* m, const xRay3* r, x
 
     {
         F32 len2 = SQR(m->right.x) + SQR(m->right.y) + SQR(m->right.z);
+        F32 vx = m->right.x, vy = m->right.y, vz = m->right.z;
 
         if ((F32)iabs(len2 - 1.0f) <= 0.00001f)
         {
             scale.x = 1.0f;
 
-            mnormal.right.x = m->right.x;
-            mnormal.right.y = m->right.y;
-            mnormal.right.z = m->right.z;
+            mnormal.right.x = vx;
+            mnormal.right.y = vy;
+            mnormal.right.z = vz;
         }
         else if ((F32)iabs(len2) <= 0.00001f)
         {
-            // non-matching: incorrect order
-
             scale.x = 0.0f;
 
             mnormal.right.x = 0.0f;
@@ -200,19 +181,18 @@ static void xBoundOBBIsectRay(const xBox* b, const xMat4x3* m, const xRay3* r, x
 
     {
         F32 len2 = SQR(m->up.x) + SQR(m->up.y) + SQR(m->up.z);
+        F32 vx = m->up.x, vy = m->up.y, vz = m->up.z;
 
         if ((F32)iabs(len2 - 1.0f) <= 0.00001f)
         {
             scale.y = 1.0f;
 
-            mnormal.up.x = m->up.x;
-            mnormal.up.y = m->up.y;
-            mnormal.up.z = m->up.z;
+            mnormal.up.x = vx;
+            mnormal.up.y = vy;
+            mnormal.up.z = vz;
         }
         else if ((F32)iabs(len2) <= 0.00001f)
         {
-            // non-matching: incorrect order
-
             scale.y = 0.0f;
 
             mnormal.up.x = 0.0f;
@@ -233,19 +213,18 @@ static void xBoundOBBIsectRay(const xBox* b, const xMat4x3* m, const xRay3* r, x
 
     {
         F32 len2 = SQR(m->at.x) + SQR(m->at.y) + SQR(m->at.z);
+        F32 vx = m->at.x, vy = m->at.y, vz = m->at.z;
 
         if ((F32)iabs(len2 - 1.0f) <= 0.00001f)
         {
             scale.z = 1.0f;
 
-            mnormal.at.x = m->at.x;
-            mnormal.at.y = m->at.y;
-            mnormal.at.z = m->at.z;
+            mnormal.at.x = vx;
+            mnormal.at.y = vy;
+            mnormal.at.z = vz;
         }
         else if ((F32)iabs(len2) <= 0.00001f)
         {
-            // non-matching: incorrect order
-
             scale.z = 0.0f;
 
             mnormal.at.x = 0.0f;
@@ -379,18 +358,10 @@ void xBoundDraw(const xBound* b)
     }
 }
 
+#if !defined(PS2)
 void xQuickCullForBound(xQCData* q, const xBound* b)
 {
     xQuickCullForBound(&xqc_def_ctrl, q, b);
-}
-
-void xMat4x3Toworld(xVec3* o, const xMat4x3* m, const xVec3* v)
-{
-    xMat3x3RMulVec(o, m, v);
-
-    o->x += m->pos.x;
-    o->y += m->pos.y;
-    o->z += m->pos.z;
 }
 
 void xMat4x3Tolocal(xVec3* o, const xMat4x3* m, const xVec3* v)
@@ -401,21 +372,27 @@ void xMat4x3Tolocal(xVec3* o, const xMat4x3* m, const xVec3* v)
 
     xMat3x3Tolocal(o, m, o);
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 void xVec3SMul(xVec3* o, const xVec3* v, F32 s)
 {
     o->x = v->x * s;
     o->y = v->y * s;
     o->z = v->z * s;
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 void xVec3Add(xVec3* o, const xVec3* a, const xVec3* b)
 {
     o->x = a->x + b->x;
     o->y = a->y + b->y;
     o->z = a->z + b->z;
 }
+#endif
 
+#if !defined(PS2)
 xVec3& xVec3::assign(F32 x, F32 y, F32 z)
 {
     this->x = x;
@@ -429,7 +406,9 @@ F32 xVec3::length2() const
 {
     return this->x * this->x + this->y * this->y + this->z * this->z;
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 xVec3 xVec3::operator*(F32 f) const
 {
     xVec3 temp = *this;
@@ -437,7 +416,9 @@ xVec3 xVec3::operator*(F32 f) const
 
     return temp;
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 xVec3& xVec3::operator*=(F32 f)
 {
     this->x *= f;
@@ -446,12 +427,16 @@ xVec3& xVec3::operator*=(F32 f)
 
     return *this;
 }
+#endif
 
+#if !defined(PS2)
 F32 xVec3::length() const
 {
     return xsqrt(this->length2());
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 xVec3 xVec3::operator-(const xVec3& v) const
 {
     xVec3 temp = *this;
@@ -459,7 +444,9 @@ xVec3 xVec3::operator-(const xVec3& v) const
 
     return temp;
 }
+#endif
 
+#if !defined(PS2) && !defined(XBOX)
 xVec3& xVec3::operator-=(const xVec3& v)
 {
     this->x -= v.x;
@@ -468,6 +455,7 @@ xVec3& xVec3::operator-=(const xVec3& v)
 
     return *this;
 }
+#endif
 
 void xDrawBox(const xBox*)
 {

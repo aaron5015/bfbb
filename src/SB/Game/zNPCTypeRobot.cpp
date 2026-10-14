@@ -32,7 +32,18 @@
 #include "zParEmitter.h"
 #include "xParEmitter.h"
 
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
+
 #include <string.h>
+
+#if defined(PS2)
+static inline S32 NPCRobotTimerElapsed(F32 timer)
+{
+    return timer < 0.0f;
+}
+#endif
 
 // These structs were used in deadstripped functions.
 // This function is here to force the symbols to be linked.
@@ -42,9 +53,6 @@
 // 0x28, 0x148 in total -- which offsets every later .rodata relocation.
 void __deadstripped_zNPCTypeRobot()
 {
-    const char _405[0x0C] = {};
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
     const char _441[0x0C] = {};
 
     const char _607[0x28] = {};
@@ -1009,10 +1017,10 @@ U32 zNPCRobot::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
 
     switch (gid)
     {
-    case NPC_GOAL_IDLE:
-    case NPC_GOAL_WAITING:
     case NPC_GOAL_NOMANLAND:
     case NPC_GOAL_LIMBO:
+    case NPC_GOAL_IDLE:
+    case NPC_GOAL_WAITING:
     case NPC_GOAL_ALERT:
         if (gspot == NPC_GSPOT_START)
         {
@@ -1036,9 +1044,9 @@ U32 zNPCRobot::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
         idx = 3;
         break;
     case NPC_GOAL_WANDER:
-    case NPC_GOAL_EVADE:
-    case NPC_GOAL_GOHOME:
     case NPC_GOAL_CHASE:
+    case NPC_GOAL_GOHOME:
+    case NPC_GOAL_EVADE:
         idx = 3;
         break;
     case NPC_GOAL_FIDGET:
@@ -1571,13 +1579,13 @@ S32 zNPCRobot::IsDying()
     {
     case NPC_GOAL_DAMAGE:
     case NPC_GOAL_KNOCK:
-    case NPC_GOAL_R54:
     case NPC_GOAL_BASHED:
     case NPC_GOAL_R56:
+    case NPC_GOAL_R54:
         dying = 2;
         break;
-    case NPC_GOAL_LIMBO:
     case NPC_GOAL_AFTERLIFE:
+    case NPC_GOAL_LIMBO:
         dying = 1;
         break;
     }
@@ -2315,8 +2323,8 @@ void zNPCFodBzzt::Setup()
     if (!laser.TextureGet())
     {
         RwRaster* rast = NPCC_FindRWRaster("fx_fodbzzt_deathray");
-        RwRGBA rgba_beg = { 0, 255, 0, 255 };
-        RwRGBA rgba_end = { 0, 204, 0, 0 };
+        const RwRGBA rgba_beg = { 0, 255, 0, 255 };
+        const RwRGBA rgba_end = { 0, 204, 0, 0 };
         F32 uv_scroll[2] = { 0.0f, 10.0f };
         F32 radius[2] = { 0.01f, 0.3f };
 
@@ -2455,9 +2463,6 @@ void zNPCFodBzzt_ResetDanceParty()
 
 void zNPCFodBzzt_DoTheHokeyPokey(F32 dt)
 {
-    static S32 g_somebodyplay;
-    static S8 init;
-
     if (globals.player.Health < 1 || globals.player.DamageTimer > 0.25f ||
         (globals.player.ControlOff & 0xffffbeff) || zNPCFodBzzt::cnt_alerthokey < 1)
     {
@@ -2466,11 +2471,7 @@ void zNPCFodBzzt_DoTheHokeyPokey(F32 dt)
     }
     else
     {
-        if (init == 0)
-        {
-            g_somebodyplay = 1;
-            init = 1;
-        }
+        static S32 g_somebodyplay = 1;
 
         if (!((zNPCFodBzzt::tmr_hokeypokey < 0.0f) ? 1 : 0))
         {
@@ -2540,7 +2541,8 @@ void zNPCFodBzzt::DiscoUpdate(F32 dt)
         tmr_discoLight = MAX(-1.0f, tmr_discoLight - dt);
     }
 
-    rgba_discoLight.alpha = (U8)(255.0f * (MAX(0.0f, tmr_discoLight) / 0.75f));
+    F32 rat = MAX(0.0f, tmr_discoLight) / 0.75f;
+    rgba_discoLight.alpha = (U8)(255.0f * rat);
 
     uv_discoLight[0] += dt * uv_scroll_discoLight[0];
     uv_discoLight[1] += dt * uv_scroll_discoLight[1];
@@ -2571,7 +2573,6 @@ F32 RANGEWRAP(F32* val, F32 lo, F32 hi)
 
 void zNPCFodBzzt::DiscoRender()
 {
-    RwRGBA rgba_disco = rgba_discoLight;
     RwRGBA rgba_top = rgba_discoLight;
     RwRGBA rgba_bot = rgba_discoLight;
 
@@ -2580,9 +2581,6 @@ void zNPCFodBzzt::DiscoRender()
 
     xVec3 pos_top = pos_discoLight;
     xVec3 pos_bot = *Pos();
-    const xVec3 vec_ray = { 0.0f, 0.0f, 1.0f };
-    xVec3 pos_vtx;
-    xMat3x3 mat_spin;
 
     pos_bot.y += 1.0f;
 
@@ -2594,39 +2592,38 @@ void zNPCFodBzzt::DiscoRender()
     uv_bot[0] = uv_discoLight[0] + uv_slice_discoLight[0];
     uv_bot[1] = uv_discoLight[1] + uv_slice_discoLight[1];
 
-    void* mem = xMemPushTemp(10 * sizeof(RwIm3DVertex));
+    xVec3 vec_aim = { 0.0f, 0.0f, 1.0f };
+
+    void* mem = xMemPushTemp(10 * sizeof(RxObjSpace3DVertex));
 
     if (!mem)
     {
         return;
     }
 
-    memset(mem, 0, 10 * sizeof(RwIm3DVertex));
+    memset(mem, 0, 10 * sizeof(RxObjSpace3DVertex));
 
-    RwIm3DVertex* vert_list = (RwIm3DVertex*)mem;
-    RwIm3DVertex* vtx = vert_list + 1;
+    RxObjSpace3DVertex* vert_list = (RxObjSpace3DVertex*)mem;
+    RxObjSpace3DVertex* vtx = vert_list;
 
-    RwIm3DVertexSetPos(&vert_list[0], pos_top.x, pos_top.y, pos_top.z);
-    RwIm3DVertexSetRGBA(&vert_list[0], rgba_top.red, rgba_top.green, rgba_top.blue,
-                        rgba_top.alpha);
-    RwIm3DVertexSetUV(&vert_list[0], uv_top[0], uv_top[1]);
-
-    F32 u_bot = uv_bot[0];
-    F32 v_bot = uv_bot[1];
+    RwIm3DVertexSetPos(vtx, pos_top.x, pos_top.y, pos_top.z);
+    RwIm3DVertexSetRGBA(vtx, rgba_top.red, rgba_top.green, rgba_top.blue, rgba_top.alpha);
+    RwIm3DVertexSetUV(vtx, uv_top[0], uv_top[1]);
+    vtx++;
 
     for (S32 i = 0; i < 8; i++)
     {
-        F32 uoff = 0.125f * i;
+        xMat3x3 mat;
+        xVec3 pos_edge;
 
-        xMat3x3Euler(&mat_spin, (PI / 4) * i, 0.0f, 0.0f);
-        xMat3x3LMulVec(&pos_vtx, &mat_spin, &vec_ray);
-        pos_vtx *= 0.2f;
-        pos_vtx += pos_bot;
+        xMat3x3Euler(&mat, (PI / 4) * i, 0.0f, 0.0f);
+        xMat3x3LMulVec(&pos_edge, &mat, &vec_aim);
+        pos_edge *= 0.2f;
+        pos_edge += pos_bot;
 
-        RwIm3DVertexSetPos(vtx, pos_vtx.x, pos_vtx.y, pos_vtx.z);
+        RwIm3DVertexSetPos(vtx, pos_edge.x, pos_edge.y, pos_edge.z);
         RwIm3DVertexSetRGBA(vtx, rgba_bot.red, rgba_bot.green, rgba_bot.blue, rgba_bot.alpha);
-        RwIm3DVertexSetUV(vtx, u_bot + uoff, v_bot);
-
+        RwIm3DVertexSetUV(vtx, uv_bot[0] + 0.125f * i, uv_bot[1]);
         vtx++;
     }
 
@@ -2649,7 +2646,7 @@ void zNPCFodBzzt::DiscoRender()
 
     zRenderState(old_rendstat);
 
-    xMemPopTemp(mem);
+    xMemPopTemp(vert_list);
 }
 
 void zNPCChomper::Init(xEntAsset* asset)
@@ -3281,7 +3278,7 @@ RwRaster* zNPCSleepy::rast_killcone;
 
 RwRaster* zNPCSleepy::rast_detectcone;
 
-volatile F32 zNPCSleepy::hyt_NightLightCurrent;
+F32 zNPCSleepy::hyt_NightLightCurrent;
 
 static S32 g_sleepy_NightLightStates[10] = { 'NGN0', 'NGN2', 'NGN1', 'NGN3', 'NGN4',
                                              'NGR4', 'NGR=', 'NGR0', 'NGR1', 0 };
@@ -3291,20 +3288,15 @@ static S32 g_sleepy_angryStates[5] = { 'NGR4', 'NGR0', 'NGRi', 'NGR=', 0 };
 // Scheduling
 void zNPCSleepy_Timestep(F32 dt)
 {
-    static F32 tmr_cycle;
-    static S8 init;
-
-    if (init == 0)
-    {
-        tmr_cycle = 0.0f;
-        init = 1;
-    }
+    static F32 tmr_cycle = 0.0f;
 
     // NPCC_TmrCycle's second argument is the time to advance the cycle by; every
     // other caller passes its own dt. A constant here runs the night light's
     // pulse at a speed proportional to the frame rate.
 #ifdef PLATFORM_PC
     F32 dVar1 = NPCC_TmrCycle(&tmr_cycle, dt, 2.63f);
+#elif defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+    F32 dVar1 = NPCC_TmrCycle(&tmr_cycle, 1.0f / 50.0f, 2.63f);
 #else
     F32 dVar1 = NPCC_TmrCycle(&tmr_cycle, 0.016666667f, 2.63f);
 #endif
@@ -3352,19 +3344,12 @@ void zNPCSleepy::Reset()
 
 void zNPCSleepy::ParseINI()
 {
-    static F32 rad_minimum;
-    static S8 init;
-
     NPCConfig* cfg = cfg_npc;
     zNPCRobot::ParseINI();
     cfg->snd_trax = g_sndTrax_Sleepy;
     NPCS_SndTablePrepare(g_sndTrax_Sleepy);
 
-    if (init == 0)
-    {
-        rad_minimum = 5.0f;
-        init = 1;
-    }
+    static F32 rad_minimum = 5.0f;
     cfg_npc->rad_detect = MAX(rad_minimum, cfg_npc->rad_detect);
 }
 
@@ -3488,13 +3473,17 @@ void zNPCSleepy::NightLightUVStep(F32 dt)
     static const F32 uv_scroll_nightlight[2] = { 0.0f, -0.2f };
     static const F32 uv_scroll_deathcone[2] = { 0.0f, -1.55f };
 
-    zNPCSleepy::uv_nightlight[0] += dt * uv_scroll_nightlight[0];
-    zNPCSleepy::uv_nightlight[1] += dt * uv_scroll_nightlight[1];
+    F32 rate = uv_scroll_nightlight[0];
+    zNPCSleepy::uv_nightlight[0] += dt * rate;
+    rate = uv_scroll_nightlight[1];
+    zNPCSleepy::uv_nightlight[1] += dt * rate;
     RANGEWRAP(&zNPCSleepy::uv_nightlight[0], 0.0f, 1.0f);
     RANGEWRAP(&zNPCSleepy::uv_nightlight[1], 0.0f, 1.0f);
 
-    zNPCSleepy::uv_deathcone[0] += dt * uv_scroll_deathcone[0];
-    zNPCSleepy::uv_deathcone[1] += dt * uv_scroll_deathcone[1];
+    rate = uv_scroll_deathcone[0];
+    zNPCSleepy::uv_deathcone[0] += dt * rate;
+    rate = uv_scroll_deathcone[1];
+    zNPCSleepy::uv_deathcone[1] += dt * rate;
     RANGEWRAP(&zNPCSleepy::uv_deathcone[0], 0.0f, 1.0f);
     RANGEWRAP(&zNPCSleepy::uv_deathcone[1], 0.0f, 1.0f);
 }
@@ -3513,7 +3502,11 @@ void zNPCSleepy::SnoreNZeez(F32 dt)
 
     tmr_emitzeez = MAX(-1.0f, tmr_emitzeez - dt);
 
+#if defined(PS2)
+    if (NPCRobotTimerElapsed(tmr_emitzeez))
+#else
     if (tmr_emitzeez < 0.0f)
+#endif
     {
         cnt_grpzeez -= 1.0f;
 
@@ -3544,7 +3537,7 @@ void zNPCSleepy::SnoreNZeez(F32 dt)
 S32 zNPCSleepy::RepelMissile(F32 dt)
 {
     tmr_nextPatriot = MAX(-1.0f, tmr_nextPatriot - dt);
-    if (haz_patriot != NULL && !(tmr_nextPatriot < 0.0f))
+    if (haz_patriot != NULL && !((tmr_nextPatriot < 0.0f) ? 1 : 0))
     {
         return 1;
     }
@@ -3680,9 +3673,8 @@ void zNPCSleepy::ConeOfRange(F32 dt, S32 which)
 
     F32 rad2 = SQ(cfg_npc->rad_detect);
     F32 dst2 = XZDstSqToPlayer(NULL, NULL);
-    F32 pct = 0.2f + (1.0f - dst2 / rad2);
-
-    pct = MAX(0.0f, MIN(pct, 1.0f));
+    dst2 = 1.0f - dst2 / rad2;
+    F32 pct = MAX(0.0f, MIN(0.2f + dst2, 1.0f));
 
     for (i = 0; i < 3; i++)
     {
@@ -3736,6 +3728,7 @@ void zNPCSleepy::RendConeOfDeath(S32 tgt_isBowlingBall)
     static RwRGBA rgba_beg = { 0, 200, 240, 0 };
     static RwRGBA rgba_end = { 80, 204, 204, 255 };
 
+    S32 i;
     xVec3 pos_top;
     xVec3 pos_bot;
 
@@ -3765,34 +3758,30 @@ void zNPCSleepy::RendConeOfDeath(S32 tgt_isBowlingBall)
 
     RxObjSpace3DVertex* vtx = g_vert_list;
 
-    for (S32 i = 0; i < 16; i++)
+    for (i = 0; i < 16; i++)
     {
         F32 ang_seg = (PI / 8) * i;
         F32 sn = isin(ang_seg);
         F32 cs = icos(ang_seg);
 
-        xVec3 vec_ray = { 0.0f, 0.0f, 0.0f };
-        xVec3 pos_vtx;
+        const xVec3 vec_ray = { sn, 0.0f, cs };
+        xVec3 pos_edge;
 
-        vec_ray.z = cs;
-        vec_ray.x = sn;
+        pos_edge = vec_ray * 0.1f + pos_top;
 
-        pos_vtx = vec_ray * 0.1f + pos_top;
-
-        RwIm3DVertexSetPos(&vtx[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx[0], rgba_beg.red, rgba_beg.green, rgba_beg.blue,
-                            rgba_beg.alpha);
+        RwIm3DVertexSetPos(&vtx[0], pos_edge.x, pos_edge.y, pos_edge.z);
+        RwIm3DVertexSetRGBA(&vtx[0], rgba_beg.red, rgba_beg.green, rgba_beg.blue, rgba_beg.alpha);
 
         F32 u_off = 0.0625f * ((i & 1) ? i : i + 1);
+        F32 v_off = 0.0f;
         F32 u_seg = u_beg + u_off;
 
-        RwIm3DVertexSetUV(&vtx[0], u_seg, v_beg + 0.0f);
+        RwIm3DVertexSetUV(&vtx[0], u_seg, v_beg + v_off);
 
-        pos_vtx = vec_ray * 0.5f + pos_bot;
+        pos_edge = vec_ray * 0.5f + pos_bot;
 
-        RwIm3DVertexSetPos(&vtx[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx[1], rgba_end.red, rgba_end.green, rgba_end.blue,
-                            rgba_end.alpha);
+        RwIm3DVertexSetPos(&vtx[1], pos_edge.x, pos_edge.y, pos_edge.z);
+        RwIm3DVertexSetRGBA(&vtx[1], rgba_end.red, rgba_end.green, rgba_end.blue, rgba_end.alpha);
         RwIm3DVertexSetUV(&vtx[1], u_seg, v_end);
 
         vtx += 2;
@@ -3824,17 +3813,18 @@ void zNPCSleepy::RendConeOfDeath(S32 tgt_isBowlingBall)
 
 void zNPCSleepy::RendConeRange()
 {
+    static const F32 rad_fadeinOuter = 30.0f;
+    static const F32 rad_fadeinInner = 20.0f;
     static F32 uv_top[2] = { 0.0f, 0.0f };
     static F32 uv_bot[2] = { 0.0f, 1.0f };
 
-    xMat3x3 mat_spin;
+    xMat3x3 mat;
     xVec3 pos_top;
     xVec3 pos_bot;
-    xVec3 pos_vtx;
     RwRGBA rgba_top;
     RwRGBA rgba_bot;
 
-    F32 rad_cone = cfg_npc->rad_detect;
+    F32 rad_end = cfg_npc->rad_detect;
 
     NightLightPos(&pos_top);
 
@@ -3845,61 +3835,60 @@ void zNPCSleepy::RendConeRange()
 
     F32 ds2 = XZDstSqToPlayer(NULL, NULL);
 
-    if (ds2 < SQ(20.0f))
+    if (ds2 < SQ(rad_fadeinInner))
     {
         rgba_top.alpha = 128;
         rgba_bot.alpha = 32;
     }
-    else if (ds2 > SQ(30.0f))
+    else if (ds2 > SQ(rad_fadeinOuter))
     {
         rgba_top.alpha = 0;
         rgba_bot.alpha = 0;
     }
     else
     {
-        F32 pct = 1.0f - (xsqrt(ds2) - 20.0f) / 10.0f;
-
-        pct = CLAMP(pct, 0.0f, 1.0f);
+        F32 pct = (xsqrt(ds2) - rad_fadeinInner) / (rad_fadeinOuter - rad_fadeinInner);
+        pct = CLAMP(1.0f - pct, 0.0f, 1.0f);
 
         rgba_top.alpha = (U8)SMOOTH(pct, 0.0f, 128.0f);
         rgba_bot.alpha = (U8)SMOOTH(pct, 0.0f, 32.0f);
     }
 
-    xVec3 vec_ray = { 0.0f, 0.0f, 1.0f };
+    xVec3 vec_aim = { 0.0f, 0.0f, 1.0f };
 
+    S32 i;
     RxObjSpace3DVertex* vtx = g_vert_list;
 
-    uv_top[0] = zNPCSleepy::uv_nightlight[0];
-    uv_top[1] = zNPCSleepy::uv_nightlight[1];
-    uv_bot[0] = zNPCSleepy::uv_nightlight[0] + zNPCSleepy::uv_slice_nightlight[0];
-    uv_bot[1] = zNPCSleepy::uv_nightlight[1] + zNPCSleepy::uv_slice_nightlight[1];
+    uv_top[0] = uv_nightlight[0];
+    uv_top[1] = uv_nightlight[1];
+    uv_bot[0] = uv_nightlight[0] + uv_slice_nightlight[0];
+    uv_bot[1] = uv_nightlight[1] + uv_slice_nightlight[1];
 
-    for (S32 i = 0; i < 16; i++)
+    for (i = 0; i < 16; i++)
     {
-        xMat3x3Euler(&mat_spin, (PI / 8) * i, 0.0f, 0.0f);
+        xMat3x3Euler(&mat, (PI / 8) * i, 0.0f, 0.0f);
 
-        vec_ray.z = 0.0f;
+        vec_aim.z = 0.0f;
 
-        xMat3x3LMulVec(&pos_vtx, &mat_spin, &vec_ray);
-        xVec3AddTo(&pos_vtx, &pos_top);
+        xVec3 offset;
+        xMat3x3LMulVec(&offset, &mat, &vec_aim);
+        xVec3AddTo(&offset, &pos_top);
 
-        RwIm3DVertexSetPos(&vtx[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx[0], rgba_top.red, rgba_top.green, rgba_top.blue,
-                            rgba_top.alpha);
+        RwIm3DVertexSetPos(&vtx[0], offset.x, offset.y, offset.z);
+        RwIm3DVertexSetRGBA(&vtx[0], rgba_top.red, rgba_top.green, rgba_top.blue, rgba_top.alpha);
 
-        F32 u_ofs = 0.0625f * ((i & 1) ? i : i + 1);
+        F32 u = 0.0625f * (!(i & 1) ? i : i + 1);
 
-        RwIm3DVertexSetUV(&vtx[0], uv_top[0] + u_ofs, uv_top[1]);
+        RwIm3DVertexSetUV(&vtx[0], uv_top[0] + u, uv_top[1]);
 
-        vec_ray.z = rad_cone;
+        vec_aim.z = rad_end;
 
-        xMat3x3LMulVec(&pos_vtx, &mat_spin, &vec_ray);
-        xVec3AddTo(&pos_vtx, &pos_bot);
+        xMat3x3LMulVec(&offset, &mat, &vec_aim);
+        xVec3AddTo(&offset, &pos_bot);
 
-        RwIm3DVertexSetPos(&vtx[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
-        RwIm3DVertexSetRGBA(&vtx[1], rgba_bot.red, rgba_bot.green, rgba_bot.blue,
-                            rgba_bot.alpha);
-        RwIm3DVertexSetUV(&vtx[1], uv_top[0] + u_ofs, uv_bot[1]);
+        RwIm3DVertexSetPos(&vtx[1], offset.x, offset.y, offset.z);
+        RwIm3DVertexSetRGBA(&vtx[1], rgba_bot.red, rgba_bot.green, rgba_bot.blue, rgba_bot.alpha);
+        RwIm3DVertexSetUV(&vtx[1], uv_top[0] + u, uv_bot[1]);
 
         vtx += 2;
     }
@@ -3939,7 +3928,7 @@ void zNPCArfArf::Init(xEntAsset* asset)
 void zNPCArfArf::Reset()
 {
     zNPCRobot::Reset();
-    for (int i = 0; i < sizeof(flg_puppy) / sizeof(S32); i++)
+    for (S32 i = 0; i < 5; i++)
     {
         flg_puppy[i] = 1;
     }
@@ -4115,12 +4104,10 @@ U32 zNPCArfArf::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
 
 void zNPCArfArf::DuploNotice(en_SM_NOTICES note, void* data)
 {
-    S32 i;
-
     switch (note)
     {
     case SM_NOTE_NPCALIVE:
-        for (i = 0; i < 5; i++)
+        for (S32 i = 0; i < 5; i++)
         {
             if (pup_kennel[i] == (zNPCArfDog*)data)
             {
@@ -4130,7 +4117,7 @@ void zNPCArfArf::DuploNotice(en_SM_NOTICES note, void* data)
         }
         break;
     case SM_NOTE_NPCSTANDBY:
-        for (i = 0; i < 5; i++)
+        for (S32 i = 0; i < 5; i++)
         {
             if (pup_kennel[i] == (zNPCArfDog*)data)
             {
@@ -4711,27 +4698,22 @@ S32 zNPCTubelet::RoboHandleMail(NPCMsg* mail)
         {
             handled = 0;
 
-            NPCMsg msg = *mail;
-            zNPCTubeSlave* slave;
+            NPCMsg tellkid = *mail;
 
-            slave = tub_paul;
-
-            if (slave)
+            if (tub_paul)
             {
-                msg.sendto = slave->id;
-                msg.sysevent.from = this;
-                msg.sysevent.to = slave;
-                slave->NPCMessage(&msg);
+                tellkid.sendto = tub_paul->id;
+                tellkid.sysevent.from = this;
+                tellkid.sysevent.to = tub_paul;
+                tub_paul->NPCMessage(&tellkid);
             }
 
-            slave = tub_mary;
-
-            if (slave)
+            if (tub_mary)
             {
-                msg.sendto = slave->id;
-                msg.sysevent.from = this;
-                msg.sysevent.to = slave;
-                slave->NPCMessage(&msg);
+                tellkid.sendto = tub_mary->id;
+                tellkid.sysevent.from = this;
+                tellkid.sysevent.to = tub_mary;
+                tub_mary->NPCMessage(&tellkid);
             }
 
             break;
@@ -4770,8 +4752,8 @@ void zNPCTubelet::LassoNotify(en_LASSO_EVENT event)
     case LASS_EVNT_BEGIN:
         tubestat = TUBE_STAT_LASSO;
         break;
-    case LASS_EVNT_ENDED:
     case LASS_EVNT_ABORT:
+    case LASS_EVNT_ENDED:
         if ((lass->stage == LASS_STAT_PENDING || lass->stage == LASS_STAT_DONE) &&
             tubestat == TUBE_STAT_LASSO && hitpoints >= 1)
         {
@@ -4851,7 +4833,7 @@ S32 zNPCTubelet::Chk_IsBonked()
 
         if (hitpoints == 0)
         {
-            cnt_hurt = 1;
+            cnt_hurt++;
         }
 
         if (tub_paul == NULL)
@@ -4899,7 +4881,7 @@ S32 zNPCTubelet::Chk_IsBonked()
             Unbonk();
         }
 
-        die = (hitpoints == 0);
+        die = !hitpoints;
     }
 
     return die;
@@ -4916,7 +4898,11 @@ void zNPCTubelet::Chk_NonAlertBonk(F32 dt)
     {
         tmr_restoreHealth = MAX(-1.0f, tmr_restoreHealth - dt);
 
+#if defined(PS2)
+        if (NPCRobotTimerElapsed(tmr_restoreHealth) &&
+#else
         if (tmr_restoreHealth < 0.0f &&
+#endif
             hitpoints + tub_paul->hitpoints + tub_mary->hitpoints <= 2)
         {
             Unbonk();
@@ -5076,15 +5062,15 @@ void zNPCTubeSlave::SelfSetup()
 
 U32 zNPCTubeSlave::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
 {
-    U32 hashid = 0;
     S32 idx = -1;
+    U32 da_anim = 0;
 
     switch (gid)
     {
     case NPC_GOAL_TUBEPAL:
         idx = 1;
         break;
-    case NPC_GOAL_TUBEDUCKLING:
+    case NPC_GOAL_TUBEATTACK:
         idx = 3;
         break;
     case NPC_GOAL_TUBELASSO:
@@ -5096,20 +5082,20 @@ U32 zNPCTubeSlave::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
     case NPC_GOAL_TUBEDEAD:
         idx = 0x25;
         break;
-    case NPC_GOAL_TUBEATTACK:
+    case NPC_GOAL_TUBEDUCKLING:
         idx = 3;
         break;
     default:
-        hashid = zNPCRobot::AnimPick(gid, gspot, rawgoal);
+        da_anim = zNPCRobot::AnimPick(gid, gspot, rawgoal);
         break;
     }
 
     if (idx >= 0)
     {
-        hashid = g_hash_roboanim[idx];
+        da_anim = g_hash_roboanim[idx];
     }
 
-    return hashid;
+    return da_anim;
 }
 
 void zNPCTubeSlave::SetMaster(zNPCTubelet* pete, en_tubespot spot)
@@ -5375,9 +5361,9 @@ void zNPCSlick::Damage(en_NPC_DAMAGE_TYPE dmg_type, xBase* who, const xVec3* vec
 {
     switch (dmg_type)
     {
-    case DMGTYP_ABOVE:
-    case DMGTYP_BELOW:
     case DMGTYP_SIDE:
+    case DMGTYP_BELOW:
+    case DMGTYP_ABOVE:
         if (IsShield())
         {
             zEntPlayer_DamageNPCKnockBack(this, 1, Pos());
@@ -5389,7 +5375,11 @@ void zNPCSlick::Damage(en_NPC_DAMAGE_TYPE dmg_type, xBase* who, const xVec3* vec
         break;
     }
 
+#if defined(PS2)
+    if (NPCRobotTimerElapsed(tmr_invuln))
+#else
     if (tmr_invuln < 0.0f)
+#endif
     {
         if (!IsShield())
         {
@@ -5409,7 +5399,11 @@ void zNPCSlick::ShieldUpdate(F32 dt)
 {
     tmr_repairShield = MAX(-1.0f, tmr_repairShield - dt);
 
+#if defined(PS2)
+    if (NPCRobotTimerElapsed(tmr_repairShield))
+#else
     if (tmr_repairShield < 0.0f)
+#endif
     {
         ShieldShow();
     }
@@ -5580,21 +5574,11 @@ zNPCSlick* zNPCSlick::YouOwnSlipFX()
 
 void zNPCSlick::SlipSlidenAway(F32 dt)
 {
-    static S32 moreorless;
-    static S8 init;
+    static S32 moreorless = 0;
 #ifdef PLATFORM_PC
     // The remainder of a console frame carried between updates.
-    static F32 tmr_moreorless;
+    static F32 tmr_moreorless = 0.0f;
 #endif
-
-    if (init == 0)
-    {
-        moreorless = 0;
-#ifdef PLATFORM_PC
-        tmr_moreorless = 0.0f;
-#endif
-        init = 1;
-    }
 
 #ifdef PLATFORM_PC
     // moreorless counts console frames; bank dt and spend whole sixtieths
@@ -5639,8 +5623,8 @@ S32 DUMY_grul_returnToIdle(xGoal* goal, void*, en_trantype* trantype, F32, void*
 
     if (goal->GetPsyche()->TimerGet(XPSY_TYMR_CURGOAL) > 10.0f)
     {
-        *trantype = GOAL_TRAN_SET;
         nextgoal = NPC_GOAL_IDLE;
+        *trantype = GOAL_TRAN_SET;
     }
 
     return nextgoal;
@@ -6365,6 +6349,17 @@ void NPCArena::SetHome(zNPCCommon* npc, zMovePoint* nav)
     SyncHomeFromNav();
 }
 
+void NPCArena::SetHome(zNPCCommon* npc, xVec3* pos, F32 rad)
+{
+    flg_arena = 0;
+    flg_arena |= 1;
+    nav_arena = NULL;
+    xVec3Copy(&pos_arena, pos);
+    rad_arena = MAX(1.0f, rad);
+    nav_refer_dest = npc->nav_dest;
+    nav_refer_curr = npc->nav_curr;
+}
+
 void NPCArena::AdjustHome(zNPCCommon* npc, xVec3* pos, F32 rad)
 {
     flg_arena |= 2;
@@ -6403,11 +6398,13 @@ void UVAModelInfo::Clear()
     memset(this, 0, sizeof(UVAModelInfo));
 }
 
+#if !defined(PS2)
 void UVAModelInfo::UVVelSet(float x, float y)
 {
     offset_vel.x = x;
     offset_vel.y = y;
 }
+#endif
 
 zNPCLassoInfo* zNPCRobot::PRIV_GetLassoData()
 {

@@ -1,13 +1,21 @@
+#if defined(PS2)
+#include "xGlobals.h"
+#include "xEntTypes.h"
+#include "xModelTypes.h"
+#include "xMemMgr.h"
+#include <rwplcore.h>
+#include <string.h>
+#else
 #include "zGlobals.h"
+#endif
 #include "xUpdateCull.h"
 #include "xGroup.h"
 
 static void xUpdateCull_Swap(xUpdateCullMgr* m, U32 a, U32 b)
 {
-    xUpdateCullEnt* pMgrAIndex;
-
+    xUpdateCullEnt* pMgrAIndex = m->mgr[a];
     xUpdateCullEnt* pMgrBIndex = m->mgr[b];
-    xUpdateCullEnt* pMgrIndex = pMgrAIndex = m->mgr[a];
+    xUpdateCullEnt* pMgrIndex = pMgrAIndex;
 
     do
     {
@@ -37,8 +45,13 @@ static void xUpdateCull_Swap(xUpdateCullMgr* m, U32 a, U32 b)
 
 static void xUpdateCull_MakeActive(xUpdateCullMgr* m, xUpdateCullEnt* e)
 {
+#if defined(PS2)
+    U32 mEntActive = m->entActive;
+    U32 eIndex = e->index;
+#else
     U32 eIndex = e->index;
     U32 mEntActive = m->entActive;
+#endif
 
     if (eIndex >= mEntActive)
     {
@@ -56,8 +69,13 @@ static void xUpdateCull_MakeActive(xUpdateCullMgr* m, xUpdateCullEnt* e)
 
 static void xUpdateCull_MakeInactive(xUpdateCullMgr* m, xUpdateCullEnt* e)
 {
+#if defined(PS2)
+    U32 mEntActive = m->entActive;
+    U32 eIndex = e->index;
+#else
     U32 eIndex = e->index;
     U32 mEntActive = m->entActive;
+#endif
 
     if (eIndex < mEntActive)
     {
@@ -140,9 +158,9 @@ xUpdateCullMgr* xUpdateCull_Init(void** ent, U32 entCount, xGroup** group, U32 g
             {
                 if (base == ent[k])
                 {
-                    inGroupArray[k] = true;
                     entsInGroups++;
                     entsInThisGroup++;
+                    inGroupArray[k] = true;
                 }
             }
         }

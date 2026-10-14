@@ -5,6 +5,7 @@
 
 #include "xFile.h"
 #include "xString.h"
+#include "xpkrsvc_api.h"
 #include "xstransvc.h"
 
 #include <stdio.h>

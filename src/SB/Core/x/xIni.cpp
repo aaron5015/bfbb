@@ -3,14 +3,14 @@
 #include <rwplcore.h>
 
 #include <types.h>
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <stdlib.h>
+#include <string.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cstdlib>
-#else
-#include <cstdlib>
-#endif
-#ifdef __MWERKS__
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cstring>
 #else
+#include <cstdlib>
 #include <cstring>
 #endif
 
@@ -50,12 +50,12 @@ xIniFile* xIniParse(char* buf, S32 len)
         switch (buf[i])
         {
         case '\n':
-            lastCRLF = i;
             clf++;
+            lastCRLF = i;
             break;
         case '\r':
-            lastCRLF = i;
             ccr++;
+            lastCRLF = i;
             break;
         case '[':
             copen++;

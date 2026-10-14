@@ -10,6 +10,7 @@
 #include "xCurveAsset.h"
 #include "xCutscene.h"
 #include "xstransvc.h"
+#include "xpkrsvc.h"
 #include "xDebug.h"
 #include "xEnv.h"
 #include "xJSP.h"
@@ -21,6 +22,9 @@
 #include <stdio.h>
 #include <rwcore.h>
 #include <rpworld.h>
+#if defined(PS2)
+#include <rwplcore.h>
+#endif
 
 #ifdef PLATFORM_PC
 #include "iTextPatch.h"
@@ -37,7 +41,9 @@ static void* RWTX_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32
 static void* Model_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize);
 static void* BSP_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize);
 static void* JSP_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize);
+#if !defined(PS2)
 static void* SndInfoRead(void*, unsigned int, void*, unsigned int, unsigned int*);
+#endif
 static void Model_Unload(void*, U32);
 static void BSP_Unload(void*, U32);
 static void JSP_Unload(void*, U32);
@@ -113,7 +119,11 @@ static st_PACKER_ASSETTYPE assetTypeHandlers[78] = {
     { 'GRUP' },
     { 'MPHT' },
     { 'SFX ' },
+#if defined(PS2)
+    { 'SNDI' },
+#else
     { 'SNDI', 0, 0, SndInfoRead, NULL, NULL, NULL, NULL, NULL, NULL },
+#endif
     { 'HANG' },
     { 'SIMP' },
     { 'BUTN' },
@@ -720,16 +730,16 @@ static RpAtomic* jsp_shadow_hack_atomic_cb(RpAtomic* atomic, void* data)
     }
 
     xClumpCollBSPTree* colltree = context.jsp->colltree;
-    if (context.jsp->jspNodeList[index].originalMatIndex == context.last_material)
+    S32 material_index = context.jsp->jspNodeList[index].originalMatIndex;
+    if (material_index == context.last_material)
     {
         return atomic;
     }
 
-    S32 material_index = context.jsp->jspNodeList[index].originalMatIndex;
     context.last_material = material_index;
 
     xClumpCollBSPTriangle* tri = colltree->triangles;
-    xClumpCollBSPTriangle* end_tri = colltree->triangles + colltree->numTriangles;
+    xClumpCollBSPTriangle* end_tri = tri + colltree->numTriangles;
 
     for (; tri != end_tri; ++tri)
     {
@@ -1750,6 +1760,7 @@ static void MovePoint_Unload(void* userdata, U32 b)
     xMovePointSplineDestroy((xMovePoint*)userdata);
 }
 
+#if !defined(PS2)
 static void* SndInfoRead(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize)
 {
     void* __dest = RWSRCGLOBAL(memoryFuncs.rwmalloc(insize));
@@ -1773,3 +1784,4 @@ static void* SndInfoRead(void* param_1, U32 param_2, void* indata, U32 insize, U
 
     return __dest;
 }
+#endif

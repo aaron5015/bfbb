@@ -23,7 +23,10 @@ void xParMgrInit()
     }
 }
 
-void xParMgrKillAllParticles()
+#if defined(PS2)
+inline
+#endif
+    void xParMgrKillAllParticles()
 {
 }
 
@@ -39,7 +42,21 @@ void xParMgrUpdate(F32 elapsedTime)
     }
 
     U32 i;
-    for (i = sFrameCount; i >= 1; i--);
+#if defined(PS2)
+    // Load the volatile counter once before counting down.
+    i = sFrameCount;
+    for (;;)
+    {
+        if (i == 0)
+        {
+            break;
+        }
+        i--;
+    }
+#else
+    for (i = sFrameCount; i >= 1; i--)
+        ;
+#endif
     sFrameCount = i;
 }
 

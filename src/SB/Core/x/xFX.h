@@ -135,7 +135,9 @@ struct xFXRibbon
 // operator[] and iterator::operator-- were declared here too, and must not be:
 // the declaration alone suppresses the implicit instantiation, so the template
 // bodies in containers.h go unused and the link has nothing to call.
+#if !defined(PS2)
 template <> void tier_queue<xFXRibbon::joint_data>::clear();
+#endif
 
 inline void xFXRibbon::clear()
 {
@@ -277,5 +279,33 @@ void xFXSceneSetup();
 void xFXSceneReset();
 void xFXScenePrepare();
 void xFXSceneFinish();
+
+struct StreakInfo
+{
+    void Defaults()
+    {
+        freq = 0.25f;
+        alf_fade = 4.0f;
+        alf_start = 1.0f;
+        idx_useTxtr = 0;
+        rgba_left.r = rgba_left.g = rgba_left.b = rgba_left.a = 0xff;
+        rgba_right.r = rgba_right.g = rgba_right.b = rgba_right.a = 0xff;
+        taper = 1;
+    }
+
+    F32 freq;
+    F32 alf_fade;
+    F32 alf_start;
+    U32 idx_useTxtr;
+    iColor_tag rgba_left;
+    iColor_tag rgba_right;
+    S32 taper;
+};
+
+inline U32 xFXStreakStart(StreakInfo* styp)
+{
+    return xFXStreakStart(styp->freq, styp->alf_fade, styp->alf_start, styp->idx_useTxtr,
+                          &styp->rgba_left, &styp->rgba_right, styp->taper);
+}
 
 #endif
