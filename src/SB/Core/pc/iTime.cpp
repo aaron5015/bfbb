@@ -64,6 +64,17 @@ void iTimeStep()
     sFixedNs += sFixedStepNs;
 }
 
+S32 iTimeFixedNs(U64* ns)
+{
+    if (sFixedStepNs == 0)
+    {
+        return FALSE;
+    }
+
+    *ns = sFixedNs;
+    return TRUE;
+}
+
 void iTimeInit()
 {
     sStartupTime = iTicksNow();

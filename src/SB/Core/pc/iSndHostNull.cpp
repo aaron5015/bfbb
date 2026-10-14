@@ -1,5 +1,6 @@
 #include "iSndHost.h"
 #include "iHost.h"
+#include "iTime.h"
 
 #include <string.h>
 
@@ -23,6 +24,15 @@
 // does when it is built without an audio library, and it is the correct answer
 // in that configuration: no sound, and every timing the game derives from sound
 // still correct. A real backend replaces this file in the link, not around it.
+
+// The clock voices are timed on: the tour's fixed clock when there is one
+// (iTime.h), so a voice ends on the same frame each run, and the monotonic
+// clock otherwise.
+static U64 iNowNs()
+{
+    U64 fixed;
+    return iTimeFixedNs(&fixed) ? fixed : iHostMonotonicNs();
+}
 
 struct null_voice
 {
@@ -111,7 +121,7 @@ void iSndHostStart(S32 voice, const iSndHostSample* sample)
     v->playing = true;
     v->paused = false;
     v->looping = sample->looping;
-    v->start_ns = iHostMonotonicNs();
+    v->start_ns = iNowNs();
     v->duration_ns = iDurationNs(sample, v->pitch);
     v->elapsed_at_pause_ns = 0;
 }
@@ -140,13 +150,13 @@ void iSndHostPause(S32 voice, bool paused)
 
     if (paused)
     {
-        v->elapsed_at_pause_ns = iHostMonotonicNs() - v->start_ns;
+        v->elapsed_at_pause_ns = iNowNs() - v->start_ns;
         v->paused = true;
     }
     else
     {
         // Restart the deadline from now, minus what had already elapsed.
-        v->start_ns = iHostMonotonicNs() - v->elapsed_at_pause_ns;
+        v->start_ns = iNowNs() - v->elapsed_at_pause_ns;
         v->paused = false;
     }
 }
@@ -172,7 +182,7 @@ void iSndHostSetPitch(S32 voice, F32 pitch)
     // move the part already played.
     if (v->playing && !v->paused && v->pitch > 0.0f)
     {
-        U64 now = iHostMonotonicNs();
+        U64 now = iNowNs();
         U64 elapsed = now - v->start_ns;
         if (elapsed < v->duration_ns)
         {
@@ -205,7 +215,7 @@ bool iSndHostIsPlaying(S32 voice)
         return true;
     }
 
-    return (iHostMonotonicNs() - v->start_ns) < v->duration_ns;
+    return (iNowNs() - v->start_ns) < v->duration_ns;
 }
 
 void iSndHostUpdate()

@@ -83,6 +83,14 @@ void iVSync()
     // iTimeFixedStep each one is a step of the game clock.
     iTimeStep();
 
+    // A tour's clock moves only by these steps, so there is no deadline to
+    // sleep to: the wait is the step.
+    U64 fixed;
+    if (iTimeFixedNs(&fixed))
+    {
+        return;
+    }
+
     U64 now = iHostMonotonicNs();
 
     if (!sVSyncStarted)
@@ -1207,10 +1215,12 @@ void iSystemInit(U32 options)
         exit(1);
     }
 
-    // A tour counts in frames; see iTour.h.
+    // A tour counts in frames on its own clock (iTour.h), so it runs as fast as
+    // the machine draws them.
     if (iTourActive())
     {
-        iWindowSetFrameRate(60);
+        iWindowSetFrameRate(0);
+        iWindowSetVSync(FALSE);
     }
 
     // The reference every alpha test is measured against, which librw leaves
