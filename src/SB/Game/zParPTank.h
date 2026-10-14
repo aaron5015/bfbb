@@ -30,6 +30,4 @@ void zParPTankExit();
 void zParPTankRender();
 void zParPTankUpdate(F32 dt);
 
-extern const U32 gPTankDisable;
-
 #endif

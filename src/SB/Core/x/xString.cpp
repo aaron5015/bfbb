@@ -1,5 +1,7 @@
 #include "xString.h"
+#if !defined(XBOX) && !defined(PS2)
 #include "rwplcore.h"
+#endif
 #include "xMath.h"
 
 #include <types.h>
@@ -7,13 +9,30 @@
 U32 xStrHash(const char* str)
 {
     U32 hash = 0;
+#if defined(PS2)
+    while (*str)
+    {
+        char c = *str;
+        hash = (char)(c - (c & c >> 1 & 0x20)) + hash * 0x83;
+        str++;
+    }
+#else
+#ifdef XBOX
+    char i;
+#else
     U32 i;
+#endif
 
     while (i = *str, i != NULL)
     {
+#ifdef XBOX
+        hash = (char)(i - (i & i >> 1 & 0x20)) + hash * 0x83;
+#else
         hash = (i - (i & (S32)i >> 1 & 0x20) & 0xff) + hash * 0x83;
+#endif
         str++;
     }
+#endif
 
     return hash;
 }
@@ -22,14 +41,36 @@ U32 xStrHash(const char* str, size_t size)
 {
     U32 hash = 0;
     U32 i = 0;
-    U32 c;
-
-    while (i < size && (c = *str, c != NULL))
+#if defined(PS2)
+    for (; i < size && *str; i++, str++)
     {
+        char c = *str;
+        hash = (char)(c - (c & c >> 1 & 0x20)) + hash * 0x83;
+    }
+#else
+#ifdef XBOX
+    char c;
+#else
+    U32 c;
+#endif
+
+#ifdef XBOX
+    for (; i < size && (c = *str, c != NULL); i++, str++)
+#else
+    while (i < size && (c = *str, c != NULL))
+#endif
+    {
+#ifndef XBOX
         i++;
         str++;
+#endif
+#ifdef XBOX
+        hash = (char)(c - (c & c >> 1 & 0x20)) + hash * 0x83;
+#else
         hash = (c - (c & (S32)c >> 1 & 0x20) & 0xff) + hash * 0x83;
+#endif
     }
+#endif
 
     return hash;
 }
@@ -41,13 +82,36 @@ U32 xStrHashCat(U32 prefix, const char* str)
     // match. It is still a live read of an indeterminate value anywhere the
     // parameter is not already in the accumulator's register.
     U32 hash = prefix;
-    U32 i;
-
-    while (i = *str, i != NULL)
+#if defined(PS2)
+    while (*str)
     {
+        char c = *str;
+        hash = (char)(c - (c & c >> 1 & 0x20)) + hash * 0x83;
         str++;
-        hash = (i - (i & (S32)i >> 1 & 0x20) & 0xff) + hash * 0x83;
     }
+#else
+#ifdef XBOX
+    char i;
+#else
+    U32 i;
+#endif
+
+#ifdef XBOX
+    for (; i = *str, i != NULL; str++)
+#else
+    while (i = *str, i != NULL)
+#endif
+    {
+#ifndef XBOX
+        str++;
+#endif
+#ifdef XBOX
+        hash = (char)(i - (i & i >> 1 & 0x20)) + hash * 0x83;
+#else
+        hash = (i - (i & (S32)i >> 1 & 0x20) & 0xff) + hash * 0x83;
+#endif
+    }
+#endif
 
     return hash;
 }
@@ -58,14 +122,22 @@ char* xStrTok(char* string, const char* control, char** nextoken)
     U8* ctrl;
     U8 map[32];
     S32 count;
+#if !defined(PS2)
     U8 c;
+#endif
+
+#ifdef XBOX
+    ctrl = (U8*)control;
+#endif
 
     for (S32 i = 0; i < 32; i++)
     {
         map[i] = 0;
     }
 
+#ifndef XBOX
     ctrl = (U8*)control;
+#endif
 
     do
     {
@@ -73,18 +145,44 @@ char* xStrTok(char* string, const char* control, char** nextoken)
         map[*ctrl >> 3] |= bit;
     } while (*ctrl++ != '\0');
 
+#if defined(PS2)
+    if (string)
+    {
+        str = (U8*)string;
+    }
+    else
+    {
+        str = (U8*)*nextoken;
+    }
+#else
     str = (string) ? (U8*)string : (U8*)*nextoken;
+#endif
 
+#if defined(PS2)
+    while (map[*str >> 3] & (1 << (*str & 0x7)) && *str != '\0')
+#else
     while (map[(*str >> 3) & 0x1F] & (1 << (*str & 0x7)) && *str != '\0')
+#endif
     {
         str++;
     }
 
     string = (char*)str;
 
+#if defined(PS2)
+    while (*str != '\0')
+    {
+        char c = *str;
+        if (map[c >> 3] & (1 << (c & 0x7)))
+#elif defined(XBOX)
+    while (*str != '\0')
+    {
+        if (map[(*str >> 3) & 0x1F] & (1 << (*str & 0x7)))
+#else
     while ((c = *str) != '\0')
     {
         if (map[(c >> 3) & 0x1F] & (1 << (c & 0x7)))
+#endif
         {
             *str = '\0';
             str++;
@@ -96,29 +194,41 @@ char* xStrTok(char* string, const char* control, char** nextoken)
 
     *nextoken = (char*)str;
 
+#if defined(XBOX) || defined(PS2)
+    return string == (char*)str ? NULL : string;
+#else
     if (string == (char*)str)
     {
         string = NULL;
     }
 
     return string;
+#endif
 }
 
 char* xStrTokBuffer(const char* string, const char* control, void* buffer)
 {
+#ifndef PS2
     U8 c;
+#endif
     U8* str;
     U8* ctrl;
     U8 map[32];
     char* dest = (char*)buffer;
     dest += sizeof(char*);
 
+#ifdef XBOX
+    ctrl = (U8*)control;
+#endif
+
     for (S32 i = 0; i < 32; i++)
     {
         map[i] = 0;
     }
 
+#ifndef XBOX
     ctrl = (U8*)control;
+#endif
 
     do
     {
@@ -126,24 +236,49 @@ char* xStrTokBuffer(const char* string, const char* control, void* buffer)
         map[*ctrl >> 3] |= bit;
     } while (*ctrl++ != '\0');
 
+#if defined(PS2)
+    if (string)
+    {
+        str = (U8*)string;
+    }
+    else
+    {
+        str = (U8*)*(char**)buffer;
+    }
+#else
     str = (string) ? (U8*)string : (U8*)*(char**)buffer;
+#endif
 
+#if defined(PS2)
+    while (map[*str >> 3] & (1 << (*str & 0x7)) && *str != '\0')
+#else
     while (map[(*str >> 3) & 0x1F] & (1 << (*str & 0x7)) && *str != '\0')
+#endif
     {
         str++;
     }
 
     string = (char*)str;
 
+#if defined(PS2)
+    while (*str != '\0')
+    {
+        if (map[*str >> 3] & (1 << (*str & 0x7)))
+#else
     while ((c = *str) != '\0')
     {
         if (map[(c >> 3) & 0x1F] & (1 << (c & 0x7)))
+#endif
         {
             str++;
             break;
         }
 
+#if defined(PS2)
+        *dest = *str;
+#else
         *dest = c;
+#endif
         dest++;
         str++;
     }
@@ -159,7 +294,7 @@ char* xStrTokBuffer(const char* string, const char* control, void* buffer)
     return (char*)buffer + sizeof(char*);
 }
 
-#define XSTR_UPPER(c) ((c) >= 'a' && (c) <= 'z' ? (c)-32 : (c))
+#define XSTR_UPPER(c) ((c) >= 'a' && (c) <= 'z' ? (c) - 32 : (c))
 
 S32 xStricmp(const char* string1, const char* string2)
 {
@@ -209,8 +344,13 @@ char* xStrupr(char* string)
 
 namespace
 {
+#ifdef XBOX
+    inline U32 tolower(char param_1);
+    inline U32 tolower(S32 param_1);
+#else
     U32 tolower(char param_1);
     U32 tolower(S32 param_1);
+#endif
 } // namespace
 
 S32 xStrParseFloatList(F32* dest, const char* strbuf, S32 max)
@@ -222,12 +362,17 @@ S32 xStrParseFloatList(F32* dest, const char* strbuf, S32 max)
     char* numstart;
     char savech;
 
+#ifdef PS2
+    str = (char*)strbuf;
+    if (!str)
+#else
     if (!(str = (char*)strbuf))
+#endif
     {
         return 0;
     }
 
-    for (index = 0; *str != '\0' && index < max; index++)
+    for (index = 0; *str && index < max; index++)
     {
         while (*str == '\t' || *str == ' ' || *str == '[' || *str == ']' || *str == '{' ||
                *str == '}' || *str == '(' || *str == ')' || *str == '+' || *str == ',' ||
@@ -298,8 +443,8 @@ S32 imemcmp(void const* d1, void const* d2, size_t size)
 
     for (size_t i = 0; i < size; i++, s1++, s2++)
     {
-        S32 cval1 = tolower(*s1);
-        S32 cval2 = tolower(*s2);
+        S32 cval1 = tolower((char)(U8)*s1);
+        S32 cval2 = tolower((char)(U8)*s2);
         if (cval1 != cval2)
         {
             return cval1 - cval2;
@@ -335,11 +480,15 @@ S32 icompare(const substr& s1, const substr& s2)
         }
         else
         {
+#if defined(XBOX) || defined(PS2)
+            result = s1.size < s2.size ? -1 : 1;
+#else
             result = 1;
             if (s1.size < s2.size)
             {
                 result = -1;
             }
+#endif
         }
         break;
     }
@@ -363,10 +512,14 @@ size_t atox(const substr& s, size_t& read_size)
         size = 8;
     }
 
-    for (read_size = 0; read_size < size; read_size++)
+    for (read_size = 0; read_size < size; read_size++, text++)
     {
         U32 digit;
+#ifdef XBOX
+        char c = *text;
+#else
         U8 c = *text;
+#endif
 
         if (c >= '0' && c <= '9')
         {
@@ -374,11 +527,13 @@ size_t atox(const substr& s, size_t& read_size)
         }
         else if (c >= 'a' && c <= 'f')
         {
-            digit = c - 'a' + 10;
+            digit = c - 'a';
+            digit += 10;
         }
         else if (c >= 'A' && c <= 'F')
         {
-            digit = c - 'A' + 10;
+            digit = c - 'A';
+            digit += 10;
         }
         else
         {
@@ -386,7 +541,6 @@ size_t atox(const substr& s, size_t& read_size)
         }
 
         value = (value << 4) + digit;
-        text++;
     }
 
     return value;
@@ -395,18 +549,20 @@ size_t atox(const substr& s, size_t& read_size)
 // Each case of the switch is the same scan with the character set fully
 // unrolled, so that the common short sets never touch a second loop.
 #define FIND_CHAR_SCAN(match)                                                                      \
-    size = s.size;                                                                                 \
-    while (size > 0 && *text != '\0')                                                              \
     {                                                                                              \
-        c = *text;                                                                                 \
-        if (match)                                                                                 \
+        S32 size = s.size;                                                                         \
+        while (size > 0 && *text != '\0')                                                          \
         {                                                                                          \
-            return text;                                                                           \
+            c = *text;                                                                             \
+            if (match)                                                                             \
+            {                                                                                      \
+                return text;                                                                       \
+            }                                                                                      \
+            size--;                                                                                \
+            text++;                                                                                \
         }                                                                                          \
-        size--;                                                                                    \
-        text++;                                                                                    \
-    }                                                                                              \
-    break
+        break;                                                                                     \
+    }
 
 const char* find_char(const substr& s, const substr& cs)
 {
@@ -416,8 +572,11 @@ const char* find_char(const substr& s, const substr& cs)
     }
 
     const char* text = s.text;
-    S32 size;
+#if defined(XBOX)
+    char c;
+#else
     U8 c;
+#endif
 
     switch (cs.size)
     {
@@ -456,7 +615,8 @@ const char* find_char(const substr& s, const substr& cs)
                        c == cs.text[4] || c == cs.text[5] || c == cs.text[6] || c == cs.text[7] ||
                        c == cs.text[8] || c == cs.text[9] || c == cs.text[10]);
     default:
-        size = s.size;
+    {
+        S32 size = s.size;
 
         while (size > 0 && *text != '\0')
         {
@@ -473,6 +633,7 @@ const char* find_char(const substr& s, const substr& cs)
         }
 
         break;
+    }
     }
 
     return NULL;

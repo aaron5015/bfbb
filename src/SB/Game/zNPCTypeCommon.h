@@ -13,6 +13,7 @@
 #include "zMovePoint.h"
 #include "zShrapnel.h"
 #include "zNPCMessenger.h"
+#include "zGlobals.h"
 
 #define XRAY3_USE_MIN (1 << 10)
 #define XRAY3_USE_MAX (1 << 11)
@@ -347,7 +348,10 @@ struct zNPCCommon : xNPCBasic //Size of zNPCCommon: 0x2A0
     void TagVerts();
     S32 HaveLOSToPos(xVec3*, float, xScene*, xBase*, xCollis*);
     void ModelScaleSet(F32 x, F32 y, F32 z);
-    void ModelScaleSet(F32 unk);
+    void ModelScaleSet(F32 unk)
+    {
+        ModelScaleSet(unk, unk, unk);
+    }
     xModelInstance* ModelAtomicFind(int index, int idx_prev, xModelInstance* mdl_prev);
     xModelInstance* ModelAtomicHide(int index, xModelInstance* mdl);
     xModelInstance* ModelAtomicShow(int index, xModelInstance* mdl);
@@ -394,21 +398,73 @@ struct zNPCCommon : xNPCBasic //Size of zNPCCommon: 0x2A0
                      int (*)(xGoal*, void*, en_trantype*, float, void*));
     zMovePoint* FirstAssigned();
 
-    // defined from zNPCGoalRobo.cpp
-    xVec3* Center();
+    xVec3* Center()
+    {
+        return xEntGetCenter(this);
+    }
+#if defined(PS2)
+    xVec3* Pos()
+    {
+        return (xVec3*)&model->Mat->pos;
+    }
+#else
     xVec3* Pos();
-    RwMatrix* BoneMat(S32 unk) const;
-    RwV3d* BonePos(S32 unk) const;
+#endif
+    RwMatrix* BoneMat(S32 unk) const
+    {
+        return &this->model->Mat[unk];
+    }
+    RwV3d* BonePos(S32 unk) const
+    {
+        return &this->model->Mat[unk].pos;
+    }
     xVec3* MatPosSet(xVec3* pos);
-    void XZVecToPlayer(xVec3* unk1, F32* unk2);
+    void XZVecToPlayer(xVec3* unk1, F32* unk2)
+    {
+        XZVecToPos(unk1, xEntGetPos(&globals.player.ent), unk2);
+    }
+#if defined(PS2)
+    F32 XZDstSqToPlayer(xVec3* dir, F32* dy)
+    {
+        return XZDstSqToPos(xEntGetPos(&globals.player.ent), dir, dy);
+    }
+    F32 XZDstSqToPos(const xVec3* pos, xVec3* dir, F32* dy)
+    {
+        xVec3 tmp;
+
+        if (!dir)
+        {
+            dir = &tmp;
+        }
+
+        XZVecToPos(dir, pos, dy);
+
+        return xVec3Length2(dir);
+    }
+    void XZVecToPos(xVec3* dir, const xVec3* pos, F32* dy)
+    {
+        xVec3Sub(dir, pos, Pos());
+
+        if (dy)
+        {
+            *dy = dir->y;
+        }
+
+        dir->y = 0.0f;
+    }
+#else
     F32 XZDstSqToPlayer(xVec3* unk1, F32* unk2);
     F32 XZDstSqToPos(const xVec3* unk1, xVec3* unk2, F32* unk3);
     void XZVecToPos(xVec3* unk1, const xVec3* unk2, F32* unk3);
+#endif
     void XYZVecToPos(xVec3* dest, xVec3* unk2)
     {
         xVec3Sub(dest, unk2, Pos());
     }
-    F32 XYZDstSqToPlayer(xVec3* unk);
+    F32 XYZDstSqToPlayer(xVec3* unk)
+    {
+        return XYZDstSqToPos(xEntGetPos(&globals.player.ent), unk);
+    }
     F32 XYZDstSqToPos(xVec3* unk1, xVec3* dest)
     {
         xVec3 dest_vec;
@@ -519,7 +575,9 @@ struct zNPCCommon : xNPCBasic //Size of zNPCCommon: 0x2A0
     {
         npc_duplodude = duper;
     }
-    virtual void DuploNotice(en_SM_NOTICES, void*);
+    virtual void DuploNotice(en_SM_NOTICES, void*)
+    {
+    }
     virtual S32 CanRope();
     virtual void LassoNotify(en_LASSO_EVENT event);
     virtual S32 SetCarryState(en_NPC_CARRY_STATE);
@@ -573,22 +631,6 @@ void zNPCSettings_MakeDummy();
 void ZNPC_Common_Startup();
 void zNPCCommon_WonderReset();
 void ZNPC_Common_Shutdown();
-// NPCC_BuildStandardAnimTran walks ourAnims until it reads a 0. Several of
-// retail's lists have no 0 in them -- ZNPC_AnimTable_Dutchman passes 13 non-zero
-// entries, ZNPC_AnimTable_Prawn 10 -- so the scan always reads one element past
-// the end of a stack array. Retail gets away with it because the word after the
-// array happens to hold 0 in its frames; ours does not, and the resulting index
-// into the name table produces a wild pointer that xStrTokBuffer dereferences.
-//
-// Terminating the lists is a deviation from retail, so it is confined to builds
-// that have to actually run. Both anim table functions are 100% matching and
-// must stay that way. See "Latent retail bugs" in docs/PCPORT.md.
-#ifdef NON_MATCHING
-#define NPCC_ANIM_LIST_END , 0
-#else
-#define NPCC_ANIM_LIST_END
-#endif
-
 void NPCC_BuildStandardAnimTran(xAnimTable* table, char** namelist, S32* ourAnims, S32 idx_dflt,
                                 F32 blend);
 void zNPCCommon_Timestep(xScene* xscn, F32 dt);

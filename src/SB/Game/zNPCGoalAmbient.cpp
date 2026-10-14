@@ -35,11 +35,6 @@ xFactoryInst* GOALCreate_Ambient(S32 who, RyzMemGrow* grow, void*)
     return goal;
 }
 
-zNPCGoalJellyBumped::zNPCGoalJellyBumped(S32 who) : zNPCGoalPushAnim(who)
-{
-    SetFlags(1 << 1);
-}
-
 S32 zNPCGoalJellyBumped::Enter(F32 dt, void* updCtxt)
 {
     zNPCJelly* npc;
@@ -118,7 +113,19 @@ S32 zNPCGoalJellyBumped::Process(en_trantype* trantyp, F32 dt, void* updCxt, xSc
 xVec3* NPCC_upDir(xEnt* ent);
 
 F32 SQ(F32 x);
+#ifdef PS2
+// PS2 retail inlines this (zNPCFXCinematic.cpp and zNPCHazard.cpp carry the same
+// local inline definition).
+inline xVec3* LERP(F32 t, xVec3* dst, const xVec3* a, const xVec3* b)
+{
+    dst->x = LERP(t, a->x, b->x);
+    dst->y = LERP(t, a->y, b->y);
+    dst->z = LERP(t, a->z, b->z);
+    return dst;
+}
+#else
 void LERP(float dt, xVec3* pos_update, const xVec3*, const xVec3*);
+#endif
 F32 SMOOTH(float, float, float);
 
 void zNPCGoalJellyBumped::MoveSwoosh(F32 dt)
@@ -236,11 +243,6 @@ F32 zNPCGoalJellyBumped::CalcEndPoint(xVec3* pos_end, const xVec3* dir_aim)
     }
 
     return dst_toEndPnt;
-}
-
-zNPCGoalJellyAttack::zNPCGoalJellyAttack(S32 who) : zNPCGoalPushAnim(who)
-{
-    SetFlags(1 << 1);
 }
 
 S32 zNPCGoalJellyAttack::Enter(F32 arg0, void* arg1)
@@ -384,11 +386,6 @@ void zNPCGoalJellyAttack::ZapperUpdate()
             }
         }
     }
-}
-
-zNPCGoalJellyBirth::zNPCGoalJellyBirth(S32 who) : zNPCGoalCommon(who)
-{
-    SetFlags(1 << 1);
 }
 
 S32 zNPCGoalJellyBirth::Enter(F32 dt, void* updCtxt)

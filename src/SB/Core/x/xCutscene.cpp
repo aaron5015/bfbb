@@ -20,7 +20,13 @@
 
 #include <types.h>
 #include <string.h>
+#if defined(PS2)
+#include <math.h>
+#include <rwplcore.h>
+#define FABS(x) xabs(x)
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
+#endif
 
 struct xCutsceneMphFrame
 {
@@ -56,7 +62,9 @@ void xShadowCameraUpdate(void* model, void (*renderCB)(void*), xVec3* center, F3
 xCutscene sActiveCutscene;
 U32 sCutTocCount;
 xCutsceneInfo* sCutTocInfo;
+#if !defined(PS2)
 extern RwGlobals* RwEngineInstance;
+#endif
 static xModelInstance sCutsceneFakeModel[8];
 
 void xCutscene_Init(void* toc)
@@ -75,8 +83,7 @@ void xCutscene_Init(void* toc)
 
     for (i = 0; i < 8; i++)
     {
-        sCutsceneFakeModel[i].Mat =
-            (RwMatrix*)xMemAlloc(gActiveHeap, sizeof(RwMatrixTag) * 65, 0);
+        sCutsceneFakeModel[i].Mat = (RwMatrix*)xMemAlloc(gActiveHeap, sizeof(RwMatrixTag) * 65, 0);
         sCutsceneFakeModel[i].Bucket =
             (xModelBucket**)xMemAlloc(gActiveHeap, sizeof(xModelBucket*) * 2, 0);
         sCutsceneFakeModel[i].Bucket[0] =
@@ -303,13 +310,13 @@ void xCutscene_SetSpeed(xCutscene* csn, F32 speed)
     csn->PlaybackSpeed = speed;
 
     F32 semitones;
-    if (speed)
+    if (!speed)
     {
-        semitones = xlog(speed) / 0.057762269f;
+        semitones = -99999.0f;
     }
     else
     {
-        semitones = -99999.0f;
+        semitones = xlog(speed) / 0.057762269f;
     }
 
     for (S32 i = 0; i < (S32)csn->SndNumChannel; i++)
@@ -323,19 +330,15 @@ F32 xlog(F32 x)
     return std::logf(x);
 }
 
+#if !defined(PS2)
 float std::logf(float x)
 {
     return (float)log((double)x);
 }
+#endif
 
 // A camera chunk's payload sits directly after its xCutsceneData header: the
 // number of fly keys, then the keys themselves.
-struct xCutsceneCameraData
-{
-    U32 NumKeys;
-    zFlyKey Keys[1];
-};
-
 void xCutscene_SetCamera(xCutscene* csn, xCamera* cam)
 {
     xCutsceneData* data;
@@ -358,9 +361,8 @@ void xCutscene_SetCamera(xCutscene* csn, xCamera* cam)
         if (data->DataType == XCUTSCENEDATA_TYPE_CAMERA)
         {
             frame = (S32)std::floorf(30.0f * csn->CamTime);
-            xCutsceneCameraData* camData = (xCutsceneCameraData*)(data + 1);
-            zFlyKey* keys = camData->Keys;
-            dataIndex = camData->NumKeys;
+            zFlyKey* keys = (zFlyKey*)((U32*)(data + 1) + 1);
+            dataIndex = *(U32*)(data + 1);
 
             if (frame < keys[0].frame)
             {
@@ -540,9 +542,8 @@ static void JDeltaEval(RpAtomic* model, void* deltaModel, void* deltaAnim, F32 t
     if (dtgt->scale)
     {
         F32 scale = dtgt->scale;
-        S16* svert =
-            (S16*)((U8*)deltaModel +
-                   ((((U8*)&dtgt->runs[numRun] - (U8*)deltaModel) + 0xf) & 0xfffffff0));
+        S16* svert = (S16*)((U8*)deltaModel +
+                            ((((U8*)&dtgt->runs[numRun] - (U8*)deltaModel) + 0xf) & 0xfffffff0));
 
         for (i = 0; i < numRun; i++)
         {
@@ -560,9 +561,8 @@ static void JDeltaEval(RpAtomic* model, void* deltaModel, void* deltaAnim, F32 t
     }
     else
     {
-        RwV3d* vert =
-            (RwV3d*)((U8*)deltaModel +
-                     ((((U8*)&dtgt->runs[numRun] - (U8*)deltaModel) + 0xf) & 0xfffffff0));
+        RwV3d* vert = (RwV3d*)((U8*)deltaModel +
+                               ((((U8*)&dtgt->runs[numRun] - (U8*)deltaModel) + 0xf) & 0xfffffff0));
 
         for (i = 0; i < numRun; i++)
         {
@@ -638,12 +638,14 @@ static void JDeltaEval(RpAtomic* model, void* deltaModel, void* deltaAnim, F32 t
     RpGeometryUnlock(model->geometry);
 }
 
+#if !defined(PS2)
 void xVec3Lerp(xVec3* out, const xVec3* a, const xVec3* b, float alpha)
 {
     out->x = a->x + (b->x - a->x) * alpha;
     out->y = a->y + (b->y - a->y) * alpha;
     out->z = a->z + (b->z - a->z) * alpha;
 }
+#endif
 
 void CutsceneShadowRender(CutsceneShadowModel* smod)
 {
@@ -675,35 +677,47 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
     U32 tworoot;
     U32 noshadow;
     xCutsceneData* data;
+    xCutsceneData* mphdata;
     RpAtomic* model;
     RpAtomic* shadowModel;
     RwMatrixTag animMat[65];
     xVec3* camVec;
+    XCSNNosey* nosey;
     U32 tempSize;
+    RpAtomic* tmpModel;
     F32 radius;
     F32 animTime;
     F32 maxRadius;
     U32 viscnt;
+    U32* currvis;
     U32 subIndex;
     U32 frameMin;
     U32 frameMax;
     U32 frameIndex;
     U32 shadowBits;
+    RpGeometry* geom;
+    RwTexture* tex;
     S32 matnum;
     U32 morphAnimIndex;
     U32 morphModelIndex;
     U32 numFrame;
     U32 numRun;
+    xCutsceneMphFrame* mphFrame;
+    xCutsceneMphRun* mphRun;
+    xMorphTargetFile* mphFile;
     U32 skipsize;
+    xVec3* csnTmpArray;
     xVec3* currtmp;
     xVec3* outv;
     U32 j;
     U32 cmpval;
+    void* deltaAnim;
+    void* deltaModel;
     xShadowCache scache;
     static xVec3 shadVec = { 0.0f, -1.0f, 0.0f };
 
     fakeCount = 0;
-    XCSNNosey* nosey = csn->cb_nosey;
+    nosey = csn->cb_nosey;
     camVec = (xVec3*)&((RwFrame*)((RwCamera*)RwEngineInstance->curCamera)->object.object.parent)
                  ->modelling.pos;
     data = (xCutsceneData*)&csn->Play[1];
@@ -742,13 +756,13 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
             {
                 maxRadius = model->boundingSphere.radius;
                 shadowModel = model;
-                RpAtomic* tmpModel = iModelFile_RWMultiAtomic(model);
+                tmpModel = iModelFile_RWMultiAtomic(model);
 
                 while (tmpModel != NULL)
                 {
-                    maxRadius = (maxRadius > tmpModel->boundingSphere.radius)
-                                    ? maxRadius
-                                    : tmpModel->boundingSphere.radius;
+                    maxRadius = (maxRadius > tmpModel->boundingSphere.radius) ?
+                                    maxRadius :
+                                    tmpModel->boundingSphere.radius;
                     tmpModel = iModelFile_RWMultiAtomic(tmpModel);
                 }
 
@@ -757,7 +771,8 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                 if (csn->Info->VisCount)
                 {
                     viscnt = csn->Info->VisCount;
-                    U32* currvis = csn->Visibility;
+                    currvis = csn->Visibility;
+                    frameIndex = (U32)(30.0f * animTime);
 
                     while (viscnt)
                     {
@@ -767,13 +782,10 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
 
                         if ((currvis[0] & 0xffff) == animIndex)
                         {
-                            frameIndex = 30.0f * animTime;
-                            if (frameIndex > frameMax - frameMin)
-                            {
-                                frameIndex = frameMax - frameMin;
-                            }
+                            j = (frameIndex > frameMax - frameMin) ? frameMax - frameMin :
+                                                                     frameIndex;
 
-                            if (!((currvis[(frameIndex >> 5) + 2] >> (frameIndex & 31)) & 1))
+                            if (!((currvis[2 + (j >> 5)] >> (j & 31)) & 1))
                             {
                                 visFlags &= ~(1 << subIndex);
                             }
@@ -800,9 +812,9 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                 {
                     if (visFlags & (1 << visIdx))
                     {
-                        RpGeometry* geom = model->geometry;
+                        geom = model->geometry;
                         hasAlpha = 0;
-                        RwTexture* tex = geom->matList.materials[0]->texture;
+                        tex = geom->matList.materials[0]->texture;
 
                         if (tex != NULL && (xStricmp(tex->name, "tv_close") == 0 ||
                                             (xStricmp(tex->name, "robot_2a_tar-tar") == 0 &&
@@ -822,7 +834,7 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                             }
                         }
 
-                        xCutsceneData* mphdata = (xCutsceneData*)&csn->Play[1];
+                        mphdata = (xCutsceneData*)&csn->Play[1];
 
                         for (mphIndex = 0; mphIndex < csn->Play->NumData; mphIndex++)
                         {
@@ -837,12 +849,13 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                                 {
                                     numFrame = ((U32*)&mphdata[1])[0];
                                     numRun = ((U32*)&mphdata[1])[1];
-                                    xCutsceneMphFrame* mphFrame = (xCutsceneMphFrame*)((U32*)&mphdata[1] + 2);
-                                    xCutsceneMphRun* mphRun = (xCutsceneMphRun*)&mphFrame[numFrame];
-                                    xMorphTargetFile* mphFile = (xMorphTargetFile*)((U8*)mphdata +
-                                                                  ((numFrame * 2 + numRun * 2 + 5) *
-                                                                   4 & 0xfffffff0) +
-                                                                  0x10);
+                                    mphFrame = (xCutsceneMphFrame*)((U32*)&mphdata[1] + 2);
+                                    mphRun = (xCutsceneMphRun*)&mphFrame[numFrame];
+                                    mphFile =
+                                        (xMorphTargetFile*)((U8*)mphdata +
+                                                            ((numFrame * 2 + numRun * 2 + 5) * 4 &
+                                                             0xfffffff0) +
+                                                            0x10);
 
                                     S16* v_array[4] = { NULL, NULL, NULL, NULL };
                                     S16 weight[4] = { 0, 0, 0, 0 };
@@ -864,18 +877,17 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                                     v_array[0] = (S16*)(mphFile + 1) + skipsize * (frameIndex - 1);
                                     v_array[1] = (S16*)(mphFile + 1) + skipsize * frameIndex;
 
-                                    weight[1] =
-                                        (S16)(16384.0f *
-                                              (animTime - mphFrame[frameIndex - 1].Time) /
-                                              (mphFrame[frameIndex].Time -
-                                               mphFrame[frameIndex - 1].Time));
+                                    weight[1] = (S16)(16384.0f *
+                                                      (animTime - mphFrame[frameIndex - 1].Time) /
+                                                      (mphFrame[frameIndex].Time -
+                                                       mphFrame[frameIndex - 1].Time));
                                     if (weight[1] > 0x4000)
                                     {
                                         weight[1] = 0x4000;
                                     }
                                     weight[0] = 0x4000 - weight[1];
 
-                                    xVec3* csnTmpArray = (xVec3*)&gRenderArr;
+                                    csnTmpArray = (xVec3*)&gRenderArr;
                                     FastS16weight2((F32*)csnTmpArray, v_array, weight,
                                                    mphFile->NumVerts * 3,
                                                    0.000061035156f * mphFile->Scale);
@@ -902,8 +914,8 @@ void xCutscene_Render(xCutscene* csn, xEnt**, S32*, F32*)
                                 }
                                 else
                                 {
-                                    void* deltaAnim = (void*)((U8*)mphdata + 0x10);
-                                    void* deltaModel = NULL;
+                                    deltaAnim = (void*)((U8*)mphdata + 0x10);
+                                    deltaModel = NULL;
 
                                     for (dataIndex = 0; dataIndex < csn->Info->NumData; dataIndex++)
                                     {

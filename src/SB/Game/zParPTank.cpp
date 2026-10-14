@@ -1,7 +1,13 @@
+#define XVEC3_SCALE_ADD_INLINE
 #include "zParPTank.h"
 
+#if defined(PS2)
+#include <math.h>
+#include <rwsdk/rpptank.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
 #include <rpptank.h>
+#endif
 #include <types.h>
 
 #include "iColor.h"
@@ -18,6 +24,16 @@
 
 #include "zGame.h"
 #include "zGlobals.h"
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
+
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78) || defined(VERSION_SLES_51968) ||           \
+    defined(VERSION_SLES_51970)
+#define PARTICLE_FRAME_RATE 50.0f
+#else
+#define PARTICLE_FRAME_RATE 60.0f
+#endif
 
 // NOTE (Square)
 // There's something slightly off in this file. Functions appear to be equivalent but it's hard to
@@ -32,7 +48,7 @@ struct BubbleData
 
 extern RwCamera* sGameScreenTransCam;
 
-const U32 gPTankDisable = 0;
+extern const U32 gPTankDisable = 0;
 static zParPTank sPTank[7];
 static U32 sNumPTanks;
 static zParPTank* sSparklePTank;
@@ -113,7 +129,7 @@ static void zParPTankSparkleCreate(zParPTank* zp, U32 max_particles, zParPTankUp
 static void zParPTankSparkleUpdate(zParPTank* zp, float dt)
 {
     sSparkleAnimTime += dt;
-    if (!(sSparkleAnimTime >= 1.0f / 30.0f))
+    if (!(sSparkleAnimTime >= 2.0f / PARTICLE_FRAME_RATE))
     {
         return;
     }
@@ -154,17 +170,26 @@ static void zParPTankSparkleUpdate(zParPTank* zp, float dt)
 
     RPATOMICPTANKPLUGINDATA(zp->ptank)->instFlags |= rpPTANKIFLAGACTNUMCHG;
     RPATOMICPTANKPLUGINDATA(zp->ptank)->actPCount = zp->num_particles;
-    sSparkleAnimTime -= 1.0f / 30.f;
+    sSparkleAnimTime -= 2.0f / PARTICLE_FRAME_RATE;
 }
 
-// Equivalent: regswaps
 void zParPTankSpawnSparkles(xVec3* pos, U32 count)
 {
+    zParPTank* zp;
+    RpPTankLockStruct posLock;
+    RpPTankLockStruct vtx2TexCoordsLock;
+    U32 poslock_base;
+    U32 uvlock_base;
+    xVec3* ref_pos;
+    RwCamera* camera;
+    U32 i;
+    RwTexCoords* uv;
+
     if (zGameIsPaused())
     {
         return;
     }
-    zParPTank* zp = sSparklePTank;
+    zp = sSparklePTank;
 
     if (count > zp->max_particles - zp->num_particles)
     {
@@ -175,9 +200,6 @@ void zParPTankSpawnSparkles(xVec3* pos, U32 count)
     {
         return;
     }
-
-    RpPTankLockStruct posLock;
-    RpPTankLockStruct vtx2TexCoordsLock;
 
     RpPTankAtomicLock(zp->ptank, &posLock, rpPTANKLFLAGPOSITION, rpPTANKLOCKWRITE);
     if (posLock.data == NULL)
@@ -191,26 +213,24 @@ void zParPTankSpawnSparkles(xVec3* pos, U32 count)
         return;
     }
 
-    U32 poslock_base = (U32)posLock.data;
-    U32 uvlock_base = (U32)vtx2TexCoordsLock.data;
-    xVec3* ref_pos = pos;
-    RwCamera* camera = RwCameraGetCurrentCamera();
+    poslock_base = (U32)posLock.data;
+    uvlock_base = (U32)vtx2TexCoordsLock.data;
+    ref_pos = pos;
+    camera = RwCameraGetCurrentCamera();
     if (gGameState == eGameState_Play && camera)
     {
         ref_pos = (xVec3*)&RwFrameGetMatrix(RwCameraGetFrame(camera))->pos;
     }
 
-    xVec3* posit = pos;
-    for (U32 i = 0; i < count; posit++, i++)
+    for (i = 0; i < count; i++)
     {
-        if (!sGameScreenTransCam && ref_pos && xVec3Dist2(posit, ref_pos) > 900.0f)
+        if (!sGameScreenTransCam && ref_pos && xVec3Dist2(&pos[i], ref_pos) > 900.0f)
         {
             continue;
         }
 
-        *(xVec3*)(poslock_base + zp->num_particles * posLock.stride) = *posit;
-        RwTexCoords* uv =
-            (RwTexCoords*)(uvlock_base + zp->num_particles * vtx2TexCoordsLock.stride);
+        *(xVec3*)(poslock_base + zp->num_particles * posLock.stride) = pos[i];
+        uv = (RwTexCoords*)(uvlock_base + zp->num_particles * vtx2TexCoordsLock.stride);
         uv[0].u = 0.0f;
         uv[0].v = 0.5f;
         uv[1].u = 0.125f + uv[0].u;
@@ -302,27 +322,38 @@ static void zParPTankBubbleUpdate(zParPTank* zp, float dt)
     RpPTankLockStruct clock;
     RpPTankLockStruct slock;
     RpPTankLockStruct uvlock;
+    U32 plock_base;
+    U32 clock_base;
+    U32 slock_base;
+    U32 uvlock_base;
+    F32 damp;
+    BubbleData* base_xp;
+    BubbleData* xp;
+    U32 i;
+    xVec3* pos;
+    RwTexCoords* uv;
+    RwRGBA* color;
+
     RpPTankAtomicLock(zp->ptank, &plock, rpPTANKDFLAGPOSITION, rpPTANKLOCKWRITE);
     RpPTankAtomicLock(zp->ptank, &clock, rpPTANKDFLAGCOLOR, rpPTANKLOCKWRITE);
     RpPTankAtomicLock(zp->ptank, &slock, rpPTANKDFLAGSIZE, rpPTANKLOCKWRITE);
     RpPTankAtomicLock(zp->ptank, &uvlock, rpPTANKDFLAGVTX2TEXCOORDS, rpPTANKLOCKWRITE);
 
-    U32 plock_base = (U32)plock.data;
-    U32 clock_base = (U32)clock.data;
-    U32 slock_base = (U32)slock.data;
-    U32 uvlock_base = (U32)uvlock.data;
+    plock_base = (U32)plock.data;
+    clock_base = (U32)clock.data;
+    slock_base = (U32)slock.data;
+    uvlock_base = (U32)uvlock.data;
 
-    F32 damp = xpow(0.95f, 60.0f * dt);
+    damp = xpow(0.95f, PARTICLE_FRAME_RATE * dt);
 
-    BubbleData* base_xp = zp == sBubblePTank ? sBubbleData : sMenuBubbleData;
-    BubbleData* xp = base_xp;
+    base_xp = zp == sBubblePTank ? sBubbleData : sMenuBubbleData;
+    xp = base_xp;
 
-    for (S32 i = 0; i < zp->num_particles; i++)
+    for (i = 0; i < zp->num_particles; i++)
     {
-        xVec3* pos = (xVec3*)plock.data;
-        RwTexCoords* uv = (RwTexCoords*)uvlock.data;
-
         xp->life -= dt;
+
+        pos = (xVec3*)plock.data;
 
         pos->x += xp->vel.x * dt;
         pos->y += xp->vel.y * dt;
@@ -333,15 +364,15 @@ static void zParPTankBubbleUpdate(zParPTank* zp, float dt)
         xp->vel.y *= damp;
         xp->vel.z *= damp;
 
+        uv = (RwTexCoords*)uvlock.data;
         if (xp->life > 0.21875f)
         {
-            uv[0].u = -(0.125f * (U32)((xp->life * 8.0f) / 1.75f) - 1.0f);
+            uv[0].u = 1.0f - 0.125f * (U32)((xp->life * 8.0f) / 1.75f);
             uv[1].u = 0.125f + uv[0].u;
         }
 
-        RwRGBA* color = (RwRGBA*)clock.data;
-
         F32 life = xp->life > 0.0f ? xp->life : 0.0f;
+        color = (RwRGBA*)clock.data;
         if (life > 1.5749999f)
         {
             color->alpha = 255.0f * ((1.75f - life) / 0.175f);
@@ -361,6 +392,7 @@ static void zParPTankBubbleUpdate(zParPTank* zp, float dt)
             *color = *(RwRGBA*)(clock_base + (zp->num_particles - 1) * clock.stride);
             *(RwV2d*)slock.data = *(RwV2d*)(slock_base + (zp->num_particles - 1) * slock.stride);
 
+            RwTexCoords* uv = (RwTexCoords*)uvlock.data;
             RwTexCoords* end_uv =
                 (RwTexCoords*)(uvlock_base + (zp->num_particles - 1) * uvlock.stride);
             uv[0] = end_uv[0];
@@ -390,9 +422,22 @@ static void zParPTankBubbleUpdate(zParPTank* zp, float dt)
     RPATOMICPTANKPLUGINDATA(zp->ptank)->actPCount = zp->num_particles;
 }
 
-// regswaps
 static void zParPTankSpawnBubbles(xVec3* pos, xVec3* vel, U32 count, float scale, zParPTank* zp)
 {
+    RpPTankLockStruct plock;
+    RpPTankLockStruct clock;
+    RpPTankLockStruct slock;
+    RpPTankLockStruct uvlock;
+    U32 plock_base;
+    U32 clock_base;
+    U32 slock_base;
+    U32 uvlock_base;
+    xVec3* ref_pos;
+    RwCamera* camera;
+    U32 i;
+    RwTexCoords* uv;
+    RwV2d* size;
+
     if (globals.player.ent.model == 0 || globals.player.ent.model->Mat == 0)
     {
         return;
@@ -410,10 +455,6 @@ static void zParPTankSpawnBubbles(xVec3* pos, xVec3* vel, U32 count, float scale
 
     BubbleData* base_xp = zp == sBubblePTank ? sBubbleData : sMenuBubbleData;
 
-    RpPTankLockStruct plock;
-    RpPTankLockStruct clock;
-    RpPTankLockStruct slock;
-    RpPTankLockStruct uvlock;
     RpPTankAtomicLock(zp->ptank, &plock, rpPTANKDFLAGPOSITION, rpPTANKLOCKWRITE);
     if (!plock.data)
     {
@@ -438,38 +479,35 @@ static void zParPTankSpawnBubbles(xVec3* pos, xVec3* vel, U32 count, float scale
         return;
     }
 
-    U32 plock_base = (U32)plock.data;
-    U32 clock_base = (U32)clock.data;
-    U32 slock_base = (U32)slock.data;
-    U32 uvlock_base = (U32)uvlock.data;
-    xVec3* ref_pos = pos;
-    RwCamera* camera = RwCameraGetCurrentCamera();
+    plock_base = (U32)plock.data;
+    clock_base = (U32)clock.data;
+    slock_base = (U32)slock.data;
+    uvlock_base = (U32)uvlock.data;
+    ref_pos = pos;
+    camera = RwCameraGetCurrentCamera();
     if (gGameState == eGameState_Play && camera)
     {
         ref_pos = (xVec3*)&RwFrameGetMatrix(RwCameraGetFrame(camera))->pos;
     }
 
-    xVec3* posit = pos;
-    xVec3* velit = vel;
-    U32 i = 0;
-    for (; i < count; posit++, velit++, i++)
+    for (i = 0; i < count; i++)
     {
-        if (!sGameScreenTransCam && ref_pos && xVec3Dist2(posit, ref_pos) > 5625.0f)
+        if (!sGameScreenTransCam && ref_pos && xVec3Dist2(&pos[i], ref_pos) > 5625.0f)
         {
             continue;
         }
 
-        *(xVec3*)(plock_base + zp->num_particles * plock.stride) = *posit;
-        base_xp[zp->num_particles].vel = *velit;
+        *(xVec3*)(plock_base + zp->num_particles * plock.stride) = pos[i];
+        base_xp[zp->num_particles].vel = vel[i];
         base_xp[zp->num_particles].life = 1.75f;
 
-        RwTexCoords* uv = (RwTexCoords*)(uvlock_base + zp->num_particles * uvlock.stride);
+        uv = (RwTexCoords*)(uvlock_base + zp->num_particles * uvlock.stride);
         uv[0].u = 0.0f;
         uv[0].v = 0.625f;
         uv[1].u = 0.125f + uv[0].u;
         uv[1].v = 0.75f;
 
-        RwV2d* size = (RwV2d*)(slock_base + zp->num_particles * slock.stride);
+        size = (RwV2d*)(slock_base + zp->num_particles * slock.stride);
 
         size->x = size->y = scale * (xurand() * 0.15f + 0.1f);
 
@@ -519,6 +557,48 @@ static void zParPTankSnowCreate(zParPTank* zp, U32 max_particles, zParPTankUpdat
         (snow_particle_data*)xMemAllocSize(zp->max_particles * sizeof(snow_particle_data));
 }
 
+#if defined(PS2)
+namespace
+{
+    // The original PS2 path keeps the four side planes in vf14-vf17.
+    inline void prepare_snow_culling()
+    {
+        asm volatile("lqc2 vf14, 0(%0)\n"
+                     "lqc2 vf15, 16(%0)\n"
+                     "lqc2 vf16, 32(%0)\n"
+                     "lqc2 vf17, 48(%0)\n"
+                     :
+                     : "r"(globals.camera.frustplane)
+                     : "memory");
+    }
+
+    inline S32 snow_outside_side_planes(const xVec4* loc)
+    {
+        S32 outside;
+        asm volatile("lqc2 vf8, 0(%1)\n"
+                     "vaddaw.xyzw ACC, vf17, vf8w\n"
+                     "vmsubax.xyzw ACC, vf14, vf8x\n"
+                     "vmsubay.xyzw ACC, vf15, vf8y\n"
+                     "vmsubz.xyzw vf1, vf16, vf8z\n"
+                     "qmfc2 %0, vf1\n"
+                     "pcgtw %0, $0, %0\n"
+                     "ppach %0, $0, %0\n"
+                     "vmul.w vf7, vf8, vf10\n"
+                     : "=&r"(outside)
+                     : "r"(loc)
+                     : "memory");
+        return outside;
+    }
+
+    inline F32 snow_near_plane_distance(const xVec4* loc)
+    {
+        return globals.camera.frustplane[4].x * loc->x + globals.camera.frustplane[5].x * loc->y +
+               globals.camera.frustplane[6].x * loc->z - globals.camera.frustplane[7].x +
+               0.5f * loc->w;
+    }
+} // namespace
+#endif
+
 // Equivalent: float scheduling
 static void zParPTankSnowUpdate(zParPTank* zp, float dt)
 {
@@ -529,6 +609,9 @@ static void zParPTankSnowUpdate(zParPTank* zp, float dt)
     F32 ifadein = 2550.0f * (1.0f / ilife);
     F32 ifadeout = 637.5f * (1.0f / ilife);
     snow_pool.reset();
+#if defined(PS2)
+    prepare_snow_culling();
+#endif
     snow_particle_data* it = snow_particles;
     while (it != end)
     {
@@ -543,33 +626,44 @@ static void zParPTankSnowUpdate(zParPTank* zp, float dt)
         it->loc += it->vel * dt;
         xVec4* _loc = (xVec4*)&it->loc;
         F32 par_dist;
-        snow_pool.next();
-        if (!snow_pool.valid())
+#if defined(PS2)
+        if (!snow_outside_side_planes(_loc))
         {
-            end = it;
-            break;
-        }
+            par_dist = snow_near_plane_distance(_loc);
+            if (par_dist < -0.1f)
+            {
+#endif
+                snow_pool.next();
+                if (!snow_pool.valid())
+                {
+                    end = it;
+                    break;
+                }
 
-        *(U32*)snow_pool.color = 0xFFFFFFFF;
+                *(U32*)snow_pool.color = 0xFFFFFFFF;
 
-        if (it->life > fadein_life)
-        {
-            snow_pool.color->a = ifadein * (snow_life - it->life) + 0.5f;
-        }
-        else if (it->life < fadeout_life)
-        {
-            snow_pool.color->a = it->life * ifadeout + 0.5f;
-        }
-        else
-        {
-            snow_pool.color->a = 0xFF;
-        }
+                if (it->life > fadein_life)
+                {
+                    snow_pool.color->a = ifadein * (snow_life - it->life) + 0.5f;
+                }
+                else if (it->life < fadeout_life)
+                {
+                    snow_pool.color->a = it->life * ifadeout + 0.5f;
+                }
+                else
+                {
+                    snow_pool.color->a = 0xFF;
+                }
 
-        *snow_pool.pos = it->loc;
-        snow_pool.size->assign(it->size);
-        snow_pool.uv[0].assign(it->u, 0.875f);
-        snow_pool.uv[1].assign(0.125f + snow_pool.uv[0].x, 0.125f + snow_pool.uv[0].y);
+                *snow_pool.pos = it->loc;
+                snow_pool.size->assign(it->size);
+                snow_pool.uv[0].assign(it->u, 0.875f);
+                snow_pool.uv[1].assign(0.125f + snow_pool.uv[0].x, 0.125f + snow_pool.uv[0].y);
 
+#if defined(PS2)
+            }
+        }
+#endif
         it++;
     }
 
@@ -664,7 +758,7 @@ static void zParPTankSteamUpdate(zParPTank* zp, float dt)
 
     sSteamAnimTime += dt;
 
-    if (!(sSteamAnimTime >= 1.0f / 30.0f))
+    if (!(sSteamAnimTime >= 2.0f / PARTICLE_FRAME_RATE))
     {
         return;
     }

@@ -67,30 +67,34 @@ void xGridKill(xGrid* grid)
 
 void xGridEmpty(xGrid* grid)
 {
+    xGridBound** head;
+    xGridBound* curr;
+
     for (S32 x = 0; x < grid->nx; ++x)
     {
         for (S32 z = 0; z < grid->nz; ++z)
         {
-            xGridBound** head = &grid->cells[z * grid->nx];
-            xGridBound* curr = head[x];
+            head = &grid->cells[z * grid->nx] + x;
+            curr = *head;
             while (curr)
             {
                 xGridBound* currnext = curr->next;
                 xGridBoundInit(curr, curr->data);
                 curr = currnext;
             }
-            head[x] = NULL;
+            *head = NULL;
         }
     }
 
-    xGridBound* curr = grid->other;
+    head = &grid->other;
+    curr = *head;
     while (curr)
     {
-        xGridBound* nextnext = curr->next;
+        xGridBound* currnext = curr->next;
         xGridBoundInit(curr, curr->data);
-        curr = nextnext;
+        curr = currnext;
     }
-    grid->other = NULL;
+    *head = NULL;
 }
 
 S32 xGridAddToCell(xGridBound** boundList, xGridBound* bound)
@@ -253,6 +257,9 @@ void xGridUpdate(xGrid* grid, xEnt* ent)
     }
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 xGridBound** xGridGetCell(xGrid* grid, const xEnt* ent, S32& grx, S32& grz)
 {
     const xBound* bound = &ent->bound;
@@ -277,6 +284,9 @@ xGridBound** xGridGetCell(xGrid* grid, const xEnt* ent, S32& grx, S32& grz)
     xGridGetCell(grid, center->x, center->y, center->z, grx, grz);
     return &grid->cells[grz * grid->nx] + grx;
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 void xGridGetCell(xGrid* grid, F32 x, F32 y, F32 z, S32& grx, S32& grz)
 {

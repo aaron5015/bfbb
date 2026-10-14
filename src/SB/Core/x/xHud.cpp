@@ -12,7 +12,12 @@
 
 #include "zEnt.h"
 
+#if defined(PS2)
+extern "C" long skyTest_1;
+#include <new.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C++\MSL_Common\Include\new.h>
+#endif
 #include <types.h>
 
 #define lengthof(x) (sizeof(x) / sizeof((x)[0]))
@@ -26,9 +31,6 @@
 // This function is here to force the symbols to be linked.
 void __deadstripped_xHud_head()
 {
-    const char _405[0x0C] = {};
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
     const char _441[0x0C] = {};
 }
 
@@ -196,8 +198,7 @@ namespace xhud
         motive_node* it = _motive_top;
         while (it != NULL)
         {
-            bool unk = it->m.update(*this, dt);
-            if (!unk)
+            if (!it->m.update(*this, dt))
             {
                 *itp = it->next;
                 motive_allocator()->free(it);
@@ -253,7 +254,7 @@ namespace xhud
     // Equivalent: scheduling
     U32 widget::type() const
     {
-        static U32 myid = xStrHash(a->type_name());
+        static U32 myid = xStrHash(asset::type_name());
         return myid;
     }
 
@@ -270,27 +271,24 @@ namespace xhud
 
         F32 dx = start_rc.loc.x - rc.loc.x;
         F32 dy = start_rc.loc.y - rc.loc.y;
-        F32 fVar1 = dx * dx + dy * dy;
-        if (fVar1 <= 0.000000009999999f)
+        F32 d2 = dx * dx + dy * dy;
+        if (d2 <= 0.000000009999999f)
         {
             rc.loc = start_rc.loc;
             rc.a = start_rc.a;
         }
         else
         {
-            F32 dVar4 = xsqrt(fVar1);
+            d2 = xsqrt(d2);
+            F32 vx = 10.0f * dx;
             F32 vy = 10.0f * dy;
-            fVar1 = 10.0f * dx;
-            F32 dVar5 = (-(fVar1 * fVar1 + (vy * vy)) / (2.0f * dVar4));
+            F32 a = -(vx * vx + vy * vy) / (2.0f * d2);
 
-            add_motive(motive(&rc.loc.x, fVar1, dx, (dVar5 * dx) / dVar4,
-                              accelerate_motive_update, NULL));
+            add_motive(motive(&rc.loc.x, vx, dx, (a * dx) / d2, accelerate_motive_update, NULL));
+            add_motive(motive(&rc.loc.y, vy, dy, (a * dy) / d2, accelerate_motive_update, NULL));
 
-            add_motive(motive(&rc.loc.y, vy, dy, (dVar5 * dy) / dVar4,
-                              accelerate_motive_update, NULL));
-
-            fVar1 = start_rc.a - rc.a;
-            add_motive(motive(&rc.a, 3.0f * fVar1, fVar1, 0.0f, linear_motive_update, NULL));
+            F32 da = start_rc.a - rc.a;
+            add_motive(motive(&rc.a, 3.0f * da, da, 0.0f, linear_motive_update, NULL));
         }
     }
 
@@ -433,30 +431,33 @@ namespace xhud
             F32 delta_time;
         };
 
-        template <class F> void for_each(U8 widget_type, U32 type_size, F f)
+        struct widget_chunk : xBase
         {
-            U32 count = globals.sceneCur->baseCount[widget_type];
-            U8* it = (U8*)globals.sceneCur->baseList[widget_type];
-            U8* end = it + count * type_size;
+            widget w;
+        };
+
+        template <class F> void for_each(U8 type, U32 size, F f)
+        {
+            zScene& s = *globals.sceneCur;
+            U8* it = (U8*)s.baseList[type];
+            U8* end = it + s.baseCount[type] * size;
             while (it != end)
             {
-                f(*(widget*)(it + sizeof(xBase)));
-                it += type_size;
+                widget_chunk* wc = (widget_chunk*)it;
+                f(wc->w);
+                it += size;
             }
-        }
-
-        void render_one_model(xModelInstance& model, F32 alpha, const basic_rect<F32>& rect,
-                              const xVec3& from, const xVec3& to, const xMat4x3& frame)
-        {
-            xModelSetMaterialAlpha(&model, 255.0f * alpha + 0.5f);
-            xModelSetFrame(&model, &frame);
-            xModelRender2D(model, rect, from, to);
         }
 
     } // namespace
 
-    void widget::debug_render()
+    void widget::disable_all(bool st)
     {
+        functor_disable func(st);
+        for (U32 i = 0; i < lengthof(known_types); ++i)
+        {
+            for_each(known_types[i].widget_type, known_types[i].widget_size, func);
+        }
     }
 
     void widget::setup_all()
@@ -464,25 +465,6 @@ namespace xhud
         for (U32 i = 0; i < lengthof(known_types); ++i)
         {
             for_each(known_types[i].widget_type, known_types[i].widget_size, fp_setup);
-        }
-    }
-
-    S32 widget::cb_dispatch(xBase* from, xBase* to, U32 event, const F32* argf,
-                            xBase* argw)
-    {
-        widget* w = (widget*)(to + 1);
-
-        w->dispatch(from, event, argf, argw);
-
-        return 1;
-    }
-
-    void widget::render_all()
-    {
-        debug_render();
-        for (U32 i = 0; i < lengthof(known_types); ++i)
-        {
-            for_each(known_types[i].widget_type, known_types[i].widget_size, fp_render);
         }
     }
 
@@ -495,12 +477,12 @@ namespace xhud
         }
     }
 
-    void widget::disable_all(bool st)
+    void widget::render_all()
     {
-        functor_disable func(st);
+        debug_render();
         for (U32 i = 0; i < lengthof(known_types); ++i)
         {
-            for_each(known_types[i].widget_type, known_types[i].widget_size, func);
+            for_each(known_types[i].widget_type, known_types[i].widget_size, fp_render);
         }
     }
 
@@ -528,13 +510,14 @@ namespace xhud
     void widget::clear_motives()
     {
         activity = ACT_NONE;
-        motive_node* node = _motive_top;
-        while (node != NULL)
+        motive_node** itp = &_motive_top;
+        motive_node* it = *itp;
+        while (it != NULL)
         {
-            node->m.finish();
-            _motive_top = node->next;
-            motive_allocator()->free(node);
-            node = _motive_top;
+            it->m.finish();
+            *itp = it->next;
+            motive_allocator()->free(it);
+            it = *itp;
         }
     }
 
@@ -563,106 +546,14 @@ namespace xhud
         }
     }
 
-    bool linear_motive_update(widget& w, motive& m, F32 dt)
+    S32 widget::cb_dispatch(xBase* from, xBase* to, U32 event, const F32* argf,
+                            xBase* argw)
     {
-        F32 diff = dt * m.delta;
-        F32 remaining = m.max_offset - m.offset;
-        if ((diff >= 0.0f && diff >= remaining) || (diff < 0.0f && diff <= remaining))
-        {
-            *m.value += remaining;
-            m.offset = m.max_offset;
-            return false;
-        }
-        else
-        {
-            *m.value += diff;
-            m.offset += diff;
-            return true;
-        }
-    }
+        widget* w = (widget*)(to + 1);
 
-    bool accelerate_motive_update(widget& w, motive& m, F32 dt)
-    {
-        F32 diff = 0.5f * m.accel * dt * dt + m.delta * dt;
-        m.delta += dt * m.accel;
-        F32 remaining = m.max_offset - m.offset;
+        w->dispatch(from, event, argf, argw);
 
-        if ((diff >= 0.0f && diff >= remaining) || (diff < 0.0f && diff <= remaining))
-        {
-            *m.value += remaining;
-            m.offset = m.max_offset;
-            return false;
-        }
-        else
-        {
-            *m.value += diff;
-            m.offset += diff;
-            return true;
-        }
-    }
-
-    bool shake_motive_update(widget& w, motive& m, F32 dt)
-    {
-        static const float mult[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
-
-        *((U32*)&m.context) += 1;
-        U32 i = *((U32*)&m.context);
-        if (i > 0x32)
-        {
-            m.context = 0;
-            *m.value -= m.offset;
-            m.offset = 0.0f;
-            return false;
-        }
-
-        F32 diff = m.delta * mult[i & 0x3];
-        if ((i & 0x3) == 0)
-        {
-            m.delta = m.delta * m.accel;
-        }
-
-        *m.value += diff;
-        m.offset += diff;
-
-        return true;
-    }
-
-    bool delay_motive_update(widget& w, motive& m, F32 dt)
-    {
-        m.offset += dt;
-        if (m.max_offset - m.offset < 0.0f)
-        {
-            ((void (*)(widget&, motive&))m.context)(w, m);
-            return false;
-        }
-        return true;
-    }
-
-    void render_model(xModelInstance& m, const xhud::render_context& rc)
-    {
-        basic_rect<F32> r = { 0 };
-        r.x = rc.loc.x;
-        r.y = rc.loc.y;
-        r.w = rc.size.x;
-        r.h = rc.size.y;
-
-        xVec3 from = { 0, 0, 1 };
-        xVec3 to = { 0, 0, -rc.loc.z };
-
-        xMat4x3 frame;
-        xMat3x3Euler(&frame, rc.rot.x, rc.rot.y, rc.rot.z);
-        frame.right *= (1.0f + rc.loc.z);
-        frame.up *= (1.0f + rc.loc.z);
-        frame.at *= 0.0099999998f;
-        frame.pos.z = 0.0f;
-        frame.pos.y = 0.0f;
-        frame.pos.x = 0.0f;
-        frame.flags = 0;
-
-        for (xModelInstance* model = &m; model; model = model->Next)
-        {
-            render_one_model(*model, rc.a, r, from, to, frame);
-        }
+        return 1;
     }
 
     void __deadstripped_xHud()
@@ -693,26 +584,138 @@ namespace xhud
         return xModelInstanceAlloc((RpAtomic*)info, NULL, 0, 0, NULL);
     }
 
+    namespace
+    {
+        void render_one_model(xModelInstance& model, F32 alpha, const basic_rect<F32>& rect,
+                              const xVec3& from, const xVec3& to, const xMat4x3& frame)
+        {
+#if defined(PS2)
+            // Scale the GS alpha-test reference (TEST_1.AREF) by the widget's
+            // alpha while it draws, then restore it.
+            S32 aref = (skyTest_1 >> 4) & 0xff;
+            skyTest_1 &= ~0xff0;
+            S32 ref = aref * alpha;
+            skyTest_1 |= MAX(0, MIN(ref, 255)) << 4;
+#endif
+            xModelSetMaterialAlpha(&model, 255.0f * alpha + 0.5f);
+            xModelSetFrame(&model, &frame);
+            xModelRender2D(model, rect, from, to);
+#if defined(PS2)
+            skyTest_1 = (skyTest_1 & ~0xff0) | (aref << 4);
+#endif
+        }
+    }
+
+    void render_model(xModelInstance& m, const xhud::render_context& rc)
+    {
+        basic_rect<F32> r = { 0 };
+        r.x = rc.loc.x;
+        r.y = rc.loc.y;
+        r.w = rc.size.x;
+        r.h = rc.size.y;
+
+        xVec3 from = { 0, 0, 1 };
+        xVec3 to = { 0, 0, -rc.loc.z };
+
+        xMat4x3 frame;
+        xMat3x3Euler(&frame, rc.rot.x, rc.rot.y, rc.rot.z);
+        frame.right *= (1.0f + rc.loc.z);
+        frame.up *= (1.0f + rc.loc.z);
+        frame.at *= 0.0099999998f;
+        frame.pos.z = 0.0f;
+        frame.pos.y = 0.0f;
+        frame.pos.x = 0.0f;
+        frame.flags = 0;
+
+        for (xModelInstance* model = &m; model; model = model->Next)
+        {
+            render_one_model(*model, rc.a, r, from, to, frame);
+        }
+    }
+
+    bool linear_motive_update(widget& w, motive& m, F32 dt)
+    {
+        F32 diff = dt * m.delta;
+        F32 remaining = m.max_offset - m.offset;
+        if ((diff >= 0.0f && diff >= remaining) || (diff < 0.0f && diff <= remaining))
+        {
+            *m.value += remaining;
+            m.offset = m.max_offset;
+            return false;
+        }
+        else
+        {
+            *m.value += diff;
+            m.offset += diff;
+            return true;
+        }
+    }
+
+    // Equivalent: regalloc
+    bool accelerate_motive_update(widget& w, motive& m, F32 dt)
+    {
+        F32 diff = dt * (0.5f * m.accel * dt) + m.delta * dt;
+        m.delta += dt * m.accel;
+
+        F32 remaining = m.max_offset - m.offset;
+
+        if ((diff >= 0.0f && diff >= remaining) || (diff < 0.0f && diff <= remaining))
+        {
+            *m.value += remaining;
+            m.offset = m.max_offset;
+            return false;
+        }
+        else
+        {
+            *m.value += diff;
+            m.offset += diff;
+            return true;
+        }
+    }
+
+    bool shake_motive_update(widget& w, motive& m, F32 dt)
+    {
+        static const float mult[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+
+        U32& iter = *(U32*)&m.context;
+        iter++;
+        U32 i = iter;
+        if (i > 0x32)
+        {
+            iter = 0;
+            *m.value -= m.offset;
+            m.offset = 0.0f;
+            return false;
+        }
+
+        F32 diff = m.delta * mult[i & 0x3];
+        if ((i & 0x3) == 0)
+        {
+            m.delta = m.delta * m.accel;
+        }
+
+        *m.value += diff;
+        m.offset += diff;
+
+        return true;
+    }
+
+    bool delay_motive_update(widget& w, motive& m, F32 dt)
+    {
+        m.offset += dt;
+        F32 remaining = m.max_offset - m.offset;
+        if (remaining < 0.0f)
+        {
+            ((motive_proc*)m.context)(w, m, remaining);
+            return false;
+        }
+        return true;
+    }
+
 } // namespace xhud
 
-// NOTE: this belongs in <new.h>. It is inline, so the compiler emits a weak
-// out-of-line copy into every translation unit that placement-news.
-inline void* operator new(size_t, void* ptr) throw()
+// Layout-only reference keeps the unused weak color helper in this unit.
+iColor_tag __deadstripped_xHud_color(U8 r, U8 g, U8 b, U8 a)
 {
-    return ptr;
-}
-
-// NOTE: the original is a weak symbol, i.e. an inline in xColor.h, but it is
-// emitted only here and nothing in this object references it. Defining it here
-// reproduces the code exactly; it just makes the symbol strong.
-iColor_tag xColorFromRGBA(U8 r, U8 g, U8 b, U8 a)
-{
-    iColor_tag color;
-
-    color.r = r;
-    color.g = g;
-    color.b = b;
-    color.a = a;
-
-    return color;
+    return xColorFromRGBA(r, g, b, a);
 }

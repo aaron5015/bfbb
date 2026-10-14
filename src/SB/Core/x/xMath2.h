@@ -74,11 +74,7 @@ struct xVec2
 
     static xVec2 create(F32 x, F32 y)
     {
-        xVec2 v;
-
-        v.x = x;
-        v.y = y;
-
+        xVec2 v = { x, y };
         return v;
     }
 
@@ -102,6 +98,12 @@ struct xVec2
         return tmp;
     }
 
+    // xPad.cpp defines XVEC2_DIVEQ_OUT_OF_LINE and supplies this body after
+    // its own functions: retail emits xPad's weak copy at the end of its
+    // .text, which only happens when the body is not yet visible at the call.
+#ifdef XVEC2_DIVEQ_OUT_OF_LINE
+    xVec2& operator/=(F32 f);
+#else
     xVec2& operator/=(F32 f)
     {
         F32 inv = 1.0f / f;
@@ -111,6 +113,7 @@ struct xVec2
 
         return *this;
     }
+#endif
 
     xVec2 operator+(const xVec2& v) const
     {
@@ -144,5 +147,50 @@ struct xVec2
 F32 xVec2Dist(F32 x1, F32 y1, F32 x2, F32 y2);
 F32 xVec2Dot(const xVec2* a, const xVec2* b);
 void xVec2Init(xVec2* v, F32 _x, F32 _y);
+
+#if defined(PS2)
+#include "xMathInlines.h"
+
+inline xVec2& xVec2::assign(F32 x, F32 y)
+{
+    this->x = x;
+    this->y = y;
+    return *this;
+}
+
+inline F32 xVec2::length2() const
+{
+    return x * x + y * y;
+}
+
+inline F32 xVec2::length() const
+{
+    return xsqrt(length2());
+}
+
+inline xVec2 xVec2::operator-(const xVec2& v) const
+{
+    xVec2 vec = *this;
+    vec -= v;
+    return vec;
+}
+
+inline xVec2& xVec2::operator-=(const xVec2& v)
+{
+    x -= v.x;
+    y -= v.y;
+    return *this;
+}
+#endif
+
+template <class T> basic_rect<T>& basic_rect<T>::contract(T s)
+{
+    return expand(-s);
+}
+
+template <class T> basic_rect<T>& basic_rect<T>::expand(T s)
+{
+    return expand(s, s, s, s);
+}
 
 #endif

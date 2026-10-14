@@ -17,9 +17,14 @@
 #include "xstransvc.h"
 #include "iAnim.h"
 #include "iModel.h"
+#if defined(PS2)
+#include "xLightKit.h"
+#endif
 
 #include <string.h>
 #include <stdio.h>
+
+extern U32 gPTankDisable;
 
 #define PICKUP_TYPE_SHINY 0
 #define PICKUP_TYPE_1 1
@@ -92,7 +97,9 @@ struct RewardList
 // in any header the original TU could have seen from here.
 void zParPTankSpawnSparkles(xVec3* pos, U32 count);
 S32 zParPTankConvertEmitRate(xParEmitter* pe, F32 dt);
+#if !defined(PS2)
 WEAK F32 xVec3DistFast(const xVec3* a, const xVec3* b);
+#endif
 S32 zEntPlayer_InBossBattle();
 
 zParEmitter* gEmitShinySparkles = NULL;
@@ -184,6 +191,12 @@ static _tagKeyShake sKeyShake[4] = {};
 static zEntPickup* rewardPickups[REWARD_TYPE_COUNT][REWARD_PICKUP_COUNT];
 static RewardList sRewards[REWARD_COUNT];
 static zLODTable sRewardLOD[REWARD_TYPE_COUNT];
+#if defined(PS2)
+static RpLight* sPickupDirectionalLight;
+static RpLight* sPickupAmbientLight;
+static xLightKit sPickupLightKit;
+static xLightKitLight sPickupLightKitLight[2];
+#endif
 static xEntFrame gPickupFrame;
 static xEntCollis gPickupCollis;
 static zEntPickup* sSpatulaAlreadyGiven = NULL;
@@ -255,6 +268,35 @@ U32 isRewardPickup(zEntPickup* ent)
 
 void zEntPickup_Startup()
 {
+#if defined(PS2)
+    static RwRGBAReal black = { 0.0f, 0.0f, 0.0f, 0.0f };
+    static RwRGBAReal white = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+    if (sPickupDirectionalLight == NULL)
+    {
+        sPickupDirectionalLight = RpLightCreate(rpLIGHTDIRECTIONAL);
+        RpLightSetColor(sPickupDirectionalLight, &black);
+        RwFrame* frame = RwFrameCreate();
+        RpLightSetFrame(sPickupDirectionalLight, frame);
+
+        sPickupAmbientLight = RpLightCreate(rpLIGHTAMBIENT);
+        RpLightSetColor(sPickupAmbientLight, &white);
+
+        sPickupLightKit.tagID = 'TIKL';
+        sPickupLightKit.groupID = 0;
+        sPickupLightKit.lightCount = 2;
+        sPickupLightKit.lightList = sPickupLightKitLight;
+
+        sPickupLightKit.lightList[0].type = 1;
+        sPickupLightKit.lightList[0].color = white;
+        sPickupLightKit.lightList[0].platLight = sPickupAmbientLight;
+
+        sPickupLightKit.lightList[1].type = 2;
+        sPickupLightKit.lightList[1].color = black;
+        sPickupLightKit.lightList[1].platLight = sPickupDirectionalLight;
+        memcpy(sPickupLightKit.lightList[1].matrix, &g_I3, sizeof(g_I3));
+    }
+#endif
 }
 
 void zEntPickupInit(void* ent, void* asset)
@@ -1338,7 +1380,7 @@ void zEntPickup_Update(zEntPickup* ent, xScene* sc, F32 dt)
                     }
                     else if (yvel < -12.0f)
                     {
-                        yvel = yvel + 12.0f;
+                        yvel += 12.0f;
                     }
                     else
                     {
@@ -1383,11 +1425,12 @@ void zEntPickup_Update(zEntPickup* ent, xScene* sc, F32 dt)
                         distMult = 1.2f;
                     }
 
-                    distMult *= 2.0f;
+                    F32 scaledDist = distMult;
+                    scaledDist *= 2.0f;
 
-                    ent->model->Mat->pos.x += distMult * (ent->vel.x * dt);
-                    ent->model->Mat->pos.y += distMult * (ent->vel.y * dt);
-                    ent->model->Mat->pos.z += distMult * (ent->vel.z * dt);
+                    ent->model->Mat->pos.x += scaledDist * (ent->vel.x * dt);
+                    ent->model->Mat->pos.y += scaledDist * (ent->vel.y * dt);
+                    ent->model->Mat->pos.z += scaledDist * (ent->vel.z * dt);
                 }
             }
         }
@@ -1765,7 +1808,11 @@ static void set_alpha_blend(xModelInstance* model)
 
 void zEntPickup_Render(zEntPickup* plist, U32 pcount)
 {
+#if defined(PS2)
+    xLightKit_Enable(&sPickupLightKit, globals.currWorld);
+#else
     xLightKit_Enable(NULL, globals.currWorld);
+#endif
 
     for (U32 i = 0; i < pcount; plist++, i++)
     {
@@ -1786,11 +1833,17 @@ void zEntPickup_Render(zEntPickup* plist, U32 pcount)
             }
         }
     }
+
+#if defined(PS2)
+    xLightKit_Enable(NULL, globals.currWorld);
+#endif
 }
 
 // equivalent: float load scheduling
 void zEntPickup_RenderOne(xEnt* ent)
 {
+    zEntPickup* pickup = (zEntPickup*)ent;
+
     if (ent->baseType != eBaseTypePickup)
     {
         return;
@@ -1806,7 +1859,6 @@ void zEntPickup_RenderOne(xEnt* ent)
         return;
     }
 
-    zEntPickup* pickup = (zEntPickup*)ent;
     RpAtomic* imodel = pickup->model->Data;
     RwMatrix* mat = ent->model->Mat;
     S32 shadowResult;
@@ -1818,7 +1870,7 @@ void zEntPickup_RenderOne(xEnt* ent)
     shadVec.y = ent->model->Mat->pos.y - 10.0f;
     shadVec.z = ent->model->Mat->pos.z;
 
-    if (iModelCullPlusShadow(imodel, ent->model->Mat, &shadVec, &shadowResult))
+    if (iModelCullPlusShadow(imodel, mat, &shadVec, &shadowResult))
     {
         return;
     }
@@ -2320,6 +2372,7 @@ void zEntPickup_RewardPostSetup()
     }
 }
 
+#if !defined(PS2)
 WEAK F32 xVec3DistFast(const xVec3* a, const xVec3* b)
 {
     F32 dx = a->x - b->x;
@@ -2339,3 +2392,4 @@ WEAK void xMat3x3MulRotC(xMat3x3* o, xMat3x3* m, F32 _x, F32 _y, F32 _z, F32 t)
     xMat3x3RotC(&var_38, _x, _y, _z, t);
     xMat3x3Mul(o, m, &var_38);
 }
+#endif

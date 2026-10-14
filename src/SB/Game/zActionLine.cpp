@@ -1,5 +1,8 @@
 #include <types.h>
 #include <rwcore.h>
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
 
 #include "xstransvc.h"
 #include "xString.h"
@@ -48,7 +51,7 @@ void zActionLineUpdate(F32 seconds)
 
 static void RenderActionLine(_tagActionLine* l)
 {
-    static volatile RxObjSpace3DVertex sStripVert[4];
+    static RxObjSpace3DVertex sStripVert[4];
 
     for (S32 i = 0; i < 4; i++)
     {

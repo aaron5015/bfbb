@@ -10,6 +10,9 @@
 
 #include <types.h>
 #include <rwcore.h>
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
 
 #define NUM_LIGHTNING 48
 
@@ -218,7 +221,7 @@ void zLightningInit()
 
 static zLightning* FindFreeLightning()
 {
-    for (int i = 0; i != (sizeof(sLightning) / sizeof(zLightning*)); i++)
+    for (S32 i = 0; i < NUM_LIGHTNING; i++)
     {
         if (sLightning[i] != NULL)
         {
@@ -546,26 +549,18 @@ static void UpdateLightning(zLightning* l, F32 seconds)
     }
     else
     {
-        l->func.endParam[0] += seconds * (l->func.endVel[0] * sLFuncShift);
-        while (l->func.endParam[0] > sLFuncEnd[9])
+        for (S32 i = 0; i < 2; i++)
         {
-            l->func.endParam[0] -= 10.0f;
-        }
+            l->func.endParam[i] += seconds * (l->func.endVel[i] * sLFuncShift);
+            while (l->func.endParam[i] > sLFuncEnd[9])
+            {
+                l->func.endParam[i] -= 10.0f;
+            }
 
-        while (l->func.endParam[0] < 0.0f)
-        {
-            l->func.endParam[0] += 10.0f;
-        }
-
-        l->func.endParam[1] += seconds * (l->func.endVel[1] * sLFuncShift);
-        while (l->func.endParam[1] > sLFuncEnd[9])
-        {
-            l->func.endParam[1] -= 10.0f;
-        }
-
-        while (l->func.endParam[1] < 0.0f)
-        {
-            l->func.endParam[1] += 10.0f;
+            while (l->func.endParam[i] < 0.0f)
+            {
+                l->func.endParam[i] += 10.0f;
+            }
         }
     }
 }
@@ -649,6 +644,7 @@ void zLightningFunc_Render(zLightning* l)
     xFuncPiece* pieceY[2];
     xFuncPiece* pieceZ[2];
     RwIm3DVertex* vert[2];
+    S32 i;
 
     if (l->func.length > 0.00001f)
     {
@@ -665,7 +661,7 @@ void zLightningFunc_Render(zLightning* l)
         pstep = sLFuncMinPStep;
     }
 
-    for (S32 i = 0; i < 2; i++)
+    for (i = 0; i < 2; i++)
     {
         param[i] = l->func.endParam[i];
         pieceX[i] = sLFuncX;
@@ -673,6 +669,7 @@ void zLightningFunc_Render(zLightning* l)
         pieceZ[i] = sLFuncZ;
     }
 
+    U32 nvert = 0;
     vert[0] = gRenderArr.m_vertex;
     vert[1] = vert[0] + 240;
 
@@ -693,37 +690,24 @@ void zLightningFunc_Render(zLightning* l)
 
     xVec3Copy(&lastPos, &l->func.endPoint[0]);
 
-    U8 alpha = xrand();
-    S32 tex = 0;
-    U32 nvert = 0;
+    U32 alpha = U8(xrand());
+    S32 firstTex = 0;
 
-    for (S32 i = 0; i < 2; i++)
+    for (i = 0; i < 2; i++)
     {
         xVec3Copy(&vpos, &lastPos);
 
-        F32 vx = vpos.x;
-        F32 vy = vpos.y;
-        F32 vz = vpos.z;
-        RwIm3DVertexSetPos(&vert[i][nvert], vx, vy, vz);
-        U8 cr = l->color.r;
-        U8 cg = l->color.g;
-        U8 cb = l->color.b;
-        RwIm3DVertexSetRGBA(&vert[i][nvert], cr, cg, cb, alpha);
-        RwIm3DVertexSetUV(&vert[i][nvert], tex + sLFuncUVOffset, 0.0f);
+        RwIm3DVertexSetPos(&vert[i][nvert], vpos.x, vpos.y, vpos.z);
+        RwIm3DVertexSetRGBA(&vert[i][nvert], l->color.r, l->color.g, l->color.b, alpha);
+        RwIm3DVertexSetUV(&vert[i][nvert], firstTex + sLFuncUVOffset, 0.0f);
 
-        vx = vpos.x;
-        vy = vpos.y;
-        vz = vpos.z;
-        RwIm3DVertexSetPos(&vert[i][nvert + 1], vx, vy, vz);
-        cr = l->color.r;
-        cg = l->color.g;
-        cb = l->color.b;
-        RwIm3DVertexSetRGBA(&vert[i][nvert + 1], cr, cg, cb, alpha);
-        RwIm3DVertexSetUV(&vert[i][nvert + 1], tex + sLFuncUVOffset, 1.0f);
+        RwIm3DVertexSetPos(&vert[i][nvert + 1], vpos.x, vpos.y, vpos.z);
+        RwIm3DVertexSetRGBA(&vert[i][nvert + 1], l->color.r, l->color.g, l->color.b, alpha);
+        RwIm3DVertexSetUV(&vert[i][nvert + 1], firstTex + sLFuncUVOffset, 1.0f);
     }
 
     nvert += 2;
-    tex = 1;
+    S32 tex = 1;
 
     while (t < 1.0f)
     {
@@ -736,7 +720,7 @@ void zLightningFunc_Render(zLightning* l)
         xVec3SMul(&pos, &l->func.endPoint[0], 1.0f - t);
         xVec3AddScaled(&pos, &l->func.endPoint[1], t);
 
-        for (S32 i = 0; i < 2; i++)
+        for (i = 0; i < 2; i++)
         {
             F32 p = l->func.endParam[i] + t * l->func.paramSpan[i];
 
@@ -776,40 +760,28 @@ void zLightningFunc_Render(zLightning* l)
             }
         }
 
-        alpha = xrand();
+        alpha = U8(xrand());
 
-        for (S32 i = 0; i < 2; i++)
+        for (i = 0; i < 2; i++)
         {
             xVec3Copy(&vpos, &pos);
             xVec3AddScaled(&vpos, &side[i],
                            l->func.width * (l->func.scale * (scalar1 + scalar2)));
 
-            F32 vx = vpos.x;
-            F32 vy = vpos.y;
-            F32 vz = vpos.z;
-            RwIm3DVertexSetPos(&vert[i][nvert], vx, vy, vz);
-            U8 cr = l->color.r;
-            U8 cg = l->color.g;
-            U8 cb = l->color.b;
-            RwIm3DVertexSetRGBA(&vert[i][nvert], cr, cg, cb, alpha);
+            RwIm3DVertexSetPos(&vert[i][nvert], vpos.x, vpos.y, vpos.z);
+            RwIm3DVertexSetRGBA(&vert[i][nvert], l->color.r, l->color.g, l->color.b, alpha);
             RwIm3DVertexSetUV(&vert[i][nvert], tex + sLFuncUVOffset, 0.0f);
 
             xVec3AddScaled(&vpos, &side[i],
                            (scalar1 + scalar2) * (-2.0f * l->func.scale * l->func.width));
 
-            vx = vpos.x;
-            vy = vpos.y;
-            vz = vpos.z;
-            RwIm3DVertexSetPos(&vert[i][nvert + 1], vx, vy, vz);
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&vert[i][nvert + 1], cr, cg, cb, alpha);
+            RwIm3DVertexSetPos(&vert[i][nvert + 1], vpos.x, vpos.y, vpos.z);
+            RwIm3DVertexSetRGBA(&vert[i][nvert + 1], l->color.r, l->color.g, l->color.b, alpha);
             RwIm3DVertexSetUV(&vert[i][nvert + 1], tex + sLFuncUVOffset, 1.0f);
         }
 
-        tex = 1 - tex;
         nvert += 2;
+        tex = 1 - tex;
 
         xVec3Copy(&lastPos, &pos);
     }
@@ -830,14 +802,11 @@ void RenderLightning(zLightning* l)
     static RwIm3DVertex sStripVert[128];
 
     xMat4x3* cam = &globals.camera.mat;
-    F32 fade;
-    U8 alpha;
+    F32 alphaf;
+    U8 alphau8;
     S32 i;
-    U32 nvert;
-    U8 cr;
-    U8 cg;
-    U8 cb;
-    S32 last;
+    U32 verts;
+    S32 lastPoint;
 
     xVec3 up;
     xVec3 dir;
@@ -850,25 +819,25 @@ void RenderLightning(zLightning* l)
     {
         if (l->flags & 0x1000)
         {
-            fade = l->color.a;
+            alphaf = l->color.a;
         }
         else
         {
-            fade = l->time_left / l->time_total;
-            fade *= l->color.a;
+            alphaf = l->time_left / l->time_total;
+            alphaf *= l->color.a;
         }
 
-        alpha = 0.5f + fade;
-        nvert = 2;
+        alphau8 = 0.5f + alphaf;
+        verts = 2;
 
         if (l->flags & 0x200)
         {
-            last = l->legacy.total_points;
+            lastPoint = l->legacy.total_points;
             xVec3Init(&up, 0.0f, 1.0f, 0.0f);
         }
         else
         {
-            last = l->legacy.total_points - 1;
+            lastPoint = l->legacy.total_points - 1;
             xVec3Copy(&up, &cam->at);
             xVec3Sub(&tmp, &l->legacy.point[1], &l->legacy.point[0]);
             xVec3AddScaled(&tmp, &cam->at,
@@ -886,15 +855,12 @@ void RenderLightning(zLightning* l)
 
         RwIm3DVertexSetPos(&sStripVert[0], pt1.x, pt1.y, pt1.z);
         RwIm3DVertexSetUV(&sStripVert[0], 0.0f, 0.0f);
-        cr = l->color.r;
-        cg = l->color.g;
-        cb = l->color.b;
-        RwIm3DVertexSetRGBA(&sStripVert[0], cr, cg, cb, alpha);
+        RwIm3DVertexSetRGBA(&sStripVert[0], l->color.r, l->color.g, l->color.b, alphau8);
         RwIm3DVertexSetPos(&sStripVert[1], pt2.x, pt2.y, pt2.z);
         RwIm3DVertexSetUV(&sStripVert[1], 0.0f, 1.0f);
-        RwIm3DVertexSetRGBA(&sStripVert[1], cr, cg, cb, alpha);
+        RwIm3DVertexSetRGBA(&sStripVert[1], l->color.r, l->color.g, l->color.b, alphau8);
 
-        for (i = 1; i < last; i++)
+        for (i = 1; i < lastPoint; i++)
         {
             if (!(l->flags & 0x200))
             {
@@ -917,126 +883,114 @@ void RenderLightning(zLightning* l)
             xVec3Copy(&pt2, &l->legacy.point[i]);
             xVec3AddScaled(&pt2, &up, -l->legacy.thickness[i]);
 
-            S32 flip = xVec3Dot(&lastdir, &dir) < 0.0f;
+            S32 backwards = xVec3Dot(&lastdir, &dir) < 0.0f;
 
-            if (flip)
+            if (backwards)
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt2.x, pt2.y, pt2.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt2.x, pt2.y, pt2.z);
             }
             else
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt1.x, pt1.y, pt1.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt1.x, pt1.y, pt1.z);
             }
 
             if (i & 1)
             {
-                sStripVert[nvert].u = 1.0f;
+                sStripVert[verts].u = 1.0f;
             }
             else
             {
-                sStripVert[nvert].u = 0.0f;
+                sStripVert[verts].u = 0.0f;
             }
 
-            sStripVert[nvert].v = 0.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
+            sStripVert[verts].v = 0.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
 
-            nvert++;
+            verts++;
 
-            if (flip)
+            if (backwards)
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt1.x, pt1.y, pt1.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt1.x, pt1.y, pt1.z);
             }
             else
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt2.x, pt2.y, pt2.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt2.x, pt2.y, pt2.z);
             }
 
             if (i & 1)
             {
-                sStripVert[nvert].u = 1.0f;
+                sStripVert[verts].u = 1.0f;
             }
             else
             {
-                sStripVert[nvert].u = 0.0f;
+                sStripVert[verts].u = 0.0f;
             }
 
-            sStripVert[nvert].v = 1.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
+            sStripVert[verts].v = 1.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
 
-            nvert++;
-            if (nvert >= 128)
+            verts++;
+            if (verts >= 128)
             {
-                nvert = 128;
+                verts = 128;
                 goto render;
             }
         }
 
         if (!(l->flags & 0x200))
         {
-            xVec3Copy(&pt1, &l->legacy.point[last]);
-            xVec3AddScaled(&pt1, &up, l->legacy.thickness[last]);
-            xVec3Copy(&pt2, &l->legacy.point[last]);
-            xVec3AddScaled(&pt2, &up, -l->legacy.thickness[last]);
+            xVec3Copy(&pt1, &l->legacy.point[lastPoint]);
+            xVec3AddScaled(&pt1, &up, l->legacy.thickness[lastPoint]);
+            xVec3Copy(&pt2, &l->legacy.point[lastPoint]);
+            xVec3AddScaled(&pt2, &up, -l->legacy.thickness[lastPoint]);
 
-            RwIm3DVertexSetPos(&sStripVert[nvert], pt1.x, pt1.y, pt1.z);
-
-            if (i & 1)
-            {
-                sStripVert[nvert].u = 1.0f;
-            }
-            else
-            {
-                sStripVert[nvert].u = 0.0f;
-            }
-
-            sStripVert[nvert].v = 0.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
-
-            nvert++;
-
-            RwIm3DVertexSetPos(&sStripVert[nvert], pt2.x, pt2.y, pt2.z);
+            RwIm3DVertexSetPos(&sStripVert[verts], pt1.x, pt1.y, pt1.z);
 
             if (i & 1)
             {
-                sStripVert[nvert].u = 1.0f;
+                sStripVert[verts].u = 1.0f;
             }
             else
             {
-                sStripVert[nvert].u = 0.0f;
+                sStripVert[verts].u = 0.0f;
             }
 
-            sStripVert[nvert].v = 1.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
+            sStripVert[verts].v = 0.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
 
-            nvert++;
+            verts++;
+
+            RwIm3DVertexSetPos(&sStripVert[verts], pt2.x, pt2.y, pt2.z);
+
+            if (i & 1)
+            {
+                sStripVert[verts].u = 1.0f;
+            }
+            else
+            {
+                sStripVert[verts].u = 0.0f;
+            }
+
+            sStripVert[verts].v = 1.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
+
+            verts++;
         }
 
     render:
-        if (RwIm3DTransform(sStripVert, nvert, NULL,
+        if (RwIm3DTransform(sStripVert, verts, NULL,
                             rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
         {
             RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
             RwIm3DEnd();
         }
 
-        fade = l->time_left / l->time_total;
-        fade *= 0.5f * l->color.a;
-        alpha = 0.5f + fade;
+        alphaf = l->time_left / l->time_total;
+        alphaf *= 0.5f * l->color.a;
+        alphau8 = 0.5f + alphaf;
 
-        F32 width = 1.5f + xurand();
-        nvert = 2;
+        F32 thicknessScale = 1.5f + xurand();
+        verts = 2;
 
         if (!(l->flags & 0x200))
         {
@@ -1051,21 +1005,18 @@ void RenderLightning(zLightning* l)
         }
 
         xVec3Copy(&pt1, &l->legacy.point[0]);
-        xVec3AddScaled(&pt1, &up, width * l->legacy.thickness[0]);
+        xVec3AddScaled(&pt1, &up, thicknessScale * l->legacy.thickness[0]);
         xVec3Copy(&pt2, &l->legacy.point[0]);
-        xVec3AddScaled(&pt2, &up, -width * l->legacy.thickness[0]);
+        xVec3AddScaled(&pt2, &up, -thicknessScale * l->legacy.thickness[0]);
 
         RwIm3DVertexSetPos(&sStripVert[0], pt1.x, pt1.y, pt1.z);
         RwIm3DVertexSetUV(&sStripVert[0], 0.0f, 0.0f);
-        cr = l->color.r;
-        cg = l->color.g;
-        cb = l->color.b;
-        RwIm3DVertexSetRGBA(&sStripVert[0], cr, cg, cb, alpha);
+        RwIm3DVertexSetRGBA(&sStripVert[0], l->color.r, l->color.g, l->color.b, alphau8);
         RwIm3DVertexSetPos(&sStripVert[1], pt2.x, pt2.y, pt2.z);
         RwIm3DVertexSetUV(&sStripVert[1], 0.0f, 1.0f);
-        RwIm3DVertexSetRGBA(&sStripVert[1], cr, cg, cb, alpha);
+        RwIm3DVertexSetRGBA(&sStripVert[1], l->color.r, l->color.g, l->color.b, alphau8);
 
-        for (i = 1; i < last; i++)
+        for (i = 1; i < lastPoint; i++)
         {
             if (!(l->flags & 0x200))
             {
@@ -1080,117 +1031,105 @@ void RenderLightning(zLightning* l)
             }
 
             xVec3Copy(&pt1, &l->legacy.point[i]);
-            xVec3AddScaled(&pt1, &up, width * l->legacy.thickness[i]);
+            xVec3AddScaled(&pt1, &up, thicknessScale * l->legacy.thickness[i]);
             xVec3Copy(&pt2, &l->legacy.point[i]);
-            xVec3AddScaled(&pt2, &up, -width * l->legacy.thickness[i]);
+            xVec3AddScaled(&pt2, &up, -thicknessScale * l->legacy.thickness[i]);
 
-            S32 flip = xVec3Dot(&lastdir, &dir) < 0.0f;
+            S32 backwards = xVec3Dot(&lastdir, &dir) < 0.0f;
 
-            if (flip)
+            if (backwards)
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt2.x, pt2.y, pt2.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt2.x, pt2.y, pt2.z);
             }
             else
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt1.x, pt1.y, pt1.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt1.x, pt1.y, pt1.z);
             }
 
             if (i & 1)
             {
-                sStripVert[nvert].u = 1.0f;
+                sStripVert[verts].u = 1.0f;
             }
             else
             {
-                sStripVert[nvert].u = 0.0f;
+                sStripVert[verts].u = 0.0f;
             }
 
-            sStripVert[nvert].v = 0.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
+            sStripVert[verts].v = 0.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
 
-            nvert++;
+            verts++;
 
-            if (flip)
+            if (backwards)
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt1.x, pt1.y, pt1.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt1.x, pt1.y, pt1.z);
             }
             else
             {
-                RwIm3DVertexSetPos(&sStripVert[nvert], pt2.x, pt2.y, pt2.z);
+                RwIm3DVertexSetPos(&sStripVert[verts], pt2.x, pt2.y, pt2.z);
             }
 
             if (i & 1)
             {
-                sStripVert[nvert].u = 1.0f;
+                sStripVert[verts].u = 1.0f;
             }
             else
             {
-                sStripVert[nvert].u = 0.0f;
+                sStripVert[verts].u = 0.0f;
             }
 
-            sStripVert[nvert].v = 1.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
+            sStripVert[verts].v = 1.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
 
-            nvert++;
-            if (nvert >= 128)
+            verts++;
+            if (verts >= 128)
             {
-                nvert = 128;
+                verts = 128;
                 goto render;
             }
         }
 
         if (!(l->flags & 0x200))
         {
-            xVec3Copy(&pt1, &l->legacy.point[last]);
-            xVec3AddScaled(&pt1, &up, width * l->legacy.thickness[last]);
-            xVec3Copy(&pt2, &l->legacy.point[last]);
-            xVec3AddScaled(&pt2, &up, -width * l->legacy.thickness[last]);
+            xVec3Copy(&pt1, &l->legacy.point[lastPoint]);
+            xVec3AddScaled(&pt1, &up, thicknessScale * l->legacy.thickness[lastPoint]);
+            xVec3Copy(&pt2, &l->legacy.point[lastPoint]);
+            xVec3AddScaled(&pt2, &up, -thicknessScale * l->legacy.thickness[lastPoint]);
 
-            RwIm3DVertexSetPos(&sStripVert[nvert], pt1.x, pt1.y, pt1.z);
-
-            if (i & 1)
-            {
-                sStripVert[nvert].u = 1.0f;
-            }
-            else
-            {
-                sStripVert[nvert].u = 0.0f;
-            }
-
-            sStripVert[nvert].v = 0.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
-
-            nvert++;
-
-            RwIm3DVertexSetPos(&sStripVert[nvert], pt2.x, pt2.y, pt2.z);
+            RwIm3DVertexSetPos(&sStripVert[verts], pt1.x, pt1.y, pt1.z);
 
             if (i & 1)
             {
-                sStripVert[nvert].u = 1.0f;
+                sStripVert[verts].u = 1.0f;
             }
             else
             {
-                sStripVert[nvert].u = 0.0f;
+                sStripVert[verts].u = 0.0f;
             }
 
-            sStripVert[nvert].v = 1.0f;
-            cr = l->color.r;
-            cg = l->color.g;
-            cb = l->color.b;
-            RwIm3DVertexSetRGBA(&sStripVert[nvert], cr, cg, cb, alpha);
+            sStripVert[verts].v = 0.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
 
-            nvert++;
+            verts++;
+
+            RwIm3DVertexSetPos(&sStripVert[verts], pt2.x, pt2.y, pt2.z);
+
+            if (i & 1)
+            {
+                sStripVert[verts].u = 1.0f;
+            }
+            else
+            {
+                sStripVert[verts].u = 0.0f;
+            }
+
+            sStripVert[verts].v = 1.0f;
+            RwIm3DVertexSetRGBA(&sStripVert[verts], l->color.r, l->color.g, l->color.b, alphau8);
+
+            verts++;
         }
 
-        if (RwIm3DTransform(sStripVert, nvert, NULL,
+        if (RwIm3DTransform(sStripVert, verts, NULL,
                             rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
         {
             RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);

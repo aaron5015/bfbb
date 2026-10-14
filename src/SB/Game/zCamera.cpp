@@ -11,6 +11,15 @@
 #include "xVec3Inlines.h"
 #include "xScrFx.h"
 #include "xstransvc.h"
+#if defined(PS2)
+#include "xpkrsvc_api.h"
+#else
+#include "xpkrsvc.h"
+#endif
+
+// The stripped first common appears in the debug symbols. It prevents mwld
+// from inflating the first camera backup to the entire common block.
+char buffer[16];
 
 F32 zcam_overrot_tmr;
 S32 zcam_near;
@@ -100,7 +109,6 @@ extern const xVec3 g_O3;
 void xCameraRotate(xCamera* cam, const xVec3& v, F32 roll, F32 time, F32 accel, F32 decl);
 // Declared in zCameraFly.h, which this TU does not include.
 U32 zCameraFlyProcessStopEvent();
-
 
 namespace
 {
@@ -231,17 +239,16 @@ static void zCameraConversUpdate(xCamera* cam, F32 dt)
     }
     else
     {
-        F32 ease1 = EaseInOut(1.0f - (zcam_tmr / zcam_ttm));
-        F32 ease2 = EaseInOut(1.0f - (zcam_tmr - dt) / zcam_ttm);
-        F32 t = (ease2 - ease1) / (1.0f - ease1);
+        F32 s = EaseInOut(1.0f - (zcam_tmr / zcam_ttm));
+        s = (EaseInOut(1.0f - (zcam_tmr - dt) / zcam_ttm) - s) / (1.0f - s);
 
-        xQuat tOld;
-        xQuat tNew;
-        xQuatFromMat(&tOld, &cam->mat);
-        xQuatSlerp(&tNew, &tOld, &zcam_quat, t);
-        xQuatToMat(&tNew, &cam->mat);
-        xVec3Lerp(&cam->mat.pos, &cam->mat.pos, &zcam_dest->pos, t);
-        zcam_fovcurr = zcam_fovcurr * (1.0f - t) + (zcam_fovdest * t);
+        xQuat a;
+        xQuat c;
+        xQuatFromMat(&a, &cam->mat);
+        xQuatSlerp(&c, &a, &zcam_quat, s);
+        xQuatToMat(&c, &cam->mat);
+        xVec3Lerp(&cam->mat.pos, &cam->mat.pos, &zcam_dest->pos, s);
+        zcam_fovcurr = zcam_fovcurr * (1.0f - s) + (zcam_fovdest * s);
     }
 
     zcam_tmr = zcam_tmr - dt;
@@ -562,8 +569,8 @@ static S32 zCameraRewardUpdate(xCamera* cam, F32 dt)
     return 1;
 }
 
-void zCameraFreeLookSetGoals(xCamera* cam, F32 pitch_s, F32& dgoal, F32& hgoal, F32& pitch_goal,
-                             F32& lktm, F32 dt)
+static void zCameraFreeLookSetGoals(xCamera* cam, F32 pitch_s, F32& dgoal, F32& hgoal,
+                                    F32& pitch_goal, F32& lktm, F32 dt)
 {
     if (zcam_bbounce != 0)
     {
@@ -585,23 +592,14 @@ void zCameraFreeLookSetGoals(xCamera* cam, F32 pitch_s, F32& dgoal, F32& hgoal, 
                             zcam_playervel->y * zcam_playervel->y +
                             zcam_playervel->z * zcam_playervel->z);
 
-            bool lenValid = false;
-            if (zcam_playervel != NULL)
-            {
-                if (len)
-                {
-                    lenValid = true;
-                }
-            }
+            bool lenValid = zcam_playervel && len;
 
             if (lenValid)
             {
-                newPitchGoal =
-                    (cam->mat.at.x * zcam_playervel->x + cam->mat.at.y * zcam_playervel->y +
-                     cam->mat.at.z * zcam_playervel->z) /
-                    len;
-                newPitchGoal = 0.0f < newPitchGoal ? 0.0f : newPitchGoal;
-                newPitchGoal = -newPitchGoal;
+                newPitchGoal = -MIN(0.0f, (cam->mat.at.x * zcam_playervel->x +
+                                           cam->mat.at.y * zcam_playervel->y +
+                                           cam->mat.at.z * zcam_playervel->z) /
+                                              len);
             }
             else
             {
@@ -824,10 +822,8 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     plerp = 5.729579f * (xabs(cam->pitch_cur) - 1.2217306f);
     plerp = CLAMP(plerp, 0.0f, 1.0f);
 
-    dist = xsqrt(SQR(cam->mat.pos.x - cam->tgt_mat->pos.x) +
-                 SQR(cam->mat.pos.z - cam->tgt_mat->pos.z));
-
-    dlerp = 1.6666666f * (1.2f - dist);
+    dlerp = 1.6666666f * (1.2f - xsqrt(SQR(cam->mat.pos.x - cam->tgt_mat->pos.x) +
+                                       SQR(cam->mat.pos.z - cam->tgt_mat->pos.z)));
     dlerp = CLAMP(dlerp, 0.0f, 1.0f);
 
     vertical_lerp = MAX(dlerp, plerp);
@@ -900,10 +896,9 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
     if (input_enabled && wall_jump_enabled == WJVS_DISABLED)
     {
-        S8 x = globals.pad0->analog2.x;
-
-        if (x > 32)
+        if (globals.pad0->analog2.x > 32)
         {
+            S8 x = globals.pad0->analog2.x;
             F32 dp = (F32)(MAX(32, MIN(x, 110)) - 32);
             dp = 0.016666668f * (dp * zcam_pad_pyaw_scale);
 
@@ -927,8 +922,9 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
             zcam_overrot_tmr = -zcam_overrot_tmanual;
         }
-        else if (x < -32)
+        else if (globals.pad0->analog2.x < -32)
         {
+            S8 x = globals.pad0->analog2.x;
             F32 dp = (F32)(MAX(-110, MIN(x, -32)) + 32);
             dp = 0.016666668f * (dp * zcam_pad_pyaw_scale);
 
@@ -958,10 +954,9 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
     if (input_enabled && wall_jump_enabled == WJVS_DISABLED && zcam_highbounce == 0)
     {
-        S8 y = globals.pad0->analog2.y;
-
-        if (y > 32)
+        if (globals.pad0->analog2.y > 32)
         {
+            S8 y = globals.pad0->analog2.y;
             F32 dp = (F32)(MAX(32, MIN(y, 110)) - 32);
             pitch_s = 0.016666668f * (dp * zcam_pad_pitch_scale);
 
@@ -972,8 +967,9 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
             zcam_overrot_tmr = -zcam_overrot_tmanual;
         }
-        else if (y < -32)
+        else if (globals.pad0->analog2.y < -32)
         {
+            S8 y = globals.pad0->analog2.y;
             F32 dp = (F32)(MAX(-110, MIN(y, -32)) + 32);
             pitch_s = 0.016666668f * (dp * zcam_pad_pitch_scale);
 
@@ -988,10 +984,8 @@ void zCameraUpdate(xCamera* cam, F32 dt)
 
     if (dt > 1e-5f && cam->tgt_mat != NULL && cam->tgt_omat != NULL && vertical_lerp < 0.9999f)
     {
-        F32 velx =
-            (cam->tgt_mat->pos.x - cam->tgt_omat->pos.x - tran_accum.x) / dt;
-        F32 velz =
-            (cam->tgt_mat->pos.z - cam->tgt_omat->pos.z - tran_accum.z) / dt;
+        F32 velx = (cam->tgt_mat->pos.x - cam->tgt_omat->pos.x - tran_accum.x) / dt;
+        F32 velz = (cam->tgt_mat->pos.z - cam->tgt_omat->pos.z - tran_accum.z) / dt;
         F32 camx = cam->tgt_mat->pos.x - cam->mat.pos.x;
         F32 camz = cam->tgt_mat->pos.z - cam->mat.pos.z;
         F32 cammag = xsqrt(SQR(camx) + SQR(camz));
@@ -1016,8 +1010,7 @@ void zCameraUpdate(xCamera* cam, F32 dt)
             }
         }
 
-        if (zcam_overrot_tmr > zcam_overrot_tstart && cammag > 1.2f &&
-            velmag > zcam_overrot_velmin)
+        if (zcam_overrot_tmr > zcam_overrot_tstart && cammag > 1.2f && velmag > zcam_overrot_velmin)
         {
             camz /= cammag;
             velz /= velmag;
@@ -1361,24 +1354,16 @@ void zCameraMinTargetHeightClear()
     zcam_mintgtheight = -1.0e38f;
 }
 
-F32 xVec3Dist2(const xVec3* vecA, const xVec3* vecB)
-{
-    float dx = vecA->x - vecB->x;
-    float dy = vecA->y - vecB->y;
-    float dz = vecA->z - vecB->z;
-    return dx * dx + dy * dy + dz * dz;
-}
-
 U32 zCamera_FlyOnly()
 {
     switch (globals.sceneCur->sceneID)
     {
-    case 'PG12':
-    case 'KF05':
-    case 'DB02':
     case 'SM02':
     case 'SM03':
     case 'SM04':
+    case 'DB02':
+    case 'KF05':
+    case 'PG12':
         return 1;
     default:
         return 0;

@@ -1,4 +1,5 @@
 #include "xHudMeter.h"
+#include "xSndQueue.h"
 
 #include <types.h>
 
@@ -8,22 +9,6 @@
 
 #include <math.h>
 
-// NOTE: these two belong in headers (std::powf in <math.h>, xpow in
-// xMathInlines.h). They are inline, so the compiler emits a weak out-of-line
-// copy into every translation unit that calls them.
-namespace std
-{
-    extern inline float powf(float x, float y)
-    {
-        return ::pow(x, y);
-    }
-}
-
-inline F32 xpow(F32 x, F32 y)
-{
-    return std::powf(x, y);
-}
-
 namespace xhud
 {
     namespace
@@ -32,15 +17,19 @@ namespace xhud
         {
         }
     } // namespace
-
-    meter_widget::meter_widget(const meter_asset& asset)
-        : widget((xhud::asset&)asset), res((xhud::meter_asset&)asset), value(asset.start_value),
-          min_value(asset.min_value), max_value(asset.max_value), end_value(asset.start_value),
-          value_vel(0.0f), ping_delay(10.0f)
-    {
-        add_global_tweaks();
-    }
 } // namespace xhud
+
+// Layout-only references reproduce inline groups left by stripped code.
+// The original stripped routines are unknown; these stubs do not enter the DOL.
+void __deadstripped_xHudMeter_queue()
+{
+    sound_queue<4> queue;
+}
+
+F32 __deadstripped_xHudMeter_power(F32 value)
+{
+    return xpow(value, value);
+}
 
 void xhud::meter_widget::set_value(F32 v)
 {
@@ -108,6 +97,14 @@ void xhud::meter_widget::set_value_immediate(F32 v)
     value_vel = 0.0f;
 }
 
+xhud::meter_widget::meter_widget(const meter_asset& asset)
+    : widget((xhud::asset&)asset), res((xhud::meter_asset&)asset), value(asset.start_value),
+      min_value(asset.min_value), max_value(asset.max_value), end_value(asset.start_value),
+      value_vel(0.0f), ping_delay(10.0f)
+{
+    add_global_tweaks();
+}
+
 void xhud::meter_widget::destruct()
 {
     xhud::widget::destruct();
@@ -115,21 +112,14 @@ void xhud::meter_widget::destruct()
 
 U32 xhud::meter_widget::type() const
 {
-    static U32 myid = xStrHash(res.type_name());
+    static U32 myid = xStrHash(meter_asset::type_name());
 
     return myid;
 }
 
 bool xhud::meter_widget::is(U32 id) const
 {
-    bool isTheWidget = false;
-
-    if (id == xhud::meter_widget::type() || xhud::widget::is(id))
-    {
-        isTheWidget = true;
-    }
-
-    return isTheWidget;
+    return id == xhud::meter_widget::type() || xhud::widget::is(id);
 }
 
 void xhud::meter_widget::updater(F32 dt)
@@ -162,7 +152,8 @@ void xhud::meter_widget::updater(F32 dt)
 
             pitch = -4.0f * this->pitch;
             pitch = range_limit<F32>(pitch, -10.0f, 6.5f);
-            min_ping_time = 0.05f * xpow(0.5f, 0.083333336f * pitch);
+            min_ping_time = xpow(0.5f, 0.083333336f * pitch);
+            min_ping_time = 0.05f * min_ping_time;
 
             if ((S32)value != (S32)old_value && res.sound.decrement != 0 &&
                 ping_delay > min_ping_time)
@@ -181,7 +172,8 @@ void xhud::meter_widget::updater(F32 dt)
 
             pitch = 2.0f * this->pitch;
             pitch = range_limit<F32>(pitch, -10.0f, 6.5f);
-            min_ping_time = 0.05f * xpow(0.5f, 0.083333336f * pitch);
+            min_ping_time = xpow(0.5f, 0.083333336f * pitch);
+            min_ping_time = 0.05f * min_ping_time;
 
             if ((S32)value != (S32)old_value && res.sound.increment != 0 &&
                 ping_delay > min_ping_time)
@@ -191,37 +183,4 @@ void xhud::meter_widget::updater(F32 dt)
             }
         }
     }
-}
-
-// NOTE: these belong in xSnd.h. They are template members, so the compiler
-// emits a weak out-of-line copy into every translation unit that instantiates
-// them.
-template <S32 N>
-void sound_queue<N>::play(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, U32 parentID,
-                          sound_category snd_category)
-{
-    U32 assetID = xSndPlay(id, vol, pitch, priority, flags, parentID, snd_category, 0.0f);
-
-    push(assetID);
-}
-
-template <S32 N> void sound_queue<N>::push(U32 id)
-{
-    _playing[tail] = id;
-
-    S32 h = head;
-    S32 t = tail + 1;
-
-    if (t <= h)
-    {
-        t += (N + 1);
-    }
-
-    if (t - h > N)
-    {
-        xSndStop(_playing[h]);
-        head = (h + 1) % (N + 1);
-    }
-
-    tail = t % (N + 1);
 }

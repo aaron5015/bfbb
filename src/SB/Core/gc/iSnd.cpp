@@ -11,6 +11,7 @@
 #include "xSnd.h"
 #include "xString.h"
 #include "xstransvc.h"
+#include "xpkrsvc.h"
 #include "xMath.h"
 
 #include <dolphin/ar.h>
@@ -354,6 +355,12 @@ static void iSndMyAXFree(AXVPB**);
 
 static void fcb()
 {
+    U32 source;
+    U32 flags_bit_12;
+    U32 flags_bit_10;
+    U32 flags_bit_13;
+    U32 flags_bit_9;
+
     if (!soundInited && iTRCDisk::IsDiskIDed())
     {
         return;
@@ -409,11 +416,11 @@ static void fcb()
         if ((orig_flags & 0x20) && (orig_flags & 0x4000))
         {
             streams[i].vinf.flags &= ~0x20;
-            dest = streams[i].dest_a;
-            dest *= 2;
-            dest += streams[i].hdr.num_nibbles & 0xFFFF;
+            U32 end = streams[i].dest_a;
+            end *= 2;
+            end += streams[i].hdr.num_nibbles & 0xFFFF;
             AXSetVoiceLoopAddr(streams[i].vinf.voice, zero_point);
-            AXSetVoiceEndAddr(streams[i].vinf.voice, dest - 1);
+            AXSetVoiceEndAddr(streams[i].vinf.voice, end - 1);
             AXSetVoiceLoop(streams[i].vinf.voice, 0);
             AXSetVoiceType(streams[i].vinf.voice, 0);
             streams[i].vinf.flags |= 0x40;
@@ -503,7 +510,6 @@ static void fcb()
         }
         if ((orig_flags & 0x800) || (orig_flags & 0x4000000))
         {
-            U32 source;
             U32 length;
             if (orig_flags & 0x800)
             {
@@ -520,10 +526,6 @@ static void fcb()
                 source = streams[i].source_b;
             }
 
-            U32 flags_bit_12;
-            U32 flags_bit_10;
-            U32 flags_bit_13;
-            U32 flags_bit_9;
             flags_bit_9 = orig_flags & 0x200;
             flags_bit_12 = orig_flags & 0x1000;
             flags_bit_10 = orig_flags & 0x400;
@@ -558,32 +560,33 @@ static void fcb()
         need_update = TRUE;
     }
 
-    for (i = 0; i < 58; i++)
+    for (S32 j = 0; j < 58; j++)
     {
-        if (voices[i].voice == NULL || (voices[i].flags & 0x1))
+        if (voices[j].voice == NULL || (voices[j].flags & 0x1))
         {
             continue;
         }
 
-        if (voices[i].flags & 0x20000)
+        if (voices[j].flags & 0x20000)
         {
-            iSndMyAXFree(&voices[i].voice);
-            voices[i].flags = NULL;
-            voices[i].aid = 0;
+            iSndMyAXFree(&voices[j].voice);
+            voices[j].flags = NULL;
+            voices[j].aid = 0;
         }
         else
         {
-            U32 addr = (voices[i].voice->pb.addr.currentAddressHi << 16) +
-                       voices[i].voice->pb.addr.currentAddressLo;
-            if (voices[i].flags & 0x4 && !voices[i].voice->pb.addr.loopFlag && addr >= zero_point &&
+            U32 addr = voices[j].voice->pb.addr.currentAddressHi;
+            addr <<= 16;
+            addr += voices[j].voice->pb.addr.currentAddressLo;
+            if (voices[j].flags & 0x4 && !voices[j].voice->pb.addr.loopFlag && addr >= zero_point &&
                 addr < zero_end)
             {
-                voices[i].flags &= ~0x4;
-                AXSetVoiceState(voices[i].voice, 0);
-                MIXReleaseChannel(voices[i].voice);
-                iSndMyAXFree(&voices[i].voice);
-                voices[i].flags = NULL;
-                voices[i].aid = 0;
+                voices[j].flags &= ~0x4;
+                AXSetVoiceState(voices[j].voice, 0);
+                MIXReleaseChannel(voices[j].voice);
+                iSndMyAXFree(&voices[j].voice);
+                voices[j].flags = NULL;
+                voices[j].aid = 0;
             }
         }
     }
@@ -649,7 +652,6 @@ void iSndInit()
         ;
 
     char str_buf[0x20];
-    U32 offset = 0;
 
     for (i = 0; i < 6; i++)
     {
@@ -657,8 +659,7 @@ void iSndInit()
         sprintf(str_buf, "streaming channel %d\n", i);
         streams[i].dest_a = buf;
         streams[i].dest_b = buf + 0x4000;
-        streams[i].source_a = (u32)stream_buffer + offset;
-        offset += 0x4000;
+        streams[i].source_a = (u32)stream_buffer + i * 0x4000;
     }
     AXRegisterCallback(fcb);
 }
@@ -775,10 +776,9 @@ iSndFileInfo* iSndLookup(U32 id)
         }
 
         sndhdr* entry = info->entry;
-        U32 n = info->num_sfx;
         U32 j = 0;
 
-        for (; j < n; j++)
+        for (; j < info->num_sfx; j++)
         {
             if (id == entry[j].assetID)
             {
@@ -793,8 +793,7 @@ iSndFileInfo* iSndLookup(U32 id)
             }
         }
 
-        n = info->num_streams + n;
-        for (; j < n; j++)
+        for (; j < info->num_streams + info->num_sfx; j++)
         {
             if (id == entry[j].assetID)
             {
@@ -818,8 +817,7 @@ iSndFileInfo* iSndLookup(U32 id)
             }
         }
 
-        n = info->num_cutscene + n;
-        for (; j < n; j++)
+        for (; j < info->num_cutscene + (info->num_streams + info->num_sfx); j++)
         {
             if (id == entry[j].assetID)
             {
@@ -995,8 +993,9 @@ void iSndCalcVol3d(xSndVoiceInfo* vp, vinfo* info)
         volscale = std::sqrtf((fadeRange - (dist2 - vp->innerRadius2)) / fadeRange);
     }
 
+    volscale *= vp->vol * gSnd.categoryVolFader[vp->category];
     S32 ipan = (S32)(64.0f * pan) + 0x40;
-    S32 vol = iVolFromX(volscale * (vp->vol * gSnd.categoryVolFader[vp->category]));
+    S32 vol = iVolFromX(volscale);
 
     if (ipan < 0)
     {
@@ -1141,8 +1140,13 @@ void iSndUpdate()
 
     for (S32 i = 0; i < 64; i++)
     {
-        xSndVoiceInfo* vp = &gSnd.voice[i];
+        bool done;
+        U32 f;
+        xSndVoiceInfo* vp;
+        U32 addr;
         U8 active;
+
+        vp = &gSnd.voice[i];
 
         if (i < 6)
         {
@@ -1150,19 +1154,16 @@ void iSndUpdate()
         }
         else
         {
-            U32 addr = 0;
+            addr = 0;
             if (voices[i - 6].voice != NULL)
             {
-                addr = (voices[i - 6].voice->pb.addr.currentAddressHi << 16) +
-                       voices[i - 6].voice->pb.addr.currentAddressLo;
+                addr = voices[i - 6].voice->pb.addr.currentAddressHi;
+                addr <<= 16;
+                addr += voices[i - 6].voice->pb.addr.currentAddressLo;
             }
 
-            U32 f = voices[i - 6].flags;
-            U8 done = 0;
-            if ((f & 0x4) && !(f & 0x8) && addr >= zero_point && addr < zero_end)
-            {
-                done = 1;
-            }
+            f = voices[i - 6].flags;
+            done = (f & 0x4) && !(f & 0x8) && addr >= zero_point && addr < zero_end;
 
             active = done | (voices[i - 6].voice != NULL);
         }
@@ -1338,8 +1339,8 @@ S32 iSndPlayMemStream(xSndVoiceInfo* vp)
     F32 ratio = std::powf(2.0f, vp->pitch / 12.0f);
     F32 srcRatio = (s->hdr.sample_rate * ratio) / 32000.0f;
 
-    s->vinf.voice->pb.src.ratioHi = (S32)srcRatio;
-    s->vinf.voice->pb.src.ratioLo = (S32)(65536.0f * srcRatio);
+    s->vinf.voice->pb.src.ratioHi = srcRatio;
+    s->vinf.voice->pb.src.ratioLo = 65536.0f * srcRatio;
     s->vinf.voice->sync |= 0x80000000;
 
     streams[i].vinf.x14 = 0x7fffffff;
@@ -1409,8 +1410,8 @@ S32 iSndPlayStream(xSndVoiceInfo* vp)
         F32 ratio = std::powf(2.0f, vp->pitch / 12.0f);
         F32 srcRatio = (s->hdr.sample_rate * ratio) / 32000.0f;
 
-        s->vinf.voice->pb.src.ratioHi = (S32)srcRatio;
-        s->vinf.voice->pb.src.ratioLo = (S32)(65536.0f * srcRatio);
+        s->vinf.voice->pb.src.ratioHi = srcRatio;
+        s->vinf.voice->pb.src.ratioLo = 65536.0f * srcRatio;
         s->vinf.voice->sync |= 0x80000000;
 
         streams[i].vinf.x14 = 0x7fffffff;
@@ -1441,21 +1442,26 @@ S32 iSndPlaySound(xSndVoiceInfo* vp)
         sound_stream = 0;
     }
 
-    U32 prio = vp->priority;
-    S32 i = vp - gSnd.voice;
+    vinfo* v;
+    S32 i;
+    U32 prio;
+    S32 j;
+
+    prio = vp->priority;
+    i = vp - gSnd.voice;
 
     if (prio >= 0xff)
     {
         prio = 0xff;
     }
 
-    S32 j = i - 6;
-    vinfo* v = &voices[j];
+    j = i - 6;
+    v = &voices[j];
     prio >>= 3;
 
     if (v->voice == NULL)
     {
-        v->aid = vp->assetID;
+        voices[j].aid = vp->assetID;
         v->xc = 1000.0f * snd.hdr.num_samples;
         v->xc = v->xc / snd.hdr.sample_rate;
 

@@ -1,7 +1,13 @@
 #ifndef XDEBUG_H
 #define XDEBUG_H
 
+#if defined(PS2)
+#include "xString.h"
+struct xVec3;
+#else
 #include "xFont.h"
+#endif
+#include "xDebugTweak.h"
 
 #include <types.h>
 
@@ -97,10 +103,6 @@ void xDebugUpdate();
 void xDebugExit();
 void xDebugTimestampScreen();
 
-inline void xDebugRemoveTweak(const char*)
-{
-}
-
 void xDebugUpdate();
 
 inline void xDebugAddTweak(const char*, F32*, F32, F32, const tweak_callback*, void*, U32)
@@ -115,6 +117,10 @@ inline void xDebugAddTweak(const char*, U8*, U8, U8, const tweak_callback*, void
 {
 }
 
+inline void xDebugAddTweak(const char*, U32*, U32, U32, const tweak_callback*, void*, U32)
+{
+}
+
 inline void xDebugAddTweak(const char*, const char*, const tweak_callback*, void*, U32)
 {
 }
@@ -126,6 +132,10 @@ inline void xDebugAddFlagTweak(const char*, U32*, U32, const tweak_callback*, vo
 
 inline void xDebugAddSelectTweak(const char*, U32*, const char**, const U32*, U32, const tweak_callback*,
                           void*, U32)
+{
+}
+
+inline void xDebugAddTweak(const char*, xVec3*, const tweak_callback*, void*, U32)
 {
 }
 

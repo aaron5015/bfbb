@@ -30,15 +30,43 @@
 #include "xSkyDome.h"
 #include "xTRC.h"
 #include "xUtil.h"
+#include "xstransvc.h"
 
 #include <types.h>
 
 #include <stdio.h>
+#if defined(PS2)
+#include <rwim2d.h>
+#include <rwim3d.h>
+#endif
 
-const static basic_rect<F32> screen_bounds =
+#if defined(VERSION_SLES_51968) || defined(VERSION_SLES_51970)
+enum
 {
-    0.0f, 0.0f, 1.0f, 1.0f
+    GAME_SCREEN_HEIGHT = 512,
+    GAME_VBLANKS_PER_SECOND = 50
 };
+#elif defined(PS2)
+enum
+{
+    GAME_SCREEN_HEIGHT = 448,
+    GAME_VBLANKS_PER_SECOND = 60
+};
+#elif defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+enum
+{
+    GAME_SCREEN_HEIGHT = 528,
+    GAME_VBLANKS_PER_SECOND = 50
+};
+#else
+enum
+{
+    GAME_SCREEN_HEIGHT = 480,
+    GAME_VBLANKS_PER_SECOND = 60
+};
+#endif
+
+const static basic_rect<F32> screen_bounds = { 0.0f, 0.0f, 1.0f, 1.0f };
 
 // Retail puts this at the head of zGame.cpp's .sbss (0x803CB7A0), not in
 // zMain.o, which is where our source had it.
@@ -63,6 +91,8 @@ extern _tagTRCPadInfo gTrcPad[4];
 // .sbss, so its definition sits near the bottom of the original file even
 // though the first function already writes it.
 extern eGameWhereAmI gGameWhereAmI;
+// The debug-recorded common buffer precedes the portal common objects.
+char buffer[16];
 xPortalAsset dummyPortalAsset;
 _zPortal dummyPortal;
 U32 gSoak;
@@ -75,9 +105,8 @@ void xCameraFXBegin(xCamera* cam);
 void xCameraFXUpdate(xCamera* cam, F32 dt);
 void xCameraFXEnd(xCamera* cam);
 
-extern "C"
-{
-    void RwGameCubeSetMinRetraceCount(RwUInt8 count);
+extern "C" {
+void RwGameCubeSetMinRetraceCount(RwUInt8 count);
 }
 
 // The target's .sdata opens gPendingPlayer, startPressed, black, clear,
@@ -90,65 +119,12 @@ U32 startPressed = -1;
 iColor_tag black = { 0x00, 0x00, 0x00, 0xFF };
 iColor_tag clear = { 0x00, 0x00, 0x00, 0x00 };
 
-char* soaklevels_gameorder[] =
-{
-	"HB02",
-    "HB01",
-    "HB03",
-    "HB04",
-    "JF01",
-    "JF02",
-    "JF03",
-    "JF04",
-    "JF01",
-    "BB01",
-    "BB02",
-    "BB03",
-    "BB04",
-    "GL01",
-    "GL02",
-    "GL03",
-    "B101",
-    "HB01",
-    "HB05",
-    "HB06",
-    "HB09",
-    "BC01",
-    "BC02",
-    "BC03",
-    "BC04",
-    "BC05",
-    "HB09",
-    "RB01",
-    "RB02",
-    "RB03",
-    "HB09",
-    "SM01",
-    "SM02",
-    "SM03",
-    "SM04",
-    "B201",
-    "HB01",
-    "DB01",
-    "DB02",
-    "DB03",
-    "DB04",
-    "DB06",
-    "KF01",
-    "KF02",
-    "KF04",
-    "KF05",
-    "GY01",
-    "GY02",
-    "GY03",
-    "GY04",
-    "HB07",
-    "HB08",
-    "B302",
-    "B303",
-    "HB10",
-    "PG12",
-	NULL
+char* soaklevels_gameorder[] = {
+    "HB02", "HB01", "HB03", "HB04", "JF01", "JF02", "JF03", "JF04", "JF01", "BB01", "BB02", "BB03",
+    "BB04", "GL01", "GL02", "GL03", "B101", "HB01", "HB05", "HB06", "HB09", "BC01", "BC02", "BC03",
+    "BC04", "BC05", "HB09", "RB01", "RB02", "RB03", "HB09", "SM01", "SM02", "SM03", "SM04", "B201",
+    "HB01", "DB01", "DB02", "DB03", "DB04", "DB06", "KF01", "KF02", "KF04", "KF05", "GY01", "GY02",
+    "GY03", "GY04", "HB07", "HB08", "B302", "B303", "HB10", "PG12", NULL
 };
 
 char** soaklevels = soaklevels_gameorder;
@@ -266,8 +242,7 @@ static U32 PickNextSoak()
     static S32 soakidx = 0;
     static S32 soakcnt = 0;
 
-    static enum en_SOAK_DIR
-    {
+    static enum en_SOAK_DIR {
         SOAK_FOR,
         SOAK_BACK,
         SOAK_RAND,
@@ -293,65 +268,65 @@ static U32 PickNextSoak()
 
     switch (soakdir)
     {
-        case SOAK_FOR:
-            name = soaklevels[soakidx];
-            soakidx++;
-            if (*(volatile S32*)(&soakidx) < soakcnt)
-            {
-                break;
-            }
-            if (justwrap != 0)
-            {
-                soakidx = 0;
-            }
-            else
-            {
-                soakidx = soakcnt - 2;
-                soakdir = SOAK_BACK;
-            }
+    case SOAK_FOR:
+        name = soaklevels[soakidx];
+        soakidx++;
+        if (soakidx < soakcnt)
+        {
             break;
-        case SOAK_BACK:
-            name = soaklevels[soakidx];
-            soakidx--;
-            if (*(volatile S32*)(&soakidx) >= 0)
-            {
-                break;
-            }
-            if (justwrap != 0)
-            {
-                soakidx = soakcnt - 1;
-            }
-            else
-            {
-                soakidx = 0;
-                soakdir = SOAK_RAND;
-            }
+        }
+        if (justwrap != 0)
+        {
+            soakidx = 0;
+        }
+        else
+        {
+            soakidx = soakcnt - 2;
+            soakdir = SOAK_BACK;
+        }
+        break;
+    case SOAK_BACK:
+        name = soaklevels[soakidx];
+        soakidx--;
+        if (soakidx >= 0)
+        {
             break;
-        // SOAK_RAND shares the default block.  That is what produces the target's
-        // duplicated `b default` in the dispatch: CW builds the {0,1,2} search
-        // tree, finds the >=2 subtree is just `b default`, retargets the `bge`
-        // straight at default and leaves the orphaned `b` behind.  Without this
-        // label the phantom branch cannot be reproduced (99.363% -> 100%).
-        case SOAK_RAND:
-        default:
-            if (globals.sceneCur != NULL)
-            {
-                tag = globals.sceneCur->sceneID;
-            }
-            else
-            {
-                tag = 0;
-            }
+        }
+        if (justwrap != 0)
+        {
+            soakidx = soakcnt - 1;
+        }
+        else
+        {
+            soakidx = 0;
+            soakdir = SOAK_RAND;
+        }
+        break;
+    // SOAK_RAND shares the default block.  That is what produces the target's
+    // duplicated `b default` in the dispatch: CW builds the {0,1,2} search
+    // tree, finds the >=2 subtree is just `b default`, retargets the `bge`
+    // straight at default and leaves the orphaned `b` behind.  Without this
+    // label the phantom branch cannot be reproduced (99.363% -> 100%).
+    case SOAK_RAND:
+    default:
+        if (globals.sceneCur != NULL)
+        {
+            tag = globals.sceneCur->sceneID;
+        }
+        else
+        {
+            tag = 0;
+        }
 
-            S32 scoobydoobydoo = tag;
+        S32 scoobydoobydoo = tag;
 
-            while (scoobydoobydoo == globals.sceneCur->sceneID)
-            {
-                name = (char *)xUtil_select(soaklevels, soakcnt, 0);
-                scoobydoobydoo = name[0] << 24 | name[1] << 16 | name[2] << 8 | name[3];
-            }
+        while (scoobydoobydoo == globals.sceneCur->sceneID)
+        {
+            name = (char*)xUtil_select(soaklevels, soakcnt, 0);
+            scoobydoobydoo = name[0] << 24 | name[1] << 16 | name[2] << 8 | name[3];
+        }
 
-            break;
+        break;
     }
 
     char useme[5] = {};
@@ -388,7 +363,7 @@ void zGameInit(U32 theSceneID)
     g_hiphopReloadHIP = 0;
     g_hiphopForcePortal = 0;
     gGameWhereAmI = eGameWhere_InitCamera;
-    xCameraInit(&globals.camera, 640, 480);
+    xCameraInit(&globals.camera, 640, GAME_SCREEN_HEIGHT);
     zCameraReset(&globals.camera);
     xCameraSetScene(&globals.camera, globals.sceneCur);
     gGameWhereAmI = eGameWhere_InitMusic;
@@ -431,7 +406,7 @@ void zGameSetup()
     gGameWhereAmI = eGameWhere_SetupScene;
     zSceneSetup();
     gGameWhereAmI = eGameWhere_SetupZFX;
-	RpWorld* world = globals.sceneCur->env->geom->world;
+    RpWorld* world = globals.sceneCur->env->geom->world;
     xModel_SceneEnter(world);
     zFX_SceneEnter(world);
     gGameWhereAmI = eGameWhere_SetupPlayer;
@@ -479,7 +454,9 @@ static S32 gloop_ct;
 static F32 gloop_time_secs;
 static F32 gwait_time_secs;
 static F32 gloop_net_time_secs;
+#if !defined(PS2)
 U8 sHackSmoothedUpdate;
+#endif
 
 static S32 zGameLoopContinue();
 static void zGameUpdateMode();
@@ -499,7 +476,7 @@ void zGameLoop()
     gGameWhereAmI = eGameWhere_LoopStart;
     zGameStateSwitch(eGameState_Play);
 
-    iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / 60.0f);
+    iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / (F32)GAME_VBLANKS_PER_SECOND);
     sTimeLast = iTimeGet() - bus;
 
     gGameWhereAmI = eGameWhere_CutsceneFinish;
@@ -518,6 +495,9 @@ void zGameLoop()
         sTimeCurrent = iTimeGet();
         sTimeElapsed = iTimeDiffSec(sTimeLast, sTimeCurrent);
 
+#if !defined(PS2)
+        // GameCube-only frame smoothing; PS2 retail (and its DWARF) has neither the
+        // flag nor this block.
         if (sHackSmoothedUpdate)
         {
             if (sTimeElapsed > 0.1f)
@@ -548,8 +528,10 @@ void zGameLoop()
             }
             total += sPreviousFrames[i];
 
-            sTimeElapsed = total / sAverageRange;
+            total /= sAverageRange;
+            sTimeElapsed = total;
         }
+#endif
 
         if (globals.QuarterSpeed)
         {
@@ -558,7 +540,7 @@ void zGameLoop()
 
         if (sTimeElapsed < 1e-5f)
         {
-            sTimeElapsed = 1.0f / 60.0f;
+            sTimeElapsed = 1.0f / (F32)GAME_VBLANKS_PER_SECOND;
         }
         else if (sTimeElapsed > 0.1f)
         {
@@ -629,10 +611,12 @@ void zGameLoop()
         xPadNormalizeAnalog(*globals.pad0, globals.player.g.AnalogMin, globals.player.g.AnalogMax);
 
         gGameWhereAmI = eGameWhere_LoopTRCCheck;
+#if !defined(PS2)
         if (iTRCDisk::CheckDVDAndResetState())
         {
             zMusicNotify(7);
         }
+#endif
 
         globals.update_dt = sTimeElapsed;
 
@@ -720,9 +704,8 @@ void zGameLoop()
 
             if ((gTrcPad[0].state != TRC_PadInserted) && (gBusStopIsRunning == 0) &&
                 (oob_state::IsPlayerInControl() ||
-                 (globals.player.ControlOff &
-                  (CONTROL_OWNER_OOB | CONTROL_OWNER_TALK_BOX | CONTROL_OWNER_TAXI |
-                   CONTROL_OWNER_TELEPORT_BOX))) &&
+                 (globals.player.ControlOff & (CONTROL_OWNER_OOB | CONTROL_OWNER_TALK_BOX |
+                                               CONTROL_OWNER_TAXI | CONTROL_OWNER_TELEPORT_BOX))) &&
                 (globals.dontShowPadMessageDuringLoadingOrCutScene == 0))
             {
                 globals.dontShowPadMessageDuringLoadingOrCutScene = 1;
@@ -759,7 +742,8 @@ static S32 zGameLoopContinue()
 {
     if (gGameMode == eGameMode_Game)
     {
-        return gGameState == eGameState_Play || gGameState == eGameState_GameOver || gGameState == eGameState_GameStats;
+        return gGameState == eGameState_Play || gGameState == eGameState_GameOver ||
+               gGameState == eGameState_GameStats;
     }
     else
     {
@@ -826,6 +810,58 @@ void zGamePause()
     }
 }
 
+#if defined(PS2)
+void zGamePauseIfPossible()
+{
+    if (zGameGetOstrich() != eGameOstrich_InScene)
+    {
+        return;
+    }
+
+    if (zMenuRunning())
+    {
+        return;
+    }
+
+    if (zGameModeGet() == eGameMode_Save || zGameModeGet() == eGameMode_Load)
+    {
+        return;
+    }
+
+    if (gBusStopIsRunning)
+    {
+        return;
+    }
+
+    if (!oob_state::IsPlayerInControl())
+    {
+        return;
+    }
+
+    if (globals.sceneCur->sceneID == 'PG12')
+    {
+        return;
+    }
+
+    if (globals.player.ControlOff)
+    {
+        if (globals.player.ControlOff & CONTROL_OWNER_TALK_BOX)
+        {
+            zGameStall();
+        }
+
+        if ((globals.player.ControlOff & CONTROL_OWNER_EVENT) &&
+            globals.sceneCur->sceneID == 'HB10')
+        {
+            zGameStall();
+        }
+        return;
+    }
+
+    zGamePause();
+}
+#endif
+
 void zGameStall()
 {
     if (!zGameIsPaused())
@@ -847,6 +883,39 @@ static void zGame_HackDrawCard(F32 x, F32 y, F32 w, F32 h, RwRaster* rast)
     RwIm2DVertex quad[4];
     F32 screenZ = RwIm2DGetNearScreenZ();
 
+#if defined(PS2)
+    RwIm2DVertexSetScreenX(&quad[0], x);
+    RwIm2DVertexSetScreenY(&quad[0], y);
+    RwIm2DVertexSetScreenZ(&quad[0], screenZ);
+    RwIm2DVertexSetIntRGBA(&quad[0], 255, 255, 255, 255);
+    RwIm2DVertexSetRecipCameraZ(&quad[0], 1.0f / 6.0f);
+    RwIm2DVertexSetU(&quad[0], 0.0f, 1.0f / 6.0f);
+    RwIm2DVertexSetV(&quad[0], 0.0f, 1.0f / 6.0f);
+
+    RwIm2DVertexSetScreenX(&quad[1], x);
+    RwIm2DVertexSetScreenY(&quad[1], y + h);
+    RwIm2DVertexSetScreenZ(&quad[1], screenZ);
+    RwIm2DVertexSetIntRGBA(&quad[1], 255, 255, 255, 255);
+    RwIm2DVertexSetRecipCameraZ(&quad[1], 1.0f / 6.0f);
+    RwIm2DVertexSetU(&quad[1], 0.0f, 1.0f / 6.0f);
+    RwIm2DVertexSetV(&quad[1], 1.0f, 1.0f / 6.0f);
+
+    RwIm2DVertexSetScreenX(&quad[2], x + w);
+    RwIm2DVertexSetScreenY(&quad[2], y);
+    RwIm2DVertexSetScreenZ(&quad[2], screenZ);
+    RwIm2DVertexSetIntRGBA(&quad[2], 255, 255, 255, 255);
+    RwIm2DVertexSetRecipCameraZ(&quad[2], 1.0f / 6.0f);
+    RwIm2DVertexSetU(&quad[2], 1.0f, 1.0f / 6.0f);
+    RwIm2DVertexSetV(&quad[2], 0.0f, 1.0f / 6.0f);
+
+    RwIm2DVertexSetScreenX(&quad[3], x + w);
+    RwIm2DVertexSetScreenY(&quad[3], y + h);
+    RwIm2DVertexSetScreenZ(&quad[3], screenZ);
+    RwIm2DVertexSetIntRGBA(&quad[3], 255, 255, 255, 255);
+    RwIm2DVertexSetRecipCameraZ(&quad[3], 1.0f / 6.0f);
+    RwIm2DVertexSetU(&quad[3], 1.0f, 1.0f / 6.0f);
+    RwIm2DVertexSetV(&quad[3], 1.0f, 1.0f / 6.0f);
+#else
     quad[0].x = x;
     quad[0].y = y;
     quad[0].z = screenZ;
@@ -886,6 +955,7 @@ static void zGame_HackDrawCard(F32 x, F32 y, F32 w, F32 h, RwRaster* rast)
     quad[3].emissiveColor.alpha = 255;
     quad[3].u = 1.0f;
     quad[3].v = 1.0f;
+#endif
 
     RwRenderStateSet(rwRENDERSTATESHADEMODE, (void*)rwSHADEMODEFLAT);
     RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
@@ -901,43 +971,37 @@ static void zGame_HackPostPortalAutoSaveDraw()
 {
     U32 i;
     RwCamera* ccam;
-	RwCamera* cam;
+    RwCamera* cam;
     RwRaster* rast;
     char str[2048];
-    RwTexture* tex; 
+    RwTexture* tex;
     RwRGBA bg = {};
-	
+
     cam = (RwCamera*)RwEngineInstance->curCamera;
     if (cam != NULL)
     {
         RwCameraEndUpdate(cam);
     }
-	
+
     sprintf(str, "{font=0}{i:MNU4 AUTO SAVE TXT}");
-	
-    ccam = (RwCamera *)iCameraCreate(640, 480, 0);
-	
-    xtextbox tb = xtextbox::create
-	(
-	    xfont::create
-		(
-		    1, NSCREENX(19.0f), NSCREENY(22.0f), 0.0f,
-			xColorFromRGBA(0xFF, 0xE6, 0x00, 0xFF), 
-			screen_bounds
-		),
-		screen_bounds, 0, 0.0f, 0.0f, 0.0f, 0.0f
-	);
-	
+
+    ccam = (RwCamera*)iCameraCreate(640, GAME_SCREEN_HEIGHT, 0);
+
+    xtextbox tb =
+        xtextbox::create(xfont::create(1, NSCREENX(19.0f), NSCREENY(22.0f), 0.0f,
+                                       xColorFromRGBA(0xFF, 0xE6, 0x00, 0xFF), screen_bounds),
+                         screen_bounds, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+
     tb.flags |= 2;
     tb.bounds.assign(0.0f, 0.4125f, 1.0f, 0.25f);
     tb.bounds.contract(0.025f);
     tb.set_text(str);
-    tb.bounds.h  = tb.yextent(true);
+    tb.bounds.h = tb.yextent(true);
     tb.bounds.y = -((tb.bounds.h * 0.5f) - 0.5f);
-	tb.font.clip = tb.bounds;
+    tb.font.clip = tb.bounds;
     tb.font.clip.expand(0.025f);
     F32 yextent = tb.yextent(true);
-	
+
     for (i = 0; i < 2; i++)
     {
         RwCameraClear(ccam, &bg, rwCAMERACLEARZ | rwCAMERACLEARIMAGE);
@@ -951,12 +1015,14 @@ static void zGame_HackPostPortalAutoSaveDraw()
         {
             rast = NULL;
         }
-		
-        zGame_HackDrawCard(0.0f,   0.0f,   320.0f, 240.0f, rast);
-        zGame_HackDrawCard(320.0f, 0.0f,   320.0f, 240.0f, rast);
-        zGame_HackDrawCard(0.0f,   240.0f, 320.0f, 240.0f, rast);
-        zGame_HackDrawCard(320.0f, 240.0f, 320.0f, 240.0f, rast);
-		
+
+        zGame_HackDrawCard(0.0f, 0.0f, 320.0f, (F32)GAME_SCREEN_HEIGHT * 0.5f, rast);
+        zGame_HackDrawCard(320.0f, 0.0f, 320.0f, (F32)GAME_SCREEN_HEIGHT * 0.5f, rast);
+        zGame_HackDrawCard(0.0f, (F32)GAME_SCREEN_HEIGHT * 0.5f, 320.0f,
+                           (F32)GAME_SCREEN_HEIGHT * 0.5f, rast);
+        zGame_HackDrawCard(320.0f, (F32)GAME_SCREEN_HEIGHT * 0.5f, 320.0f,
+                           (F32)GAME_SCREEN_HEIGHT * 0.5f, rast);
+
         tex = (RwTexture*)xSTFindAsset(xStrHash("ui_savinggame"), NULL);
         if (tex == NULL)
         {
@@ -978,7 +1044,7 @@ static void zGame_HackPostPortalAutoSaveDraw()
             render_fill_rect(tb.font.clip, xColorFromRGBA(0x00, 0x00, 0x00, 0xFF));
             tb.render(true);
         }
-		
+
         RwCameraEndUpdate(ccam);
         RwCameraShowRaster(ccam, NULL, 1);
     }
@@ -1012,7 +1078,7 @@ static void zGameUpdateMode()
 
     if ((gSoak != 0) && (gGameState == eGameState_Play) && (globals.cmgr == NULL))
     {
-        soaktime -= (1.0f / 30.0f);
+        soaktime -= (2.0f / (F32)GAME_VBLANKS_PER_SECOND);
         if (soaktime < 0.0f)
         {
             id = xUtil_idtag2string(globals.sceneCur->sceneID, 0);
@@ -1035,16 +1101,16 @@ static void zGameUpdateMode()
         {
             switch (zGameOkToPause())
             {
-                case 0:
-                    xTRCReset();
-                    startPressed = 1;
-                    break;
-                case 1:
-                    zGamePause();
-                    break;
-                case 2:
-                    zGameStall();
-                    break;
+            case 0:
+                xTRCReset();
+                startPressed = 1;
+                break;
+            case 1:
+                zGamePause();
+                break;
+            case 2:
+                zGameStall();
+                break;
             }
         }
         else
@@ -1063,23 +1129,42 @@ static void zGameUpdateMode()
         scene = globals.sceneCur;
         passet = scene->pendingPortal->passet;
 
+#if defined(PS2)
+        // Little-endian asset IDs: compose the scene ID from its bytes, and compare
+        // the stored IDs directly.
+        id = (char*)&passet->sceneID;
+        if (g_hiphopReloadHIP != 0)
+        {
+            nextSceneID = id[0] | (id[1] << 8) | (id[2] << 16) | (id[3] << 24);
+        }
+        else
+        {
+            nextSceneID = (id[0] << 24) | (id[1] << 16) | (id[2] << 8) | id[3];
+        }
+
+        if ((g_hiphopReloadHIP != 0) || (g_hiphopForcePortal != 0) ||
+            (passet->sceneID != scene->sceneID))
+#else
         // c/d used to be crossed over in the two expressions below, which made
         // nextSceneID come out as [+3][+1][+2][+0] - neither the sceneID nor its
         // byteswap.  The target's `or r31, r5, r3` / `or r3, r7, r0` pin it:
         // nextSceneID is the plain big-endian sceneID ([+0][+1][+2][+3]) and the
         // value compared against globals.sceneCur->sceneID is the full byteswap.
-        d = *(char *)((int)&passet->sceneID + 3);
-        c = *(char *)((int)&passet->sceneID + 0);
-        b = *(char *)((int)&passet->sceneID + 2);
-        a = *(char *)((int)&passet->sceneID + 1);
+        d = *(char*)((int)&passet->sceneID + 3);
+        c = *(char*)((int)&passet->sceneID + 0);
+        b = *(char*)((int)&passet->sceneID + 2);
+        a = *(char*)((int)&passet->sceneID + 1);
 
-        U32 x = (((b << 8) & 0xff00) | (((c << 24) & 0xff000000) | ((a << 16) & 0x00ffffff)) & 0xffff00ff);
-        U32 y = (((a << 8) & 0xff00) | (((d << 24) & 0xff000000) | ((b << 16) & 0x00ffffff)) & 0xffff00ff);
+        U32 x = (((b << 8) & 0xff00) |
+                 (((c << 24) & 0xff000000) | ((a << 16) & 0x00ffffff)) & 0xffff00ff);
+        U32 y = (((a << 8) & 0xff00) |
+                 (((d << 24) & 0xff000000) | ((b << 16) & 0x00ffffff)) & 0xffff00ff);
 
         nextSceneID = d | x;
         x = c | y;
 
         if ((g_hiphopReloadHIP != 0) || ((g_hiphopForcePortal != 0) || (x != scene->sceneID)))
+#endif
         {
             sPlayerMarkerStartID = passet->assetMarkerID;
             sPlayerMarkerStartCamID = passet->assetCameraID;
@@ -1105,23 +1190,23 @@ static void zGameUpdateMode()
             if (gWaitingToAutoSave != 0)
             {
                 zGame_HackPostPortalAutoSaveDraw();
-				
+
                 zSaveLoadPreAutoSave(1);
                 if (zSaveLoad_DoAutoSave() < 0)
                 {
-                    sendTo = (xBase *)zSceneFindObject(xStrHash("MNU4 AUTO SAVE FAILED"));
+                    sendTo = (xBase*)zSceneFindObject(xStrHash("MNU4 AUTO SAVE FAILED"));
                     if (sendTo != NULL)
                     {
                         zEntEvent(sendTo, eEventVisible);
                     }
                 }
-				
-                sendTo = (xBase *)zSceneFindObject(xStrHash("SAVING GAME ICON UI"));
+
+                sendTo = (xBase*)zSceneFindObject(xStrHash("SAVING GAME ICON UI"));
                 if (sendTo != NULL)
                 {
                     zEntEvent(sendTo, eEventInvisible);
                 }
-				
+
                 zSaveLoadPreAutoSave(0);
                 gWaitingToAutoSave = 0;
             }
@@ -1143,39 +1228,41 @@ static void zGameUpdateMode()
                 sPlayerMarkerStartID = 0;
             }
         }
-		
+
         if (gSoak != 0)
         {
-            sendTo = (xBase *)zSceneGetObject(eBaseTypeCamera, 0);
+            sendTo = (xBase*)zSceneGetObject(eBaseTypeCamera, 0);
             sPlayerMarkerStartCamID = sendTo->id;
         }
         else
         {
-            sendTo = (xBase *)zSceneFindObject(sPlayerMarkerStartCamID);
+            sendTo = (xBase*)zSceneFindObject(sPlayerMarkerStartCamID);
             if (sendTo == NULL)
             {
                 xSTAssetName(sPlayerMarkerStartCamID);
-                sendTo = (xBase *)zSceneGetObject(eBaseTypeCamera, 0);
+                sendTo = (xBase*)zSceneGetObject(eBaseTypeCamera, 0);
                 sPlayerMarkerStartCamID = sendTo->id;
                 xSTAssetName(sendTo->id);
             }
         }
-		
+
         gGameWhereAmI = eGameWhere_ModeStoreCheckpoint;
         if (sendTo != NULL)
         {
-            zEntPlayer_StoreCheckPoint(&globals.player.ent.frame->mat.pos, globals.player.ent.frame->rot.angle, sPlayerMarkerStartCamID);
+            zEntPlayer_StoreCheckPoint(&globals.player.ent.frame->mat.pos,
+                                       globals.player.ent.frame->rot.angle,
+                                       sPlayerMarkerStartCamID);
         }
-		
+
         sPlayerMarkerStartCamID = 0;
-		
+
         if (gPendingPlayer != eCurrentPlayerCount)
         {
             gCurrentPlayer = gPendingPlayer;
             gPendingPlayer = eCurrentPlayerCount;
         }
 
-        iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / 60.0f);
+        iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / (F32)GAME_VBLANKS_PER_SECOND);
         sTimeLast = iTimeGet() - bus;
 
         zGameStateSwitch(eGameState_Play);
@@ -1200,7 +1287,7 @@ static void zGameUpdateMode()
         else
         {
             sGameOverTimer = sGameOverTimer - sTimeElapsed;
-            xprintf("GAME OVER (%f secs)\n", *(volatile F32*)(&sGameOverTimer));
+            xprintf("GAME OVER (%f secs)\n", sGameOverTimer);
             if (sGameOverTimer <= 0.0f)
             {
                 sGameOverTimer = 0.0f;
@@ -1262,21 +1349,21 @@ void zGameScreenTransitionBegin()
     gGameWhereAmI = eGameWhere_TransitionBegin;
     zGameSetOstrich(eGameOstrich_Loading);
     globals.dontShowPadMessageDuringLoadingOrCutScene = '\0';
-    sGameScreenTransCam = iCameraCreate(640, 480, 0);
+    sGameScreenTransCam = iCameraCreate(640, GAME_SCREEN_HEIGHT, 0);
     if (sGameScreenTransCam != NULL)
     {
         DirectionalLight = RpLightCreate(1);
         if (DirectionalLight != NULL)
         {
             RwRGBAReal col;
-			col.red = col.green = col.blue = 1.0f;
-			col.alpha = 0.0f;
+            col.red = col.green = col.blue = 1.0f;
+            col.alpha = 0.0f;
             RpLightSetColor(DirectionalLight, &col);
             RwFrame* frame = RwFrameCreate();
             _rwObjectHasFrameSetFrame(DirectionalLight, frame);
             RwBBox box;
-			box.sup.z = box.sup.y = box.sup.x =  10000.0f;
-			box.inf.z = box.inf.y = box.inf.x = -10000.0f;
+            box.sup.z = box.sup.y = box.sup.x = 10000.0f;
+            box.inf.z = box.inf.y = box.inf.x = -10000.0f;
             World = RpWorldCreate(&box);
             RpWorldAddCamera(World, sGameScreenTransCam);
             gGameWhereAmI = eGameWhere_TransitionSnapShot;
@@ -1304,16 +1391,17 @@ F32 bgu1;
 F32 bgv1;
 eGameWhereAmI gGameWhereAmI;
 
-// 93.654%.  Everything outside the background-quad fill matches; inside it the
-// target stores vx[0..3] in strictly ascending offset order and never fills a
-// load-use gap, while our compiler interleaves the next vertex's stores between
-// each `lbz`/`stb` and `lfs`/`stfs` pair.  Same instruction multiset - SCHED,
-// same family as zGame_HackDrawCard.
+// Three background-quad stores still differ in their instruction scheduling.
 void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
 {
     RwTexture* tex;
     RwRaster* ras;
+#if defined(PS2)
+    F32 recipCamZ;
+    RwIm2DVertex vx[4];
+#else
     rwGameCube2DVertex vx[4];
+#endif
 
     gGameWhereAmI = eGameWhere_TransitionUpdate;
 
@@ -1328,20 +1416,24 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
     RwRGBA back_col = { 0x00, 0x00, 0x00, 0xFF };
     if (rgba != NULL)
     {
-        back_col.red   = rgba[0];
+        back_col.red = rgba[0];
         back_col.green = rgba[1];
-        back_col.blue  = rgba[2];
+        back_col.blue = rgba[2];
         back_col.alpha = rgba[3];
     }
 
     gGameWhereAmI = eGameWhere_TransitionPadUpdate;
     xPadUpdate(globals.currentActivePad, sTimeElapsed);
+#if !defined(PS2)
     xDrawBegin();
+#endif
 
     if (sGameScreenTransCam != NULL)
     {
         gGameWhereAmI = eGameWhere_TransitionTRCCheck;
+#if !defined(PS2)
         iTRCDisk::CheckDVDAndResetState();
+#endif
 
         gGameWhereAmI = eGameWhere_TransitionCameraClear;
         RwCameraClear(sGameScreenTransCam, &back_col, 3);
@@ -1353,7 +1445,11 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
         tex = (RwTexture*)xSTFindAsset(bgID, NULL);
         if ((tex != NULL) && (ras = (RwRaster*)tex->raster, ras != NULL))
         {
+#if defined(PS2)
+            recipCamZ = 1.0f / sGameScreenTransCam->farPlane;
+#else
             RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)0);
+#endif
             RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)2);
             RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)1);
             RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)0);
@@ -1362,22 +1458,55 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
 
             F32 z = RwIm2DGetFarScreenZ();
 
+#if defined(PS2)
+            RwIm2DVertexSetScreenX(&vx[0], 0.0f);
+            RwIm2DVertexSetScreenY(&vx[0], 0.0f);
+            RwIm2DVertexSetScreenZ(&vx[0], z);
+            RwIm2DVertexSetIntRGBA(&vx[0], bgr, bgb, bgg, bga);
+            RwIm2DVertexSetRecipCameraZ(&vx[0], recipCamZ);
+            RwIm2DVertexSetU(&vx[0], bgu1, recipCamZ);
+            RwIm2DVertexSetV(&vx[0], bgv1, recipCamZ);
+
+            RwIm2DVertexSetScreenX(&vx[1], 0.0f);
+            RwIm2DVertexSetScreenY(&vx[1], (F32)GAME_SCREEN_HEIGHT);
+            RwIm2DVertexSetScreenZ(&vx[1], z);
+            RwIm2DVertexSetIntRGBA(&vx[1], bgr, bgb, bgg, bga);
+            RwIm2DVertexSetRecipCameraZ(&vx[1], recipCamZ);
+            RwIm2DVertexSetU(&vx[1], bgu1, recipCamZ);
+            RwIm2DVertexSetV(&vx[1], bgv2, recipCamZ);
+
+            RwIm2DVertexSetScreenX(&vx[2], 640.0f);
+            RwIm2DVertexSetScreenY(&vx[2], 0.0f);
+            RwIm2DVertexSetScreenZ(&vx[2], z);
+            RwIm2DVertexSetIntRGBA(&vx[2], bgr, bgb, bgg, bga);
+            RwIm2DVertexSetRecipCameraZ(&vx[2], recipCamZ);
+            RwIm2DVertexSetU(&vx[2], bgu2, recipCamZ);
+            RwIm2DVertexSetV(&vx[2], bgv1, recipCamZ);
+
+            RwIm2DVertexSetScreenX(&vx[3], 640.0f);
+            RwIm2DVertexSetScreenY(&vx[3], (F32)GAME_SCREEN_HEIGHT);
+            RwIm2DVertexSetScreenZ(&vx[3], z);
+            RwIm2DVertexSetIntRGBA(&vx[3], bgr, bgb, bgg, bga);
+            RwIm2DVertexSetRecipCameraZ(&vx[3], recipCamZ);
+            RwIm2DVertexSetU(&vx[3], bgu2, recipCamZ);
+            RwIm2DVertexSetV(&vx[3], bgv2, recipCamZ);
+#else
             vx[0].x = 0.0f;
             vx[0].y = 0.0f;
             vx[0].z = z;
-            vx[0].emissiveColor.red   = bgr;
+            vx[0].emissiveColor.red = bgr;
             vx[0].emissiveColor.green = bgb;
-            vx[0].emissiveColor.blue  = bgg;
+            vx[0].emissiveColor.blue = bgg;
             vx[0].emissiveColor.alpha = bga;
             vx[0].u = bgu1;
             vx[0].v = bgv1;
 
             vx[1].x = 0.0f;
-            vx[1].y = 480.0f;
+            vx[1].y = (F32)GAME_SCREEN_HEIGHT;
             vx[1].z = z;
-            vx[1].emissiveColor.red   = bgr;
+            vx[1].emissiveColor.red = bgr;
             vx[1].emissiveColor.green = bgb;
-            vx[1].emissiveColor.blue  = bgg;
+            vx[1].emissiveColor.blue = bgg;
             vx[1].emissiveColor.alpha = bga;
             vx[1].u = bgu1;
             vx[1].v = bgv2;
@@ -1385,22 +1514,23 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
             vx[2].x = 640.0f;
             vx[2].y = 0.0f;
             vx[2].z = z;
-            vx[2].emissiveColor.red   = bgr;
+            vx[2].emissiveColor.red = bgr;
             vx[2].emissiveColor.green = bgb;
-            vx[2].emissiveColor.blue  = bgg;
+            vx[2].emissiveColor.blue = bgg;
             vx[2].emissiveColor.alpha = bga;
             vx[2].u = bgu2;
             vx[2].v = bgv1;
 
             vx[3].x = 640.0f;
-            vx[3].y = 480.0f;
+            vx[3].y = (F32)GAME_SCREEN_HEIGHT;
             vx[3].z = z;
-            vx[3].emissiveColor.red   = bgr;
+            vx[3].emissiveColor.red = bgr;
             vx[3].emissiveColor.green = bgb;
-            vx[3].emissiveColor.blue  = bgg;
+            vx[3].emissiveColor.blue = bgg;
             vx[3].emissiveColor.alpha = bga;
             vx[3].u = bgu2;
             vx[3].v = bgv2;
+#endif
 
             RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, &vx[0], 4);
             RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)1);
@@ -1420,21 +1550,21 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
 
     switch ((loadMeter / 0x19) % 5)
     {
-        case 0:
-            strcpy(meter, "   ");
-            break;
-        case 1:
-            strcpy(meter, ".  ");
-            break;
-        case 2:
-            strcpy(meter, ".. ");
-            break;
-        case 3:
-            strcpy(meter, "...");
-            break;
-        case 4:
-            loadMeter = 0;
-            break;
+    case 0:
+        strcpy(meter, "   ");
+        break;
+    case 1:
+        strcpy(meter, ".  ");
+        break;
+    case 2:
+        strcpy(meter, ".. ");
+        break;
+    case 3:
+        strcpy(meter, "...");
+        break;
+    case 4:
+        loadMeter = 0;
+        break;
     }
 
     loadMeter++;
@@ -1445,7 +1575,9 @@ void zGameScreenTransitionUpdate(F32 percentComplete, char* msg, U8* rgba)
     zFX_SpawnBubbleWall();
 
     gGameWhereAmI = eGameWhere_TransitionDrawEnd;
+#if !defined(PS2)
     xDrawEnd();
+#endif
 
     if (sGameScreenTransCam != NULL)
     {
@@ -1494,9 +1626,9 @@ void zGameSetupPlayer()
     xEntAsset* asset = (xEntAsset*)xSTFindAssetByType('PLYR', xSTAssetCountByType('PLYR') - 1, 0);
     U32 size;
     xMarkerAsset* m;
-	
+
     asset->baseType = eBaseTypePlayer;
-	
+
     if (sPortalling != 0)
     {
         if (sPlayerStartAngle > -1e8f)
@@ -1505,42 +1637,36 @@ void zGameSetupPlayer()
         }
         sPortalling = 0;
     }
-	
+
     asset->ang.y = 0.0f;
     asset->ang.z = 0.0f;
     gGameWhereAmI = eGameWhere_SetupPlayerInit;
     zEntPlayer_Init(&globals.player.ent, asset);
-	
+
     if (sPlayerMarkerStartID != 0)
     {
-        m = (xMarkerAsset *)xSTFindAsset(sPlayerMarkerStartID, &size);
+        m = (xMarkerAsset*)xSTFindAsset(sPlayerMarkerStartID, &size);
         if (m != NULL)
         {
-            xVec3Copy((xVec3 *)&globals.player.ent.frame->mat.pos,    &m->pos);
-            xVec3Copy((xVec3 *)&globals.player.ent.frame->oldmat.pos, &m->pos);
-            xVec3Copy((xVec3 *)&globals.player.ent.model->Mat->pos,   &m->pos);
+            xVec3Copy((xVec3*)&globals.player.ent.frame->mat.pos, &m->pos);
+            xVec3Copy((xVec3*)&globals.player.ent.frame->oldmat.pos, &m->pos);
+            xVec3Copy((xVec3*)&globals.player.ent.model->Mat->pos, &m->pos);
             xCameraSetTargetMatrix(&globals.camera, xEntGetFrame(&globals.player.ent));
         }
         sPlayerMarkerStartID = 0;
     }
-	
+
     gGameWhereAmI = eGameWhere_SetupPlayerCamera;
     zCameraReset(&globals.camera);
-    zEntPlayer_StoreCheckPoint(&globals.player.ent.frame->mat.pos, globals.player.ent.frame->rot.angle, globals.camera.id);
+    zEntPlayer_StoreCheckPoint(&globals.player.ent.frame->mat.pos,
+                               globals.player.ent.frame->rot.angle, globals.camera.id);
     gGameWhereAmI = eGameWhere_SetupPlayerEnd;
-	
 }
 
 void zGameStats_Init()
 {
 }
 
-void xDrawEnd()
-{
-    iDrawEnd();
-}
-
-void xDrawBegin()
-{
-    iDrawBegin();
-}
+#if !defined(PS2)
+#include "zGameDrawHelpers.h"
+#endif

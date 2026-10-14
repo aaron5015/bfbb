@@ -7,6 +7,17 @@
 
 #include <rwcore.h>
 
+#ifndef PS2
+inline iColor_tag& iColor_tag::operator=(const iColor_tag& rhs)
+{
+    this->r = rhs.r;
+    this->g = rhs.g;
+    this->b = rhs.b;
+    this->a = rhs.a;
+    return *this;
+}
+#endif
+
 struct xfont
 {
     U32 id;
@@ -166,44 +177,7 @@ struct xtextbox
 
     static callback text_cb;
 
-    xtextbox& operator=(const xtextbox& rhs)
-    {
-        this->font.id = rhs.font.id;
-
-        *(S32*)(&this->font.width) = *(S32*)(&rhs.font.width);
-        *(S32*)(&this->font.height) = *(S32*)(&rhs.font.height);
-        *(S32*)(&this->font.space) = *(S32*)(&rhs.font.space);
-
-        *(S32*)(&this->font.color) = *(S32*)(&rhs.font.color);
-
-        *(S32*)(&this->font.clip.x) = *(S32*)(&rhs.font.clip.x);
-        *(S32*)(&this->font.clip.y) = *(S32*)(&rhs.font.clip.y);
-        *(S32*)(&this->font.clip.w) = *(S32*)(&rhs.font.clip.w);
-        *(S32*)(&this->font.clip.h) = *(S32*)(&rhs.font.clip.h);
-
-        *(S32*)(&this->bounds.x) = *(S32*)(&rhs.bounds.x);
-        *(S32*)(&this->bounds.y) = *(S32*)(&rhs.bounds.y);
-        *(S32*)(&this->bounds.w) = *(S32*)(&rhs.bounds.w);
-        *(S32*)(&this->bounds.h) = *(S32*)(&rhs.bounds.h);
-
-        this->flags = rhs.flags;
-
-        this->line_space = rhs.line_space;
-        this->tab_stop = rhs.tab_stop;
-        this->left_indent = rhs.left_indent;
-        this->right_indent = rhs.right_indent;
-
-        this->cb = rhs.cb;
-        this->context = rhs.context;
-        this->texts = rhs.texts;
-        this->text_sizes = rhs.text_sizes;
-        this->texts_size = rhs.texts_size;
-        this->text.text = rhs.text.text;
-        this->text.size = rhs.text.size;
-        this->text_hash = rhs.text_hash;
-
-        return *this;
-    }
+    xtextbox& operator=(const xtextbox& rhs);
 
     static void text_render(const jot& j, const xtextbox& tb, F32 x, F32 y);
     static tag_entry_list read_tag(const substr& s);
@@ -212,8 +186,17 @@ struct xtextbox
     static size_t read_list(const tag_entry& e, S32* v, size_t vsize);
     static void clear_layout_cache();
     static void register_tags(const tag_type* tag, size_t count);
+#if defined(PS2)
+    static tag_type* find_format_tag(const substr& s, S32& index);
+    static tag_type* find_format_tag(const substr& s)
+    {
+        S32 index;
+        return find_format_tag(s, index);
+    }
+#else
     static tag_type* find_format_tag(const substr& s);
     static tag_type* find_format_tag(const substr& s, S32& index);
+#endif
     static xtextbox create();
     static xtextbox create(const xfont& font, const basic_rect<F32>& bounds, U32 flags,
                            F32 line_space, F32 tab_stop, F32 left_indent, F32 right_indent)
@@ -282,7 +265,14 @@ struct xtextbox::layout
     void render(const xtextbox& ctb, S32 begin_jot, S32 end_jot);
     F32 yextent(F32 max, S32& size, S32 begin_jot, S32 end_jot) const;
     bool changed(const xtextbox& ctb);
+#if defined(PS2)
+    size_t jots_size() const
+    {
+        return _jots_size;
+    }
+#else
     size_t jots_size() const;
+#endif
 
     jot* jots() const
     {

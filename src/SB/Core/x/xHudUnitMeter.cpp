@@ -3,13 +3,18 @@
 #include "xMathInlines.h"
 #include "xDebug.h"
 
+#if defined(PS2)
+#include <new.h>
+#else
 #include <PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new.h>
+#endif
 #include <math.h>
 #include <types.h>
 
 // NOTE: these two belong in headers (std::fmodf in <math.h>, xfmod in
 // xMathInlines.h). They are inline, so the compiler emits a weak out-of-line
 // copy into every translation unit that calls them.
+#if !defined(XBOX)
 namespace std
 {
     extern inline float fmodf(float x, float y)
@@ -17,11 +22,14 @@ namespace std
         return ::fmod(x, y);
     }
 }
+#endif
 
+#if !defined(XBOX) && !defined(PS2)
 inline F32 xfmod(F32 a, F32 b)
 {
     return std::fmodf(a, b);
 }
+#endif
 
 namespace xhud
 {
@@ -46,9 +54,9 @@ xhud::unit_meter_widget::unit_meter_widget(const xhud::unit_meter_asset& a)
 
     for (i = 0; i < 2; i++)
     {
-        for (j = 0; j < 6; j++)
+        for (j = 0; j < 6;)
         {
-            model[j][i] = load_model(res.model[i].id);
+            model[j++][i] = load_model(res.model[i].id);
         }
     }
 

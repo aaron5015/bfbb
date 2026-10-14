@@ -12,9 +12,12 @@
 #include <types.h>
 #include <string.h>
 #include <stdlib.h>
+#if defined(PS2)
+#include <math.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
-
 #include <dolphin.h>
+#endif
 #include <stdio.h>
 
 static xMemPool sxAnimTempTranPool;
@@ -57,14 +60,12 @@ static bool _xSingleCompare(char ch, const char* str)
 
 static bool _xCharIn(char ch, const char* str)
 {
-    while (*str != '\0')
+    for (S32 i = 0; str[i] != '\0'; i++)
     {
-        if (ch == *str)
+        if (ch == str[i])
         {
             return true;
         }
-
-        str++;
     }
 
     return false;
@@ -153,7 +154,7 @@ static U8 _xCheckAnimNameInner(const char* name, const char* pattern, S32 patter
             }
             nameCurrent++;
 
-            for (const char* x = &name[nameCurrent]; *x >= '0' && *x <= '9'; x++)
+            while (name[nameCurrent] >= '0' && name[nameCurrent] <= '9')
             {
                 nameCurrent++;
             }
@@ -170,8 +171,8 @@ static U8 _xCheckAnimNameInner(const char* name, const char* pattern, S32 patter
             {
                 memcpy(extra, startExtra, length);
                 extra[length] = NULL;
-                extra = extra + length;
-                *++extra = '\x01';
+                extra += length + 1;
+                *extra = '\x01';
             }
             startExtra = NULL;
             patternCurrent++;
@@ -218,11 +219,17 @@ static U8 _xCheckAnimNameInner(const char* name, const char* pattern, S32 patter
                     S32 nameOut;
                     S32 extraOut;
 
-                    U8 ret = !done && _xCheckAnimNameInner(&name[nameCurrent], startPattern,
-                                                           current - startPattern, extra, &nameOut,
-                                                           &extraOut);
+                    // NOTE (Square): There is no DWARF for an extra variable here and this programming pattern seems
+                    // extremely wack. I think this "variable" is completely compiler generated for some reason
+                    U8 wtfman = 0;
+                    if (!done &&
+                        _xCheckAnimNameInner(&name[nameCurrent], startPattern,
+                                             current - startPattern, extra, &nameOut, &extraOut))
+                    {
+                        wtfman = 1;
+                    }
 
-                    if (ret != 0)
+                    if (wtfman != 0)
                     {
                         done = 1;
                         nameCurrent += nameOut;
@@ -254,7 +261,6 @@ static U8 _xCheckAnimNameInner(const char* name, const char* pattern, S32 patter
         {
             patternCurrent++;
             const char* current = &pattern[patternCurrent];
-            const char* positive = current;
             while (*current != NULL && *current != ';' && *current != '>')
             {
                 current++;
@@ -274,10 +280,12 @@ static U8 _xCheckAnimNameInner(const char* name, const char* pattern, S32 patter
                 }
                 negativeEnd = current;
             }
+
             S32 nameOut;
             S32 extraOut;
-            U8 matched = _xCheckAnimNameInner(&name[nameCurrent], positive, positiveEnd - positive,
-                                              extra, &nameOut, &extraOut);
+            U8 matched = _xCheckAnimNameInner(&name[nameCurrent], &pattern[patternCurrent],
+                                              positiveEnd - &pattern[patternCurrent], extra,
+                                              &nameOut, &extraOut);
             if (matched != 0)
             {
                 if (negative != NULL &&
@@ -358,7 +366,7 @@ void xAnimTempTransitionInit(U32 count)
                   sizeof(xAnimTransition), count, count / 2);
 }
 
-#ifndef INLINE
+#if !defined(INLINE) && !defined(PS2) && !defined(XBOX)
 namespace std
 {
     extern inline float atan2f(float y, float x)
@@ -368,10 +376,12 @@ namespace std
 } // namespace std
 #endif
 
+#if !defined(XBOX) && !defined(PS2)
 F32 xatan2(F32 y, F32 x)
 {
     return xAngleClampFast(std::atan2f(y, x));
 }
+#endif
 
 float CalcRecipBlendMax(U16* arg0)
 {
@@ -388,10 +398,10 @@ float CalcRecipBlendMax(U16* arg0)
             f3 = 1.0f / (arg0[1] / 1024.0f);
         }
 
-        f3 = arg0[0] / 1024.0f + f3;
-        if (f3 > max)
+        float sum = arg0[0] / 1024.0f + f3;
+        if (sum > max)
         {
-            max = f3;
+            max = sum;
         }
         arg0 += 2;
     }
@@ -466,11 +476,10 @@ static void TransitionTimeInit(xAnimSingle* single, xAnimTransition* tran)
 {
     if (tran->Flags & 0x20)
     {
-        xAnimFile* dest = tran->Dest->Data;
-
-        if ((single->State->Data->FileFlags ^ dest->FileFlags) & 0x1000)
+        xAnimFile* destData = tran->Dest->Data;
+        if ((single->State->Data->FileFlags ^ destData->FileFlags) & 0x1000)
         {
-            single->Time = dest->Duration - single->Time;
+            single->Time = destData->Duration - single->Time;
         }
     }
     else
@@ -488,13 +497,13 @@ xAnimFile* xAnimFileNewBilinear(void** rawData, const char* name, U32 flags, xAn
     xAnimFile* afile;
     if (gxAnimUseGrowAlloc)
     {
-        afile = (xAnimFile*)xMemGrowAlloc(gActiveHeap,
-                                          numX * numY * sizeof(void*) + sizeof(xAnimFile));
+        afile =
+            (xAnimFile*)xMemGrowAlloc(gActiveHeap, numX * numY * sizeof(void*) + sizeof(xAnimFile));
     }
     else
     {
-        afile = (xAnimFile*)xMemAlloc(gActiveHeap,
-                                      numX * numY * sizeof(void*) + sizeof(xAnimFile), 0);
+        afile =
+            (xAnimFile*)xMemAlloc(gActiveHeap, numX * numY * sizeof(void*) + sizeof(xAnimFile), 0);
     }
 
     if (numX > 1 || numY > 1)
@@ -599,21 +608,15 @@ void xAnimFileEval(xAnimFile* data, F32 time, F32* bilinear, U32 flags, xVec3* t
     U32 biindex[2];
     U32 biplus[2];
     xQuat* q0;
+    U32 fileFlags = data->FileFlags;
 
-    time = xAnimFileRawTime(data, CLAMP(time, 0.0f, data->Duration));
+    F32 rawTime = xAnimFileRawTime(data, CLAMP(time, 0.0f, data->Duration));
     if (data->FileFlags & 0x8000)
     {
         return;
     }
 
-    if (flags & 0x1)
-    {
-        numBones = 1;
-    }
-    else
-    {
-        numBones = data->BoneCount;
-    }
+    numBones = (flags & 0x1) ? 1 : data->BoneCount;
 
     if (flags & 0x2)
     {
@@ -625,7 +628,7 @@ void xAnimFileEval(xAnimFile* data, F32 time, F32* bilinear, U32 flags, xVec3* t
         return;
     }
 
-    if (bilinear != NULL && data->FileFlags & 0x4000)
+    if (bilinear != NULL && fileFlags & 0x4000)
     {
         for (i = 0; i < 2; ++i)
         {
@@ -643,48 +646,47 @@ void xAnimFileEval(xAnimFile* data, F32 time, F32* bilinear, U32 flags, xVec3* t
             xQuat* q1 = (xQuat*)(giAnimScratch + 4 * IANIM_POSE_SIZE);
             xVec3* t1 = (xVec3*)(q1 + IANIM_MAXBONES);
 
-            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], time, flags, tran,
-                      quat);
-            iAnimEval(data->RawData[biplus[0] + biindex[1] * data->NumAnims[0]], time, flags, t0,
+            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], rawTime, flags,
+                      tran, quat);
+            iAnimEval(data->RawData[biplus[0] + biindex[1] * data->NumAnims[0]], rawTime, flags, t0,
                       q0);
             iAnimBlend(bilerp[0], 1.0f, NULL, NULL, numBones, tran, quat, t0, q0, tran, quat);
 
-            iAnimEval(data->RawData[biindex[0] + biplus[1] * data->NumAnims[0]], time, flags, t0,
+            iAnimEval(data->RawData[biindex[0] + biplus[1] * data->NumAnims[0]], rawTime, flags, t0,
                       q0);
-            iAnimEval(data->RawData[biplus[0] + biplus[1] * data->NumAnims[0]], time, flags, t1,
+            iAnimEval(data->RawData[biplus[0] + biplus[1] * data->NumAnims[0]], rawTime, flags, t1,
                       q1);
             iAnimBlend(bilerp[0], 1.0f, NULL, NULL, numBones, t0, q0, t1, q1, t0, q0);
             iAnimBlend(bilerp[1], 1.0f, NULL, NULL, numBones, tran, quat, t0, q0, tran, quat);
         }
         else if (bilerp[0])
         {
-            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], time, flags, tran,
-                      quat);
-            iAnimEval(data->RawData[biplus[0] + biindex[1] * data->NumAnims[0]], time, flags, t0,
+            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], rawTime, flags,
+                      tran, quat);
+            iAnimEval(data->RawData[biplus[0] + biindex[1] * data->NumAnims[0]], rawTime, flags, t0,
                       q0);
             iAnimBlend(bilerp[0], 1.0f, NULL, NULL, numBones, tran, quat, t0, q0, tran, quat);
         }
         else if (bilerp[1])
         {
-            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], time, flags, tran,
-                      quat);
-            iAnimEval(data->RawData[biindex[0] + biplus[1] * data->NumAnims[0]], time, flags, t0,
+            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], rawTime, flags,
+                      tran, quat);
+            iAnimEval(data->RawData[biindex[0] + biplus[1] * data->NumAnims[0]], rawTime, flags, t0,
                       q0);
             iAnimBlend(bilerp[0], 1.0f, NULL, NULL, numBones, tran, quat, t0, q0, tran, quat);
         }
         else
         {
-            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], time, flags, tran,
-                      quat);
+            iAnimEval(data->RawData[biindex[0] + biindex[1] * data->NumAnims[0]], rawTime, flags,
+                      tran, quat);
         }
     }
     else
     {
-        iAnimEval(data->RawData[0], time, flags, tran, quat);
+        iAnimEval(data->RawData[0], rawTime, flags, tran, quat);
     }
 }
-
-#ifndef INLINE
+#if !defined(INLINE) && !defined(PS2) && !defined(XBOX)
 namespace std
 {
     extern inline float floorf(float x)
@@ -837,15 +839,14 @@ void _xAnimTableAddTransition(xAnimTable* table, xAnimTransition* tran, const ch
     xAnimTransitionList* tlist;
     xAnimTransition* substTransitionList[32];
     U32 substTransitionCount = 0;
-    U8 hasSubst;
+    U8 hasSubst = false;
+
+    buffer = (U8*)giAnimScratch;
+    stateList = (xAnimState**)(giAnimScratch + 0x400);
+    allocCount = 0;
 
     char tempName[128];
     char extra[128];
-
-    buffer = (U8*)giAnimScratch;
-    stateList = (xAnimState**)(buffer + 0x400);
-    allocCount = 0;
-    hasSubst = false;
 
     if (dest != NULL)
     {
@@ -897,8 +898,8 @@ void _xAnimTableAddTransition(xAnimTable* table, xAnimTransition* tran, const ch
                                 allowMissingState = dest[i] == '~';
                                 U32 extraIteratorLength = strlen(tempIterator);
                                 strcpy(extraIterator, tempIterator);
-                                extraIterator += extraIteratorLength;
                                 tempIterator += extraIteratorLength + 1;
+                                extraIterator += extraIteratorLength;
                             }
                             else
                             {
@@ -930,8 +931,8 @@ void _xAnimTableAddTransition(xAnimTable* table, xAnimTransition* tran, const ch
                             memcpy(duplicatedTransition, tran, sizeof(xAnimTransition));
                             tran = duplicatedTransition;
                         }
-                        tran->Dest = sp;
                         substTransitionList[substTransitionCount++] = tran;
+                        tran->Dest = sp;
                     }
                     if (tran->Dest != state)
                     {
@@ -1343,7 +1344,7 @@ static void EffectSingleLoop(xAnimSingle* single)
     }
 
     xAnimEffect* effect = single->State->Effects;
-    while (effect != NULL && effect->StartTime < 0.0f)
+    while (effect && effect->StartTime < 0.0f)
     {
         effect = effect->Next;
     }
@@ -2071,7 +2072,7 @@ void xAnimPoolCB(xMemPool* pool, void* data)
     clone->Pool = pool;
 }
 
-#define ADD_4_BITS(x) (((x)&1) + (((x) >> 1) & 1) + (((x) >> 2) & 1) + (((x) >> 3) & 1))
+#define ADD_4_BITS(x) (((x) & 1) + (((x) >> 1) & 1) + (((x) >> 2) & 1) + (((x) >> 3) & 1))
 void xAnimPoolInit(xMemPool* pool, U32 count, U32 singles, U32 blendFlags, U32 effectMax)
 {
     effectMax += effectMax & 1;

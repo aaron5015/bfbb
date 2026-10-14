@@ -4,14 +4,20 @@
 #include <rwplcore.h>
 #include <xMathInlines.h>
 #include <xMemMgr.h>
+#if defined(PS2)
+#include <string.h>
+#else
 #include <mem.h>
+#endif
 #include <xVec3.h>
 
+#if !defined(PS2)
 // MSL's <cmath> is not reachable from here; the target calls floorf__3stdFf.
 namespace std
 {
     float floorf(float x);
 }
+#endif
 
 static F32 sBasisUniformBspline[4][4];
 static F32 sBasisBezier[4][4] = { { -1.0f, 3.0f, -3.0f, 1.0f },
@@ -70,33 +76,21 @@ void Tridiag_Solve(F32* a, F32* b, F32* c, xVec3* d, xVec3* x, S32 n)
 
 void Interpolate_Bspline(xVec3* data, xVec3* control, F32* knots, U32 nodata)
 {
-    F32* alpha;
-    F32* beta;
-    F32* gamma;
-
-    U32 i;
-
-    F32 t1;
-    F32 t2;
-    F32 t3;
-    F32 t4;
-    F32 t5;
-
-    alpha = (F32*)RwMalloc(nodata * 4);
-    beta = (F32*)RwMalloc(nodata * 4);
-    gamma = (F32*)RwMalloc(nodata * 4);
+    F32* alpha = (F32*)RwMalloc(nodata * sizeof(F32));
+    F32* beta = (F32*)RwMalloc(nodata * sizeof(F32));
+    F32* gamma = (F32*)RwMalloc(nodata * sizeof(F32));
 
     alpha[0] = alpha[nodata - 1] = 0.0f;
     beta[0] = beta[nodata - 1] = 1.0f;
     gamma[0] = gamma[nodata - 1] = 0.0f;
 
-    for (i = 1; i < nodata - 1; i += 1)
+    for (U32 i = 1; i < nodata - 1; i++)
     {
-        t1 = knots[i + 1];
-        t2 = knots[i + 2];
-        t3 = knots[i + 3];
-        t4 = knots[i + 4];
-        t5 = knots[i + 5];
+        F32 t1 = knots[i + 1];
+        F32 t2 = knots[i + 2];
+        F32 t3 = knots[i + 3];
+        F32 t4 = knots[i + 4];
+        F32 t5 = knots[i + 5];
 
         alpha[i] = (t4 - t3) * (t4 - t3) / (t4 - t1);
         beta[i] = (t3 - t1) * (t4 - t3) / (t4 - t1) + (t5 - t3) * (t3 - t2) / (t5 - t2);
@@ -118,6 +112,54 @@ void Interpolate_Bspline(xVec3* data, xVec3* control, F32* knots, U32 nodata)
 }
 
 // Implementation of Composite Simpson's 1/3 Rule to calculate arc length
+#ifdef PS2
+// The R5900 FPU is single precision; retail PS2 evaluates this entirely in
+// floats (ArcLength3__FP6xCoef3ff, float locals per DWARF).
+static F32 ArcLength3(xCoef3* coef, F32 ustart, F32 uend)
+{
+    U32 i;
+    F32 E;
+    F32 D;
+    F32 C;
+    F32 B;
+    F32 A;
+    F32 h;
+    F32 sum;
+    F32 u;
+
+    E = 9.0f *
+        (coef->x.a[0] * coef->x.a[0] + coef->y.a[0] * coef->y.a[0] + coef->z.a[0] * coef->z.a[0]);
+    D = 12.0f *
+        (coef->x.a[0] * coef->x.a[1] + coef->y.a[0] * coef->y.a[1] + coef->z.a[0] * coef->z.a[1]);
+    C = 6.0f * (coef->x.a[0] * coef->x.a[2] + coef->y.a[0] * coef->y.a[2] +
+                coef->z.a[0] * coef->z.a[2]) +
+        4.0f * (coef->x.a[1] * coef->x.a[1] + coef->y.a[1] * coef->y.a[1] +
+                coef->z.a[1] * coef->z.a[1]);
+    B = 4.0f *
+        (coef->x.a[1] * coef->x.a[2] + coef->y.a[1] * coef->y.a[2] + coef->z.a[1] * coef->z.a[2]);
+    A = coef->x.a[2] * coef->x.a[2] + coef->y.a[2] * coef->y.a[2] + coef->z.a[2] * coef->z.a[2];
+    h = (uend - ustart) / 50.0f;
+    sum = 0.0f;
+    u = ustart + h;
+
+    for (i = 2; i <= 50; i += 1)
+    {
+        if (!(i & 1))
+        {
+            sum = sum + 4.0f * sqrtf(A + u * (B + u * (C + u * (D + E * u))));
+        }
+        else
+        {
+            sum = sum + 2.0f * sqrtf(A + u * (B + u * (C + u * (D + E * u))));
+        }
+        u = u + h;
+    }
+
+    F32 startSpeed = sqrtf(A + ustart * (B + ustart * (C + ustart * (D + E * ustart))));
+    F32 endSpeed = sqrtf(A + uend * (B + uend * (C + uend * (D + E * uend))));
+    return (h * ((sum + startSpeed) + endSpeed)) / 3.0f;
+}
+#else
 F32 ArcLength3(xCoef3* coef, F64 ustart, F64 uend)
 {
     U32 i;
@@ -170,7 +212,9 @@ F32 ArcLength3(xCoef3* coef, F64 ustart, F64 uend)
                  sqrt(A + uend * (B + uend * (C + uend * (D + E * uend)))))) /
            3.0;
 }
+#endif
 
+#if !defined(PS2)
 // We don't have the implementation provided
 double sqrt(double x)
 {
@@ -187,10 +231,11 @@ double sqrt(double x)
     {
         return 0.0;
     }
-    else if (x != 0.0)
+    else if (x)
     {
         // Retail returns NaN for every negative input; the INFINITY arm below
-        // is unreachable. Preserved deliberately.
+        // is unreachable. Preserved deliberately. Testing `x` itself (rather
+        // than `x != 0.0`) keeps retail's redundant second compare.
         return NAN;
     }
     else
@@ -198,6 +243,8 @@ double sqrt(double x)
         return INFINITY;
     }
 }
+
+#endif
 
 void EvalCoef3(xCoef3* coef, F32 u, U32 deriv, xVec3* o)
 {
@@ -236,7 +283,7 @@ void EvalCoef3(xCoef3* coef, F32 u, U32 deriv, xVec3* o)
 
 void BasisToCoef3(xCoef3* coef, F32 (*N)[4], xVec3* v1, xVec3* v2, xVec3* v3, xVec3* v4)
 {
-    S32 i;
+    U32 i;
 
     for (i = 0; i < 4; i++)
     {
@@ -249,7 +296,10 @@ void BasisToCoef3(xCoef3* coef, F32 (*N)[4], xVec3* v1, xVec3* v2, xVec3* v3, xV
     }
 }
 
-void CoefToUnity3(xCoef3* coef1, xCoef3* coef2, F32 f1, F32 f2)
+#ifdef PS2
+inline
+#endif
+    void CoefToUnity3(xCoef3* coef1, xCoef3* coef2, F32 f1, F32 f2)
 {
     U32 i;
     F32 a;

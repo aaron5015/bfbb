@@ -17,44 +17,40 @@
 // Not 100% on what this does or if it's correctly defined for all cases. Seems to be used for allocation alignment
 #define ALIGN_THING(x, n) (n + x - 1 & -x)
 
-// Dolphin TPL (texture palette) file layout.
-struct st_ISG_TPL_TEXHEADER
+// name is a total guess for now
+struct st_ISG_TPL_TEX
 {
-    U16 height;
-    U16 width;
-    U32 format;
-    char* data;
-    GXTexWrapMode wrapS;
-    GXTexWrapMode wrapT;
-    GXTexFilter minFilter;
-    GXTexFilter magFilter;
-    F32 LODBias;
-    U8 edgeLODEnable;
-    U8 minLOD;
-    U8 maxLOD;
-    U8 unpacked;
-};
+    struct UnkIn
+    {
+        U32 unk_0;
+        U32 unk_4;
+        void* unk_8;
+        U32 unk_c;
+        U32 unk_10[4];
+        U8 unk_20;
+        U8 unk_21;
+        U8 unk_22;
+        U8 unk_23;
+    };
+    struct UnkOut
+    {
+        U8 unk_0;
+        U8 unk_1;
+        U8 unk_2;
+        U8 unk_3;
+        U32 unk_4;
+        void* unk_8;
+    };
 
-struct st_ISG_TPL_CLUTHEADER
-{
-    U16 numEntries;
-    U8 unpacked;
-    U8 pad8;
-    GXTlutFmt format;
-    char* data;
+    UnkIn* unk_0;
+    UnkOut* unk_4;
 };
-
-struct st_ISG_TPL_TEXDESCRIP
-{
-    st_ISG_TPL_TEXHEADER* textureHeader;
-    st_ISG_TPL_CLUTHEADER* CLUTHeader;
-};
-
+// WIP. Looks like some sort of header for a file with embedded texture information.
 struct st_ISG_TPL_TEXPALETTE
 {
-    U32 versionNumber;
-    U32 numDescriptors;
-    st_ISG_TPL_TEXDESCRIP* descriptorArray;
+    U32 magic;
+    U32 count;
+    st_ISG_TPL_TEX* unk_8;
 };
 
 // .bss
@@ -551,8 +547,13 @@ char* iSGFileModDate(st_ISGSESSION* isgdata, const char* fname, S32* sec, S32* m
     if (iSG_get_fmoddate(&isgdata->mcdata[isgdata->slot], fname, &sec_str, &min_str, &hr_str,
                          &mon_str, &day_str, &yr_str) != 0)
     {
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+        sprintf(datestr, "%02d.%02d.%04d %02d:%02d:%02d", day_str, mon_str, yr_str, hr_str, min_str,
+                sec_str);
+#else
         sprintf(datestr, "%02d/%02d/%04d %02d:%02d:%02d", mon_str, day_str, yr_str, hr_str, min_str,
                 sec_str);
+#endif
 
         if (sec != NULL)
         {
@@ -591,8 +592,13 @@ void iSGMakeTimeStamp(char* str)
     OSCalendarTime calendar_time = { 0 };
     OSTime time = OSGetTime();
     OSTicksToCalendarTime(time, &calendar_time);
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+    sprintf(str, "%02d.%02d.%04d %02d:%02d:%02d", calendar_time.mday, calendar_time.mon + 1,
+            calendar_time.year, calendar_time.hour, calendar_time.min, calendar_time.sec);
+#else
     sprintf(str, "%02d/%02d/%04d %02d:%02d:%02d", calendar_time.mon + 1, calendar_time.mday,
             calendar_time.year, calendar_time.hour, calendar_time.min, calendar_time.sec);
+#endif
 }
 
 S32 iSGSelectGameDir(st_ISGSESSION* isgdata, const char* dname)
@@ -765,8 +771,9 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
 {
     char* readbuf;
     S32 iconsize;
-    S32 bufsize;
+    S32 tmpsize;
     S32 allocsize;
+    S32 bufsize;
 
     S32 readret = 0;
     st_ISG_MEMCARD_DATA* data;
@@ -793,7 +800,7 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
     S32 sectorsize200 = ALIGN_THING(data->sectorSize, 0x200);
     if ((S32)databuf % 32 != 0 || numbytes % sectorsize200 != 0)
     {
-        S32 tmpsize = (numbytes + 0x1ff & ~0x1ff);
+        tmpsize = (numbytes + 0x1ff & ~0x1ff);
         allocsize = tmpsize + 0x1f;
         alloc = xMemPushTemp(allocsize);
         memset(alloc, 0, allocsize);
@@ -810,7 +817,7 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
 
     if (iSG_mc_fopen(data, fname, -1, ISG_IOMODE_READ, &operr) != 0)
     {
-        if (iSG_mc_fread(data, (char*)readbuf, bufsize, iconsize))
+        if (iSG_mc_fread(data, readbuf, bufsize, iconsize) != 0)
         {
             readret = 1;
         }
@@ -906,15 +913,15 @@ static S32 iSG_start_your_engines()
     return 1;
 }
 
-// Looks equivalent. Can't get variable initializtions to match.
+// The remaining difference is in the initialization schedule.
 S32 iSG_mcidx2slot(S32 param1, S32* out_slot, S32* param3)
 {
-    *out_slot = -1;
-    s32 cardReady[ISG_NUM_SLOTS] = {};
     S32 ret = 0;
     S32 idk = 0;
     s32 memSize = 0;
+    *out_slot = -1;
     s32 sectorSize = 0;
+    s32 cardReady[ISG_NUM_SLOTS] = {};
 
     for (S32 i = 0; i < ISG_NUM_SLOTS; i++)
     {
@@ -1458,12 +1465,12 @@ static void iSG_discard_icondata()
     g_banrsize = 0;
 }
 
-static st_ISG_TPL_TEXDESCRIP* iSG_tpl_TEXGet(st_ISG_TPL_TEXPALETTE*, unsigned int);
+static st_ISG_TPL_TEX* iSG_tpl_TEXGet(st_ISG_TPL_TEXPALETTE*, unsigned int);
 static char* iSG_bfr_icondata(char* param1, CARDStat* stat, char* param3, int param4)
 {
     IconData data = { 0 };
     static st_ISG_TPL_TEXPALETTE* ico_pal;
-    static st_ISG_TPL_TEXDESCRIP* ico_desc;
+    static st_ISG_TPL_TEX* ico_desc;
     static U32 i = 0;
 
     sprintf(data.footer, "SPONGEBOB:WHENROBOTSATTACK::RyanNeilDan");
@@ -1478,13 +1485,13 @@ static char* iSG_bfr_icondata(char* param1, CARDStat* stat, char* param3, int pa
 
     ico_pal = g_rawbanr;
     ico_desc = iSG_tpl_TEXGet(ico_pal, 0);
-    memcpy(data.buf1, ico_desc->textureHeader->data, sizeof(data.buf1));
+    memcpy(data.buf1, ico_desc->unk_0->unk_8, sizeof(data.buf1));
 
     ico_pal = g_rawicon;
     for (i = 0; i < 8; i++)
     {
         ico_desc = iSG_tpl_TEXGet(ico_pal, i);
-        memcpy(data.buf2[i], ico_desc->textureHeader->data, sizeof(data.buf2[i]));
+        memcpy(data.buf2[i], ico_desc->unk_0->unk_8, sizeof(data.buf2[i]));
     }
 
     memcpy(param1, &data, sizeof(data));
@@ -1507,37 +1514,33 @@ static void iSG_upd_icostat(CARDStat*, CARDStat* stat)
     }
 }
 
-static S32 iSG_tpl_unpack(st_ISG_TPL_TEXPALETTE* pal)
+static S32 iSG_tpl_unpack(st_ISG_TPL_TEXPALETTE* tpl)
 {
-    if (pal->versionNumber != 2142000)
+    if (tpl->magic != 0x20af30)
     {
         return 0;
     }
 
-    pal->descriptorArray = (st_ISG_TPL_TEXDESCRIP*)((U32)pal + (U32)pal->descriptorArray);
-    for (S32 i = 0; i < pal->numDescriptors; ++i)
+    tpl->unk_8 = (st_ISG_TPL_TEX*)((U32)tpl + (U32)tpl->unk_8);
+    for (S32 i = 0; i < tpl->count; ++i)
     {
-        st_ISG_TPL_TEXDESCRIP* tmpdesc = &pal->descriptorArray[i];
-        if (tmpdesc->textureHeader != NULL)
+        st_ISG_TPL_TEX* x = &tpl->unk_8[i];
+        if (x->unk_0 != NULL)
         {
-            tmpdesc->textureHeader =
-                (st_ISG_TPL_TEXHEADER*)((U32)pal + (U32)tmpdesc->textureHeader);
-            if (tmpdesc->textureHeader->unpacked == 0)
+            x->unk_0 = (st_ISG_TPL_TEX::UnkIn*)((U32)tpl + (U32)x->unk_0);
+            if (x->unk_0->unk_23 == 0)
             {
-                tmpdesc->textureHeader->data =
-                    (char*)((U32)pal + (U32)tmpdesc->textureHeader->data);
-                tmpdesc->textureHeader->unpacked = 1;
+                x->unk_0->unk_8 = (void*)((U32)tpl + (U32)x->unk_0->unk_8);
+                x->unk_0->unk_23 = 1;
             }
         }
-        if (tmpdesc->CLUTHeader != NULL)
+        if (x->unk_4 != NULL)
         {
-            tmpdesc->CLUTHeader = (st_ISG_TPL_CLUTHEADER*)((U32)pal + (U32)tmpdesc->CLUTHeader);
-            if (tmpdesc->CLUTHeader->unpacked == 0)
+            x->unk_4 = (st_ISG_TPL_TEX::UnkOut*)((U32)tpl + (U32)x->unk_4);
+            if (x->unk_4->unk_2 == 0)
             {
-                // Retail stores the file base here, not base + offset. The icon and
-                // banner TPLs have no CLUTs.
-                tmpdesc->CLUTHeader->data = (char*)pal;
-                tmpdesc->CLUTHeader->unpacked = 1;
+                x->unk_4->unk_8 = tpl;
+                x->unk_4->unk_2 = 1;
             }
         }
     }
@@ -1549,9 +1552,9 @@ static S32 iSG_bnr_unpack(st_ISG_TPL_TEXPALETTE* tpl)
     return iSG_tpl_unpack(tpl);
 }
 
-static st_ISG_TPL_TEXDESCRIP* iSG_tpl_TEXGet(st_ISG_TPL_TEXPALETTE* pal, U32 n)
+static st_ISG_TPL_TEX* iSG_tpl_TEXGet(st_ISG_TPL_TEXPALETTE* tpl, U32 n)
 {
-    return &pal->descriptorArray[n];
+    return &tpl->unk_8[n];
 }
 
 static void iSG_cb_unmount(s32 chan, s32 result);
@@ -1757,7 +1760,13 @@ static S32 iSG_mc_fopen(st_ISG_MEMCARD_DATA* mcdata, const char* fname, S32 fsiz
 
     if (ret != 0)
     {
+#if defined(VERSION_GU4Y78)
+        if (memcmp(stat->gameName, "GU4Y", 4) != 0 || memcmp(stat->company, "78", 2) != 0)
+#elif defined(VERSION_GQPP78)
+        if (memcmp(stat->gameName, "GQPP", 4) != 0 || memcmp(stat->company, "78", 2) != 0)
+#else
         if (memcmp(stat->gameName, "GQPE", 4) != 0 || memcmp(stat->company, "78", 2) != 0)
+#endif
         {
             iSG_mc_fclose(mcdata);
             ret = 0;

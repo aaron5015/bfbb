@@ -1,13 +1,36 @@
 #include "xMath.h"
 
 #include <types.h>
+#if defined(PS2) || defined(XBOX)
+#include <stdlib.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
+#endif
 
 #include "xMathInlines.h"
+
+#if defined(PS2) || defined(XBOX)
+#define xMathAbs iabs
+#else
+#define xMathAbs __fabs
+#endif
 
 S32 xmath_inited;
 S32 xmath_exited;
 U32 rndseed;
+
+// Layout-only references reproduce the literal order left by stripped code.
+// The original stripped routines are unknown; these stubs do not enter the DOL.
+void __deadstripped_xMath_constants(F32* values)
+{
+    values[0] = FLOAT_MAX;
+    values[1] = 0.5f;
+    values[2] = 1.0f;
+    values[3] = 2.0f;
+    values[4] = 0.0f;
+    values[5] = 3.0f;
+    values[6] = 1e-5f;
+}
 
 void xMathInit()
 {
@@ -36,11 +59,14 @@ void xsrand(U32 seed)
     rndseed = seed;
 }
 
+#if !defined(XBOX)
 U32 xrand()
 {
     rndseed = rndseed * 1103515245 + 12345;
     return rndseed;
 }
+
+#endif
 
 F32 xurand()
 {
@@ -98,6 +124,18 @@ U32 xMathSolveQuadratic(F32 a, F32 b, F32 c, F32* x1, F32* x2)
     return 2;
 }
 
+#if defined(PS2)
+// Keep the cubic solver's scalar square-root boundary and separate result.
+static inline F32 xMathCubicSqrt(F32 value)
+{
+    F32 result;
+    asm volatile("sqrt.s %0, %1" : "=f"(result) : "f"(value));
+    return result;
+}
+#else
+#define xMathCubicSqrt xsqrt
+#endif
+
 U32 xMathSolveCubic(F32 a, F32 b, F32 c, F32 d, F32* x1, F32* x2, F32* x3)
 {
     F32 arecip; //
@@ -111,13 +149,6 @@ U32 xMathSolveCubic(F32 a, F32 b, F32 c, F32 d, F32* x1, F32* x2, F32* x3)
     F32 fAngle;
     F32 fCos; //
     F32 fSin; //
-
-    F32 temp_f1;
-    F32 temp_f1_2;
-    F32 temp_f1_3;
-    F32 temp_f28_2;
-    F32 temp_f29;
-    F32 var_f1;
 
     if (a == 0.0f)
     {
@@ -135,56 +166,64 @@ U32 xMathSolveCubic(F32 a, F32 b, F32 c, F32 d, F32* x1, F32* x2, F32* x3)
     fOffset = 0.33333334f * b;
     fDiscr = (0.25f * (fB * fB)) + (0.037037037f * (fA * (fA * fA)));
     fHalfB = 0.5f * fB;
-    if ((F32)__fabs(fDiscr) < 0.000001f)
+    if ((F32)xMathAbs(fDiscr) < 0.000001f)
     {
         fDiscr = 0.0f;
     }
     if (fDiscr > 0.0f)
     {
-        temp_f1 = xsqrt(fDiscr);
-        temp_f1_2 = -fHalfB + temp_f1;
-        if (temp_f1_2 >= 0.0f)
+        fDiscr = xMathCubicSqrt(fDiscr);
+        fTemp = -fHalfB + fDiscr;
+        if (fTemp >= 0.0f)
         {
-            *x1 = xpow(temp_f1_2, 0.33333334f);
+            *x1 = xpow(fTemp, 0.33333334f);
         }
         else
         {
-            *x1 = -xpow(-temp_f1_2, 0.33333334f);
+            *x1 = -xpow(-fTemp, 0.33333334f);
         }
-        temp_f1_3 = -fHalfB - temp_f1;
-        if (temp_f1_3 >= 0.0f)
+        fTemp = -fHalfB - fDiscr;
+        if (fTemp >= 0.0f)
         {
-            *x1 += xpow(temp_f1_3, 0.33333334f);
+            *x1 += xpow(fTemp, 0.33333334f);
         }
         else
         {
-            *x1 -= xpow(-temp_f1_3, 0.33333334f);
+            *x1 -= xpow(-fTemp, 0.33333334f);
         }
         *x1 -= fOffset;
         return 1;
     }
     if (fDiscr < 0.0f)
     {
-        temp_f29 = xsqrt(-0.33333334f * fA);
-        temp_f28_2 = 0.33333334f * xatan2(xsqrt(-fDiscr), -fHalfB);
-        fCos = icos(temp_f28_2);
-        fSin = isin(temp_f28_2);
-        *x1 = (2.0f * temp_f29 * fCos) - fOffset;
-        *x2 = (-temp_f29 * (fCos + 1.7320508f * fSin)) - fOffset;
-        *x3 = (-temp_f29 * (fCos - 1.7320508f * fSin)) - fOffset;
+        fDist = xMathCubicSqrt(-0.33333334f * fA);
+        fAngle = 0.33333334f * xatan2(xMathCubicSqrt(-fDiscr), -fHalfB);
+        fCos = icos(fAngle);
+        fSin = isin(fAngle);
+        *x1 = (2.0f * fDist * fCos) - fOffset;
+        *x2 = (-fDist * (fCos + 1.7320508f * fSin)) - fOffset;
+        *x3 = (-fDist * (fCos - 1.7320508f * fSin)) - fOffset;
         return 3;
     }
     if (fHalfB >= 0.0f)
     {
-        var_f1 = -xpow(fHalfB, 0.33333334f);
+        fTemp = -xpow(fHalfB, 0.33333334f);
     }
     else
     {
-        var_f1 = xpow(-fHalfB, 0.33333334f);
+        fTemp = xpow(-fHalfB, 0.33333334f);
     }
-    *x1 = (2.0f * var_f1) - fOffset;
-    *x2 = -var_f1 - fOffset;
+    *x1 = (2.0f * fTemp) - fOffset;
+    *x2 = -fTemp - fOffset;
     return 2;
+}
+
+#undef xMathCubicSqrt
+
+void __deadstripped_xMath_angles(F32* values)
+{
+    values[0] = PI;
+    values[1] = -1.0f;
 }
 
 F32 xAngleClamp(F32 a)
@@ -200,22 +239,21 @@ F32 xAngleClamp(F32 a)
     return rem;
 }
 
+#if !defined(XBOX)
 F32 xAngleClampFast(F32 a)
 {
-    F32 rad360 = (2 * PI);
-
     if (a < 0.0f)
     {
-        return a + rad360;
+        a += (2 * PI);
     }
-
-    if (a >= rad360)
+    else if (a >= (2 * PI))
     {
-        return a - rad360;
+        a -= (2 * PI);
     }
 
     return a;
 }
+#endif
 
 F32 xDangleClamp(F32 a)
 {
@@ -229,10 +267,26 @@ F32 xDangleClamp(F32 a)
 
     if (rem < -PI)
     {
+#if defined(PS2)
+        rem += rad360;
+#else
         return rem + rad360;
+#endif
     }
 
     return rem;
+}
+
+#if defined(PS2)
+#define XMATH_SIGN(f) (*(U32*)&(f) & 0x80000000)
+
+static inline S32 xMathAccelNearZero(F32 value)
+{
+    return (F32)xMathAbs(value) < 0.001f;
+}
+static inline S32 xMathAccelSignsDiffer(F32& lhs, F32& rhs)
+{
+    return !(XMATH_SIGN(lhs) == XMATH_SIGN(rhs));
 }
 
 void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 endx, F32 maxv)
@@ -248,43 +302,49 @@ void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 endx, F32 maxv)
     F32 dx;
 
     offset = endx - x;
-    t1 = (xabs(v) < 0.001f || ((offset < 0.0f) ? 1 : 0) != ((v < 0.0f) ? 1 : 0)) ? FLOAT_MAX :
-                                                                                   offset / v;
-    t2 = xabs(v / a);
 
+    if (xMathAccelNearZero(v) || xMathAccelSignsDiffer(offset, v))
+    {
+        t1 = 1e38f;
+    }
+    else
+    {
+        t1 = offset / v;
+    }
+
+    t2 = (F32)xMathAbs(v / a);
     if (t1 < t2)
     {
         a *= -1.0f;
     }
-
     if (offset < 0.0f)
     {
         a *= -1.0f;
     }
 
-    dv = a * dt;
     oldv = v;
+    dv = a * dt;
     newv = v + dv;
 
-    if (xabs(newv) <= maxv)
+    if ((F32)xMathAbs(newv) <= maxv)
     {
         v = newv;
         adx = 0.5f * dv * dt;
     }
-    else if (xabs(oldv) <= maxv)
+    else if ((F32)xMathAbs(v) <= maxv)
     {
         v = range_limit(newv, -maxv, maxv);
         if (oldv != v)
         {
             diff = v - oldv;
-            adx = 0.5f * diff * diff / a;
+            adx = (0.5f * diff * diff) / a;
         }
         else
         {
             adx = 0.0f;
         }
     }
-    else if (((newv < 0.0f) ? 1 : 0) != ((dv < 0.0f) ? 1 : 0))
+    else if (XMATH_SIGN(newv) != XMATH_SIGN(dv))
     {
         v = newv;
         adx = 0.5f * dv * dt;
@@ -294,17 +354,17 @@ void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 endx, F32 maxv)
         adx = 0.0f;
     }
 
-    dx = oldv * dt + adx;
+    dx = adx + oldv * dt;
 
     if (t1 > t2)
     {
-        if (((dx < 0.0f) ? 1 : 0) == ((offset < 0.0f) ? 1 : 0) && xabs(dx) > xabs(offset))
+        if (XMATH_SIGN(dx) == XMATH_SIGN(offset) && (F32)xMathAbs(dx) > (F32)xMathAbs(offset))
         {
             dx = offset;
             v = 0.0f;
         }
     }
-    else if (((dx < 0.0f) ? 1 : 0) != ((offset < 0.0f) ? 1 : 0))
+    else if (XMATH_SIGN(dx) != XMATH_SIGN(offset))
     {
         dx = offset;
         v = 0.0f;
@@ -312,12 +372,195 @@ void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 endx, F32 maxv)
 
     x += dx;
 }
+#else
+void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 endx, F32 maxv)
+{
+    // Todo: These variable names aren't all right.
+    F32 var_f31;
+    F32 offset;
+    F32 t1;
+    F32 t2;
+    F32 oldv; //
+    F32 dv; //
+    F32 newv; //
+    F32 adx;
+    F32 diff;
+    F32 dx;
+
+    F32 temp_f1_2;
+    S32 var_r0_4;
+    S32 var_r3_2;
+    S32 var_r3_3;
+    S32 var_r0_2;
+    S32 var_r0_3;
+    S32 var_r3;
+    S32 var_r3_4;
+    F32 var_f0;
+    F32 var_f2;
+    F32 temp_f29;
+    F32 temp_f28;
+
+    temp_f29 = endx - x;
+#if defined(XBOX)
+    const F32 abs_v = (F32)xMathAbs(v);
+    if (abs_v < 0.001f || (temp_f29 < 0.0f ? 1 : 0) != (v < 0.0f ? 1 : 0))
+#else
+    var_r3 = (F32)xMathAbs(v) < 0.001f || (temp_f29 < 0.0f ? 1 : 0) != (v < 0.0f ? 1 : 0);
+    if (var_r3 & 0xff)
+#endif
+    {
+        var_f31 = 1e38f;
+    }
+    else
+    {
+        var_f31 = temp_f29 / v;
+    }
+    temp_f28 = (F32)xMathAbs(v / a);
+    if (var_f31 < temp_f28)
+    {
+        a *= -1.0f;
+    }
+    if (temp_f29 < 0.0f)
+    {
+        a *= -1.0f;
+    }
+#if defined(XBOX)
+    oldv = v;
+    dv = a * dt;
+#else
+    dv = a * dt;
+    oldv = v;
+#endif
+    newv = oldv + dv;
+
+    if ((F32)xMathAbs(newv) <= maxv)
+    {
+        v = newv;
+#if defined(XBOX)
+        var_f0 = (dv * dt) * 0.5f;
+#else
+        var_f0 = 0.5f * dv * dt;
+#endif
+    }
+    else
+    {
+#if defined(XBOX)
+        if (abs_v <= maxv)
+#else
+        if ((F32)xMathAbs(oldv) <= maxv)
+#endif
+        {
+            v = range_limit(newv, -maxv, maxv);
+            if (oldv != v)
+            {
+                temp_f1_2 = v - oldv;
+#if defined(XBOX)
+                var_f0 = (temp_f1_2 / a) * temp_f1_2 * 0.5f;
+#else
+                var_f0 = (0.5f * temp_f1_2 * temp_f1_2) / a;
+#endif
+            }
+            else
+            {
+                var_f0 = 0.0f;
+            }
+        }
+        else
+        {
+            if (dv < 0.0f)
+            {
+                var_r3_2 = 1;
+            }
+            else
+            {
+                var_r3_2 = 0;
+            }
+            if (newv < 0.0f)
+            {
+                var_r0_2 = 1;
+            }
+            else
+            {
+                var_r0_2 = 0;
+            }
+            if (var_r0_2 != var_r3_2)
+            {
+                v = newv;
+#if defined(XBOX)
+                var_f0 = (dv * dt) * 0.5f;
+#else
+                var_f0 = 0.5f * dv * dt;
+#endif
+            }
+            else
+            {
+                var_f0 = 0.0f;
+            }
+        }
+    }
+    var_f2 = (oldv * dt) + var_f0;
+    if (var_f31 > temp_f28)
+    {
+        if (temp_f29 < 0.0f)
+        {
+            var_r3_3 = 1;
+        }
+        else
+        {
+            var_r3_3 = 0;
+        }
+        if (var_f2 < 0.0f)
+        {
+            var_r0_3 = 1;
+        }
+        else
+        {
+            var_r0_3 = 0;
+        }
+        if ((var_r0_3 == var_r3_3) && ((F32)xMathAbs(var_f2) > (F32)xMathAbs(temp_f29)))
+        {
+            var_f2 = temp_f29;
+            v = 0.0f;
+        }
+    }
+    else
+    {
+        if (temp_f29 < 0.0f)
+        {
+            var_r3_4 = 1;
+        }
+        else
+        {
+            var_r3_4 = 0;
+        }
+        if (var_f2 < 0.0f)
+        {
+            var_r0_4 = 1;
+        }
+        else
+        {
+            var_r0_4 = 0;
+        }
+        if (var_r0_4 != var_r3_4)
+        {
+            var_f2 = temp_f29;
+            v = 0.0f;
+        }
+    }
+    x += var_f2;
+}
+#endif
 
 F32 xAccelMoveTime(F32 dx, F32 a, F32, F32 maxv)
 {
     float time = a;
+#if defined(XBOX)
+    dx *= 0.5f;
+    float atime = maxv / time;
+#else
     float atime = maxv / time;
     dx *= 0.5f;
+#endif
     float adist = 0.5f * time * atime * atime;
 
     dx = (adist < dx) ? xsqrt(2.0f * dx / time) : (atime + (dx - adist) / maxv);
@@ -325,6 +568,41 @@ F32 xAccelMoveTime(F32 dx, F32 a, F32, F32 maxv)
     return 2.0f * dx;
 }
 
+#if defined(PS2)
+// Copy the sign of src onto dst through the float bit patterns.
+#define XMATH_COPYSIGN(dst, src)                                                                   \
+    {                                                                                              \
+        U32 bn = *(U32*)&(src) & 0x80000000;                                                       \
+        U32 bp = *(U32*)&(dst) & (*(U32*)&(src) | 0x7fffffff);                                     \
+        U32 aa = bn | bp;                                                                          \
+        (dst) = *(F32*)&aa;                                                                        \
+    }
+
+void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 maxv)
+{
+    F32 diff;
+    F32 dv;
+
+    if ((F32)xMathAbs(v) > (F32)xMathAbs(maxv))
+    {
+        XMATH_COPYSIGN(a, v);
+        *(U32*)&a ^= 0x80000000;
+    }
+
+    XMATH_COPYSIGN(maxv, a);
+
+    dv = a * dt;
+    diff = maxv - v;
+    if (xabs(diff) < xabs(dv))
+    {
+        x += (v * dt) + ((0.5f * diff * diff) / a);
+        v = maxv;
+        return;
+    }
+    x += (dt * (0.5f * a * dt)) + (v * dt);
+    v += dv;
+}
+#else
 void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 maxv)
 {
     U32 bn; // r10
@@ -333,7 +611,7 @@ void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 maxv)
     F32 diff;
     F32 dv;
 
-    if ((F32)__fabs(v) > (F32)__fabs(maxv))
+    if ((F32)xMathAbs(v) > (F32)xMathAbs(maxv))
     {
         if (v < 0.0f)
         {
@@ -361,54 +639,121 @@ void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 maxv)
     }
     diff = maxv - v;
     dv = a * dt;
-    if ((F32)__fabs(diff) < (F32)__fabs(dv))
+    if ((F32)xMathAbs(diff) < (F32)xMathAbs(dv))
     {
+#ifdef XBOX
+        x += (v * dt) + ((diff / a) * diff * 0.5f);
+#else
         x += (v * dt) + ((0.5f * diff * diff) / a);
+#endif
         v = maxv;
         return;
     }
+#ifdef XBOX
+    x += (0.5f * dv + v) * dt;
+#else
     x += (dt * (0.5f * a * dt)) + (v * dt);
+#endif
     v += dv;
 }
+#endif
 
+#if defined(PS2)
 void xAccelStop(F32& x, F32& v, F32 a, F32 dt)
 {
     U32 aa;
-    F32 oldv = v;
+    F32 oldv;
 
-    if (oldv >= -0.00001f && oldv <= 0.00001f)
+    if (!(v >= -0.00001f) || !(v <= 0.00001f))
     {
-        return;
+        aa = (*(U32*)&v & 0x80000000) | (*(U32*)&a & (*(U32*)&v | 0x7fffffff));
+        a = *(F32*)&aa;
+        *(U32*)&a ^= 0x80000000;
+
+        oldv = v;
+        v += a * dt;
+
+        if ((*(U32*)&oldv & 0x80000000) == (*(U32*)&v & 0x80000000))
+        {
+            x += (a * (0.5f * dt * dt)) + (oldv * dt);
+            return;
+        }
+
+        if (!(a >= -0.00001f) || !(a <= 0.00001f))
+        {
+            x -= (0.5f * oldv * oldv) / a;
+        }
+        v = 0.0f;
     }
+}
+#else
+void xAccelStop(F32& x, F32& v, F32 a, F32 dt)
+{
+    S32 aa; // From DWARF, currently unused.
+    F32 oldv;
 
-    if (oldv < 0.0f)
+    S32 var_r0;
+    S32 var_r5;
+
+#ifdef XBOX
+    if (!(v >= -0.00001f) || !(v <= 0.00001f))
     {
-        if (a > 0.0f)
+        if (v < 0.0f)
+#else
+    oldv = v;
+    if (!(oldv >= -0.00001f) || !(oldv <= 0.00001f))
+    {
+        if (oldv < 0.0f)
+#endif
+        {
+            if (a > 0.0f)
+            {
+                a = -a;
+            }
+        }
+        else if (a < 0.0f)
         {
             a = -a;
         }
-    }
-    else if (a < 0.0f)
-    {
+
         a = -a;
+#ifdef XBOX
+        oldv = v;
+#endif
+        v += a * dt;
+
+        if (v < 0.0f)
+        {
+            var_r5 = 1;
+        }
+        else
+        {
+            var_r5 = 0;
+        }
+
+        if (oldv < 0.0f)
+        {
+            var_r0 = 1;
+        }
+        else
+        {
+            var_r0 = 0;
+        }
+
+        if (var_r0 == var_r5)
+        {
+            x += (a * (0.5f * dt * dt)) + (oldv * dt);
+            return;
+        }
+
+        if (!(a >= -0.00001f) || !(a <= 0.00001f))
+        {
+            x -= (0.5f * oldv * oldv) / a;
+        }
+        v = 0.0f;
     }
-
-    a = -a;
-    v += a * dt;
-
-    if (((oldv < 0.0f) ? 1 : 0) == ((v < 0.0f) ? 1 : 0))
-    {
-        x += a * (0.5f * dt * dt) + oldv * dt;
-        return;
-    }
-
-    if (!(a >= -0.00001f && a <= 0.00001f))
-    {
-        x -= 0.5f * oldv * oldv / a;
-    }
-
-    v = 0.0f;
 }
+#endif
 
 F32 xFuncPiece_Eval(xFuncPiece* func, F32 param, xFuncPiece** iterator)
 {

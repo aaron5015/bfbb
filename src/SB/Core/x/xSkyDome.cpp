@@ -2,6 +2,9 @@
 
 #include "xEvent.h"
 #include "iModel.h"
+#if defined(PS2)
+#include <rwplcore.h>
+#endif
 
 struct SkyDomeInfo
 {
@@ -54,6 +57,7 @@ void xSkyDome_AddEntity(xEnt* ent, S32 sortorder, S32 lockY)
     sSkyCount++;
 
     ent->render = xSkyDome_EmptyRender;
+
     ent->model->Flags &= (U16)~0x1;
     ent->baseFlags &= (U16)~0x10;
 

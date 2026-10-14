@@ -2,7 +2,11 @@
 
 #include "xstransvc.h"
 
+#if defined(PS2)
+#include <math.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
+#endif
 
 struct xJawDataTable
 {
@@ -61,10 +65,12 @@ F32 xJaw_EvalData(void* data, F32 time)
 
     numdata = *(S32*)data;
 
+#if !defined(PS2)
     if (numdata > (U32)0xFFFF)
     {
         swap(data);
     }
+#endif
 
     time *= 60.0f;
     idx = std::floorf(time);

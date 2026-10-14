@@ -1,7 +1,13 @@
 #include "zFX.h"
 
 #include "rpworld.h"
+#if defined(PS2)
+#include <rwsdk/rpskin.h>
+#include "xstransvc.h"
+#include "iFX.h"
+#else
 #include "rpskin.h"
+#endif
 #include "rwplcore.h"
 #include "iAnim.h"
 #include "xDebug.h"
@@ -23,7 +29,11 @@
 #include <types.h>
 #include <string.h>
 #include <stdlib.h>
+#if defined(PS2)
+#include <math.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
+#endif
 
 void zParPTankSpawnBubbles(xVec3* pos, xVec3* vel, U32 count, F32 scale);
 void zParPTankSpawnMenuBubbles(xVec3* pos, xVec3* vel, U32 count);
@@ -39,9 +49,6 @@ void xSCurve(F32& p, F32& v, F32& a, F32 t);
 // sits where the target's .rodata order puts it.
 void __deadstripped_zFX()
 {
-    const char _446[0x0C] = {};
-    const char _447[0x0C] = {};
-    const char _451[0x0C] = {};
     const char _482[0x0C] = {};
 
     const char _553[0x28] = {};
@@ -254,7 +261,9 @@ void zFXGooEnable(RpAtomic* atomic, S32 freezeGroup)
 {
     S32 i;
     zFXGooInstance* goo = zFXGooInstances;
+#if !defined(PS2)
     g_txtr_gooFrozen = NULL;
+#endif
     for (i = 0; i < 24; i++, goo++)
     {
         if (goo->state == zFXGooStateInactive)
@@ -274,6 +283,7 @@ void zFXGooEnable(RpAtomic* atomic, S32 freezeGroup)
     goo->freezeGroup = freezeGroup;
     RpGeometry* geom = RpAtomicGetGeometry(atomic);
     S32 numVertices = geom->numVertices;
+#if !defined(PS2)
     S32 numTriangles = geom->numTriangles;
     if (geom->preLitLum == NULL)
     {
@@ -320,17 +330,23 @@ void zFXGooEnable(RpAtomic* atomic, S32 freezeGroup)
         geom = new_geom;
     }
 
+#endif
+
     xVec3* orig_verts = (xVec3*)xMemAllocSize(sizeof(xVec3) * numVertices);
     RwRGBA* orig_colors = (RwRGBA*)xMemAllocSize(sizeof(RwRGBA) * numVertices);
+#if !defined(PS2)
     RwTexCoords* orig_uvs = (RwTexCoords*)xMemAllocSize(sizeof(RwTexCoords) * numVertices);
     memcpy(orig_verts, geom->morphTarget->verts, (S32)sizeof(xVec3) * numVertices);
     memcpy(orig_colors, geom->preLitLum, (S32)sizeof(RwRGBA) * numVertices);
     memcpy(orig_uvs, geom->texCoords[0], (S32)sizeof(RwTexCoords) * numVertices);
+#endif
     RpAtomicSetRenderCallBack(atomic, &zFXGooRenderAtomic);
     goo->atomic = atomic;
     goo->orig_verts = orig_verts;
     goo->orig_colors = orig_colors;
+#if !defined(PS2)
     goo->orig_uvs = orig_uvs;
+#endif
     memcpy(goo->warbc, defaultGooWarbc, sizeof(defaultGooWarbc));
     goo->w0 = goo->warbc[0];
     goo->w2 = goo->warbc[2];
@@ -461,6 +477,7 @@ void zFXGooUpdateInstance(zFXGooInstance* goo, F32 dt)
     F32 tmp = xpow(1.0f - goo->alpha, 1.5f);
     goo->warb_time += tmp * dt;
 
+#if !defined(PS2)
     if (goo->alpha < 1.0f && goo->atomic != NULL)
     {
         RpGeometry* geom = RpAtomicGetGeometry(goo->atomic);
@@ -485,6 +502,8 @@ void zFXGooUpdateInstance(zFXGooInstance* goo, F32 dt)
             RpGeometryUnlock(geom);
         }
     }
+
+#endif
 
     if (goo_timer_textbox != NULL)
     {
@@ -525,6 +544,39 @@ void zFXGooUpdate(F32 dt)
     }
 }
 
+#if defined(PS2)
+RpAtomic* zFXGooRenderAtomic(class RpAtomic* atomic)
+{
+    atomic->pipeline = xFXgooPipeline;
+    S32 i;
+    zFXGooInstance* goo = zFXGooInstances;
+    for (i = 0; i < 24; i++, goo++)
+    {
+        if (goo->state == zFXGooStateInactive)
+        {
+            continue;
+        }
+        if (goo->atomic == atomic)
+        {
+            break;
+        }
+    }
+
+    if (i == 24)
+    {
+        // Retail passes these addresses even when goo is one past the array.
+        // iFXgooSetParams reads the center; preserve the original PS2 bug.
+        iFXgooSetParams(&goo->center, zFXGooStateInactive, 0.0f, 0.0f, 0.0f, 0.0f, goo->warbc);
+    }
+    else
+    {
+        iFXgooSetParams(&goo->center, goo->state, goo->warb_time, goo->alpha, goo->min, goo->max,
+                        goo->warbc);
+    }
+    (*gAtomicRenderCallBack)(atomic);
+    return atomic;
+}
+#else
 RpAtomic* zFXGooRenderAtomic(class RpAtomic* atomic)
 {
     if (g_txtr_gooFrozen == NULL)
@@ -596,13 +648,14 @@ RpAtomic* zFXGooRenderAtomic(class RpAtomic* atomic)
         {
             xVec3 tmp;
             xVec3Sub(&tmp, (xVec3*)&verts[i], &goo->center);
-            F32 c = a * xVec3Length2(&tmp) + b;
+            F32 c = xVec3Length2(&tmp);
+            c = a * c + b;
             c = CLAMP(c, 0.0f, 255.0f);
             bytes[i] = (U8)c;
         }
 
         RpTriangle* tri = geom->triangles;
-        for (i = 0; i < geom->numTriangles; i++, tri++)
+        for (i = 0; i < geom->numTriangles; numVerts += 3, i++, tri++)
         {
             if (numVerts > 0x1dd)
             {
@@ -622,41 +675,22 @@ RpAtomic* zFXGooRenderAtomic(class RpAtomic* atomic)
             a += refPos;
             b += refPos;
             c += refPos;
-            numVerts += 3;
 
-            F32 ax = a.x;
-            F32 ay = 0.02f + a.y;
-            F32 az = a.z;
-            RwIm3DVertexSetPos(&currentVertBuf[0], ax, ay, az);
-            F32 bx = b.x;
-            F32 by = 0.02f + b.y;
-            F32 bz = b.z;
-            RwIm3DVertexSetPos(&currentVertBuf[1], bx, by, bz);
-            F32 cx = c.x;
-            F32 cy = 0.02f + c.y;
-            F32 cz = c.z;
-            RwIm3DVertexSetPos(&currentVertBuf[2], cx, cy, cz);
+            RwIm3DVertexSetPos(&currentVertBuf[0], a.x, 0.02f + a.y, a.z);
+            RwIm3DVertexSetPos(&currentVertBuf[1], b.x, 0.02f + b.y, b.z);
+            RwIm3DVertexSetPos(&currentVertBuf[2], c.x, 0.02f + c.y, c.z);
 
             RwUInt16 ai = tri->vertIndex[0];
-            U8 ar = preLitLum[ai].red;
-            U8 ag = preLitLum[ai].green;
-            U8 ab = preLitLum[ai].blue;
-            U8 aa = bytes[ai];
-            RwIm3DVertexSetRGBA(&currentVertBuf[0], ar, ag, ab, aa);
+            RwIm3DVertexSetRGBA(&currentVertBuf[0], preLitLum[ai].red, preLitLum[ai].green,
+                                preLitLum[ai].blue, bytes[ai]);
 
             RwUInt16 bi = tri->vertIndex[1];
-            U8 br = preLitLum[bi].red;
-            U8 bg = preLitLum[bi].green;
-            U8 bb = preLitLum[bi].blue;
-            U8 ba = bytes[bi];
-            RwIm3DVertexSetRGBA(&currentVertBuf[1], br, bg, bb, ba);
+            RwIm3DVertexSetRGBA(&currentVertBuf[1], preLitLum[bi].red, preLitLum[bi].green,
+                                preLitLum[bi].blue, bytes[bi]);
 
             RwUInt16 ci = tri->vertIndex[2];
-            U8 cr = preLitLum[ci].red;
-            U8 cg = preLitLum[ci].green;
-            U8 cb = preLitLum[ci].blue;
-            U8 ca = bytes[ci];
-            RwIm3DVertexSetRGBA(&currentVertBuf[2], cr, cg, cb, ca);
+            RwIm3DVertexSetRGBA(&currentVertBuf[2], preLitLum[ci].red, preLitLum[ci].green,
+                                preLitLum[ci].blue, bytes[ci]);
 
             currentVertBuf[0].u = goo->orig_uvs[tri->vertIndex[0]].u;
             currentVertBuf[1].u = goo->orig_uvs[tri->vertIndex[1]].u;
@@ -676,6 +710,7 @@ RpAtomic* zFXGooRenderAtomic(class RpAtomic* atomic)
 
     return atomic;
 }
+#endif
 
 void zFXUpdate(F32 dt)
 {
@@ -1166,7 +1201,8 @@ void zFX_SpawnBubbleWall()
     xVec3 pos[100];
     xVec3 vel[100];
 
-    // Retail hoisted these six loads out of the loop. Our compiler does not, so
+#if !defined(PS2)
+    // GameCube retail hoisted these six loads out of the loop. Our compiler does not, so
     // they are hoisted by hand; the declaration order fixes the register
     // assignment and the assignment order fixes the emitted load order.
     F32 sy, sx, vsz, vsy, vsx, sz;
@@ -1177,21 +1213,35 @@ void zFX_SpawnBubbleWall()
     vsy = bubblewall_velscale.y;
     vsz = bubblewall_velscale.z;
 
+#endif
+
     xVec3* pp = pos;
     xVec3* vp = vel;
     for (U32 i = 0; i < 50; i++, pp++, vp++)
     {
+#if defined(PS2)
+        pp->x = mat->pos.x + (xurand() - 0.5f) + bubblewall_scale.x * (xurand() - 0.5f);
+        pp->y = mat->pos.y + (xurand() - 0.5f) + bubblewall_scale.y * (xurand() - 0.5f);
+        pp->z = mat->pos.z + (xurand() - 0.5f) + bubblewall_scale.z * (xurand() - 0.5f);
+#else
         pp->x = mat->pos.x + (xurand() - 0.5f) + sx * (xurand() - 0.5f);
         pp->y = mat->pos.y + (xurand() - 0.5f) + sy * (xurand() - 0.5f);
         pp->z = mat->pos.z + (xurand() - 0.5f) + sz * (xurand() - 0.5f);
+#endif
 
         xVec3 offset;
         xVec3ScaleC(&offset, (xVec3*)&mat->at, 1.2f, 1.2f, 1.2f);
         xVec3Add(pp, pp, &offset);
 
+#if defined(PS2)
+        vp->x = bubblewall_velscale.x * (xurand() - 0.5f);
+        vp->y = bubblewall_velscale.y * (xurand() - 0.5f);
+        vp->z = bubblewall_velscale.z * (xurand() - 0.5f);
+#else
         vp->x = vsx * (xurand() - 0.5f);
         vp->y = vsy * (xurand() - 0.5f);
         vp->z = vsz * (xurand() - 0.5f);
+#endif
     }
 
     zParPTankSpawnBubbles(pos, vel, 50, 1.0f);
@@ -1245,7 +1295,7 @@ void zFX_SpawnBubbleBlast(const xVec3* pos, U32 num, F32 radius, F32 blast_vel, 
     {
         F32 ang = 2 * PI * xurand();
         F32 uz = 2.0f * xurand() - 1.0f;
-        F32 r = xsqrt(-(uz * uz - 1.0f));
+        F32 r = xsqrt(1.0f - uz * uz);
         itv->assign(r * icos(ang), r * isin(ang), uz);
         *itl = *pos + *itv * radius;
         *itv *= blast_vel;
@@ -1288,12 +1338,22 @@ namespace
         xVec3 vel_rand;
     };
 
-    entrail_type entrail_types[2] = {
-        { "hovering_platform_wheel_bind", 0, 70.0f, 25.0f, { 0.0f, 0.5f, 0.0f },
-          { 0.4f, 0.4f, 0.4f }, { 0.0f, -3.0f, 0.0f }, { 1.5f, 0.0f, 1.5f } },
-        { "plat_support_double_bind", 0, 70.0f, 25.0f, { 0.0f, -2.0f, 0.0f },
-          { 0.4f, 0.4f, 0.4f }, { 0.0f, -3.0f, 0.0f }, { 1.5f, 0.0f, 1.5f } }
-    };
+    entrail_type entrail_types[2] = { { "hovering_platform_wheel_bind",
+                                        0,
+                                        70.0f,
+                                        25.0f,
+                                        { 0.0f, 0.5f, 0.0f },
+                                        { 0.4f, 0.4f, 0.4f },
+                                        { 0.0f, -3.0f, 0.0f },
+                                        { 1.5f, 0.0f, 1.5f } },
+                                      { "plat_support_double_bind",
+                                        0,
+                                        70.0f,
+                                        25.0f,
+                                        { 0.0f, -2.0f, 0.0f },
+                                        { 0.4f, 0.4f, 0.4f },
+                                        { 0.0f, -3.0f, 0.0f },
+                                        { 1.5f, 0.0f, 1.5f } } };
 
     enum state_enum
     {
@@ -1339,9 +1399,10 @@ namespace
     F32 get_triangle_area(const xVec3& a, const xVec3& b, const xVec3& c);
     void eval_tri(xVec3* vert, xVec3* norm, const xMat4x3* mat, const RpGeometry* geom,
                   const RpTriangle* tri);
-    void SkinXformVertAndNormal(xVec3* dst_verts, xVec3* dst_normals, const xVec3* verts,
-                                const xVec3* normals, const xMat4x3* mat, const xMat4x3* bone_mats,
-                                const F32* weights, const U32* bone_idx, const U16* idx, U32 count);
+    inline void SkinXformVertAndNormal(xVec3* dst_verts, xVec3* dst_normals, const xVec3* verts,
+                                       const xVec3* normals, const xMat4x3* mat,
+                                       const xMat4x3* bone_mats, const F32* weights,
+                                       const U32* bone_idx, const U16* idx, U32 count);
     void random_point_on_triangle(xVec3& loc, xVec3& norm, const xVec3* v, const xVec3* n);
     void emit_popper_bubbles(popper_data& popper, S32 emit, F32 scale, F32 vel_add);
     void set_popper_alpha(popper_data& data, F32 alpha);
@@ -1391,7 +1452,7 @@ namespace
             for (; w != end; w++)
             {
                 popper.area += get_triangle_area(vert[tri->vertIndex[0]], vert[tri->vertIndex[1]],
-                                               vert[tri->vertIndex[2]]);
+                                                 vert[tri->vertIndex[2]]);
                 tri++;
                 *w = popper.area;
             }
@@ -1466,13 +1527,15 @@ namespace
         norm[2].up_normalize();
     }
 
-    void SkinXformVertAndNormal(xVec3* dst_verts, xVec3* dst_normals, const xVec3* verts,
-                                const xVec3* normals, const xMat4x3* mat, const xMat4x3* bone_mats,
-                                const F32* weights, const U32* bone_idx, const U16* idx, U32 count)
+    inline void SkinXformVertAndNormal(xVec3* dst_verts, xVec3* dst_normals, const xVec3* verts,
+                                       const xVec3* normals, const xMat4x3* mat,
+                                       const xMat4x3* bone_mats, const F32* weights,
+                                       const U32* bone_idx, const U16* idx, U32 count)
     {
+#if defined(PS2)
+        const xMat4x3* root_mat = mat++;
+#endif
         U32 done[2] = { 0, 0 };
-        U32 mask;
-        U32 shift;
         xMat4x3* scratch = (xMat4x3*)giAnimScratch;
 
         for (; count != 0; count--)
@@ -1482,50 +1545,83 @@ namespace
             const xVec3* norm = &normals[vidx];
             U32 bones = bone_idx[vidx];
             const F32* wt = &weights[vidx * 4];
+            U32 nbones;
+            const F32* w;
 
-            shift = 0;
-            for (U32 j = 0; j < 4; j++, shift += 8)
+            for (U32 j = 0; j < 4; j++)
             {
-                U32 b = bones >> shift;
-                U32 word = (b >> 5) & 7;
-                mask = 1 << (b & 0x1f);
-                U32 bi = b & 0xff;
-                if (!(mask & done[word]))
+                U32 b = (bones >> (j * 8)) & 0xff;
+                U32 word = b >> 5;
+                U32 bi = b;
+                if (!((1 << (b & 0x1f)) & done[word]))
                 {
-                    xMat4x3Mul(&scratch[bi], &bone_mats[bi], &mat[bi] + 1);
-                    done[word] |= mask;
+                    const xMat4x3* model_bone = &mat[bi];
+#if !defined(PS2)
+                    model_bone++;
+#endif
+                    xMat4x3Mul(&scratch[bi], &bone_mats[bi], model_bone);
+                    done[word] |= 1 << (b & 0x1f);
                 }
             }
 
+#if defined(PS2)
+            w = wt;
+            nbones = bones;
+            U32 k = 4;
+            xVec3 acc = { 0.0f, 0.0f, 0.0f };
+            for (; *w && k != 0; k--)
+#else
             xVec3 acc = { 0.0f, 0.0f, 0.0f };
 
-            U32 nbones = bones;
-            const F32* w = wt;
+            w = wt;
+            nbones = bones;
             for (U32 k = 4; *w && k != 0; k--)
+#endif
             {
                 xVec3 tmp;
-                U32 bi = bones & 0xff;
+#if defined(PS2)
+                const xMat4x3* bone = &scratch[nbones & 0xff];
+                nbones >>= 8;
+#else
+                const xMat4x3* bone = &scratch[bones & 0xff];
                 bones >>= 8;
-                xMat4x3Toworld(&tmp, &scratch[bi], vert);
+#endif
+                xMat4x3Toworld(&tmp, bone, vert);
                 tmp *= *w;
                 acc += tmp;
                 w++;
             }
+#if defined(PS2)
+            xMat4x3Toworld(dst_verts, root_mat, &acc);
+
+            k = 4;
+#else
             xMat4x3Toworld(dst_verts, mat, &acc);
 
+            U32 k = 4;
+#endif
             acc = 0.0f;
             w = wt;
-            for (U32 k = 4; *w && k != 0; k--)
+            for (; *w && k != 0; k--)
             {
                 xVec3 tmp;
-                U32 bi = nbones & 0xff;
+#if defined(PS2)
+                const xMat4x3* bone = &scratch[bones & 0xff];
+                bones >>= 8;
+#else
+                const xMat4x3* bone = &scratch[nbones & 0xff];
                 nbones >>= 8;
-                xMat3x3RMulVec(&tmp, &scratch[bi], norm);
+#endif
+                xMat3x3RMulVec(&tmp, bone, norm);
                 tmp *= *w;
                 acc += tmp;
                 w++;
             }
+#if defined(PS2)
+            xMat3x3RMulVec(dst_normals, root_mat, &acc);
+#else
             xMat3x3RMulVec(dst_normals, mat, &acc);
+#endif
 
             dst_verts++;
             dst_normals++;
@@ -1546,12 +1642,9 @@ namespace
         loc.x = v[0].x + s * (v[1].x - v[0].x) + t * (v[2].x - v[0].x);
         loc.y = v[0].y + s * (v[1].y - v[0].y) + t * (v[2].y - v[0].y);
         loc.z = v[0].z + s * (v[1].z - v[0].z) + t * (v[2].z - v[0].z);
-        norm.x =
-            n[0].x + s * (n[1].x - n[0].x) + t * (n[2].x - n[0].x);
-        norm.y =
-            n[0].y + s * (n[1].y - n[0].y) + t * (n[2].y - n[0].y);
-        norm.z =
-            n[0].z + s * (n[1].z - n[0].z) + t * (n[2].z - n[0].z);
+        norm.x = n[0].x + s * (n[1].x - n[0].x) + t * (n[2].x - n[0].x);
+        norm.y = n[0].y + s * (n[1].y - n[0].y) + t * (n[2].y - n[0].y);
+        norm.z = n[0].z + s * (n[1].z - n[0].z) + t * (n[2].z - n[0].z);
         norm.up_normalize();
     }
 
@@ -1884,12 +1977,13 @@ namespace
 
 void reset_poppers()
 {
-    popper_data* pData;
+    popper_data* pData = &poppers[0];
     popper_data* pEnd = &poppers[sizeof(poppers) / sizeof(popper_data)];
-    for (pData = &poppers[0]; pData != pEnd; pData++)
+    while (pData != pEnd)
     {
         pData->state = STATE_NONE;
         pData->ent = NULL;
+        pData++;
     }
 }
 
@@ -2081,7 +2175,10 @@ void update_entrails(F32 dt)
 
 namespace
 {
-    void entrail_data::update(F32 dt)
+#ifdef PS2
+    inline
+#endif
+        void entrail_data::update(F32 dt)
     {
         if (ent == NULL)
         {
@@ -2097,11 +2194,8 @@ namespace
         entrail_type& t = entrail_types[type];
 
         const xVec3& campos = globals.camera.mat.pos;
-        xMat4x3* frame = xEntGetFrame(ent);
-        F32 dx = campos.x - frame->pos.x;
-        F32 dy = campos.y - frame->pos.y;
-        F32 dz = campos.z - frame->pos.z;
-        const xVec3 dist = { dx, dy, dz };
+        const xVec3& pos = xEntGetFrame(ent)->pos;
+        const xVec3 dist = { campos.x - pos.x, campos.y - pos.y, campos.z - pos.z };
 
         if (dist.length2() > t.cull_dist * t.cull_dist)
         {

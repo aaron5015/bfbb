@@ -2,11 +2,15 @@
 #include "iMath3.h"
 
 #include <types.h>
+#if !defined(PS2) && !defined(XBOX)
 #include <intrin.h>
+#endif
 
 #include "iMath.h"
 #include "xMath.h" // icos and isin
+#if !defined(PS2) && !defined(XBOX)
 #include "xClimate.h" // xMat3x3Identity
+#endif
 #include "xMathInlines.h" // xasin, xatan2
 
 // These structs were used in deadstripped functions.
@@ -14,12 +18,10 @@
 //
 // The target opens .rodata with 4 unreferenced all-zero
 // templates (0x30 total) that offset every later .rodata
-// relocation. Same idiom as zVar.cpp.
+// relocation. Same idiom as zVar.cpp. The first three are
+// xVec3::create/cross's initializer templates (xVec3.h).
 void __deadstripped_xMath3()
 {
-    const char _405[0x0C] = {};
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
     const char _441[0x0C] = {};
 }
 //#include "xVec3Inlines.h" // xVec3Init, imported, realized xClimate has a declaration as well though.
@@ -53,6 +55,13 @@ void xMath3Init()
     g_I3.pos.z = g_O3.z;
 }
 
+#if defined(PS2)
+void xMath3Exit()
+{
+    iMath3Exit();
+}
+#endif
+
 void xLine3VecDist2(const xVec3* p1, const xVec3* p2, const xVec3* v, xIsect* isx)
 {
     xVec3 ldir;
@@ -70,28 +79,41 @@ void xLine3VecDist2(const xVec3* p1, const xVec3* p2, const xVec3* v, xIsect* is
     if (ldirdotlv >= ldirlen2)
     {
         xVec3Sub(&isx->norm, v, p2);
+#if defined(XBOX)
+        isx->dist = xVec3Dot(&isx->norm, &isx->norm);
+#else
         isx->dist = xVec3Length2(&isx->norm);
+#endif
         return;
     }
 
     F32 lvlen2 = xVec3Length2(&isx->norm);
+#if defined(XBOX)
+    isx->dist = lvlen2 - (ldirdotlv / ldirlen2) * ldirdotlv;
+#else
     isx->dist = lvlen2 - (ldirdotlv * ldirdotlv) / ldirlen2;
+#endif
 }
 
 S32 xPointInBox(const xBox* b, const xVec3* p)
 {
-    S32 ret = 0;
+#if defined(XBOX)
     if ((p->x >= b->lower.x) && (p->x <= b->upper.x))
     {
         if ((p->y >= b->lower.y) && (p->y <= b->upper.y))
         {
             if ((p->z >= b->lower.z) && (p->z <= b->upper.z))
             {
-                ret = 1;
+                return 1;
             }
         }
     }
-    return (char)ret;
+    return 0;
+#else
+    return ((p->x >= b->lower.x) && (p->x <= b->upper.x)) &&
+           ((p->y >= b->lower.y) && (p->y <= b->upper.y)) &&
+           ((p->z >= b->lower.z) && (p->z <= b->upper.z));
+#endif
 }
 
 void xBoxInitBoundOBB(xBox* o, const xBox* b, const xMat4x3* m)
@@ -233,7 +255,7 @@ F32 xMat3x3LookVec(xMat3x3* m, const xVec3* at)
     F32 vec_len = xVec3Normalize(&m->at, at);
     xVec3Inv(&m->at, &m->at);
 
-    if (FABS(1.0f - m->at.y) < 0.00001f)
+    if (iabs(1.0f - m->at.y) < 0.00001f)
     {
         m->right.x = 1.0f;
         m->right.y = 0.0f;
@@ -246,7 +268,7 @@ F32 xMat3x3LookVec(xMat3x3* m, const xVec3* at)
         m->at.z = 0.0f;
         return vec_len;
     }
-    if (FABS(1.0f + m->at.y) < 0.00001f)
+    if (iabs(1.0f + m->at.y) < 0.00001f)
     {
         m->right.x = -1.0f;
         m->right.y = 0.0f;
@@ -259,7 +281,7 @@ F32 xMat3x3LookVec(xMat3x3* m, const xVec3* at)
         m->at.z = 0.0f;
         return vec_len;
     }
-    if ((FABS(at->z) < 0.00001f) && (FABS(at->x) < 0.00001f))
+    if ((iabs(at->z) < 0.00001f) && (iabs(at->x) < 0.00001f))
     {
         m->right.x = 1.0f;
         m->right.y = 0.0f;
@@ -295,15 +317,24 @@ void xMat3x3Euler(xMat3x3* m, F32 yaw, F32 pitch, F32 roll)
     F32 icp = icos(pitch);
     F32 isr = isin(roll);
     F32 icr = icos(roll);
-    F32 is_prod = icy * isp;
-    F32 ic_prod = isy * isp;
+#if defined(XBOX)
+    F32 is_prod = isr * isp;
 
-    m->right.x = (icy * icr) + (isr * ic_prod);
+    m->right.x = (is_prod * isy) + (icy * icr);
     m->right.y = icp * isr;
-    m->right.z = (-isy * icr) + (isr * is_prod);
-    m->up.x = (-icy * isr) + (icr * ic_prod);
+    m->right.z = (is_prod * icy) - (isy * icr);
+    F32 ic_prod = icr * isp;
+    m->up.x = (ic_prod * isy) - (icy * isr);
     m->up.y = icp * icr;
-    m->up.z = (isy * isr) + (icr * is_prod);
+    m->up.z = (isy * isr) + (ic_prod * icy);
+#else
+    m->right.x = (icy * icr) + (isr * (isy * isp));
+    m->right.y = icp * isr;
+    m->right.z = (-isy * icr) + (isr * (icy * isp));
+    m->up.x = (-icy * isr) + (icr * (isy * isp));
+    m->up.y = icp * icr;
+    m->up.z = (isy * isr) + (icr * (icy * isp));
+#endif
     m->at.x = isy * icp;
     m->at.y = -isp;
     m->at.z = icy * icp;
@@ -329,14 +360,26 @@ void xMat3x3RotC(xMat3x3* m, F32 _x, F32 _y, F32 _z, F32 t)
 
     m->right.x = (c * _x * _x) + cos;
     m->right.y = (sin * _z) + (c * _x * _y);
+#if defined(XBOX)
+    m->right.z = (c * _z * _x) - (sin * _y);
+#else
     m->right.z = (-sin * _y) + (c * _z * _x);
+#endif
 
+#if defined(XBOX)
+    m->up.x = (c * _x * _y) - (sin * _z);
+#else
     m->up.x = (-sin * _z) + (c * _x * _y);
+#endif
     m->up.y = (c * _y * _y) + cos;
     m->up.z = (sin * _x) + (c * _y * _z);
 
     m->at.x = (sin * _y) + (c * _z * _x);
+#if defined(XBOX)
+    m->at.y = (c * _y * _z) - (sin * _x);
+#else
     m->at.y = (-sin * _x) + (c * _y * _z);
+#endif
     m->at.z = (c * _z * _z) + cos;
 
     m->flags = 0;
@@ -347,7 +390,11 @@ void xMat3x3RotX(xMat3x3* m, F32 t)
     F32 cos = icos(t);
     F32 sin = isin(t);
 
+#if defined(XBOX)
+    xVec3Init(&m->right, 1.0f, 0.0f, 0.0f);
+#else
     xVec3Copy(&m->right, &g_X3);
+#endif
     xVec3Init(&m->up, 0.0f, cos, sin);
     xVec3Init(&m->at, 0.0f, -sin, cos);
     m->flags = 0;
@@ -359,7 +406,11 @@ void xMat3x3RotY(xMat3x3* m, F32 t)
     F32 sin = isin(t);
 
     xVec3Init((xVec3*)m, cos, 0.0f, -sin);
+#if defined(XBOX)
+    xVec3Init(&m->up, 0.0f, 1.0f, 0.0f);
+#else
     xVec3Copy(&m->up, &g_Y3);
+#endif
     xVec3Init(&m->at, sin, 0.0f, cos);
     m->flags = 0;
 }
@@ -371,7 +422,11 @@ void xMat3x3RotZ(xMat3x3* m, F32 t)
 
     xVec3Init(&m->right, cos, sin, 0.0f);
     xVec3Init(&m->up, -sin, cos, 0.0f);
+#if defined(XBOX)
+    xVec3Init(&m->at, 0.0f, 0.0f, 1.0f);
+#else
     xVec3Copy(&m->at, &g_Z3);
+#endif
     m->flags = 0;
 }
 
@@ -389,16 +444,17 @@ void xMat3x3RMulRotY(xMat3x3* o, const xMat3x3* m, F32 t)
     F32 sin = isin(t);
     if (o == m)
     {
-        F32 temp = (cos * o->right.x) + (sin * o->right.z);
-        o->right.z = (cos * o->right.z) - (sin * o->right.x);
+        F32 temp;
+        temp = cos * o->right.x + sin * o->right.z;
+        o->right.z = cos * o->right.z - sin * o->right.x;
         o->right.x = temp;
 
-        temp = (cos * o->up.x) + (sin * o->up.z);
-        o->up.z = (cos * o->up.z) - (sin * o->up.x);
+        temp = cos * o->up.x + sin * o->up.z;
+        o->up.z = cos * o->up.z - sin * o->up.x;
         o->up.x = temp;
 
-        temp = (cos * o->at.x) + (sin * o->at.z);
-        o->at.z = (cos * o->at.z) - (sin * o->at.x);
+        temp = cos * o->at.x + sin * o->at.z;
+        o->at.z = cos * o->at.z - sin * o->at.x;
         o->at.x = temp;
     }
     else
@@ -456,14 +512,13 @@ void xMat3x3Transpose(xMat3x3* o, const xMat3x3* m)
 }
 
 void xMat3x3Mul(xMat3x3* o, const xMat3x3* a, const xMat3x3* b)
+
 {
     xMat3x3 temp;
     xMat3x3* tp;
-    U32 usetemp;
+    U32 usetemp = (o == a || o == b);
 
-    usetemp = (o == a || o == b);
-
-    if (usetemp)
+    if (usetemp != 0)
     {
         tp = &temp;
     }
@@ -472,48 +527,68 @@ void xMat3x3Mul(xMat3x3* o, const xMat3x3* a, const xMat3x3* b)
         tp = o;
     }
 
-    F32 arx = a->right.x;
-    F32 ary = a->right.y;
-    F32 arz = a->right.z;
-    F32 aux = a->up.x;
-    F32 auy = a->up.y;
-    F32 auz = a->up.z;
-    F32 aax = a->at.x;
-    F32 aay = a->at.y;
-    F32 aaz = a->at.z;
-
-    F32 brx = b->right.x;
-    F32 bry = b->right.y;
-    F32 brz = b->right.z;
-    F32 bux = b->up.x;
-    F32 buy = b->up.y;
-    F32 buz = b->up.z;
-    F32 bax = b->at.x;
-    //F32 bay = b->at.y;
-    F32 baz = b->at.z;
-
-    // Right
-    tp->right.x = arx * brx + ary * bux + arz * bax;
-    tp->right.y = arx * bry + ary * buy + arz * b->at.y;
-    tp->right.z = arx * brz + ary * buz + arz * baz;
-
-    // Up
-    tp->up.x = aux * brx + auy * bux + auz * bax;
-    tp->up.y = aux * bry + auy * buy + auz * b->at.y;
-    tp->up.z = aux * brz + auy * buz + auz * baz;
-
-    // At
-    tp->at.x = aax * brx + aay * bux + aaz * bax;
-    tp->at.y = aax * bry + aay * buy + aaz * b->at.y;
-    tp->at.z = aax * brz + aay * buz + aaz * baz;
-
+#if defined(XBOX) || defined(PS2)
+    tp->right.x = a->right.z * b->at.x + (a->right.x * b->right.x + a->right.y * b->up.x);
+    tp->right.y = a->right.z * b->at.y + (a->right.x * b->right.y + a->right.y * b->up.y);
+    tp->right.z = a->right.z * b->at.z + (a->right.x * b->right.z + a->right.y * b->up.z);
+    tp->up.x = a->up.z * b->at.x + (a->up.x * b->right.x + a->up.y * b->up.x);
+    tp->up.y = a->up.z * b->at.y + (a->up.x * b->right.y + a->up.y * b->up.y);
+    tp->up.z = a->up.z * b->at.z + (a->up.x * b->right.z + a->up.y * b->up.z);
+    tp->at.x = a->at.z * b->at.x + (a->at.x * b->right.x + a->at.y * b->up.x);
+    tp->at.y = a->at.z * b->at.y + (a->at.x * b->right.y + a->at.y * b->up.y);
+    tp->at.z = a->at.z * b->at.z + (a->at.x * b->right.z + a->at.y * b->up.z);
     tp->flags = 0;
-    if (usetemp)
+#else
+    // Form the middle products, then accumulate the first and third terms.
+    F32 out_right_x = a->right.y * b->up.x;
+    F32 out_right_y = a->right.y * b->up.y;
+    F32 out_right_z = a->right.y * b->up.z;
+    F32 out_up_x = a->up.y * b->up.x;
+    F32 out_up_y = a->up.y * b->up.y;
+    F32 out_up_z = a->up.y * b->up.z;
+    F32 out_at_x = a->at.y * b->up.x;
+    F32 out_at_y = a->at.y * b->up.y;
+    F32 out_at_z = a->at.y * b->up.z;
+
+    out_right_x = a->right.x * b->right.x + out_right_x;
+    out_right_y = a->right.x * b->right.y + out_right_y;
+    out_right_z = a->right.x * b->right.z + out_right_z;
+    out_up_x = a->up.x * b->right.x + out_up_x;
+    out_up_y = a->up.x * b->right.y + out_up_y;
+    out_up_z = a->up.x * b->right.z + out_up_z;
+    out_at_x = a->at.x * b->right.x + out_at_x;
+    out_at_y = a->at.x * b->right.y + out_at_y;
+    out_at_z = a->at.x * b->right.z + out_at_z;
+
+    out_right_x = a->right.z * b->at.x + out_right_x;
+    out_right_y = a->right.z * b->at.y + out_right_y;
+    out_right_z = a->right.z * b->at.z + out_right_z;
+    out_up_x = a->up.z * b->at.x + out_up_x;
+    out_up_y = a->up.z * b->at.y + out_up_y;
+    out_up_z = a->up.z * b->at.z + out_up_z;
+    out_at_x = a->at.z * b->at.x + out_at_x;
+    out_at_y = a->at.z * b->at.y + out_at_y;
+    out_at_z = a->at.z * b->at.z + out_at_z;
+
+    tp->right.x = out_right_x;
+    tp->flags = 0;
+    tp->right.y = out_right_y;
+    tp->right.z = out_right_z;
+    tp->up.x = out_up_x;
+    tp->up.y = out_up_y;
+    tp->up.z = out_up_z;
+    tp->at.x = out_at_x;
+    tp->at.y = out_at_y;
+    tp->at.z = out_at_z;
+#endif
+    if (usetemp != 0)
     {
         xMat3x3Copy(o, tp);
     }
+    return;
 }
 
+#if !defined(XBOX)
 void xMat3x3LMulVec(xVec3* o, const xMat3x3* m, const xVec3* v)
 {
     F32 y = (m->up.x * v->x) + (m->up.y * v->y) + (m->up.z * v->z);
@@ -523,6 +598,7 @@ void xMat3x3LMulVec(xVec3* o, const xMat3x3* m, const xVec3* v)
     o->y = y;
     o->z = z;
 }
+#endif
 
 void xMat3x3Tolocal(xVec3* o, const xMat3x3* m, const xVec3* v)
 {
@@ -546,7 +622,21 @@ void xMat4x3Rot(xMat4x3* m, const xVec3* a, F32 t, const xVec3* p)
     xMat4x3Mul(m, &temp, m);
 }
 
-void xMat4x3Mul(xMat4x3* o, const xMat4x3* a, const xMat4x3* b)
+#if defined(XBOX)
+void xMat4x3Toworld(xVec3* o, const xMat4x3* m, const xVec3* v)
+{
+    xMat3x3RMulVec(o, m, v);
+
+    o->x += m->pos.x;
+    o->y += m->pos.y;
+    o->z += m->pos.z;
+}
+#endif
+
+#if defined(XBOX)
+inline
+#endif
+    void xMat4x3Mul(xMat4x3* o, const xMat4x3* a, const xMat4x3* b)
 {
     xVec3 v;
 
@@ -687,8 +777,8 @@ F32 xQuatNormalize(xQuat* o, const xQuat* q)
 
 void xQuatSlerp(xQuat* o, const xQuat* a, const xQuat* b, F32 t)
 {
-    F32 temp_s;
-    F32 temp_t;
+    F32 asph;
+    F32 bsph;
     F32 one_sintheta;
     F32 abdot;
 
@@ -708,36 +798,52 @@ void xQuatSlerp(xQuat* o, const xQuat* a, const xQuat* b, F32 t)
     }
     if (abdot >= 0.999f)
     {
-        temp_t = 1.0f - t;
-        temp_s = t;
+        asph = 1.0f - t;
+        bsph = t;
     }
     else
     {
         abdot = xacos(abdot);
         one_sintheta = 1.0f / isin(abdot);
-        temp_t = one_sintheta * isin((1.0f - t) * abdot);
-        temp_s = one_sintheta * isin(t * abdot);
+        asph = one_sintheta * isin((1.0f - t) * abdot);
+        bsph = one_sintheta * isin(t * abdot);
     }
 
-    xQuatSMul(&qp1, a, temp_t);
-    xQuatSMul(&qp2, b, temp_s);
+#if defined(PS2)
+    F32 ax = a->v.x * asph;
+    F32 ay = a->v.y * asph;
+    F32 az = a->v.z * asph;
+    F32 as = a->s * asph;
+    F32 bx = b->v.x * bsph;
+    F32 by = b->v.y * bsph;
+    F32 bz = b->v.z * bsph;
+    F32 bs = b->s * bsph;
+    o->s = as + bs;
+    o->v.x = ax + bx;
+    o->v.y = ay + by;
+    o->v.z = az + bz;
+#else
+    xQuatSMul(&qp1, a, asph);
+    xQuatSMul(&qp2, b, bsph);
     xQuatAdd(o, &qp1, &qp2);
+#endif
     xQuatNormalize(o, o);
     return;
 }
 
 void xQuatMul(xQuat* o, const xQuat* a, const xQuat* b)
-{
-    F32 _s = a->s * b->s - a->v.x * b->v.x - a->v.y * b->v.y - a->v.z * b->v.z;
-    F32 _x = a->s * b->v.x + a->v.x * b->s + a->v.y * b->v.z - a->v.z * b->v.y;
-    F32 _y = a->s * b->v.y + a->v.y * b->s + a->v.z * b->v.x - a->v.x * b->v.z;
-    F32 _z = a->s * b->v.z + a->v.z * b->s + a->v.x * b->v.y - a->v.y * b->v.x;
 
-    o->v.x = _x;
-    o->v.y = _y;
-    o->v.z = _z;
-    o->s = _s;
+{
+    F32 s = a->s * b->s - a->v.x * b->v.x - a->v.y * b->v.y - a->v.z * b->v.z;
+    F32 x = a->s * b->v.x + a->v.x * b->s + a->v.y * b->v.z - a->v.z * b->v.y;
+    F32 y = a->s * b->v.y + a->v.y * b->s + a->v.z * b->v.x - a->v.x * b->v.z;
+    F32 z = a->s * b->v.z + a->v.z * b->s + a->v.x * b->v.y - a->v.y * b->v.x;
+    o->v.x = x;
+    o->v.y = y;
+    o->v.z = z;
+    o->s = s;
     xQuatNormalize(o, o);
+    return;
 }
 
 void xQuatDiff(xQuat* o, const xQuat* a, const xQuat* b)
@@ -761,18 +867,28 @@ void xBoxUnion(xBox& a, const xBox& b, const xBox& c)
     a.lower.z = MIN(b.lower.z, c.lower.z);
 }
 
-void xBoxFromCircle(xBox& box, const xVec3& center, const xVec3& dir, F32 r)
+#if defined(PS2)
+inline
+#endif
+    void xBoxFromCircle(xBox& box, const xVec3& center, const xVec3& dir, F32 r)
 {
     xVec3 ext = { 0.0f, 0.0f, 0.0f };
-
-    ext.x = r * xsqrt(1.0f - (dir.x * dir.x));
-    ext.y = r * xsqrt(1.0f - (dir.y * dir.y));
-    ext.z = r * xsqrt(1.0f - (dir.z * dir.z));
+#if defined(PS2)
+    ext.x = r * xsqrt(1.0f - dir.x * dir.x);
+    ext.y = r * xsqrt(1.0f - dir.y * dir.y);
+    ext.z = r * xsqrt(1.0f - dir.z * dir.z);
+#else
+    const F32 one = 1.0f;
+    ext.x = r * xsqrt(one - dir.x * dir.x);
+    ext.y = r * xsqrt(one - dir.y * dir.y);
+    ext.z = r * xsqrt(one - dir.z * dir.z);
+#endif
 
     box.upper = center + ext;
     box.lower = center - ext;
 }
 
+#if !defined(PS2) && !defined(XBOX)
 void xQuatSMul(xQuat* q, const xQuat* a, F32 t)
 {
     q->s = a->s * t;
@@ -789,3 +905,4 @@ void xQuatAdd(xQuat* q, const xQuat* a, const xQuat* b)
     q->s = a->s + b->s;
     xVec3Add((xVec3*)q, (xVec3*)a, (xVec3*)b);
 }
+#endif

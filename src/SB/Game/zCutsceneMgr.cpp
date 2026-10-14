@@ -104,8 +104,8 @@ void zCutsceneMgrInit(void* b, void* tasset)
 
 void zCutsceneMgrInit(xBase* b, xCutsceneMgrAsset* tasset)
 {
+    xBaseInit(b, tasset);
     zCutsceneMgr* mgr = (zCutsceneMgr*)b;
-    xBaseInit(mgr, tasset);
     mgr->eventFunc = zCutsceneMgrEventCB;
     mgr->tasset = tasset;
     mgr->csn = NULL;
@@ -185,7 +185,7 @@ RpAtomic* HackAlphaCB(RpAtomic* atomic, void* data)
 
 void zCutSceneNamesTable_clearAll()
 {
-    for (int i = 0; i < 14; i++)
+    for (int i = 0; i < sizeof(zCutSceneNamesTable) / sizeof(zCutSceneNamesTable[0]); i++)
     {
         zCutSceneNamesTable[i].played = 0;
     }
@@ -302,7 +302,9 @@ void zCutsceneMgrFinishLoad(xBase* to)
         iFileAsyncService();
         xSndUpdate();
         iCSLoadStep(t->csn);
+#if !defined(PS2)
         iTRCDisk::CheckDVDAndResetState();
+#endif
         if (t->csn->Ready)
         {
             zCutsceneMgrPlayStart(t);
@@ -490,7 +492,7 @@ void zCutsceneMgrUpdate(xBase* to, xScene* sc, F32 dt)
 
 static void check_hide_entities()
 {
-    bool mgrNotNull = globals.cmgr;
+    bool mgrNotNull = (globals.cmgr != NULL);
     if (mgrNotNull == ents_hidden)
     {
         return;

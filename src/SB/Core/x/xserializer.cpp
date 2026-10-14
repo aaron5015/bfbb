@@ -1,4 +1,5 @@
 #include "xserializer.h"
+#include "xsavegame.h"
 #include "xMemMgr.h"
 #include "xutil.h"
 #include <string.h>
@@ -50,10 +51,17 @@ S32 xSerialShutdown()
 
 void xSerialTraverse(S32 (*func)(U32, xSerial*))
 {
+#if defined(PS2)
+    S32 i = 0;
+#endif
     st_XSERIAL_DATA_PRIV* xsd = &g_xserdata;
     xSerial xser;
 
+#if defined(PS2)
+    for (; i < xsd->cltlist.cnt; i++)
+#else
     for (S32 i = 0; i < xsd->cltlist.cnt; i++)
+#endif
     {
         st_SERIAL_CLIENTINFO* clt = (st_SERIAL_CLIENTINFO*)xsd->cltlist.list[i];
         xser.setClient(clt->idtag);
@@ -63,6 +71,9 @@ void xSerialTraverse(S32 (*func)(U32, xSerial*))
     }
 }
 
+#if defined(PS2)
+#pragma auto_inline on
+#endif
 xSerial::xSerial()
 {
 }
@@ -75,7 +86,10 @@ xSerial::~xSerial()
     }
 }
 
-void xSerial::operator delete(void*)
+#if defined(PS2)
+inline
+#endif
+    void xSerial::operator delete(void*)
 {
 }
 
@@ -83,8 +97,10 @@ void xSerial::setClient(U32 idtag)
 {
     prepare(idtag);
 }
+#if defined(PS2)
+#pragma auto_inline reset
+#endif
 
-// non-matching: register allocation
 S32 xSerial::Write(char* data, S32 elesize, S32 n)
 {
     S32 nbit;
@@ -98,12 +114,19 @@ S32 xSerial::Write(char* data, S32 elesize, S32 n)
         return 0;
     }
 
-    nbit = n > 0 ? n * elesize * 8 : -n;
+    if (n > 0)
+    {
+        nbit = n * elesize * 8;
+    }
+    else
+    {
+        nbit = -n;
+    }
 
     if (n < 0)
     {
-        bidx = 0;
         iptr = (S32*)data;
+        bidx = 0;
         for (i = 0; i < nbit; i++)
         {
             wrbit(*iptr & g_tbl_onbit[bidx]);
@@ -116,8 +139,8 @@ S32 xSerial::Write(char* data, S32 elesize, S32 n)
     }
     else
     {
-        bidx = 0;
         cptr = data;
+        bidx = 0;
         for (i = 0; i < nbit; i++)
         {
             wrbit(*cptr & g_tbl_onbit[bidx]);
@@ -167,7 +190,6 @@ S32 xSerial::Write(F32 data)
     return Write((char*)&data, 4, 1);
 }
 
-// non-matching: register allocation
 S32 xSerial::Read(char* buf, S32 elesize, S32 n)
 {
     S32 nbit;
@@ -177,7 +199,14 @@ S32 xSerial::Read(char* buf, S32 elesize, S32 n)
     S32 bidx;
     S32 i;
 
-    nbit = n > 0 ? n * elesize * 8 : -n;
+    if (n > 0)
+    {
+        nbit = n * elesize * 8;
+    }
+    else
+    {
+        nbit = -n;
+    }
 
     if (n < 0)
     {
@@ -186,7 +215,7 @@ S32 xSerial::Read(char* buf, S32 elesize, S32 n)
         for (i = 0; i < nbit; i++)
         {
             bitval = rdbit();
-            if (bitval)
+            if (bitval != 0)
             {
                 *iptr |= g_tbl_onbit[bidx];
             }
@@ -209,7 +238,7 @@ S32 xSerial::Read(char* buf, S32 elesize, S32 n)
         for (i = 0; i < nbit; i++)
         {
             bitval = rdbit();
-            if (bitval)
+            if (bitval != 0)
             {
                 *cptr |= (char)g_tbl_onbit[bidx];
             }
@@ -299,7 +328,11 @@ S32 xSerial::rdbit()
         return 0;
     }
 
+#if defined(PS2)
+    S32 is_on = (ctxtdata->membuf[curele] & g_tbl_onbit[bitidx]) != 0;
+#else
     bool is_on = ctxtdata->membuf[curele] & g_tbl_onbit[bitidx];
+#endif
 
     bitidx++;
     if (bitidx == 32)
@@ -312,7 +345,10 @@ S32 xSerial::rdbit()
     return is_on;
 }
 
-void xSerial::prepare(U32 idtag)
+#if defined(PS2)
+inline
+#endif
+    void xSerial::prepare(U32 idtag)
 {
     st_SERIAL_CLIENTINFO* clt = XSER_get_client(idtag);
     this->idtag = clt->idtag;
@@ -329,7 +365,10 @@ void xSerialWipeMainBuffer()
     memset(g_xserdata.bitbuf, 0, g_xserdata.buf_bytcnt);
 }
 
-static void xSER_init_tables()
+#if defined(PS2)
+inline
+#endif
+    static void xSER_init_tables()
 {
     for (S32 i = 0; i < 32; i++)
     {
@@ -351,7 +390,8 @@ static void xSER_init_buffers(S32 count, st_SERIAL_PERCID_SIZE* sizeinfo)
 
     xsd->cltbuf =
         (st_SERIAL_CLIENTINFO*)xMemAlloc(gActiveHeap, count * sizeof(st_SERIAL_CLIENTINFO), 0);
-    memset(xsd->cltbuf, 0, count * 16);
+    // Signed size here: retail recomputes count * 16 rather than reusing the alloc size.
+    memset(xsd->cltbuf, 0, count * (S32)sizeof(st_SERIAL_CLIENTINFO));
     xsd->cltnext = xsd->cltbuf;
 
     sitmp = sizeinfo;
@@ -463,8 +503,7 @@ S32 xSerial_svgame_register(st_XSAVEGAME_DATA* sgctxt, en_SAVEGAME_MODE mode)
         for (S32 i = 0; i < xsd->cltlist.cnt; i++)
         {
             xSGAddSaveClient(sgctxt, ((st_SERIAL_CLIENTINFO*)xsd->cltlist.list[i])->idtag,
-                             xsd->cltlist.list[i], xSER_xsgclt_svinfo_clt,
-                             xSER_xsgclt_svproc_clt);
+                             xsd->cltlist.list[i], xSER_xsgclt_svinfo_clt, xSER_xsgclt_svproc_clt);
         }
         xSGAddSaveClient(sgctxt, 'SFIL', &g_xserdata, xSER_xsgclt_svinfo_fill,
                          xSER_xsgclt_svproc_fill);

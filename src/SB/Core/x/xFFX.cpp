@@ -1,5 +1,9 @@
 #include "xFFX.h"
+#if defined(PS2)
+#include "xEntTypes.h"
+#else
 #include "xEnt.h"
+#endif
 #include "xMemMgr.h"
 #include "xMathInlines.h"
 
@@ -39,7 +43,10 @@ xFFX* xFFXAlloc()
     return f;
 }
 
-void xFFXFree(xFFX* ffx)
+#if defined(PS2)
+inline
+#endif
+    void xFFXFree(xFFX* ffx)
 {
     ffx->next = alist;
     alist = ffx;
@@ -67,22 +74,20 @@ S16 xFFXAddEffect(xEnt* ent, xFFX* f)
 
 S16 xFFXAddEffect(xEnt* ent, void (*dof)(xEnt*, xScene*, F32, void*), void* fd)
 {
-    xFFX* f = (xFFX*)xFFXAlloc();
-    S16 effectID;
+    xFFX* f = xFFXAlloc();
     if (f == NULL)
     {
-        effectID = -1;
+        return -1;
     }
-    else
-    {
-        f->doEffect = dof;
-        f->fdata = fd;
-        effectID = xFFXAddEffect(ent, f);
-    }
-    return effectID;
+    f->doEffect = dof;
+    f->fdata = fd;
+    return xFFXAddEffect(ent, f);
 }
 
-U32 xFFXRemoveEffectByFData(xEnt* ent, void* fdata)
+#if defined(PS2)
+inline
+#endif
+    U32 xFFXRemoveEffectByFData(xEnt* ent, void* fdata)
 {
     xFFX** ffxh = &ent->ffx;
 

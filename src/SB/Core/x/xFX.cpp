@@ -17,10 +17,18 @@
 #include "zRumble.h"
 
 #include <string.h>
+#if defined(PS2)
+#include <rwsdk/rpmatfx.h>
+#include <rwplcore.h>
+#include <rwsdk/rpskin.h>
+#include <rwim3d.h>
+#include <stdlib.h>
+#else
 #include <rpmatfx.h>
 #include <rwplcore.h>
 #include <rpskin.h>
 #include <PowerPC_EABI_Support/MSL_C/MSL_Common/stdlib.h>
+#endif
 
 // no clue why this file is so out of order
 
@@ -40,10 +48,19 @@ F32 EnvMapShininess = 1.0f;
 
 /* End global variables */
 
+#if !defined(PS2)
 static U32 num_fx_atomics = 0;
+#endif
 static U32 xfx_initted = 0;
 
 static void LightResetFrame(RpLight* light);
+
+#if defined(PS2)
+// iFXgoo.cpp (PS2 goo pipeline)
+RxPipeline* iFXgooCreatePipe();
+void iFXGooSceneSetup();
+void iFXGooSceneExit();
+#endif
 
 void xFXInit()
 {
@@ -71,6 +88,12 @@ void xFXInit()
         }
 
         xFXanimUVCreate();
+#if defined(PS2)
+        if (xFXgooPipeline == NULL)
+        {
+            xFXgooPipeline = iFXgooCreatePipe();
+        }
+#endif
         xFXAuraInit();
     }
 }
@@ -369,12 +392,7 @@ static void xFXRingUpdate(F32 dt)
             continue;
         }
 
-        F32 lifetime = ring->lifetime;
-
-        if (lifetime < dt)
-        {
-            lifetime = dt;
-        }
+        F32 lifetime = ring->lifetime < dt ? dt : ring->lifetime;
 
         ring->time += dt;
 
@@ -522,7 +540,9 @@ void xFX_SceneEnter(RpWorld* world)
         }
     }
 
+#if !defined(PS2)
     num_fx_atomics = 0;
+#endif
 }
 
 void xFX_SceneExit(RpWorld*)
@@ -644,11 +664,15 @@ RpMaterial* MaterialSetEnvMap(RpMaterial* material, void* data)
 
 RpMaterial* MaterialSetEnvMap2(RpMaterial* material, void* data)
 {
+    char* textureName;
+    RwTexture* texture;
+    RwFrame* frame;
+
     if (material->texture != NULL)
     {
-        RwTexture* texture = (RwTexture*)data;
-        RwFrame* frame;
-        if (RwEngineInstance->stringFuncs.vecStrcmp(texture->name, "spec3") == 0)
+        texture = (RwTexture*)data;
+        textureName = texture->name;
+        if (rwstrcmp(textureName, "spec3") == 0)
         {
             frame = (RwFrame*)globals.camera.lo_cam->object.object.parent;
         }
@@ -674,7 +698,7 @@ RpAtomic* xFXBubbleRender(RpAtomic* atomic)
     iDrawSetFBMSK(bp->pass1_fbmsk);
     iModelSetMaterialAlpha(atomic, bp->pass1_alpha);
 
-    if (((char)bp->pass1))
+    if (bp->pass1)
     {
         AtomicDisableMatFX(atomic);
         (*gAtomicRenderCallBack)(atomic);
@@ -683,7 +707,7 @@ RpAtomic* xFXBubbleRender(RpAtomic* atomic)
     iDrawSetFBMSK(0);
     iModelSetMaterialAlpha(atomic, bp->pass2_alpha);
 
-    if (((char)bp->pass2) != 0)
+    if (bp->pass2)
     {
         gFXSurfaceFlags = 0x10;
         xFXAtomicEnvMapSetup(atomic, bp->fresnel_map, bp->fresnel_map_coeff);
@@ -693,7 +717,7 @@ RpAtomic* xFXBubbleRender(RpAtomic* atomic)
 
     iModelSetMaterialAlpha(atomic, bp->pass3_alpha);
 
-    if (((char)bp->pass3) != 0)
+    if (bp->pass3)
     {
         AtomicDisableMatFX(atomic);
         gFXSurfaceFlags = 0x10;
@@ -753,7 +777,7 @@ static RpAtomic* AtomicSetEnvMap(RpAtomic* atomic, void* data)
 
 RpAtomic* xFXAtomicEnvMapSetup(RpAtomic* atomic, U32 envmapID, F32 shininess)
 {
-    void* env = xSTFindAsset(envmapID, NULL);
+    RwTexture* env = (RwTexture*)xSTFindAsset(envmapID, NULL);
     if (env)
     {
         AtomicSetEnvMap(atomic, env);
@@ -872,15 +896,11 @@ void xFXanimUV2PSetTexture(RwTexture* texture)
 
 RpAtomic* xFXanimUVAtomicSetup(RpAtomic* atomic)
 {
-    if (atomic == 0)
+    if (atomic && xFXanimUVPipeline)
     {
-        return atomic;
+        atomic->pipeline = xFXanimUVPipeline;
     }
-    if (xFXanimUVPipeline == 0)
-    {
-        return atomic;
-    }
-    atomic->pipeline = xFXanimUVPipeline;
+
     return atomic;
 }
 
@@ -924,12 +944,12 @@ namespace
     void lerp(xVec3& v, F32 frac, const xVec3& v0, const xVec3& v1);
 
     void set_vert(RxObjSpace3DVertex& vert, const vert_data& vd);
-    void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, const xVec3& norm,
-                  const RwTexCoords& uv, U8 alpha);
+    inline void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, const xVec3& norm,
+                         const RwTexCoords& uv, U8 alpha);
     void push_triangle(RxObjSpace3DVertex*& vert, const tri_data& tri);
-    S32 clip_triangle(tri_data* out, const tri_data& in, F32 depth);
+    inline S32 clip_triangle(tri_data* out, const tri_data& in, F32 depth);
     void refresh_vert_buffer(RxObjSpace3DVertex*& vert, bool flush);
-    U32 count_alpha_triangles(const RpTriangle* tri, const F32* depth, u32 size);
+    inline U32 count_alpha_triangles(const RpTriangle* tri, const F32* depth, u32 size);
     void depth_sort(U16* index, const tri_data* tri, u32 size);
 
 #define ALPHA_COUNT 300
@@ -937,6 +957,9 @@ namespace
     U8 alpha_count0[ALPHA_COUNT];
     U8 alpha_count1[ALPHA_COUNT];
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
     void depth_sort(U16* index, const tri_data* tri, u32 size)
     {
         for (U32 i = 0; i < size; i++)
@@ -956,6 +979,10 @@ namespace
             }
         }
     }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
+
 } // namespace
 
 void xFXRenderProximityFade(const xModelInstance& model, F32 near_dist, F32 far_dist)
@@ -1241,16 +1268,13 @@ namespace
             alpha = 0.5f + a;
         }
 
-        F32 lx = vd.loc.x;
-        F32 ly = vd.loc.y;
-        F32 lz = vd.loc.z;
-        RwIm3DVertexSetPos(&vert, lx, ly, lz);
+        RwIm3DVertexSetPos(&vert, vd.loc.x, vd.loc.y, vd.loc.z);
         RwIm3DVertexSetNormal(&vert, vd.norm.x, vd.norm.y, vd.norm.z);
         RwIm3DVertexSetRGBA(&vert, 255, 255, 255, alpha);
         RwIm3DVertexSetUV(&vert, vd.uv.u, vd.uv.v);
     }
 
-    S32 clip_triangle(tri_data* out, const tri_data& in, F32 depth)
+    inline S32 clip_triangle(tri_data* out, const tri_data& in, F32 depth)
     {
         U16 flags;
         U8 i0;
@@ -1273,20 +1297,20 @@ namespace
 
         switch (flags)
         {
-        case 0x0e:
         case 0x31:
+        case 0x0e:
             i0 = 0;
             i1 = 1;
             i2 = 2;
             break;
-        case 0x15:
         case 0x2a:
+        case 0x15:
             i0 = 1;
             i1 = 2;
             i2 = 0;
             break;
-        case 0x1c:
         case 0x23:
+        case 0x1c:
             i0 = 2;
             i1 = 0;
             i2 = 1;
@@ -1375,13 +1399,10 @@ namespace
         }
     }
 
-    void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, const xVec3& norm,
-                  const RwTexCoords& uv, U8 alpha)
+    inline void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, const xVec3& norm,
+                         const RwTexCoords& uv, U8 alpha)
     {
-        F32 lx = loc.x;
-        F32 ly = loc.y;
-        F32 lz = loc.z;
-        RwIm3DVertexSetPos(&vert, lx, ly, lz);
+        RwIm3DVertexSetPos(&vert, loc.x, loc.y, loc.z);
         RwIm3DVertexSetNormal(&vert, norm.x, norm.y, norm.z);
         RwIm3DVertexSetRGBA(&vert, 255, 255, 255, alpha);
         RwIm3DVertexSetUV(&vert, uv.u, uv.v);
@@ -1411,7 +1432,7 @@ namespace
         }
     }
 
-    U32 count_alpha_triangles(const RpTriangle* tri, const F32* depth, u32 size)
+    inline U32 count_alpha_triangles(const RpTriangle* tri, const F32* depth, u32 size)
     {
         static const U8 segments[43] = { 0, 1, 3, 0, 1, 2, 4, 0, 3, 4, 3, 0, 0, 0, 0,
                                          0, 1, 2, 4, 0, 2, 1, 2, 0, 4, 2, 1, 0, 0, 0,
@@ -1465,10 +1486,15 @@ namespace
                 flags |= 0x10;
             }
 
+#if defined(PS2)
+            alpha_count0[i] = segments[flags];
+            total += segments[flags];
+#else
             n = segments[flags];
 
             alpha_count0[i] = n;
             total += n;
+#endif
 
             i++;
             tri++;
@@ -1495,10 +1521,6 @@ static zParEmitter* sFirework1Emit = NULL;
 static zParEmitter* sFirework2Emit = NULL;
 static U32 sFireworkSoundID = 0;
 static U32 sFireworkLaunchSoundID = 0;
-
-static RwIm3DVertex sStripVert_2188[4];
-
-static RwIm3DVertex blah_2485[4];
 
 namespace
 {
@@ -1544,7 +1566,7 @@ void xFXFireworksInit(const char* fireworksTrailEmitter, const char* fireworksEm
     sFireworkSoundID = xStrHash(fireworksSound);
     sFireworkLaunchSoundID = xStrHash(fireworksLaunchSound);
     memset(sFirework, 0, sizeof(sFirework));
-    for (U32 i = 0; i < FIREWORK_COUNT; ++i)
+    for (S32 i = 0; i < FIREWORK_COUNT; ++i)
     {
         sFirework[i].state = 0;
     }
@@ -1609,13 +1631,13 @@ void xFXFireworksUpdate(F32 dt)
                 sFirework[i].vel.y += 15.0f * dt;
             }
             xParEmitterCustomSettings trail_info;
-            trail_info.custom_flags = eParEmitterCustomPos;
             F32 vx = sFirework[i].vel.x;
             sFirework[i].pos.x += vx * dt;
             F32 vy = sFirework[i].vel.y;
             sFirework[i].pos.y += vy * dt;
             F32 vz = sFirework[i].vel.z;
             sFirework[i].pos.z += vz * dt;
+            trail_info.custom_flags = eParEmitterCustomPos;
             trail_info.pos = sFirework[i].pos;
             xParEmitterEmitCustom(sFireworkTrailEmit, dt, &trail_info);
 
@@ -1631,9 +1653,8 @@ void xFXFireworksUpdate(F32 dt)
                 }
 
                 xParEmitterCustomSettings xplo_info;
-                xplo_info.custom_flags =
-                    eParEmitterCustomColorDeath | eParEmitterCustomColorBirth |
-                    eParEmitterCustomPos;
+                xplo_info.custom_flags = eParEmitterCustomColorDeath | eParEmitterCustomColorBirth |
+                                         eParEmitterCustomPos;
                 xplo_info.pos = sFirework[i].pos;
 
                 if (femit != NULL)
@@ -1763,12 +1784,14 @@ void xFXStreakUpdate(F32 dt)
 
 void xFXStreakRender()
 {
+    static RwIm3DVertex sStripVert[4];
+
+    xFXStreakElem* e;
     xFXStreakElem* e1;
     S32 streak;
     xFXStreak* s;
-    S32 count;
     S32 j;
-    xFXStreakElem* e;
+    S32 count;
 
     for (streak = 0; streak < 10; streak++)
     {
@@ -1806,39 +1829,29 @@ void xFXStreakRender()
                 break;
             }
 
-            RwIm3DVertexSetPos(&sStripVert_2188[0], e->p[0].x, e->p[0].y, e->p[0].z);
-            RwIm3DVertexSetUV(&sStripVert_2188[0], 0.0f, 0.0f);
-            U8 c0r = s->color_a.r;
-            U8 c0g = s->color_a.g;
-            U8 c0b = s->color_a.b;
-            F32 c0af = 255.0f * e->a;
-            F32 c2af = 255.0f * e1->a;
-            RwIm3DVertexSetRGBA(&sStripVert_2188[0], c0r, c0g, c0b, (U8)c0af);
+            RwIm3DVertexSetPos(&sStripVert[0], e->p[0].x, e->p[0].y, e->p[0].z);
+            RwIm3DVertexSetUV(&sStripVert[0], 0.0f, 0.0f);
+            RwIm3DVertexSetRGBA(&sStripVert[0], s->color_a.r, s->color_a.g, s->color_a.b,
+                                (U8)(255.0f * e->a));
 
-            RwIm3DVertexSetPos(&sStripVert_2188[1], e->p[1].x, e->p[1].y, e->p[1].z);
-            RwIm3DVertexSetUV(&sStripVert_2188[1], 0.0f, 1.0f);
-            U8 c1r = s->color_b.r;
-            U8 c1g = s->color_b.g;
-            U8 c1b = s->color_b.b;
-            RwIm3DVertexSetRGBA(&sStripVert_2188[1], c1r, c1g, c1b, (U8)c0af);
+            RwIm3DVertexSetPos(&sStripVert[1], e->p[1].x, e->p[1].y, e->p[1].z);
+            RwIm3DVertexSetUV(&sStripVert[1], 0.0f, 1.0f);
+            RwIm3DVertexSetRGBA(&sStripVert[1], s->color_b.r, s->color_b.g, s->color_b.b,
+                                (U8)(255.0f * e->a));
 
-            RwIm3DVertexSetPos(&sStripVert_2188[2], e1->p[0].x, e1->p[0].y, e1->p[0].z);
-            RwIm3DVertexSetUV(&sStripVert_2188[2], 1.0f, 0.0f);
-            U8 c2r = s->color_a.r;
-            U8 c2g = s->color_a.g;
-            U8 c2b = s->color_a.b;
-            RwIm3DVertexSetRGBA(&sStripVert_2188[2], c2r, c2g, c2b, (U8)c2af);
+            RwIm3DVertexSetPos(&sStripVert[2], e1->p[0].x, e1->p[0].y, e1->p[0].z);
+            RwIm3DVertexSetUV(&sStripVert[2], 1.0f, 0.0f);
+            RwIm3DVertexSetRGBA(&sStripVert[2], s->color_a.r, s->color_a.g, s->color_a.b,
+                                (U8)(255.0f * e1->a));
 
-            RwIm3DVertexSetPos(&sStripVert_2188[3], e1->p[1].x, e1->p[1].y, e1->p[1].z);
-            RwIm3DVertexSetUV(&sStripVert_2188[3], 1.0f, 1.0f);
-            U8 c3r = s->color_b.r;
-            U8 c3g = s->color_b.g;
-            U8 c3b = s->color_b.b;
-            RwIm3DVertexSetRGBA(&sStripVert_2188[3], c3r, c3g, c3b, (U8)c2af);
+            RwIm3DVertexSetPos(&sStripVert[3], e1->p[1].x, e1->p[1].y, e1->p[1].z);
+            RwIm3DVertexSetUV(&sStripVert[3], 1.0f, 1.0f);
+            RwIm3DVertexSetRGBA(&sStripVert[3], s->color_b.r, s->color_b.g, s->color_b.b,
+                                (U8)(255.0f * e1->a));
 
             RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)s->textureRasterPtr);
 
-            if (RwIm3DTransform(sStripVert_2188, 4, NULL,
+            if (RwIm3DTransform(sStripVert, 4, NULL,
                                 rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
             {
                 RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
@@ -1941,7 +1954,11 @@ void xFXStreakStop(U32 id)
 
     xFXStreak* s = &sStreakList[id];
 
-    if (!s->flags & 0x1)
+    // The `& 1` is redundant -- `!x` is already 0 or 1 -- but both targets keep it:
+    // GameCube narrows the test to a single bit (`extrwi. 1,26` off the `cntlzw`) and
+    // PS2 computes `!x` as sltu/xori before testing. Plain `!s->flags` gives
+    // `cmplwi/beqlr` on GameCube; `(s->flags == 0) & 1` gives xor/sltiu on PS2.
+    if (!s->flags & 1)
     {
         return;
     }
@@ -2088,6 +2105,8 @@ void xFXShineUpdate(F32 dt)
 
 void xFXShineRender()
 {
+    static RwIm3DVertex blah[4];
+
     xFXShineElem* e;
     S32 shine;
     xFXShine* s;
@@ -2118,7 +2137,7 @@ void xFXShineRender()
                 continue;
             }
 
-            vert = blah_2485;
+            vert = blah;
 
             if (globals.camera.lo_cam)
             {
@@ -2140,102 +2159,56 @@ void xFXShineRender()
             xMat3x3Transpose(&mat, (xMat3x3*)frame);
             xMat3x3LMulVec(&v, &mat, &v);
 
-            F32 a0x = s->pos.x;
-            F32 a0y = s->pos.y;
-            F32 a0z = s->pos.z;
-            RwIm3DVertexSetPos(&vert[0], a0x, a0y, a0z);
+            RwIm3DVertexSetPos(&vert[0], s->pos.x, s->pos.y, s->pos.z);
             RwIm3DVertexSetUV(&vert[0], uoff, 0.0f);
-            U8 cola0_r = e->cola.r;
-            U8 cola0_g = e->cola.g;
-            U8 cola0_b = e->cola.b;
-            RwIm3DVertexSetRGBA(&vert[0], cola0_r, cola0_g, cola0_b, 0);
+            RwIm3DVertexSetRGBA(&vert[0], e->cola.r, e->cola.g, e->cola.b, 0);
 
-            F32 a1x = s->pos.x;
-            F32 a1y = s->pos.y;
-            F32 a1z = s->pos.z;
-            RwIm3DVertexSetPos(&vert[1], a1x, a1y, a1z);
+            RwIm3DVertexSetPos(&vert[1], s->pos.x, s->pos.y, s->pos.z);
             RwIm3DVertexSetUV(&vert[1], uoff, 1.0f);
-            U8 cola1_r = e->cola.r;
-            U8 cola1_g = e->cola.g;
-            U8 cola1_b = e->cola.b;
-            RwIm3DVertexSetRGBA(&vert[1], cola1_r, cola1_g, cola1_b, 0);
+            RwIm3DVertexSetRGBA(&vert[1], e->cola.r, e->cola.g, e->cola.b, 0);
 
-            F32 a2x = s->pos.x + v.x - w.x;
-            F32 a2y = s->pos.y + v.y - w.y;
-            F32 a2z = s->pos.z + v.z - w.z;
-            RwIm3DVertexSetPos(&vert[2], a2x, a2y, a2z);
+            RwIm3DVertexSetPos(&vert[2], s->pos.x + v.x - w.x, s->pos.y + v.y - w.y,
+                               s->pos.z + v.z - w.z);
             RwIm3DVertexSetUV(&vert[2], 1.0f + uoff, 0.0f);
-            U8 cola2_r = e->cola.r;
-            U8 cola2_g = e->cola.g;
-            U8 cola2_b = e->cola.b;
-            F32 cola2_af = 255.0f * e->a;
-            RwIm3DVertexSetRGBA(&vert[2], cola2_r, cola2_g, cola2_b, (U8)cola2_af);
+            RwIm3DVertexSetRGBA(&vert[2], e->cola.r, e->cola.g, e->cola.b, (U8)(255.0f * e->a));
 
-            F32 a3x = w.x + (s->pos.x + v.x);
-            F32 a3y = w.y + (s->pos.y + v.y);
-            F32 a3z = w.z + (s->pos.z + v.z);
-            RwIm3DVertexSetPos(&vert[3], a3x, a3y, a3z);
+            RwIm3DVertexSetPos(&vert[3], w.x + (s->pos.x + v.x), w.y + (s->pos.y + v.y),
+                               w.z + (s->pos.z + v.z));
             RwIm3DVertexSetUV(&vert[3], 1.0f + uoff, 1.0f);
-            U8 cola3_r = e->cola.r;
-            U8 cola3_g = e->cola.g;
-            U8 cola3_b = e->cola.b;
-            RwIm3DVertexSetRGBA(&vert[3], cola3_r, cola3_g, cola3_b, (U8)cola2_af);
+            RwIm3DVertexSetRGBA(&vert[3], e->cola.r, e->cola.g, e->cola.b, (U8)(255.0f * e->a));
 
             RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)s->textureRasterPtr);
 
-            if (RwIm3DTransform(blah_2485, 4, NULL,
+            if (RwIm3DTransform(blah, 4, NULL,
                                 rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
             {
                 RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
                 RwIm3DEnd();
             }
 
-            vert = blah_2485;
+            vert = blah;
 
-            F32 b0x = s->pos.x;
-            F32 b0y = s->pos.y;
-            F32 b0z = s->pos.z;
-            RwIm3DVertexSetPos(&vert[0], b0x, b0y, b0z);
+            RwIm3DVertexSetPos(&vert[0], s->pos.x, s->pos.y, s->pos.z);
             RwIm3DVertexSetUV(&vert[0], uoff, 0.0f);
-            U8 colb0_r = e->colb.r;
-            U8 colb0_g = e->colb.g;
-            U8 colb0_b = e->colb.b;
-            RwIm3DVertexSetRGBA(&vert[0], colb0_r, colb0_g, colb0_b, 0);
+            RwIm3DVertexSetRGBA(&vert[0], e->colb.r, e->colb.g, e->colb.b, 0);
 
-            F32 b1x = s->pos.x;
-            F32 b1y = s->pos.y;
-            F32 b1z = s->pos.z;
-            RwIm3DVertexSetPos(&vert[1], b1x, b1y, b1z);
+            RwIm3DVertexSetPos(&vert[1], s->pos.x, s->pos.y, s->pos.z);
             RwIm3DVertexSetUV(&vert[1], 0.0f, 1.0f);
-            U8 colb1_r = e->colb.r;
-            U8 colb1_g = e->colb.g;
-            U8 colb1_b = e->colb.b;
-            RwIm3DVertexSetRGBA(&vert[1], colb1_r, colb1_g, colb1_b, 0);
+            RwIm3DVertexSetRGBA(&vert[1], e->colb.r, e->colb.g, e->colb.b, 0);
 
-            F32 b2x = s->pos.x + v.x - w2.x;
-            F32 b2y = s->pos.y + v.y - w2.y;
-            F32 b2z = s->pos.z + v.z - w2.z;
-            RwIm3DVertexSetPos(&vert[2], b2x, b2y, b2z);
+            RwIm3DVertexSetPos(&vert[2], s->pos.x + v.x - w2.x, s->pos.y + v.y - w2.y,
+                               s->pos.z + v.z - w2.z);
             RwIm3DVertexSetUV(&vert[2], 1.0f, 0.0f);
-            U8 colb2_r = e->colb.r;
-            U8 colb2_g = e->colb.g;
-            U8 colb2_b = e->colb.b;
-            F32 colb2_af = 255.0f * e->a;
-            RwIm3DVertexSetRGBA(&vert[2], colb2_r, colb2_g, colb2_b, (U8)colb2_af);
+            RwIm3DVertexSetRGBA(&vert[2], e->colb.r, e->colb.g, e->colb.b, (U8)(255.0f * e->a));
 
-            F32 b3x = w2.x + (s->pos.x + v.x);
-            F32 b3y = w2.y + (s->pos.y + v.y);
-            F32 b3z = w2.z + (s->pos.z + v.z);
-            RwIm3DVertexSetPos(&vert[3], b3x, b3y, b3z);
+            RwIm3DVertexSetPos(&vert[3], w2.x + (s->pos.x + v.x), w2.y + (s->pos.y + v.y),
+                               w2.z + (s->pos.z + v.z));
             RwIm3DVertexSetUV(&vert[3], 1.0f, 1.0f);
-            U8 colb3_r = e->colb.r;
-            U8 colb3_g = e->colb.g;
-            U8 colb3_b = e->colb.b;
-            RwIm3DVertexSetRGBA(&vert[3], colb3_r, colb3_g, colb3_b, (U8)colb2_af);
+            RwIm3DVertexSetRGBA(&vert[3], e->colb.r, e->colb.g, e->colb.b, (U8)(255.0f * e->a));
 
             RwRenderStateSet(rwRENDERSTATETEXTURERASTER, (void*)s->textureRasterPtr);
 
-            if (RwIm3DTransform(blah_2485, 4, NULL,
+            if (RwIm3DTransform(blah, 4, NULL,
                                 rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA))
             {
                 RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
@@ -2332,6 +2305,7 @@ U8 tier_queue_allocator::alloc_block()
     return block;
 }
 
+#if !defined(PS2)
 void tier_queue_allocator::free_block(U8 block)
 {
     block_data& data = blocks[block];
@@ -2343,6 +2317,7 @@ void tier_queue_allocator::free_block(U8 block)
 
     head = block;
 }
+#endif
 
 void xFXRibbon::init(const char* group, const char* name)
 {
@@ -2359,6 +2334,7 @@ void xFXRibbon::init(const char* group, const char* name)
     debug_init(group, name);
 }
 
+#if !defined(PS2)
 template <> void tier_queue<xFXRibbon::joint_data>::clear()
 {
     u32 block = get_block(first);
@@ -2373,6 +2349,7 @@ template <> void tier_queue<xFXRibbon::joint_data>::clear()
     _size = 0;
     first = 0;
 }
+#endif
 
 void xFXRibbon::set_default_config()
 {
@@ -2549,7 +2526,7 @@ void xFXRibbon::render()
 void xFXRibbon::set_raster(RwRaster* rast)
 {
     this->raster = rast;
-    if (activated <= 0)
+    if (!activated)
     {
         return;
     }
@@ -2571,11 +2548,21 @@ void xFXRibbon::set_texture(const char* name)
     set_texture(xStrHash(name));
 }
 
+#if defined(PS2)
+// Preserve separate arithmetic and component reloads in the PS2 original.
+#pragma peephole off
+#pragma opt_common_subs off
+#endif
 void xFXRibbon::get_normal(xVec3& norm, const xVec3& dir, F32 orient)
 {
     F32 a = isin(orient);
     F32 b = icos(orient);
 
+#if defined(PS2)
+    F32 ax = xabs(dir.x);
+    F32 ay = xabs(dir.y);
+    F32 az = xabs(dir.z);
+#else
     // Declared z,y,x but assigned x,y,z, and that split is load-bearing: the target
     // loads the components in address order (0x0, 0x4, 0x8) while colouring them
     // f9, f8, f7 -- descending. CodeWarrior colours the FP class in DECLARATION
@@ -2592,6 +2579,7 @@ void xFXRibbon::get_normal(xVec3& norm, const xVec3& dir, F32 orient)
     F32 ax = xabs(dx);
     F32 ay = xabs(dy);
     F32 az = xabs(dz);
+#endif
 
     if (ax < ay && ax < az)
     {
@@ -2601,6 +2589,12 @@ void xFXRibbon::get_normal(xVec3& norm, const xVec3& dir, F32 orient)
         // repeats the z-axis arm's `dir.z * (a * dir.y)` instead, which is what
         // the target object computes.
 
+#if defined(PS2)
+        norm.x = -a * (dir.y * dir.y + dir.z * dir.z);
+        norm.y = dir.z * (a * dir.y) + b * dir.z;
+        norm.z = dir.z * (a * dir.x) - b * dir.y;
+        norm *= 1.0f / xsqrt(dir.y * dir.y + dir.z * dir.z);
+#else
         // Numerical fidelity, load-bearing -- do NOT fold these back into one
         // `dir.y * dir.y + dir.z * dir.z` expression. Retail rounds each square to
         // single precision and only then adds:
@@ -2617,6 +2611,7 @@ void xFXRibbon::get_normal(xVec3& norm, const xVec3& dir, F32 orient)
         norm.y = dz * (a * dy) + b * dz;
         norm.z = dz * (a * dx) - b * dy;
         norm *= 1.0f / xsqrt(dy2 + dz2);
+#endif
     }
     else if (ay < az)
     {
@@ -2633,6 +2628,11 @@ void xFXRibbon::get_normal(xVec3& norm, const xVec3& dir, F32 orient)
         norm *= 1.0f / xsqrt(dir.x * dir.x + dir.y * dir.y);
     }
 }
+
+#if defined(PS2)
+#pragma opt_common_subs reset
+#pragma peephole reset
+#endif
 
 void xFXRibbon::refresh_joint(joint_data& joint, const tier_queue<joint_data>::iterator& it)
 {
@@ -2700,7 +2700,8 @@ void xFXRibbon::eval_joint(const joint_data& joint, iColor_tag& color, F32& widt
 
 namespace
 {
-    void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, F32 u, F32 v, iColor_tag color);
+    inline void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, F32 u, F32 v,
+                         iColor_tag color);
 }
 
 void xFXRibbon::render_strip(RxObjSpace3DVertex* verts, tier_queue<joint_data>::iterator first,
@@ -2746,15 +2747,14 @@ void xFXRibbon::render_strip(RxObjSpace3DVertex* verts, tier_queue<joint_data>::
         v += 2;
     }
 
-    RwIm3DTransform(verts, v - verts, NULL,
-                    rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA);
+    RwIm3DTransform(verts, v - verts, NULL, rwIM3D_VERTEXUV | rwIM3D_VERTEXXYZ | rwIM3D_VERTEXRGBA);
     RwIm3DRenderPrimitive(rwPRIMTYPETRISTRIP);
     RwIm3DEnd();
 }
 
 namespace
 {
-    void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, F32 u, F32 v, iColor_tag color)
+    inline void set_vert(RxObjSpace3DVertex& vert, const xVec3& loc, F32 u, F32 v, iColor_tag color)
     {
         RwIm3DVertexSetPos(&vert, loc.x, loc.y, loc.z);
         RwIm3DVertexSetUV(&vert, u, v);
@@ -2767,6 +2767,9 @@ namespace
     }
 } // namespace
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 S32 xFXRibbon::render_compare(const xFXRibbon& c) const
 {
     if (raster < c.raster)
@@ -2801,6 +2804,10 @@ S32 xFXRibbon::render_compare(const xFXRibbon& c) const
 
     return 0;
 }
+
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 // Carrier, not recovered code. These eleven RwBlendFunction names are present
 // in the target's @stringBase0 right here, between "fx_streak1" and
@@ -2998,16 +3005,18 @@ void xFXAuraUpdate(F32 dt)
 
     ap = sAura;
 
-    for (i = 0; i < AURA_COUNT; i++)
+    for (i = 0; i < AURA_COUNT; i++, ap++)
     {
         if (ap->frame != gFrameCount)
         {
             ap->parent = NULL;
         }
-        ap++;
     }
 }
 
+#if defined(PS2)
+#pragma opt_loop_invariants off
+#endif
 static void RenderRotatedBillboard(xVec3* pos, _xFXAuraAngle* rot, U32 count, F32 width, F32 height,
                                    iColor_tag tint, U32 flipUV)
 {
@@ -3182,6 +3191,10 @@ static void RenderRotatedBillboard(xVec3* pos, _xFXAuraAngle* rot, U32 count, F3
     RwIm3DEnd();
 }
 
+#if defined(PS2)
+#pragma opt_loop_invariants reset
+#endif
+
 void xFXAuraRender()
 {
     S32 fogstate;
@@ -3248,6 +3261,9 @@ void xFXSceneSetup()
 {
     DrawRingSetup();
     xFXAuraSetup();
+#if defined(PS2)
+    iFXGooSceneSetup();
+#endif
 }
 
 void xFXSceneReset()
@@ -3262,8 +3278,12 @@ void xFXSceneFinish()
 {
     DrawRingSceneExit();
     gAuraTex = NULL;
+#if defined(PS2)
+    iFXGooSceneExit();
+#endif
 }
 
+#if !defined(PS2)
 void xParInterp::set(F32 value1, F32 value2, F32 freq, U32 interp)
 {
     this->val[0] = value1;
@@ -3279,6 +3299,7 @@ void xParInterp::set(F32 value1, F32 value2, F32 freq, U32 interp)
     }
     this->interp = interp;
 }
+#endif
 
 void xFXRibbon::debug_init(const char*, const char*)
 {
@@ -3294,14 +3315,7 @@ void xFXRibbon::debug_update_curve()
 
 bool xFXRibbon::need_update() const
 {
-    bool result = false;
-
-    if (visible() || debug_need_update())
-    {
-        result = true;
-    }
-
-    return result;
+    return visible() || debug_need_update();
 }
 
 bool xFXRibbon::debug_need_update() const

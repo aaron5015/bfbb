@@ -3,9 +3,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <types.h>
+#if defined(PS2)
+#include <stdlib.h>
+#else
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\stdlib.h>
+#endif
 
 #include "iTime.h"
+#if defined(PS2)
+#include "iSystem.h"
+#endif
 
 #include "xCounter.h"
 #include "xFont.h"
@@ -89,9 +96,6 @@ U32 zVarEntryCB_SndMusicVol(void*);
 // This function is here to force the symbols to be linked.
 void __deadstripped_zVar()
 {
-    const char _449[0x0C] = {};
-    const char _450[0x0C] = {};
-    const char _454[0x0C] = {};
     const char _485[0x0C] = {};
 
     const char _617[0x28] = {};

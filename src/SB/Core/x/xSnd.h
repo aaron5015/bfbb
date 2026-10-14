@@ -5,7 +5,24 @@
 #include "xVec3.h"
 #include "xMath3.h"
 #include "iSnd.h"
+#if defined(PS2)
+#include "xEntTypes.h"
+#include "xModelTypes.h"
+#else
 #include "xEnt.h"
+#endif
+
+#if defined(PS2)
+enum
+{
+    XSND_VOICE_COUNT = 48
+};
+#else
+enum
+{
+    XSND_VOICE_COUNT = 64
+};
+#endif
 
 enum sound_category
 {
@@ -52,9 +69,13 @@ struct xSndGlobals
     U32 stereo;
     U32 SndCount;
     F32 categoryVolFader[5];
-    // Evidence from iSndUpdateSounds() and xSndInit() show that this array is size 64 instead of 48
-    xSndVoiceInfo voice[64];
-    xMat4x3 listenerMat[2];
+    // PS2 has 48 voices; GameCube has 64.
+    xSndVoiceInfo voice[XSND_VOICE_COUNT];
+    xMat4x3 listenerMat[2]
+#if defined(PS2)
+        __attribute__((aligned(16)))
+#endif
+        ;
     sound_listener_game_mode listenerMode;
     U32 suspendCD;
     xVec3 right;
@@ -82,7 +103,19 @@ struct _xSndDelayed
 
 // sound_queue calls these; two-phase lookup needs them declared first.
 void xSndStop(U32 snd);
-U8 xSndIsPlayingByHandle(U32 sndID);
+#if defined(PS2)
+inline bool xSndIsPlayingByHandle(U32 sndID)
+{
+    return iSndIsPlayingByHandle(sndID);
+}
+
+inline U32 xSndIsPlaying(U32 assetID)
+{
+    return iSndIsPlaying(assetID);
+}
+#else
+bool xSndIsPlayingByHandle(U32 sndID);
+#endif
 
 template <S32 N> struct sound_queue
 {
@@ -90,11 +123,7 @@ template <S32 N> struct sound_queue
     S32 head;
     S32 tail;
 
-    sound_queue()
-    {
-        head = 0;
-        tail = 0;
-    }
+    sound_queue();
 
     void play(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, U32 parentID,
               sound_category snd_category);
@@ -120,49 +149,57 @@ template <S32 N> struct sound_queue
             pop();
         }
     }
-    U32 recent(S32 index) const
-    {
-        S32 i = tail - index - 1;
-        if (i < 0)
-        {
-            i += (N + 1);
-        }
-        return _playing[i];
-    }
-    bool playing(S32 index, bool streaming) const
-    {
-        S32 count = size();
-        S32 i;
-
-        if (index < 0 || index > count)
-        {
-            index = count;
-        }
-
-        if (streaming)
-        {
-            for (i = 0; i < index; i++)
-            {
-                if (!xSndIsPlayingByHandle(recent(i)))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-        else
-        {
-            for (i = 0; i < index; i++)
-            {
-                if (xSndIsPlayingByHandle(recent(i)))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
+    U32 recent(S32 index) const;
+    bool playing(S32 index, bool streaming) const;
 };
+
+// These four-entry queries stay inline here; generic definitions are in
+// xSndQueue.h. This preserves the deferred helper and static-init groups.
+template <> inline U32 sound_queue<4>::recent(S32 index) const;
+
+template <> inline bool sound_queue<4>::playing(S32 index, bool streaming) const
+{
+    S32 count = size();
+    S32 i;
+
+    if (index < 0 || index > count)
+    {
+        index = count;
+    }
+
+    if (streaming)
+    {
+        for (i = 0; i < index; i++)
+        {
+            if (!xSndIsPlayingByHandle(recent(i)))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    else
+    {
+        for (i = 0; i < index; i++)
+        {
+            if (xSndIsPlayingByHandle(recent(i)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+template <> inline U32 sound_queue<4>::recent(S32 index) const
+{
+    S32 i = tail - index - 1;
+    if (i < 0)
+    {
+        i += 5;
+    }
+    return _playing[i];
+}
 
 enum sound_effect
 {
@@ -213,16 +250,20 @@ U32 xSndPlayInternal(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, U32 pa
                      xEnt* parentEnt, const xVec3* pos, F32 innerRadius, F32 outerRadius,
                      sound_category category, F32 delay);
 void xSndStartStereo(U32 id1, U32 id2, F32 pitch);
-U8 xSndIsPlayingByHandle(U32 sndID);
+bool xSndIsPlayingByHandle(U32 sndID);
 U32 xSndIsPlaying(U32 assetID);
 U32 xSndIDIsPlaying(U32 sndID);
+#if defined(PS2)
+U32 xSndIsReady(U32 id);
+void xSndLoadExternalData(U32 snd, const void* data, S32 forceBuffer);
+#endif
 void xSndStop(U32 snd);
 void xSndParentDied(U32 pid);
 void xSndStopChildren(U32 pid);
 void xSndSetVol(U32 snd, F32 vol);
 void xSndSetPitch(U32 snd, F32 pitch);
 void xSndSetCategoryVol(sound_category category, F32 vol);
-void xSndSetExternalCallback(void (*callback)(U32));
+void xSndSetExternalCallback(iSndExternalCallback callback);
 
 inline U32 xSndPlay3D(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, xEnt* ent, F32 radius,
                       sound_category category, F32 delay)

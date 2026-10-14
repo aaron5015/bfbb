@@ -66,6 +66,11 @@
 #include "xNPCBasic.h"
 #include "xString.h"
 #include "xstransvc.h"
+#if defined(PS2)
+#include "xpkrsvc_api.h"
+#else
+#include "xpkrsvc.h"
+#endif
 #include "xDynAsset.h"
 #include "xParSys.h"
 #include "xParEmitter.h"
@@ -101,6 +106,9 @@
 
 #include <string.h>
 #include <stdio.h>
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
 
 // Declared in zAssetTypes.h. That header is deliberately not included here: it
 // pulls in zNPCTypeBossPlankton.h -> xLaserBolt.h (`xVec3 temp = { 0, 0, 0 };`)
@@ -112,6 +120,10 @@
 // plain declarations plus field assignments fixes it identically; that is a
 // change to shared headers, so it is left alone here.)
 void FootstepHackSceneEnter();
+
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+void iDrawSetDisplayOffset(F32 offsetx, F32 offsety);
+#endif
 
 U8 HACK_BASETYPE;
 static S32 bytesNeeded;
@@ -301,6 +313,9 @@ namespace
     {
         U32 count, type;
         S32 dyn_size, i, cnt;
+        U32 asset_size;
+        xDynAsset* a;
+        xBase* b;
 
         s.baseList[d.type] = NULL;
 
@@ -320,10 +335,6 @@ namespace
 
         for (i = 0, cnt = 0; i < (S32)count; i++)
         {
-            U32 asset_size;
-            xDynAsset* a;
-            xBase* b;
-
             a = (xDynAsset*)xSTFindAssetByType('DYNA', i, &asset_size);
 
             if (a && a->type == type)
@@ -547,9 +558,9 @@ static U32 zSceneInitFunc_Player(zScene* s, zSceneObjectInstanceDesc* desc, U32 
 
             asset = (xEntAsset*)xSTFindAssetByType('PLYR', idx, NULL);
 
-            globals.player.ent.id = asset->id;
+            b->id = asset->id;
 
-            zSceneObjHashtableAdd(asset->id, b);
+            zSceneObjHashtableAdd(b->id, b);
 
             base_idx++;
         }
@@ -721,47 +732,23 @@ static void PipeAddStuffCB(RpAtomic* data, U32 pipeFlags, U32)
 
 static void PipeForAllSceneModels(void (*pipeCB)(RpAtomic* data, U32 pipeFlags, U32 subObjects))
 {
-    // non-matching: identical instructions throughout; model /
-    // remainSubObjBits / k get r24/r23/r25 in retail and r25/r24/r23 here - a
-    // three-way permutation of the same register allocation.
-    //
-    // Worked with the colour-index table (0..7 = r27 r29 r28 r26 r30 r31 r25
-    // r24, then r23 r22 r21 r20). This function fills colours 0..11 with, in
-    // order: i, &xModelPipeData[j], &xModelPipeCount[j], j, numModels, the
-    // hoisted 'MODL' constant, model, remainSubObjBits, k, pipeCB, the k*12
-    // byte offset, currSubObjBits. Retail differs only in wanting k at index
-    // 6, model at 7, remainSubObjBits at 8 - i.e. k coloured FIRST of the
-    // three. Measured:
-    //   baseline (k in the for-init)                      99.176%, 12 rows
-    //   numModels declared before i,j          BIT-IDENTICAL to baseline
-    //   'S32 k;' at outer-loop top, for (k=0;...)          98.765%, 18 rows
-    //   same but 'S32 k = 0;'                              98.765%, 18 rows
-    //   'S32 k;' in the if-block, for (k=0;...)            98.765%, 18 rows
-    //   remainSubObjBits declared at outer-loop top        99.412%,  8 rows
-    //   both k and remainSubObjBits at outer-loop top      99.000%, 14 rows
-    // remainSubObjBits hoisted to the outer loop DOES move it to colour 6 and
-    // puts model on retail's r24 - so this permutation is driven by lexical
-    // declaration order after all, not by definition order. But k has only two
-    // reachable slots: index 8 when it is declared in the inner for-init (the
-    // last declaration lexically), and index 10 when it is declared anywhere
-    // else, which ejects it past pipeCB and the byte offset. Index 6 requires
-    // k declared before model while still being a for-init declaration, which
-    // is a contradiction. NOT EXPRESSIBLE; the 99.412% form banks nothing and
-    // is not kept.
-
+    // Declaration order decides the register ranks: the sub-object counters
+    // must precede k, which must precede model and the remaining-bits mask.
     S32 i, j;
     S32 numModels = xSTAssetCountByType('MODL');
+    U32 numSubObjects, currSubObjBits;
+    S32 k;
+    RpAtomic* model;
+    U32 remainSubObjBits;
+    RpAtomic* tempmodel;
+    st_PKR_ASSET_TOCINFO ainfo;
 
     for (i = 0; i < numModels; i++)
     {
-        RpAtomic* model = (RpAtomic*)xSTFindAssetByType('MODL', i, NULL);
+        model = (RpAtomic*)xSTFindAssetByType('MODL', i, NULL);
 
         if (model)
         {
-            st_PKR_ASSET_TOCINFO ainfo;
-            U32 numSubObjects, remainSubObjBits, currSubObjBits;
-            RpAtomic* tempmodel;
-
             xSTGetAssetInfoByType('MODL', i, &ainfo);
 
             numSubObjects = 0;
@@ -777,7 +764,7 @@ static void PipeForAllSceneModels(void (*pipeCB)(RpAtomic* data, U32 pipeFlags, 
 
             for (j = 0; j < xModelPipeNumTables; j++)
             {
-                for (S32 k = 0; k < xModelPipeCount[j]; k++)
+                for (k = 0; k < xModelPipeCount[j]; k++)
                 {
                     if (ainfo.aid == xModelPipeData[j][k].ModelHashID)
                     {
@@ -1198,7 +1185,9 @@ void zSceneInit(U32 theSceneID, S32 reloadInProgress)
     xClimateInit(&gClimate);
     zSceneInitEnvironmentalSoundEffect();
 
+#if !defined(PS2)
     sHackSmoothedUpdate = 1;
+#endif
 
     FootstepHackSceneEnter();
     zEntPickup_SceneEnter();
@@ -1222,7 +1211,9 @@ void zSceneExit(S32 beginReload)
     xSndStopAll(~SND_CAT_UI);
     xSndUpdate();
     iSndWaitForDeadSounds();
+#if !defined(PS2)
     iSndSceneExit();
+#endif
     xSFXEnvironmentalStreamSceneExit();
     iSndSuspendCD(1);
     iFuncProfileDump();
@@ -1322,6 +1313,7 @@ void zSceneUpdateSFXWidgets()
                                         s->baseCount[eBaseTypeSFX]);
 }
 
+#if !defined(PS2)
 static void HackSwapIt(char* buf, S32 size)
 {
     char* end = &buf[size - 1];
@@ -1336,6 +1328,7 @@ static void HackSwapIt(char* buf, S32 size)
         end--;
     }
 }
+#endif
 
 void zSceneSwitch(_zPortal* p, S32 forceSameScene)
 {
@@ -1343,13 +1336,23 @@ void zSceneSwitch(_zPortal* p, S32 forceSameScene)
 
     xPortalAsset* passet = globals.sceneCur->pendingPortal->passet;
 
-    gLevelChanged = (zSceneLeavingLevel() != 0);
+    if (zSceneLeavingLevel())
+    {
+        gLevelChanged = 1;
+    }
+    else
+    {
+        gLevelChanged = 0;
+    }
 
+#if !defined(PS2)
+    // Byte-swap an ID that was stored little-endian. PS2 retail has no such check.
     if (((char*)&passet->sceneID)[3] < '0' || ((char*)&passet->sceneID)[3] > '9')
     {
         char* id = (char*)&passet->sceneID;
         HackSwapIt(id, 4);
     }
+#endif
 
     U32 nextSceneID = (((char*)&passet->sceneID)[0] << 24) | (((char*)&passet->sceneID)[1] << 16) |
                       (((char*)&passet->sceneID)[2] << 8) | ((char*)&passet->sceneID)[3];
@@ -1503,6 +1506,10 @@ void zSceneSave(zScene* ent, xSerial* s)
                 ((xNPCBasic*)b)->Save(s);
                 break;
             }
+            case eBaseTypePlayer:
+            {
+                break;
+            }
             case eBaseTypePickup:
             {
                 zEntPickup_Save((zEntPickup*)b, s);
@@ -1533,9 +1540,19 @@ void zSceneSave(zScene* ent, xSerial* s)
                 zCamMarkerSave((zCamMarker*)b, s);
                 break;
             }
+            case eBaseTypeDoor:
+            case eBaseTypeSavePoint:
+            case eBaseTypeItem:
+            {
+                break;
+            }
             case eBaseTypeStatic:
             {
                 zEntSimpleObj_Save((zEntSimpleObj*)b, s);
+                break;
+            }
+            case eBaseTypeDynamic:
+            {
                 break;
             }
             case eBaseTypeMovePoint:
@@ -1546,6 +1563,10 @@ void zSceneSave(zScene* ent, xSerial* s)
             case eBaseTypeTimer:
             {
                 xTimerSave((xTimer*)b, s);
+                break;
+            }
+            case eBaseTypeBubble:
+            {
                 break;
             }
             case eBaseTypePortal:
@@ -1568,6 +1589,11 @@ void zSceneSave(zScene* ent, xSerial* s)
                 xSFXSave((xSFX*)b, s);
                 break;
             }
+            case eBaseTypeFFX:
+            case eBaseTypeVFX:
+            {
+                break;
+            }
             case eBaseTypeCounter:
             {
                 xCounterSave((_xCounter*)b, s);
@@ -1581,6 +1607,10 @@ void zSceneSave(zScene* ent, xSerial* s)
             case eBaseTypeButton:
             {
                 zEntButton_Save((_zEntButton*)b, s);
+                break;
+            }
+            case eBaseTypeProjectile:
+            {
                 break;
             }
             case eBaseTypeSurface:
@@ -1628,6 +1658,11 @@ void zSceneSave(zScene* ent, xSerial* s)
                 zUIFont_Save((zUIFont*)b, s);
                 break;
             }
+            case eBaseTypeProjectileType:
+            case eBaseTypeLobMaster:
+            {
+                break;
+            }
             case eBaseTypeEGenerator:
             {
                 zEGenerator_Save((zEGenerator*)b, s);
@@ -1656,6 +1691,10 @@ void zSceneSave(zScene* ent, xSerial* s)
             case eBaseTypeCameraTweak:
             {
                 zCameraTweak_Save((zCameraTweak*)b, s);
+                break;
+            }
+            case eBaseTypeCutsceneMgr:
+            {
                 break;
             }
             }
@@ -1977,37 +2016,6 @@ void zSceneReset()
         {
             switch (s->base[i]->baseType)
             {
-            case eBaseTypePickup:
-            case eBaseTypeCamera:
-            case eBaseTypeDoor:
-            case eBaseTypeSavePoint:
-            case eBaseTypeItem:
-            case eBaseTypeStatic:
-            case eBaseTypeDynamic:
-            case eBaseTypeMovePoint:
-            case eBaseTypeTimer:
-            case eBaseTypeBubble:
-            case eBaseTypePortal:
-            case eBaseTypeGroup:
-            case eBaseTypeSFX:
-            case eBaseTypeFFX:
-            case eBaseTypeVFX:
-            case eBaseTypeButton:
-            case eBaseTypeProjectile:
-            case eBaseTypeSurface:
-            case eBaseTypeDestructObj:
-            case eBaseTypeGust:
-            case eBaseTypeVolume:
-            case eBaseTypeDispatcher:
-            case eBaseTypeCond:
-            case eBaseTypeUI:
-            case eBaseTypeUIFont:
-            case eBaseTypeProjectileType:
-            case eBaseTypeFog:
-            case eBaseTypeLight:
-            case eBaseTypeParticleEmitter:
-            case eBaseTypeParticleSystem:
-            case eBaseTypeCutsceneMgr:
             default:
             {
                 zEntEvent(NULL, 0, s->base[i], eEventReset, NULL, NULL, 1);
@@ -2274,7 +2282,54 @@ void zSceneSetup()
                 break;
             }
             case eBaseTypeUnknown:
+            case eBaseTypeTrigger:
+            case eBaseTypeVillain:
+            case eBaseTypePlayer:
+            case eBaseTypeCamera:
+            case eBaseTypeDoor:
+            case eBaseTypeSavePoint:
+            case eBaseTypeItem:
+            case eBaseTypeDynamic:
+            case eBaseTypeTimer:
+            case eBaseTypeBubble:
+            case eBaseTypePortal:
+            case eBaseTypeSFX:
+            case eBaseTypeFFX:
+            case eBaseTypeVFX:
+            case eBaseTypeCounter:
+            case eBaseTypeHangable:
+            case eBaseTypeProjectile:
+            case eBaseTypeGust:
+            case eBaseTypeVolume:
+            case eBaseTypeCond:
+            case eBaseTypeUI:
+            case eBaseTypeUIFont:
+            case eBaseTypeProjectileType:
+            case eBaseTypeLobMaster:
+            case eBaseTypeFog:
+            case eBaseTypeLight:
+            case eBaseTypeCutsceneMgr:
+            case eBaseTypeScript:
+            case eBaseTypeHud:
+            case eBaseTypeNPCProps:
+            case eBaseTypeParticleEmitterProps:
+            case eBaseTypeCruiseBubble:
+            case eBaseTypeTextBox:
+            case eBaseTypeTalkBox:
+            case eBaseTypeTaskBox:
+            case eBaseTypeBoulderGenerator:
+            case eBaseTypeNPCSettings:
+            case eBaseTypeHUD_model:
+            case eBaseTypeHUD_font_meter:
+            case eBaseTypeHUD_unit_meter:
+            case eBaseTypeBungeeHook:
             case eBaseTypeZipLine:
+            case eBaseTypeArena:
+            case eBaseTypeDuplicator:
+            case eBaseTypeLaserBeam:
+            case eBaseTypeTurret:
+            case eBaseTypeCameraTweak:
+            case eBaseTypeSlideProps:
             case eBaseTypeHUD_text:
             {
                 break;
@@ -2540,8 +2595,7 @@ void zSceneSetup()
                                 {
                                     numPrimeMovers--;
                                 }
-
-                                if (gent->isCulled != 1)
+                                else
                                 {
                                     numDriven--;
                                 }
@@ -2807,6 +2861,109 @@ void zSceneUpdate(F32 elapsedSec)
         zCutsceneMgrUpdate(globals.cmgr, globals.sceneCur, elapsedSec);
     }
 
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+    if (enableScreenAdj)
+    {
+        F32 deltax;
+        F32 deltay;
+
+        // Retail leaves these uninitialized when the stick is in its deadzone.
+#ifdef NON_MATCHING
+        deltax = 0.0f;
+        deltay = 0.0f;
+#endif
+
+        if (globals.pad0->pressed & XPAD_BUTTON_SQUARE)
+        {
+            offsetx = oldOffsetx;
+            offsety = oldOffsety;
+        }
+
+        if (globals.pad0->pressed & XPAD_BUTTON_O)
+        {
+            offsetx = 0.0f;
+            offsety = 0.0f;
+        }
+
+        if (globals.pad0->analog1.x > 45.0f)
+        {
+            deltax = globals.pad0->analog1.x - 45.0f;
+            if (deltax > 90.0f)
+            {
+                deltax = 90.0f;
+            }
+        }
+        if (globals.pad0->analog1.x < -45.0f)
+        {
+            if (45.0f + globals.pad0->analog1.x < -90.0f)
+            {
+                deltax = -90.0f;
+            }
+            else
+            {
+                deltax = 45.0f + globals.pad0->analog1.x;
+            }
+        }
+
+        if (globals.pad0->analog1.y > 45.0f)
+        {
+            deltay = globals.pad0->analog1.y - 45.0f;
+            if (deltay > 90.0f)
+            {
+                deltay = 90.0f;
+            }
+        }
+        if (globals.pad0->analog1.y < -45.0f)
+        {
+            if (45.0f + globals.pad0->analog1.y < -90.0f)
+            {
+                deltay = -90.0f;
+            }
+            else
+            {
+                deltay = 45.0f + globals.pad0->analog1.y;
+            }
+        }
+
+        if (globals.pad0->pressed & XPAD_BUTTON_UP)
+        {
+            offsety -= 0.001f;
+        }
+        else if (globals.pad0->pressed & XPAD_BUTTON_DOWN)
+        {
+            offsety += 0.001f;
+        }
+        else if (globals.pad0->pressed & XPAD_BUTTON_LEFT)
+        {
+            offsetx -= 0.001f;
+        }
+        else if (globals.pad0->pressed & XPAD_BUTTON_RIGHT)
+        {
+            offsetx += 0.001f;
+        }
+
+        offsetx += 0.00006f * deltax;
+        offsety += 0.00006f * deltay;
+
+        if (offsetx > 0.06f)
+        {
+            offsetx = 0.06f;
+        }
+        if (offsetx < -0.06f)
+        {
+            offsetx = -0.06f;
+        }
+        if (offsety > 0.06f)
+        {
+            offsety = 0.06f;
+        }
+        if (offsety < -0.06f)
+        {
+            offsety = -0.06f;
+        }
+    }
+#endif
+
     s = globals.sceneCur;
     b = s->update_base;
 
@@ -3041,6 +3198,10 @@ static void zSceneRenderPreFX()
     zScene* s = globals.sceneCur;
 
     globals.currWorld = s->env->geom->world;
+
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+    iDrawSetDisplayOffset(offsetx, offsety);
+#endif
 
     xLightKit_Enable(NULL, globals.currWorld);
 
@@ -3283,13 +3444,14 @@ static S32 zSceneObjHashtableUsage()
 
 static void zSceneObjHashtableAdd(U32 id, xBase* base)
 {
-    S32 k, chkd;
+    S32 chkd, k;
+    IDBasePair* idbp = NULL;
 
     chkd = id & (scobj_size - 1);
 
     for (k = 0; k < scobj_size; k++)
     {
-        IDBasePair* idbp = &scobj_idbps[chkd];
+        idbp = &scobj_idbps[chkd];
 
         if (idbp->id == 0)
         {
@@ -3310,7 +3472,7 @@ static void zSceneObjHashtableAdd(U32 id, xBase* base)
 
 static xBase* zSceneObjHashtableGet(U32 id)
 {
-    S32 k, chkd;
+    S32 chkd, k;
 
     chkd = id & (scobj_size - 1);
 
@@ -3460,7 +3622,7 @@ const char* zSceneGetLevelName(U32 sceneID)
     char c1 = (sceneID >> 24) & 0xFF;
     char c2 = (sceneID >> 16) & 0xFF;
 
-    for (S32 i = 0; i < sizeof(sLevelTable) / sizeof(sLevelTable[0]); i++)
+    for (S32 i = 0; i < (S32)(sizeof(sLevelTable) / sizeof(sLevelTable[0])); i++)
     {
         if (c1 == sLevelTable[i].prefix[0] && c2 == sLevelTable[i].prefix[1])
         {

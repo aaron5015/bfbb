@@ -3,7 +3,11 @@
 
 #include "xBase.h"
 
+#if defined(XBOX)
+#include <new>
+#elif !defined(PS2)
 #include <PowerPC_EABI_Support\MSL_C++\MSL_Common\Include\new.h>
+#endif
 
 struct RyzMemGrow
 {

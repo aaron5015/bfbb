@@ -1,4 +1,4 @@
-#include "xLaserBolt.h"
+#include "xLaserBolt.inl"
 #include "xMathInlines.h"
 #include "xString.h"
 #include "xstransvc.h"
@@ -11,6 +11,13 @@
 
 #include <types.h>
 
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78) || defined(VERSION_SLES_51968) ||           \
+    defined(VERSION_SLES_51970)
+#define LASER_BOLT_FRAME_TIME (1.0f / 50.0f)
+#else
+#define LASER_BOLT_FRAME_TIME (1.0f / 60.0f)
+#endif
+
 void xLaserBoltEmitter::init(u32 max_bolts, const char* texture_name)
 {
     this->bolt_raster = NULL;
@@ -19,18 +26,17 @@ void xLaserBoltEmitter::init(u32 max_bolts, const char* texture_name)
     debug_init(texture_name);
 }
 
-
 void xLaserBoltEmitter::set_texture(const char* name)
 {
     set_texture(xStrHash(name));
 }
 
-void xLaserBoltEmitter::set_texture(U32 aid)
+inline void xLaserBoltEmitter::set_texture(U32 aid)
 {
     set_texture((RwTexture*)xSTFindAsset(aid, NULL));
 }
 
-void xLaserBoltEmitter::set_texture(RwTexture* tex)
+inline void xLaserBoltEmitter::set_texture(RwTexture* tex)
 {
     if (tex == NULL)
     {
@@ -42,7 +48,7 @@ void xLaserBoltEmitter::set_texture(RwTexture* tex)
     }
 }
 
-void xLaserBoltEmitter::set_texture(RwRaster* raster)
+inline void xLaserBoltEmitter::set_texture(RwRaster* raster)
 {
     this->bolt_raster = raster;
 }
@@ -58,10 +64,10 @@ void xLaserBoltEmitter::reset()
         effect_data* endfx = itfx + this->fxsize[6];
         while (itfx != endfx)
         {
-            emit_fx(*itfx, b, b.hit_dist, b.hit_dist, (1.0f / 60.0f));
+            emit_fx(*itfx, b, b.hit_dist, b.hit_dist, LASER_BOLT_FRAME_TIME);
             itfx++;
         }
-        
+
         ++it;
     }
 
@@ -120,7 +126,7 @@ void xLaserBoltEmitter::emit(const xVec3& loc, const xVec3& dir)
     effect_data* fx_end = fx + this->fxsize[0];
     while (fx != fx_end)
     {
-        emit_fx(*fx, b, 0.0f, 0.0f, (1.0f / 60.0f));
+        emit_fx(*fx, b, 0.0f, 0.0f, LASER_BOLT_FRAME_TIME);
         fx++;
     }
 }
@@ -136,8 +142,16 @@ void xLaserBoltEmitter::update(F32 dt)
     {
         bolt& b = *it;
 
-        U8 collided = b.dist >= b.hit_dist;
+#if defined(PS2)
+        // PS2 DWARF has no snapshot local: collided and prev_dist read b.dist directly.
+        bool collided = b.dist >= b.hit_dist;
         F32 prev_dist = b.dist;
+#else
+        // Keep the comparison snapshot separate from the saved F32 value (retail fmr).
+        F64 dist = b.dist;
+        bool collided = dist >= b.hit_dist;
+        F32 prev_dist = dist;
+#endif
 
         update(b, dt);
 
@@ -303,9 +317,9 @@ void xLaserBoltEmitter::collide_update(bolt& b)
     log_collide_dynamics(scene_coll.flags & 0x1 || player_coll.flags & 0x1);
 }
 
-RxObjSpace3DVertex* xLaserBoltEmitter::render(bolt& b, RxObjSpace3DVertex *vert) 
-{       
-    F32 dist0 = b.prev_dist - this->cfg.length; 
+RxObjSpace3DVertex* xLaserBoltEmitter::render(bolt& b, RxObjSpace3DVertex* vert)
+{
+    F32 dist0 = b.prev_dist - this->cfg.length;
     if (dist0 < 0.0f)
     {
         dist0 = 0.0f;
@@ -344,7 +358,7 @@ RxObjSpace3DVertex* xLaserBoltEmitter::render(bolt& b, RxObjSpace3DVertex *vert)
         right *= 1.0f / xsqrt(len2);
     }
 
-    xVec3 half_right = right * (0.5f * this->cfg.radius);
+    const xVec3 half_right = right * (0.5f * this->cfg.radius);
 
     U8 alpha;
     if (b.dist <= this->cfg.fade_dist)
@@ -383,12 +397,12 @@ void xLaserBoltEmitter::apply_damage(xLaserBoltEmitter::bolt& b)
     }
 }
 
-void xLaserBoltEmitter::reset_fx(fx_when_enum when)
+inline void xLaserBoltEmitter::reset_fx(fx_when_enum when)
 {
     effect_data* cur_fx = this->fx[when];
     effect_data* fx_end = cur_fx + this->fxsize[when];
     while (cur_fx != fx_end)
-    {        
+    {
         cur_fx->irate = cur_fx->rate > 0.0f ? 1.0f / cur_fx->rate : 0.0f;
         cur_fx++;
     }
@@ -410,7 +424,7 @@ void xLaserBoltEmitter::update_fx(bolt& b, F32 prev_dist, F32 dt)
     else if (tail_dist < b.hit_dist)
     {
         F32 from_dist = prev_dist - this->cfg.length;
-        
+
         effect_data* itfx = this->fx[5];
         effect_data* endfx = itfx + this->fxsize[5];
         if (from_dist < 0.0f)
@@ -447,13 +461,14 @@ void xLaserBoltEmitter::update_fx(bolt& b, F32 prev_dist, F32 dt)
     }
 }
 
-void xLaserBoltEmitter::emit_particle(effect_data& effect, bolt& b, F32 from_dist, F32 to_dist, F32 dt)
+void xLaserBoltEmitter::emit_particle(effect_data& effect, bolt& b, F32 from_dist, F32 to_dist,
+                                      F32 dt)
 {
     xParEmitter& pe = *effect.par;
     xParEmitterAsset& pea = *pe.tasset;
     F32 velmag = pea.vel.y;
-    
-    switch(effect.orient)
+
+    switch (effect.orient)
     {
     case FX_ORIENT_PATH:
         pea.vel = b.dir * velmag;
@@ -476,7 +491,7 @@ void xLaserBoltEmitter::emit_particle(effect_data& effect, bolt& b, F32 from_dis
     }
     else
     {
-        xVec3 oldloc = pea.pos;
+        const xVec3 oldloc = pea.pos;
         pea.pos += b.origin + b.dir * to_dist;
 
         xParEmitterEmit(&pe, dt);
@@ -508,7 +523,8 @@ void xLaserBoltEmitter::emit_decal(effect_data& effect, bolt& b, F32 from_dist, 
     effect.decal->emit(mat, -1);
 }
 
-void xLaserBoltEmitter::emit_decal_dist(effect_data& effect, bolt& b, F32 from_dist, F32 to_dist, F32 dt)
+void xLaserBoltEmitter::emit_decal_dist(effect_data& effect, bolt& b, F32 from_dist, F32 to_dist,
+                                        F32 dt)
 {
     F32 start_dist = (1.0f - b.emitted) * effect.irate;
     start_dist = from_dist + start_dist;

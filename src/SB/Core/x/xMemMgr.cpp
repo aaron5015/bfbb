@@ -6,6 +6,9 @@
 
 #include "iSystem.h"
 #include "iMemMgr.h"
+#if defined(PS2)
+#include <stdlib.h>
+#endif
 
 xMemInfo_tag gMemInfo;
 xMemHeap_tag gxHeap[3];
@@ -173,6 +176,8 @@ void* xMemGrowAlloc(U32 heapID, U32 size)
 }
 #endif
 
+#define XMEMHEAP_GET_0x8000(flags) (S32)(((flags) >> 15) & 0x1)
+
 U32 xMemGetBlockInfo(xMemHeap_tag* heap, U32 size, S32 align, xMemBlkInfo_tag* info)
 {
     S32 header_size;
@@ -183,9 +188,13 @@ U32 xMemGetBlockInfo(xMemHeap_tag* heap, U32 size, S32 align, xMemBlkInfo_tag* i
     S32 post;
     S32 dir;
     xHeapState_tag* sp = &heap->state[heap->state_idx];
+    // A one-element temporary preserves retail register allocation for the
+    // optional header size; a scalar coalesces it with different temporaries.
+    S32 header[1];
 
     dir = (heap->flags & 0x100) ? -1 : 1;
-    header_size = (heap->flags & 0x8000) ? (S32)sizeof(xMemBlock_tag) : 0;
+    header[0] = XMEMHEAP_GET_0x8000(heap->flags) ? sizeof(xMemBlock_tag) : 0;
+    header_size = header[0];
 
     if (heap->flags & 0x100)
     {

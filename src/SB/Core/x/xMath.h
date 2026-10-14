@@ -7,7 +7,14 @@
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#if defined(PS2)
+inline F32 xabs(F32 v)
+{
+    return iabs(v);
+}
+#else
 #define xabs(x) iabs(x)
+#endif
 
 #define xeq(a, b, e) (xabs((a) - (b)) <= (e))
 #define xfeq0(x) (((x) >= -1e-5f) && ((x) <= 1e-5f))
@@ -51,12 +58,42 @@ void xMathInit();
 void xMathExit();
 F32 xatof(const char* x);
 void xsrand(U32 seed);
+#if defined(XBOX)
+extern U32 rndseed;
+inline U32 xrand()
+{
+    rndseed = rndseed * 1103515245 + 12345;
+    return rndseed;
+}
+
+F32 xurand();
+#else
 U32 xrand();
 F32 xurand();
+#endif
 U32 xMathSolveQuadratic(F32 a, F32 b, F32 c, F32* x1, F32* x2);
 U32 xMathSolveCubic(F32 a, F32 b, F32 c, F32 d, F32* x1, F32* x2, F32* x3);
 F32 xAngleClamp(F32 a);
+#if defined(XBOX)
+inline F32 xAngleClampFast(F32 a)
+{
+    F32 rad360 = (2 * PI);
+
+    if (a < 0.0f)
+    {
+        return a + rad360;
+    }
+
+    if (a >= rad360)
+    {
+        return a - rad360;
+    }
+
+    return a;
+}
+#else
 F32 xAngleClampFast(F32 a);
+#endif
 F32 xDangleClamp(F32 a);
 void xAccelMove(F32& x, F32& v, F32 a, F32 dt, F32 endx, F32 maxv);
 F32 xAccelMoveTime(F32 dx, F32 a, F32, F32 maxv);
@@ -66,16 +103,63 @@ F32 xFuncPiece_Eval(xFuncPiece* func, F32 param, xFuncPiece** iterator);
 void xFuncPiece_EndPoints(xFuncPiece* func, F32 pi, F32 pf, F32 fi, F32 ff);
 void xFuncPiece_ShiftPiece(xFuncPiece* shift, xFuncPiece* func, F32 newZero);
 F32 xSCurve(F32 t, F32 softness);
+#if defined(PS2)
+inline F32 xSCurve(F32 t)
+{
+    if (t <= 0.5f)
+    {
+        return (2.0f * t * t);
+    }
+    F32 a = (1.0f - t);
+    return (1.0f - (2.0f * a * a));
+}
+#else
 F32 xSCurve(F32 t);
+#endif
 void xsqrtfast(F32& dst, F32 num);
 
+#if defined(PS2)
+inline F32 xrmod(F32 ang)
+{
+    F32 frac = 0.15915494f * ang;
+
+    if (frac < 0.0f)
+    {
+        return (frac - std::ceilf(frac) + 1.0f) * 6.2831855f;
+    }
+    else if (frac >= 1.0f)
+    {
+        return (frac - std::floorf(frac)) * 6.2831855f;
+    }
+
+    return ang;
+}
+#else
 F32 xrmod(F32 ang);
+#endif
 
 template <class T> T range_limit(T v, T minv, T maxv);
 
 // The primary has no definition; each of these is defined in the unit that uses it.
 // Declared here so a use sees the specialization.
+#if defined(XBOX)
+template <> inline F32 range_limit<F32>(F32 v, F32 minv, F32 maxv)
+{
+    if (v <= minv)
+    {
+        return minv;
+    }
+
+    if (v >= maxv)
+    {
+        return maxv;
+    }
+
+    return v;
+}
+#else
 template <> F32 range_limit<F32>(F32 v, F32 minv, F32 maxv);
+#endif
 template <> U16 range_limit<U16>(U16 v, U16 minv, U16 maxv);
 template <> S32 range_limit<S32>(S32 v, S32 minv, S32 maxv);
 template <> size_t range_limit<size_t>(size_t v, size_t minv, size_t maxv);

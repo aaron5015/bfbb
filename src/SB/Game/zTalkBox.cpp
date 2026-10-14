@@ -1,4 +1,9 @@
 #include "xstransvc.h"
+#if defined(PS2)
+#include "xpkrsvc_api.h"
+#else
+#include "xpkrsvc.h"
+#endif
 #include "zTalkBox.h"
 #include "xDebug.h"
 #include "zEntPlayer.h"
@@ -26,6 +31,18 @@ namespace
     static void update_quit_status(F32 dt);
     static void stop();
     static U32* pad_pressed();
+
+    inline U32* pad_pressed()
+    {
+        if (shared.permit & 2)
+        {
+            return &globals.pad0->pressed;
+        }
+
+        static U32 zero;
+        zero = 0;
+        return &zero;
+    }
 
     static U32 new_tags_size = 9;
     static F32 music_fade = 0.25f;
@@ -297,6 +314,7 @@ namespace
 
         shared.auto_wait = *c;
     }
+#if !defined(PS2)
     wait_context& wait_context::operator=(const wait_context& rhs)
     {
         *(U16*)&type = *(const U16*)&rhs.type;
@@ -306,6 +324,7 @@ namespace
         query = rhs.query;
         return *this;
     }
+#endif
     static void reset_tag_auto_wait(xtextbox::jot& j, const xtextbox&, const xtextbox& ctb,
                                     const xtextbox::split_tag&)
     {
@@ -393,16 +412,13 @@ namespace
             return true;
         }
 
-        U32 flags = c.flags;
-
         for (U32 i = 0; i < 20; i++)
         {
-            if (flags & (1 << i))
+            if (c.flags & (1 << i))
             {
                 trigger(signals[i]);
             }
         }
-
         if (shared.cb)
         {
             shared.cb->on_signal(c.flags & 0x7FFFFFFF);
@@ -570,89 +586,91 @@ namespace
 
         switch (c.action)
         {
-        case sound_context::ACTION_PUSH:
-            break;
         case sound_context::ACTION_POP:
             if (shared.sounds.size() > 0)
             {
                 shared.sounds.pop();
             }
-            return true;
+            break;
         case sound_context::ACTION_SET:
             shared.sounds.clear();
             speak_stop();
-            break;
-        }
-
-        if (c.id == 0)
-        {
-            return true;
-        }
-
-        F32 vol = MAX(c.volume.left, c.volume.right);
-
-        shared.sounds.play(c.id, shared.volume * vol, 0.0f, 0x80, 0,
-                           (U32)&shared.stream_locked[shared.next_stream], SND_CAT_DIALOG);
-
-        shared.next_stream ^= 1;
-
-        zNPCCommon* npc = NULL;
-        xEnt* player = NULL;
-        ztalkbox& talk = *shared.active;
-
-        switch (c.speaker)
-        {
-        case 0:
-            break;
-        case 1:
-            player = (xEnt*)&globals.player.ent;
-            break;
-        case 2:
-            npc = talk.npc;
-            break;
+            // fallthrough
         default:
         {
-            xBase* obj = zSceneFindObject(c.speaker);
-            if (obj)
+            if (c.id == 0)
             {
-                if (obj->baseType == 0x2B)
+                return true;
+            }
+
+            F32 vol = MAX(c.volume.left, c.volume.right);
+
+            shared.sounds.play(c.id, shared.volume * vol, 0.0f, 0x80, 0,
+                               (U32)&shared.stream_locked[shared.next_stream], SND_CAT_DIALOG);
+
+            shared.next_stream ^= 1;
+
+            zNPCCommon* npc = NULL;
+            xEnt* player = NULL;
+            ztalkbox& talk = *shared.active;
+
+            switch (c.speaker)
+            {
+            case 0:
+                break;
+            case 1:
+                player = (xEnt*)&globals.player.ent;
+                break;
+            case 2:
+                npc = talk.npc;
+                break;
+            default:
+            {
+                xBase* obj = zSceneFindObject(c.speaker);
+                if (obj)
                 {
-                    npc = (zNPCCommon*)obj;
-                }
-                else if (obj->baseType == 0x03)
-                {
-                    player = (xEnt*)&globals.player.ent;
-                }
-                else if (obj->baseType == 0x11)
-                {
-                    U32 size = xGroupGetCount((xGroup*)&obj);
-                    for (U32 i = 0; i < size; i++)
+                    if (obj->baseType == 0x2B)
                     {
-                        xBase* entry = xGroupGetItemPtr((xGroup*)&obj, i);
-                        if (entry && entry->baseType == 0x2B)
+                        npc = (zNPCCommon*)obj;
+                    }
+                    else if (obj->baseType == 0x03)
+                    {
+                        player = (xEnt*)&globals.player.ent;
+                    }
+                    else if (obj->baseType == 0x11)
+                    {
+                        U32 i = 0;
+                        U32 size = xGroupGetCount((xGroup*)&obj);
+                        for (; i < size; i++)
                         {
-                            npc = (zNPCCommon*)entry;
-                            if (xEntIsVisible((const xEnt*)entry))
+                            xBase* entry = xGroupGetItemPtr((xGroup*)&obj, i);
+                            if (entry && entry->baseType == 0x2B)
                             {
-                                break;
+                                npc = (zNPCCommon*)entry;
+                                if (xEntIsVisible((const xEnt*)entry))
+                                {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
+                break;
+            }
+            }
+
+            if (npc)
+            {
+                npc->SpeakStart(c.id, 0, c.anim - 1);
+                shared.speak_npc = npc;
+            }
+            else if (player)
+            {
+                zEntPlayerSpeakStart(c.id, 0, c.anim - 1);
+                shared.speak_player = 1;
             }
             break;
         }
-        }
-
-        if (npc)
-        {
-            npc->SpeakStart(c.id, 0, c.anim - 1);
-            shared.speak_npc = npc;
-        }
-        else if (player)
-        {
-            zEntPlayerSpeakStart(c.id, 0, c.anim - 1);
-            shared.speak_player = 1;
         }
 
         return true;
@@ -675,14 +693,8 @@ namespace
     static void parse_tag_allow_quit(xtextbox::jot& j, const xtextbox&, const xtextbox&,
                                      const xtextbox::split_tag& ti)
     {
-        U8 c = 0;
-
-        if (ti.action.size != 1 || ti.action.text[0] != '=' || read_bool(ti.value, 1) != 0)
-        {
-            c = 1;
-        }
-
-        *(U8*)&j.context = c;
+        U8& c = *(U8*)&j.context;
+        c = ti.action.size != 1 || *ti.action.text != '=' || read_bool(ti.value, true);
     }
 
     static void reset_tag_allow_quit(xtextbox::jot& j, const xtextbox&, const xtextbox& ctb,
@@ -800,17 +812,8 @@ namespace
     static void parse_tag_trap(xtextbox::jot& j, const xtextbox& ctb, const xtextbox& tb,
                                const xtextbox::split_tag& ti)
     {
-        U8 c = false;
-
-        if (ti.action.size == 1 && *ti.action.text == '=' && !read_bool(ti.value, true))
-        {
-        }
-        else
-        {
-            c = true;
-        }
-
-        *(U8*)&j.context = c;
+        U8& c = *(U8*)&j.context;
+        c = ti.action.size != 1 || *ti.action.text != '=' || read_bool(ti.value, true);
     }
 
     static void reset_tag_trap(xtextbox::jot& j, const xtextbox&, const xtextbox& ctb,
@@ -911,11 +914,10 @@ namespace
 
         switch (talk.asset->audio_effect)
         {
-        case 0:
-
-            break;
         case 1:
             zMusicSetVolume(music_fade, music_fade_delay);
+            break;
+        case 0:
             break;
         }
 
@@ -930,11 +932,10 @@ namespace
         {
             switch (shared.active->asset->audio_effect)
             {
-            case 0:
-
-                break;
             case 1:
                 zMusicSetVolume(1.0f, music_fade_delay);
+                break;
+            case 0:
                 break;
             }
         }
@@ -1168,8 +1169,8 @@ namespace
 
         switch (event)
         {
-        case eEventReset:
         case eEventSceneEnd:
+        case eEventReset:
             e.reset();
             break;
         case eEventInvisible:
@@ -1218,15 +1219,44 @@ namespace
             e.clear_text();
             break;
 
-        case eEventPadPressRight:
-        case eEventPadPressLeft:
-        case eEventOpenTBox:
-        case eEventCloseTBox:
+        case eEventTalkBox_OnSignal0:
+        case eEventTalkBox_OnSignal1:
+        case eEventTalkBox_OnSignal2:
+        case eEventTalkBox_OnSignal3:
+        case eEventTalkBox_OnSignal4:
+        case eEventTalkBox_OnSignal5:
+        case eEventTalkBox_OnSignal6:
+        case eEventTalkBox_OnSignal7:
+        case eEventTalkBox_OnSignal8:
+        case eEventTalkBox_OnSignal9:
+        case eEventTalkBox_OnSignal10:
+        case eEventTalkBox_OnSignal11:
+        case eEventTalkBox_OnSignal12:
+        case eEventTalkBox_OnSignal13:
+        case eEventTalkBox_OnSignal14:
+        case eEventTalkBox_OnSignal15:
+        case eEventTalkBox_OnSignal16:
+        case eEventTalkBox_OnSignal17:
         case eEventTalkBox_OnSignal18:
         case eEventTalkBox_OnSignal19:
         case eEventTalkBox_OnStart:
+        case eEventTalkBox_OnStop:
         case eEventTalkBox_OnYes:
         case eEventTalkBox_OnNo:
+        case eEventPadPressUp:
+        case eEventPadPressDown:
+        case eEventPadPressLeft:
+        case eEventPadPressRight:
+        case eEventPadPressStart:
+        case eEventPadPressSelect:
+        case eEventPadPressR1:
+        case eEventPadPressR2:
+        case eEventPadPressL1:
+        case eEventPadPressL2:
+        case eEventPadPressX:
+        case eEventPadPressO:
+        case eEventPadPressTriangle:
+        case eEventPadPressSquare:
             break;
         }
 
@@ -1258,7 +1288,7 @@ void ztalkbox::load(const asset_type& tasset)
     baseType = eBaseTypeTalkBox;
     asset = &tasset;
     eventFunc = cb_dispatch;
-    if (linkCount != 0)
+    if (linkCount > 0)
     {
         link = (xLinkAsset*)(&tasset + 1);
     }
@@ -1300,6 +1330,18 @@ void ztalkbox::reset()
         deactivate();
     }
 }
+namespace
+{
+    inline void state_type::start()
+    {
+    }
+
+    inline void state_type::stop()
+    {
+    }
+
+} // namespace
+
 void ztalkbox::set_text(const char* s)
 {
     ztextbox& d = *dialog_box;
@@ -1464,7 +1506,7 @@ void ztalkbox::stop_talk()
 }
 namespace
 {
-    static void stop()
+    static inline void stop()
     {
         if (!shared.state)
         {
@@ -1679,21 +1721,6 @@ void ztalkbox::update_all(xScene& s, F32 dt)
     shared.delay_events = false;
     flush_triggered();
 }
-namespace
-{
-    static U32* pad_pressed()
-    {
-        if (shared.permit & 2)
-        {
-            return &globals.pad0->pressed;
-        }
-
-        static U32 zero;
-        zero = 0;
-        return &zero;
-    }
-
-}; // namespace
 void ztalkbox::render_all()
 {
     if (!(shared.permit & 1))
@@ -1756,31 +1783,25 @@ void ztalkbox::permit(U32 add_flags, U32 remove_flags)
 
 namespace
 {
-    void stop_state_type::start()
+    inline void stop_state_type::start()
     {
     }
-    void stop_state_type::stop()
+    inline void stop_state_type::stop()
     {
     }
 
-    state_enum stop_state_type::update(xScene& scn, F32 dt)
+    inline state_enum stop_state_type::update(xScene& scn, F32 dt)
     {
         return (state_enum)-1;
     }
-    void state_type::start()
-    {
-    }
 
-    void state_type::stop()
-    {
-    }
-    void wait_state_type::start()
+    inline void wait_state_type::start()
     {
         this->answer_yes = false;
         refresh_prompts();
     }
 
-    void wait_state_type::stop()
+    inline void wait_state_type::stop()
     {
         if (!shared.wait.type.time || shared.wait.type.prompt)
         {
@@ -1795,12 +1816,7 @@ namespace
         {
             if (shared.cb)
             {
-                ztalkbox::answer_enum answer = (ztalkbox::answer_enum)2;
-                if (this->answer_yes)
-                {
-                    answer = (ztalkbox::answer_enum)1;
-                }
-                shared.cb->on_answer(answer);
+                shared.cb->on_answer(this->answer_yes ? ztalkbox::ANSWER_YES : ztalkbox::ANSWER_NO);
             }
 
             U32 event = 0x1C6;
@@ -1816,7 +1832,7 @@ namespace
         shared.wait.delay = 0.0f;
         shared.wait.need = false;
     }
-    state_enum wait_state_type::update(xScene& scn, F32 dt)
+    inline state_enum wait_state_type::update(xScene& scn, F32 dt)
     {
         update_prompt_status(dt);
         update_quit_status(dt);
@@ -1894,7 +1910,7 @@ namespace
 
         return (state_enum)3;
     }
-    static bool trigger_jot(const xtextbox::jot& j)
+    inline bool trigger_jot(const xtextbox::jot& j)
     {
         if (!j.tag)
         {
@@ -1908,12 +1924,12 @@ namespace
 
         return true;
     }
-    static bool trigger_jot(S32 index)
+    inline bool trigger_jot(S32 index)
     {
         xtextbox::jot* jots = shared.lt.jots();
         return trigger_jot(jots[index]);
     }
-    void next_state_type::start()
+    inline void next_state_type::start()
     {
         if (shared.end_jot == shared.page_end_jot)
         {
@@ -1958,10 +1974,10 @@ namespace
         }
     }
 
-    void next_state_type::stop()
+    inline void next_state_type::stop()
     {
     }
-    state_enum next_state_type::update(xScene& scn, F32 dt)
+    inline state_enum next_state_type::update(xScene& scn, F32 dt)
     {
         if (shared.begin_jot == shared.page_end_jot)
         {
@@ -1969,7 +1985,7 @@ namespace
         }
         return (state_enum)3;
     }
-    void start_state_type::start()
+    inline void start_state_type::start()
     {
         shared.page_end_jot = 0;
         shared.end_jot = 0;
@@ -1982,11 +1998,11 @@ namespace
         shared.prompt_ready = false;
         refresh_prompts();
     }
-    void start_state_type::stop()
+    inline void start_state_type::stop()
     {
     }
 
-    state_enum start_state_type::update(xScene& scn, F32 dt)
+    inline state_enum start_state_type::update(xScene& scn, F32 dt)
     {
         return (state_enum)2;
     }

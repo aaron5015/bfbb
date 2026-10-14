@@ -50,15 +50,15 @@ namespace
             {
                 switch (model.BoneCount)
                 {
+                case 0:
+                {
+                    break;
+                }
                 case 1:
                 {
                     ac.flags |= 0x1;
                     ac.old_mat = mat;
                     ac.new_mat = g_I3;
-                    break;
-                }
-                case 0:
-                {
                     break;
                 }
                 default:
@@ -200,9 +200,9 @@ static void xEntAddShadowRecFlag(xEnt* ent)
     switch (ent->baseType)
     {
     case eBaseTypePlatform:
-    case eBaseTypeStatic:
     case eBaseTypeButton:
     case eBaseTypeDestructObj:
+    case eBaseTypeStatic:
     case eBaseTypeNPC:
     case eBaseTypeBoulder:
     {
@@ -727,6 +727,11 @@ void xEntSetupPipeline(xModelInstance* model)
 }
 
 static S32 setMaterialTextureRestore;
+#if defined(PS2)
+// rppds.h
+extern "C" RxPipeline* RpPDSGetPipe(RwUInt32 pipeID);
+#endif
+
 S32 sSetPipeline;
 static RxPipeline* oldPipe;
 
@@ -804,7 +809,20 @@ void xEntSetupPipeline(xSurface* surf, RpAtomic* model)
             if (sSetPipeline)
             {
                 oldPipe = model->pipeline;
+#if defined(PS2)
+                // Leave atomics on any other custom PDS pipeline alone.
+                if (oldPipe != NULL && oldPipe != RpPDSGetPipe(0x2) &&
+                    oldPipe != RpPDSGetPipe(0x10002))
+                {
+                    sSetPipeline = 0;
+                }
+                else
+                {
+                    xFXanimUVAtomicSetup(model);
+                }
+#else
                 xFXanimUVAtomicSetup(model);
+#endif
             }
         }
     }
@@ -1150,13 +1168,13 @@ void xEntApplyPhysics(xEnt* ent, xScene* sc, F32 dt)
 
     if (ent->pflags & 0x10 && sc->flags & 0x2)
     {
-        F32 tfric = -(sc->friction * dt - 1.0f);
+        F32 tfric = 1.0f - sc->friction * dt;
         xVec3SMulBy(&ent->frame->vel, tfric);
     }
 
     if (ent->pflags & 0x8 && sc->flags & 0x4)
     {
-        F32 tdrag = -(sc->drag * dt - 1.0f);
+        F32 tdrag = 1.0f - sc->drag * dt;
         xVec3SMulBy(&ent->frame->vel, tdrag);
     }
 
@@ -1208,8 +1226,6 @@ void xEntCollide(xEnt* ent, xScene* sc, F32 dt)
             xEntCollCheckEnv(ent, sc);
         }
 
-        xCollis* coll = &ent->collis->colls[0];
-
         if (ent->collis->chk & 0x2E)
         {
             F32 h_dot_n;
@@ -1223,8 +1239,9 @@ void xEntCollide(xEnt* ent, xScene* sc, F32 dt)
                 h_dot_n = 0.7f;
             }
 
-            if (ent->pflags & 0x80 && coll->flags & 0x1)
+            if (ent->pflags & 0x80 && ent->collis->colls[0].flags & 0x1)
             {
+                xCollis* coll = &ent->collis->colls[0];
                 F32 depen_len = xVec3Dot(&coll->hdng, &coll->norm);
 
                 if (depen_len > 0.0f)
@@ -1307,9 +1324,9 @@ void xEntCollCheckEnv(xEnt* p, xScene* sc)
     coll = &p->collis->colls[p->collis->idx];
     coll->flags = 0x1F00;
 
-    ncolls = iSphereHitsEnv3(&p->bound.sph, sc->env, coll, 18 - p->collis->idx, 0.78539819f);
+    ncolls = 18 - p->collis->idx;
 
-    p->collis->idx += ncolls;
+    p->collis->idx += (U8)iSphereHitsEnv3(&p->bound.sph, sc->env, coll, ncolls, 0.78539819f);
     p->collis->env_eidx = p->collis->idx;
 }
 
@@ -1332,17 +1349,16 @@ static void xEntCollCheckOneGrid(xEnt* p, xScene* sc, xEnt* (*hitIt)(xEnt*, xSce
         cell = xGridIterNextCell(it);
     }
 
-    xBox clbox;
-    clbox.lower.x = grid->csizex * px;
-    clbox.lower.z = grid->csizez * pz;
-    clbox.lower.x += grid->minx;
-    clbox.lower.z += grid->minz;
+    F32 cellx = grid->csizex * px;
+    F32 cellz = grid->csizez * pz;
+    cellx += grid->minx;
+    cellz += grid->minz;
 
     F32 clcenterx = 0.5f * grid->csizex;
-    clcenterx += clbox.lower.x;
+    clcenterx += cellx;
 
     F32 clcenterz = 0.5f * grid->csizez;
-    clcenterz += clbox.lower.z;
+    clcenterz += cellz;
 
     static S32 k;
 
@@ -1502,10 +1518,11 @@ xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data)
 
     if (coll->flags & 0x1)
     {
+        xBound* bptr = &p->bound;
+
         if (modl_coll)
         {
             xBound tmp;
-            xBound* bptr; // unused
             U8 ncolls;
             xVec3 *upper, *lower;
             U8 idx;
@@ -1560,12 +1577,12 @@ xEnt* xEntCollCheckOneEntNoDepen(xEnt* ent, xScene* sc, void* data)
             p->collis->idx++;
 
             if (ent->pflags & 0x20 && ent->bound.type == XBOUND_TYPE_SPHERE &&
-                p->bound.type == XBOUND_TYPE_SPHERE && coll->hdng.y < -0.866025f)
+                bptr->type == XBOUND_TYPE_SPHERE && coll->hdng.y < -0.866025f)
             {
-                F32 rsum = p->bound.sph.r + ent->bound.sph.r;
-                F32 dx = p->bound.sph.center.x - ent->bound.sph.center.x;
-                F32 dy = p->bound.sph.center.y - ent->bound.sph.center.y;
-                F32 dz = p->bound.sph.center.z - ent->bound.sph.center.z;
+                F32 rsum = bptr->sph.r + ent->bound.sph.r;
+                F32 dx = bptr->sph.center.x - ent->bound.sph.center.x;
+                F32 dy = bptr->sph.center.y - ent->bound.sph.center.y;
+                F32 dz = bptr->sph.center.z - ent->bound.sph.center.z;
 
                 F32 hsqr = SQR(rsum) - (SQR(dx) + SQR(dz));
 

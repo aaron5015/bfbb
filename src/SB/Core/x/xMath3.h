@@ -6,8 +6,12 @@
 #include "xVec3.h"
 #include "xVec3Inlines.h"
 #include "xIsect.h"
+#if defined(PS2)
+#include <string.h>
+#endif
 
 // Size: 0x30
+#ifndef XVEC3_MATMUL_INLINE
 struct xMat3x3
 {
     xVec3 right;
@@ -18,12 +22,18 @@ struct xMat3x3
     U32 pad2;
 };
 
+#endif
+
 // Size: 0x40
 struct xMat4x3 : xMat3x3
 {
     xVec3 pos;
     U32 pad3;
-};
+}
+#if defined(PS2)
+__attribute__((aligned(16)))
+#endif
+;
 
 struct xSphere
 {
@@ -62,7 +72,11 @@ struct xQuat
 {
     xVec3 v;
     F32 s;
-};
+}
+#if defined(PS2)
+__attribute__((aligned(16)))
+#endif
+;
 
 struct xVec4
 {
@@ -70,7 +84,11 @@ struct xVec4
     F32 y;
     F32 z;
     F32 w;
-};
+}
+#if defined(PS2)
+__attribute__((aligned(16)))
+#endif
+;
 
 struct xRot
 {
@@ -119,7 +137,19 @@ void xMat3x3ScaleC(xMat3x3* m, F32 x, F32 y, F32 z);
 void xMat3x3RMulRotY(xMat3x3* o, const xMat3x3* m, F32 t);
 void xMat3x3Transpose(xMat3x3* o, const xMat3x3* m);
 void xMat3x3Mul(xMat3x3* o, const xMat3x3* a, const xMat3x3* b);
+#if defined(XBOX)
+inline void xMat3x3LMulVec(xVec3* o, const xMat3x3* m, const xVec3* v)
+{
+    F32 y = (m->up.x * v->x) + (m->up.y * v->y) + (m->up.z * v->z);
+    F32 z = (m->at.x * v->x) + (m->at.y * v->y) + (m->at.z * v->z);
+
+    o->x = (m->right.x * v->x) + (m->right.y * v->y) + (m->right.z * v->z);
+    o->y = y;
+    o->z = z;
+}
+#else
 void xMat3x3LMulVec(xVec3* o, const xMat3x3* m, const xVec3* v);
+#endif
 void xMat3x3Tolocal(xVec3* o, const xMat3x3* m, const xVec3* v);
 void xMat4x3Rot(xMat4x3* m, const xVec3* a, F32 t, const xVec3* p);
 void xMat4x3Mul(xMat4x3* o, const xMat4x3* a, const xMat4x3* b);
@@ -132,7 +162,20 @@ void xQuatSlerp(xQuat* o, const xQuat* a, const xQuat* b, F32 t);
 void xQuatMul(xQuat* o, const xQuat* a, const xQuat* b);
 void xQuatDiff(xQuat* o, const xQuat* a, const xQuat* b);
 
+#if defined(PS2) && defined(XMATH3_BOX_UNION_INLINE)
+inline void xBoxUnion(xBox& a, const xBox& b, const xBox& c)
+{
+    a.upper.x = MAX(b.upper.x, c.upper.x);
+    a.upper.y = MAX(b.upper.y, c.upper.y);
+    a.upper.z = MAX(b.upper.z, c.upper.z);
+
+    a.lower.x = MIN(b.lower.x, c.lower.x);
+    a.lower.y = MIN(b.lower.y, c.lower.y);
+    a.lower.z = MIN(b.lower.z, c.lower.z);
+}
+#else
 void xBoxUnion(xBox& a, const xBox& b, const xBox& c);
+#endif
 void xBoxFromCircle(xBox& box, const xVec3& center, const xVec3& dir, F32 r);
 void xQuatSMul(xQuat* q, const xQuat* a, F32 t);
 F32 xQuatLength2(const xQuat* q);
@@ -142,26 +185,112 @@ void xQuatAdd(xQuat* q, const xQuat* a, const xQuat* b);
 void xQuatCopy(xQuat*, const xQuat*);
 void xQuatFlip(xQuat* o1, const xQuat* o2);
 F32 xQuatDot(const xQuat* a, const xQuat* b);
+#if defined(PS2)
+inline void xMat3x3Copy(xMat3x3* o, const xMat3x3* m)
+{
+    memcpy(o, m, sizeof(xMat3x3));
+}
+#elif defined(XBOX)
+inline void xMat3x3Copy(xMat3x3* o, const xMat3x3* m)
+{
+    *o = *m;
+}
+#else
 void xMat3x3Copy(xMat3x3* o, const xMat3x3* m);
+#endif
+#if defined(PS2)
+inline void xMat4x3Copy(xMat4x3* o, const xMat4x3* m)
+{
+    memcpy(o, m, sizeof(xMat4x3));
+}
+#else
 void xMat4x3Copy(xMat4x3* o, const xMat4x3* m);
-void xMat4x3Toworld(xVec3* o, const xMat4x3* m, const xVec3* v);
+#endif
 void xMat3x3MulRotC(xMat3x3* o, xMat3x3* m, F32 _x, F32 _y, F32 _z, F32 t);
+#if defined(PS2)
+inline void xMat4x3Identity(xMat4x3* m)
+{
+    xMat4x3Copy(m, &g_I3);
+}
+#else
 void xMat4x3Identity(xMat4x3* m);
+#endif
+#if defined(PS2)
+inline void xMat4x3Tolocal(xVec3* o, const xMat4x3* m, const xVec3* v)
+{
+    o->x = v->x - m->pos.x;
+    o->y = v->y - m->pos.y;
+    o->z = v->z - m->pos.z;
+
+    xMat3x3Tolocal(o, m, o);
+}
+#else
 void xMat4x3Tolocal(xVec3* o, const xMat4x3* m, const xVec3* v);
+#endif
 void xMat4x3OrthoInv(xMat4x3* o, const xMat4x3* m);
 F32 xQuatGetAngle(const xQuat* q);
+#if defined(PS2) || defined(XBOX)
+inline void xQuatConj(xQuat* o, const xQuat* q)
+{
+    o->s = q->s;
+
+    xVec3Inv(&o->v, &q->v);
+}
+#else
 void xQuatConj(xQuat* o, const xQuat* q);
+#endif
+#if defined(PS2)
+inline void xMat3x3LookAt(xMat3x3* m, const xVec3* pos, const xVec3* at)
+{
+    xVec3 v;
+
+    xVec3Sub(&v, at, pos);
+    xMat3x3LookVec(m, &v);
+}
+#else
 void xMat3x3LookAt(xMat3x3* m, const xVec3* pos, const xVec3* at);
+#endif
 F32 xMat3x3LookVec3(xMat3x3& m, const xVec3& at);
 void xMat3x3Scale(xMat3x3* m, const xVec3* s);
 void xBoxFromLine(xBox& box, const xLine3& line);
 void xBoxFromRay(xBox& box, const xRay3& ray);
-// The only definition is the inline in zEntPlayerBungeeState.cpp: retail emits
-// the weak copy there and calls it out of line from zDiscoFloor.o, so this stays
-// a declaration.
+// Bungee owns the retained header-inline copy; other callers use that copy.
+#ifdef XMATH3_BOX_FROM_SPHERE_INLINE
+inline void xBoxFromSphere(xBox& box, const xSphere& o)
+{
+    box.upper = box.lower = o.center;
+    box.upper += o.r;
+    box.lower -= o.r;
+}
+#else
 void xBoxFromSphere(xBox& box, const xSphere& o);
+#endif
+#if defined(PS2) || defined(XBOX)
+inline void xMat3x3Identity(xMat3x3* matrix)
+{
+    xMat3x3Copy(matrix, &g_I3);
+}
+#else
 void xMat3x3Identity(xMat3x3* matrix);
+#endif
+#if defined(PS2)
+inline void xMat3x3SMul(xMat3x3* o, const xMat3x3* m, F32 s)
+{
+    xVec3SMul(&o->right, &m->right, s);
+    xVec3SMul(&o->up, &m->up, s);
+    xVec3SMul(&o->at, &m->at, s);
+    o->flags = 0;
+}
+
+inline void xMat3x3MulRotC(xMat3x3* o, xMat3x3* m, F32 _x, F32 _y, F32 _z, F32 t)
+{
+    xMat3x3 var_38;
+    xMat3x3RotC(&var_38, _x, _y, _z, t);
+    xMat3x3Mul(o, m, &var_38);
+}
+#else
 void xMat3x3SMul(xMat3x3*, const xMat3x3*, F32);
+#endif
 
 inline void xRotCopy(xRot* o, const xRot* r)
 {
@@ -171,6 +300,11 @@ inline void xRotCopy(xRot* o, const xRot* r)
     o->angle = r->angle;
 }
 
+#ifndef XVEC3_MATMUL_INLINE
+// Cinematic owns a deferred copy alongside its other local math helpers.
+#ifdef XMATH3_DEFER_RMULVEC
+static void xMat3x3RMulVec(xVec3* o, const xMat3x3* m, const xVec3* v);
+#else
 static inline void xMat3x3RMulVec(xVec3* o, const xMat3x3* m, const xVec3* v)
 {
     F32 x = m->right.x * v->x + m->up.x * v->y + m->at.x * v->z;
@@ -181,10 +315,70 @@ static inline void xMat3x3RMulVec(xVec3* o, const xMat3x3* m, const xVec3* v)
     o->y = y;
     o->z = z;
 }
+#endif
+
+#endif // XVEC3_MATMUL_INLINE
+
+#if defined(XBOX)
+void xMat4x3Toworld(xVec3* o, const xMat4x3* m, const xVec3* v);
+#else
+inline void xMat4x3Toworld(xVec3* o, const xMat4x3* m, const xVec3* v)
+{
+    xMat3x3RMulVec(o, m, v);
+
+    o->x += m->pos.x;
+    o->y += m->pos.y;
+    o->z += m->pos.z;
+}
+#endif
 
 inline void xMat3x3Rot(xMat3x3* m, const xVec3* a, F32 t)
 {
     xMat3x3RotC(m, a->x, a->y, a->z, t);
 }
+
+inline void xQuatCopy(xQuat* a, const xQuat* b)
+{
+    a->s = b->s;
+    a->v.x = b->v.x;
+    a->v.y = b->v.y;
+    a->v.z = b->v.z;
+}
+
+inline U32 xQuatEquals(const xQuat* a, const xQuat* b)
+{
+    return (a->s == b->s) && xVec3Equals(&a->v, &b->v);
+}
+
+inline void xQuatFlip(xQuat* a, const xQuat* b)
+{
+    a->s = -b->s;
+    xVec3Inv(&a->v, &b->v);
+}
+
+inline F32 xQuatDot(const xQuat* a, const xQuat* b)
+{
+    return xVec3Dot(&a->v, &b->v) + a->s * b->s;
+}
+
+#if defined(PS2) || defined(XBOX)
+inline void xQuatSMul(xQuat* q, const xQuat* a, F32 t)
+{
+    q->s = a->s * t;
+    xVec3SMul((xVec3*)q, (xVec3*)a, t);
+}
+
+inline F32 xQuatLength2(const xQuat* q)
+{
+    return xQuatDot(q, q);
+}
+
+inline void xQuatAdd(xQuat* q, const xQuat* a, const xQuat* b)
+{
+    q->s = a->s + b->s;
+    xVec3Add((xVec3*)q, (xVec3*)a, (xVec3*)b);
+}
+
+#endif
 
 #endif

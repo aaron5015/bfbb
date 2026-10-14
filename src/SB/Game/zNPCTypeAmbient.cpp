@@ -23,22 +23,6 @@ char* g_strz_ambianim[12] = {
 };
 extern zGlobals globals;
 
-zNPCAmbient::zNPCAmbient(S32 myType) : zNPCCommon(myType)
-{
-}
-
-zNPCJelly::zNPCJelly(S32 myType) : zNPCAmbient(myType)
-{
-}
-
-zNPCNeptune::zNPCNeptune(S32 myType) : zNPCAmbient(myType)
-{
-}
-
-zNPCMimeFish::zNPCMimeFish(S32 myType) : zNPCAmbient(myType)
-{
-}
-
 void ZNPC_Ambient_Startup()
 {
     S32 i = 0;
@@ -434,48 +418,6 @@ void zNPCJelly::BUpdate(xVec3*)
     zGridUpdateEnt(this);
 }
 
-void zNPCJelly::ActLikeOctopus()
-{
-    S32 num_vert;
-    S32 i;
-    S32 stride;
-    xVec3 pos_emit;
-
-    num_vert = model->Data->geometry->numVertices;
-    if (num_vert < 1)
-    {
-        return;
-    }
-
-    stride = MAX(1, num_vert / 16);
-
-    for (i = 0; i < num_vert; i += stride)
-    {
-        iModelVertEval(model->Data, i, 1, model->Mat, NULL, &pos_emit);
-        zFX_SpawnBubbleTrail(&pos_emit, 4);
-    }
-}
-
-void zNPCNeptune::ParseINI()
-{
-    zNPCAmbient::ParseINI();
-    cfg_npc->snd_traxShare = NULL;
-    cfg_npc->snd_trax = g_sndTrax_Neptune;
-    NPCS_SndTablePrepare(g_sndTrax_Neptune);
-}
-
-void zNPCNeptune::Reset()
-{
-    zNPCAmbient::Reset();
-    flags |= XENT_0x40;
-}
-
-void zNPCMimeFish::Reset()
-{
-    zNPCAmbient::Reset();
-    flg_move = 1;
-}
-
 void zNPCJelly::Process(xScene* xscn, F32 dt)
 {
     this->zNPCAmbient::Process(xscn, dt);
@@ -552,7 +494,7 @@ void zNPCJelly::PlayWithAlpha(F32 dt)
     F32 t = NPCC_TmrCycle(&this->tmr_pulseAlpha, dt, 0.5f);
     F32 x = PI * t;
 
-    this->SetAlpha(LERP(MAX(0.0f, MIN((F32)__fabs(isin(x)), 1.0f)), 0.7f, 0.95f));
+    this->SetAlpha(LERP(MAX(0.0f, MIN(xabs(isin(x)), 1.0f)), 0.7f, 0.95f));
 }
 
 void zNPCJelly::SetAlpha(F32 alf)
@@ -746,6 +688,28 @@ S32 JELY_grul_getAngry(xGoal* rawgoal, void* p1, en_trantype* trantype, F32 f, v
     return nextgoal;
 }
 
+void zNPCJelly::ActLikeOctopus()
+{
+    S32 num_vert;
+    S32 i;
+    S32 stride;
+    xVec3 pos_emit;
+
+    num_vert = model->Data->geometry->numVertices;
+    if (num_vert < 1)
+    {
+        return;
+    }
+
+    stride = MAX(1, num_vert / 16);
+
+    for (i = 0; i < num_vert; i += stride)
+    {
+        iModelVertEval(model->Data, i, 1, model->Mat, NULL, &pos_emit);
+        zFX_SpawnBubbleTrail(&pos_emit, 4);
+    }
+}
+
 U32 zNPCNeptune::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
 {
     S32 idx;
@@ -776,6 +740,20 @@ U32 zNPCNeptune::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
     }
 
     return da_anim;
+}
+
+void zNPCNeptune::ParseINI()
+{
+    zNPCAmbient::ParseINI();
+    cfg_npc->snd_traxShare = NULL;
+    cfg_npc->snd_trax = g_sndTrax_Neptune;
+    NPCS_SndTablePrepare(g_sndTrax_Neptune);
+}
+
+void zNPCNeptune::Reset()
+{
+    zNPCAmbient::Reset();
+    flags |= XENT_0x40;
 }
 
 void zNPCNeptune::Process(xScene* xscn, F32 dt)
@@ -844,8 +822,35 @@ U32 zNPCMimeFish::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
     return da_anim;
 }
 
+void zNPCMimeFish::Reset()
+{
+    zNPCAmbient::Reset();
+    flg_move = 1;
+}
+
 void zNPCMimeFish::Process(xScene* xscn, F32 dt)
 {
+}
+
+zNPCMimeFish::zNPCMimeFish(S32 myType) : zNPCAmbient(myType)
+{
+}
+
+zNPCNeptune::zNPCNeptune(S32 myType) : zNPCAmbient(myType)
+{
+}
+
+zNPCJelly::zNPCJelly(S32 myType) : zNPCAmbient(myType)
+{
+}
+
+zNPCAmbient::zNPCAmbient(S32 myType) : zNPCCommon(myType)
+{
+}
+
+S32 zNPCAmbient::AmbiHandleMail(NPCMsg* mail)
+{
+    return 0;
 }
 
 S32 zNPCJelly::IsAlive()
@@ -882,11 +887,9 @@ U8 zNPCAmbient::PhysicsFlags() const
     return 3;
 }
 
-/* This should be 100% matching but it causes a vtable duplication error for some reason
 void zNPCNeptune::SelfSetup()
 {
 }
-*/
 
 U8 zNPCNeptune::ColChkFlags() const
 {
@@ -906,8 +909,4 @@ U8 zNPCNeptune::ColChkByFlags() const
 U8 zNPCNeptune::ColPenByFlags() const
 {
     return 0;
-}
-
-void zNPCNeptune::SelfSetup()
-{
 }
