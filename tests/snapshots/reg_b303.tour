@@ -1,0 +1,5 @@
+# The Chum Bucket brain (b303) at 640x480 on Direct3D 9, booted straight into the scene.
+# No talk box.
+
+wait 600
+shot reg_b303 0
