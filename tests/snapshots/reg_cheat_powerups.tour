@@ -1,0 +1,14 @@
+# [cheats] bubble_bowl and cruise_bubble in Jellyfish Fields. Y throws the
+# Bubble Bowl; holding L1 launches the Cruise Bubble. The shot is the missile
+# leaving SpongeBob: its flight after that is not the same from run to run.
+
+wait 2400
+press b
+wait 120
+press y
+wait 8
+shot reg_cheat_bubble_bowl 0
+wait 200
+hold 30 l1
+wait 30
+shot reg_cheat_cruise_bubble 0

@@ -1,0 +1,5 @@
+# [cheats] small_costars in Jellyfish Lake: Mr. Krabs' talk box is up by
+# 240.
+
+wait 600
+shot reg_cheat_small_costars 0
