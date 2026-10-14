@@ -52,6 +52,10 @@ void iTimeResume();
 // each run.
 void iTimeFixedStep(U32 fps);
 void iTimeStep();
+// The fixed-step clock in nanoseconds into *ns, and TRUE; FALSE when
+// iTimeFixedStep is not in use. What iVSync and the sound mixer read in a tour
+// instead of the host clock.
+S32 iTimeFixedNs(U64* ns);
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 void iProfileClear(U32 sceneID);

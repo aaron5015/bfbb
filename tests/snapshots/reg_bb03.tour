@@ -1,0 +1,6 @@
+# The lighthouse (bb03) at 640x480 on Direct3D 9, booted straight into the scene.
+# The 'Are you ready kids?' prompt is up by 240; B would exit the level, so
+# the shot keeps it.
+
+wait 600
+shot reg_bb03 0

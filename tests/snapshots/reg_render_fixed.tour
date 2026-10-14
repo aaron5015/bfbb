@@ -1,0 +1,7 @@
+# [video] pipeline fixed, on the reg_jf01 route: SpongeBob at the Jellyfish Rock
+# spawn point after Squidward's talk box.
+
+wait 2400
+press b
+wait 120
+shot reg_render_fixed 0

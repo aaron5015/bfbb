@@ -1,0 +1,5 @@
+# [cheats] no_pants in Jellyfish Caves: SpongeBob's talk box shows him close
+# up by 240.
+
+wait 600
+shot reg_cheat_no_pants 0

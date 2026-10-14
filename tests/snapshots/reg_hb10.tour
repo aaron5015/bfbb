@@ -1,0 +1,5 @@
+# The theater (hb10) at 640x480 on Direct3D 9, booted straight into the scene.
+# The concept art screen.
+
+wait 600
+shot reg_hb10 0

@@ -1,0 +1,8 @@
+# Sandy's treedome (hb05) at 640x480 on Direct3D 9, booted straight into the scene.
+# SpongeBob's talk box to Sandy is up by 240. B leaves it, and the shot 120
+# frames later has the challenge's 'Are you ready kids?' prompt.
+
+wait 600
+press b
+wait 120
+shot reg_hb05 0

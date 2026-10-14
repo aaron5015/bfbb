@@ -1,0 +1,8 @@
+# [cheats] small_villagers at Sand Mountain, on the reg_sm04 route: Larry's
+# talk box is up by 960, B leaves it, and fish villagers stand by the start
+# gate.
+
+wait 1200
+press b
+wait 120
+shot reg_cheat_small_villagers 0

@@ -1,0 +1,7 @@
+# The original menus (assets.code_menu off) at 640x480 on Direct3D 9: the
+# main menu without the port's Settings entry.
+
+wait 900
+press start
+wait 180
+shot reg_original_main_menu 0

@@ -13,7 +13,9 @@
 // are ignored. The window is created hidden and stays windowed, so the render
 // size is video.width x video.height. The game's clock advances exactly 1/60
 // of a second per frame (iTimeFixedStep), so counts below are seconds / 60 and
-// a script plays the same way each run.
+// a script plays the same way each run. Nothing caps the frame rate: a tour
+// runs as fast as the machine draws. There is no sound; the voices still play
+// out, on the same clock (iSndHostSDL.cpp).
 //
 // One command a line; `#` starts a comment. Counts are in presented frames.
 //
