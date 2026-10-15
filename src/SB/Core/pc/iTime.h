@@ -68,7 +68,18 @@ void iTimeSetSeed(U32 seed);
 // object in the scene, the always-loaded menu packages among them: four fewer
 // mnu4 widgets changed the state play began with. The draws made during init
 // still follow such changes. gc/iTime.h makes it nothing.
-void iTimeSeedPlay();
+//
+// Inline so that only the game code calling it needs xsrand: the platform
+// layer links into pc_selftest, which has no xMath.cpp.
+S32 iTimeSeedPinned();
+void xsrand(U32 seed);
+inline void iTimeSeedPlay()
+{
+    if (iTimeSeedPinned())
+    {
+        xsrand(iTimeSeed());
+    }
+}
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 void iProfileClear(U32 sceneID);

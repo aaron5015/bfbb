@@ -1,7 +1,6 @@
 #include "iTime.h"
 #include "iHost.h"
 #include "iSystem.h"
-#include "xMath.h"
 
 #include <types.h>
 
@@ -91,12 +90,9 @@ void iTimeSetSeed(U32 seed)
     sSeedPinned = true;
 }
 
-void iTimeSeedPlay()
+S32 iTimeSeedPinned()
 {
-    if (sSeedPinned)
-    {
-        xsrand(sSeed);
-    }
+    return sSeedPinned;
 }
 
 void iTimeInit()
