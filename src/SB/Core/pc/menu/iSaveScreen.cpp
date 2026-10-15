@@ -558,8 +558,10 @@ namespace
                 iSGMakeTarget(e.tgt);
             }
 
+            // Retail's slot 0 takes the title down with it; these rows do not.
             Send("SV GAMESLOT GROUP", eEventUIFocusOff_Unselect);
             Send("SV MAKE INVISIBLE", eEventInvisible);
+            Send("SV SAVE GAME TITLE UIF", eEventInvisible);
             DropStill(true);
 
             // The still is the frame the pause kept: the pause menu has been
