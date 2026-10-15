@@ -544,7 +544,10 @@ S32 iPadHostCaptureButton(S32 prime, char* out, S32 size)
 {
     static U32 sWasHeld;
 
-    SDL_Gamepad* pad = sGamepad[0];
+    // The pad port 0 plays on, which is not slot 0 when input.controller pins
+    // another one or the pad in slot 0 has been unplugged.
+    const S32 slot = sPortSlot[0];
+    SDL_Gamepad* pad = (slot >= 0) ? sGamepad[slot] : NULL;
     U32 held = 0;
     if (pad != NULL)
     {
