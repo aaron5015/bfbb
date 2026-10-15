@@ -31,6 +31,9 @@
 //                       steer the left stick toward world (X, Z) until the
 //                       player is within TOL (default 1.5) of it, for at most
 //                       MAXFRAMES (default 1800), with the buttons held
+//
+// In move, cam and goto, a button written *B is tapped instead of held: down 4
+// frames of every 12.
 //   shot NAME [WIDTH]   write NAME.png, at most WIDTH wide (default 1280; 0
 //                       keeps the render size)
 //   record NAME [WIDTH] from this frame on, write every frame and the sound

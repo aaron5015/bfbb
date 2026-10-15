@@ -35,6 +35,7 @@ namespace
         Op op;
         S32 frames;
         U32 buttons;
+        U32 taps; // move, goto: pressed kTapDown of every kTapPeriod frames
         S32 width;
         F32 sticks[4]; // left x, y, right x, y
         F32 target[3]; // goto: x, z, tolerance
@@ -43,6 +44,8 @@ namespace
 
     const S32 kMaxSteps = 16384;
     const S32 kRelease = 4;
+    const S32 kTapPeriod = 12;
+    const S32 kTapDown = 4;
     const S32 kShotWidth = 1280;
 
     // A shot taken while a loading screen holds the snapshot has no frame to
@@ -54,6 +57,7 @@ namespace
     S32 sAt;
     S32 sLeft;
     S32 sReleasing;
+    S32 sElapsed;
     S32 sFrameNo;
     char sOutDir[512];
 
@@ -65,20 +69,29 @@ namespace
     }
 
     // Space-separated button names from `p` into a mask. Empty is allowed
-    // where `optional` is set.
-    U32 Buttons(char* p, S32 line, bool optional)
+    // where `optional` is set. With `taps`, a name written *NAME goes there
+    // instead.
+    U32 Buttons(char* p, S32 line, bool optional, U32* taps = NULL)
     {
         U32 mask = 0;
         for (char* tok = strtok(p, " \t"); tok != NULL; tok = strtok(NULL, " \t"))
         {
-            const iPadBindButton* b = iPadBindFind(tok);
+            bool tap = taps != NULL && tok[0] == '*';
+            const iPadBindButton* b = iPadBindFind(tap ? tok + 1 : tok);
             if (b == NULL)
             {
                 Fail(line, "unknown button", tok);
             }
-            mask |= b->mask;
+            if (tap)
+            {
+                *taps |= b->mask;
+            }
+            else
+            {
+                mask |= b->mask;
+            }
         }
-        if (mask == 0 && !optional)
+        if (mask == 0 && (taps == NULL || *taps == 0) && !optional)
         {
             Fail(line, "no buttons", "");
         }
@@ -451,7 +464,7 @@ namespace
                     s->sticks[2] = x;
                     s->sticks[3] = y;
                 }
-                s->buttons = Buttons(p, line, true);
+                s->buttons = Buttons(p, line, true, &s->taps);
                 if (s->frames <= 0)
                 {
                     Fail(line, "move needs a frame count", cmd);
@@ -478,7 +491,7 @@ namespace
                         p = q;
                     }
                 }
-                s->buttons = Buttons(p, line, true);
+                s->buttons = Buttons(p, line, true, &s->taps);
             }
             else if (strcmp(cmd, "shot") == 0 || strcmp(cmd, "record") == 0)
             {
@@ -530,9 +543,21 @@ namespace
         const Step* s = &sSteps[sAt];
         sLeft = s->frames;
         sReleasing = 0;
+        sElapsed = 0;
         iPadHostScript(TRUE,
                        s->op == OP_HOLD || s->op == OP_MOVE || s->op == OP_GOTO ? s->buttons : 0);
         iPadHostScriptSticks(s->sticks[0], s->sticks[1], s->sticks[2], s->sticks[3]);
+    }
+
+    // The held buttons plus the tapped ones, down for the first kTapDown
+    // frames of each kTapPeriod.
+    void Tap(const Step* s)
+    {
+        if (s->taps != 0)
+        {
+            bool down = (++sElapsed % kTapPeriod) < kTapDown;
+            iPadHostScript(TRUE, s->buttons | (down ? s->taps : 0));
+        }
     }
 
     void Next()
@@ -583,6 +608,7 @@ namespace
             case OP_MOVE:
                 // No release: the next step takes over the sticks directly,
                 // so moves chain into one continuous run.
+                Tap(s);
                 if (--sLeft <= 0)
                 {
                     Next();
@@ -590,6 +616,7 @@ namespace
                 return;
 
             case OP_GOTO:
+                Tap(s);
                 if (Steer(s))
                 {
                     printf("bfbb: tour: frame %d reached %.1f %.1f\n", (int)sFrameNo, s->target[0],
