@@ -356,8 +356,9 @@ namespace
 
         F32 ux = dx / dist;
         F32 uz = dz / dist;
+        // The camera's right vector points to the left of the screen.
         F32 forward = (ux * at.x + uz * at.z) / fl;
-        F32 side = (ux * right.x + uz * right.z) / rl;
+        F32 side = -(ux * right.x + uz * right.z) / rl;
         F32 mag = dist < 3.0f ? 0.35f + 0.65f * dist / 3.0f : 1.0f;
         iPadHostScriptSticks(side * mag, forward * mag, 0.0f, 0.0f);
         return false;
@@ -591,8 +592,8 @@ namespace
             case OP_GOTO:
                 if (Steer(s))
                 {
-                    printf("bfbb: tour: frame %d reached %.1f %.1f\n", (int)sFrameNo,
-                           s->target[0], s->target[1]);
+                    printf("bfbb: tour: frame %d reached %.1f %.1f\n", (int)sFrameNo, s->target[0],
+                           s->target[1]);
                     fflush(stdout);
                     Next();
                     continue;
