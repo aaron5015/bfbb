@@ -138,12 +138,24 @@ RpAtomic* RpAtomicForAllIntersections(RpAtomic* atomic, RpIntersection* intersec
     //
     // iModelRender takes the same view from the other side: it assigns
     // frame->ltm = *mat outright rather than going through the hierarchy.
+    //
+    // **Unless the frame is clean, and then its LTM.** SlideTrackUpdate in
+    // zEntPlayer.cpp is the one caller that does not go through
+    // RwFrameTransform: it assigns frame->ltm = *Mat and calls straight in.
+    // RenderWare's RwFrameGetLTM hands a clean frame's LTM back untouched, so
+    // that write is what retail tests against. The frame's matrix there is
+    // whatever the clump was loaded with: right only for a track modelled in
+    // place at the origin, wrong for the placed and moving tracks in sm04.
+    // RwFrameTransform marks the frame SUBTREESYNCLTM until the next flush,
+    // which is how the two kinds of caller are told apart.
     RwMatrix inverse = {};
     float scale = 1.0f;
     RwFrame* frame = RpAtomicGetFrame(atomic);
     if (frame != NULL)
     {
-        RwMatrix* ltm = reinterpret_cast<RwMatrix*>(&reinterpret_cast<rw::Frame*>(frame)->matrix);
+        rw::Frame* f = reinterpret_cast<rw::Frame*>(frame);
+        RwMatrix* ltm = reinterpret_cast<RwMatrix*>(
+            (f->object.privateFlags & rw::Frame::SUBTREESYNCLTM) ? &f->matrix : &f->ltm);
         RwMatrixInvert(&inverse, ltm);
         scale = RwV3dLength(&ltm->right);
         if (scale == 0.0f)

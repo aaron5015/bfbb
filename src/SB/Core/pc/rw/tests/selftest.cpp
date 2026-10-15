@@ -2270,6 +2270,22 @@ static void test_atomics()
     RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
     check(log.calls == 0, "a point intersection against an atomic is refused");
 
+    // SlideTrackUpdate writes the LTM straight onto a clean frame and does not
+    // touch the matrix. The query has to land where the LTM puts the atomic.
+    _rwFrameSyncDirty();
+    frame->ltm.pos.x = -20.0f;
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTSPHERE;
+    isx.t.sphere.center.x = -20.0f;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 2, "a clean frame is tested at its LTM");
+
+    // And a RwFrameTransform after that is what counts again.
+    RwFrameTranslate(frame, &ten, rwCOMBINEREPLACE);
+    memset(&log, 0, sizeof(log));
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 0, "a moved frame is tested at its matrix, not the stale LTM");
+
     RpAtomicSetFrame(atomic, NULL);
     RwFrameDestroy(frame);
     reinterpret_cast<rw::Geometry*>(geometry)->destroy();
