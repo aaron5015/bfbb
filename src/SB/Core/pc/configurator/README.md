@@ -84,10 +84,12 @@ does it.
 `[keyboard]` and `[pad]` are two more pages after the settings' sections, one
 row per button the game reads (`kPadBindButtons`). Each row holds the binding
 as the file has it, typable in the full grammar (`,` `+` `!`), with Set to
-replace it with the next input pressed and Add to append one as another
-alternative.
+replace it with the next input pressed, Add to append one as another
+alternative and Clear to write `none`, which binds nothing.
 
-An empty box is the default, and saving takes the line out of the file. The
+An empty box is the default, and saving takes the line out of the file. A line
+in the file with nothing after the `=` also binds nothing, so it loads as
+`none` rather than as an empty box. The
 default shows as grey hint text: the key table's for the keyboard, and for the
 pad whatever `input.preset` (as this window holds it) binds the row to. A
 preset's face buttons name a printed letter rather than a position, and the

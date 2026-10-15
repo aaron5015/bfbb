@@ -22,7 +22,11 @@
 //     a  = x, ls            either input on its own
 //     l2 = lt+rb            both at once
 //     l1 = lt+!rb           held, and something else not held
-//     l1 =                  nothing; the button can never be pressed
+//     l1 = none             nothing; the button can never be pressed
+//     l1 =                  the same as none
+//
+// `none` exists because a front end shows an empty box as "use the default"
+// and cannot tell that apart from an empty line.
 //
 // Negation is not a flourish. gc/iPad.cpp reads the GameCube's three shoulders
 // as four buttons by making Z a modifier, and the two arms of that are

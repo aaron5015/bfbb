@@ -61,6 +61,14 @@ namespace
                 const char* have =
                     iConfigEditGet(gModel.file, kDeviceSections[d], kPadBindButtons[i].name);
                 gModel.binds[d][i].present = (have != NULL);
+
+                // A line with nothing after the '=' is a button bound to
+                // nothing. An empty box here means the default, so it is shown
+                // as the word that says so; saving would otherwise drop it.
+                if (have != NULL && have[0] == '\0')
+                {
+                    have = "none";
+                }
                 snprintf(gModel.binds[d][i].text, kConfigModelMaxValue, "%s",
                          have != NULL ? have : "");
             }

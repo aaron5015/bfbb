@@ -640,8 +640,9 @@ namespace
     // The binding pages: one row per button the game reads, what presses it,
     // and a row that puts them all back. Confirm on a row waits for the next
     // key or controller button and binds it; Escape, or eight seconds, leaves
-    // it alone. Written to config.ini's [keyboard] or [pad] and read again at
-    // once (iPadHostReloadBindings).
+    // it alone. Options binds nothing to the row, except on the rows the menus
+    // need (MenuNeeds). Written to config.ini's [keyboard] or [pad] and read
+    // again at once (iPadHostReloadBindings).
 
     // What each row of kPadBindButtons is called here. The game's own names
     // are the GameCube's, and what a button does depends on the preset, so the
@@ -662,6 +663,15 @@ namespace
     void BindKey(bool pad, S32 row, char* out, size_t size)
     {
         snprintf(out, size, "%s.%s", pad ? "pad" : "keyboard", kPadBindButtons[row].name);
+    }
+
+    // Buttons this screen and the pause menu cannot be worked without. Clearing
+    // one would leave no way back in here to undo it.
+    bool MenuNeeds(S32 row)
+    {
+        const U32 mask = kPadBindButtons[row].mask;
+        return mask == XPAD_BUTTON_X || mask == XPAD_BUTTON_TRIANGLE || mask == XPAD_BUTTON_UP ||
+               mask == XPAD_BUTTON_DOWN || mask == XPAD_BUTTON_START;
     }
 
     void DrawBindPage(bool pad, S32 sel, S32 top, const char* help)
@@ -691,7 +701,8 @@ namespace
             SetText(ISETTINGS_LABEL_TEXT, r,
                     i < kBindLabelCount ? kBindLabels[i] : kPadBindButtons[i].name);
             const char* bound = iConfigGetString(key, "");
-            SetText(ISETTINGS_VALUE_TEXT, r, bound[0] != '\0' ? bound : "(nothing)");
+            const bool nothing = bound[0] == '\0' || iHostStrCaseCmp(bound, "none") == 0;
+            SetText(ISETTINGS_VALUE_TEXT, r, nothing ? "(nothing)" : bound);
         }
 
         if (help != NULL)
@@ -710,9 +721,11 @@ namespace
         else
         {
             const char* does = kPadBindButtons[sel].does;
-            snprintf(text, sizeof(text), "%s%s{n}{i:button_picture_01} Change  "
+            snprintf(text, sizeof(text),
+                     "%s%s{n}{i:button_picture_01} Change  %s"
                      "{i:button_picture_03} Back",
-                     does != NULL ? "Action: " : "", does != NULL ? does : "");
+                     does != NULL ? "Action: " : "", does != NULL ? does : "",
+                     MenuNeeds(sel) ? "" : "{i:button_picture_04} Clear  ");
         }
         DrawHelp(text);
     }
@@ -833,6 +846,21 @@ namespace
                 {
                     Capture(pad, sel);
                 }
+                DrawBindPage(pad, sel, top, NULL);
+            }
+            else if ((pressed & XPAD_BUTTON_O) && sel < kPadBindButtonCount && MenuNeeds(sel))
+            {
+                Send("MNU4 DENY SFX", eEventPlay);
+            }
+            else if ((pressed & XPAD_BUTTON_O) && sel < kPadBindButtonCount)
+            {
+                // `none` rather than an empty value: bfbb_config reads an empty
+                // line as "use the default". See iPadBind.h.
+                char key[64];
+                BindKey(pad, sel, key, sizeof(key));
+                iConfigSet(key, "none");
+                iPadHostReloadBindings();
+                Send("MNU4 MOVE B SFX", eEventPlay);
                 DrawBindPage(pad, sel, top, NULL);
             }
         }

@@ -123,8 +123,8 @@ namespace
         fprintf(f, ";\n");
         fprintf(f, ";   %s\n", inputs);
         fprintf(f, ";\n");
-        fprintf(f, "; ',' is either one, '+' is both at once, '!' is NOT held, and nothing\n");
-        fprintf(f, "; at all leaves the button unpressable.\n");
+        fprintf(f, "; ',' is either one, '+' is both at once, '!' is NOT held, and none\n");
+        fprintf(f, "; leaves the button unpressable.\n");
         fprintf(f, ";\n");
         fprintf(f, "%s", extra);
 

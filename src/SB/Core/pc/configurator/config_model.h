@@ -100,12 +100,14 @@ S32 ConfigModelBindCount();
 const char* ConfigModelBindName(S32 row);
 const char* ConfigModelBindDoes(S32 row);
 
-// The binding the file gives the button, or "" for none. None means the
-// default: the game answers a missing line from its own table.
+// The binding the file gives the button, or "" for no line. No line means the
+// default: the game answers a missing line from its own table. A line bound to
+// nothing reads "none", whether the file wrote that or left the value empty.
 const char* ConfigModelBindText(ConfigModelDevice device, S32 row);
 
 // Record a binding. "" puts the button back on its default and takes the line
-// out of the file on the next save. Checked on save, like a setting.
+// out of the file on the next save; "none" binds nothing to it. Checked on
+// save, like a setting.
 void ConfigModelBindSetText(ConfigModelDevice device, S32 row, const char* text);
 
 // What the default is, in words: the key table's binding for the keyboard,

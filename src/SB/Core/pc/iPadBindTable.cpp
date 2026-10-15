@@ -236,6 +236,14 @@ namespace
         }
         return -1;
     }
+
+    // The whole binding is the word `none`, in any case.
+    bool isNone(const char* s)
+    {
+        char word[8];
+        takeToken(s, '\0', word, (S32)sizeof(word));
+        return iHostStrCaseCmp(word, "none") == 0;
+    }
 } // namespace
 
 bool iPadBindParse(const char* text, const iPadBindToken* tokens, S32 tokenCount, const char* what,
@@ -254,7 +262,7 @@ bool iPadBindParse(const char* text, const iPadBindToken* tokens, S32 tokenCount
     memset(&built, 0, sizeof(built));
 
     const char* s = skipSpace(text);
-    if (*s == '\0')
+    if (*s == '\0' || isNone(s))
     {
         // Deliberately empty. Not an error: it is how a button is turned off.
         *out = built;

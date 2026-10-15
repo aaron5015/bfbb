@@ -54,11 +54,12 @@ namespace
         kIdRowBase
     };
 
-    // A binding row uses the Browse slot for Set and one more for Add.
-    const int kIdsPerRow = 3;
+    // A binding row uses the Browse slot for Set and two more for Add and Clear.
+    const int kIdsPerRow = 4;
     const int kIdRowValue = 0;
     const int kIdRowBrowse = 1;
     const int kIdRowAdd = 2;
+    const int kIdRowClear = 3;
 
     // One setting's controls.
     //
@@ -736,7 +737,8 @@ namespace
 
     // One button's binding: its name, a box holding the binding as the file has
     // it (the default shows as grey hint text when it is empty), Set to replace
-    // it with one captured input and Add to append one as an alternative.
+    // it with one captured input, Add to append one as an alternative and Clear
+    // to bind nothing.
     void ConfigFrame::AddBindRow(int& line, ConfigModelDevice device, S32 bind)
     {
         Row row;
@@ -759,12 +761,16 @@ namespace
                                      wxDefaultSize, wxBU_EXACTFIT);
         wxButton* add = new wxButton(mPane, id + kIdRowAdd, "Add...", wxDefaultPosition,
                                      wxDefaultSize, wxBU_EXACTFIT);
+        wxButton* clear = new wxButton(mPane, id + kIdRowClear, "Clear", wxDefaultPosition,
+                                       wxDefaultSize, wxBU_EXACTFIT);
         set->SetToolTip("Replace the binding with the next key or button you press");
         add->SetToolTip("Add another key or button for this action");
+        clear->SetToolTip("Bind nothing, so no key or button presses this");
 
         wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
         buttons->Add(set, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
-        buttons->Add(add);
+        buttons->Add(add, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(clear);
 
         mGrid->Add(label, wxGBPosition(line, 0), wxGBSpan(1, 1), wxALIGN_CENTER_VERTICAL);
         mGrid->Add(text, wxGBPosition(line, 1), wxGBSpan(1, 1), wxEXPAND);
@@ -791,8 +797,9 @@ namespace
         }
 
         wxString value = dialog.Token();
-        const wxString have = row.entry->GetValue();
-        if (add && !have.empty())
+        wxString have = row.entry->GetValue();
+        have.Trim(true).Trim(false);
+        if (add && !have.empty() && !have.IsSameAs("none", false))
         {
             value = have + ", " + value;
         }
@@ -845,7 +852,7 @@ namespace
                       "(WASD) and camera (IJKL) keys are fixed."
                     : "Controller inputs for each game button, by position: a is the bottom "
                       "face button on any controller. ',', '+' and '!' work as on the keyboard "
-                      "page. Empty: follow input.preset.");
+                      "page. Empty: follow input.preset. none: nothing presses it.");
             intro->Wrap(FromDIP(520));
             mGrid->Add(intro, wxGBPosition(line, 0), wxGBSpan(1, 3), wxEXPAND | wxBOTTOM,
                        FromDIP(12));
@@ -1086,8 +1093,14 @@ namespace
 
         if (row->bindRow >= 0)
         {
-            const bool add = (event.GetId() - kIdRowBase) % kIdsPerRow == kIdRowAdd;
-            Capture(*row, add);
+            const int which = (event.GetId() - kIdRowBase) % kIdsPerRow;
+            if (which == kIdRowClear)
+            {
+                // SetValue sends the change event, which records it.
+                row->entry->SetValue("none");
+                return;
+            }
+            Capture(*row, which == kIdRowAdd);
             return;
         }
 

@@ -2020,6 +2020,13 @@ static void test_pad_bindings()
     sFakeHeld = FAKE(ONE) | FAKE(TWO) | FAKE(THREE);
     check(!iPadBindHeld(b, fake_held), "and nothing can press it");
 
+    check(iPadBindParse("  None ", kFakeTokens, kFakeTokenCount, "test", &b) && b.alts == 0,
+          "'none' is the same as empty, in any case and with spaces round it");
+    check(!iPadBindParse("none, one", kFakeTokens, kFakeTokenCount, "test", &b),
+          "but only as the whole binding");
+    check(!iPadBindParse("nonesuch", kFakeTokens, kFakeTokenCount, "test", &b),
+          "and not as the start of a longer word");
+
     // Whitespace is not significant anywhere.
     check(bind_says("  one  +  ! two  ,  three  ", FAKE(THREE)), "spaces around the operators");
 
