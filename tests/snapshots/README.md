@@ -25,8 +25,12 @@ scratch config, an empty save folder and no audio. The assets come from
 executable. Needs Pillow and NumPy.
 
 In a tour the game clock advances exactly 1/60 s per frame and the random seed
-comes from that clock, so a run is pixel-identical to the last one on the same
-machine. Sound is silent and plays out on the same clock, and nothing caps the
+is pinned (`seed` in iTour.h), so a run is pixel-identical to the last one on
+the same machine. The seed is set at each level start and again when play
+begins, so what came before a level does not move its randomness. What a
+level draws while it initialises still depends on every object loaded with
+it, the always-loaded menus included: a change to the menu data can move the
+boss cases. Sound is silent and plays out on the same clock, and nothing caps the
 frame rate: the whole `reg_` suite runs in about a minute and a half. A shot passes at a mean difference of 2.0 or less per channel, out of
 255 (`--tolerance`). Another GPU or driver can land above that; check the diff
 image the script leaves in its scratch folder before updating.

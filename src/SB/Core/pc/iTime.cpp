@@ -1,6 +1,7 @@
 #include "iTime.h"
 #include "iHost.h"
 #include "iSystem.h"
+#include "xMath.h"
 
 #include <types.h>
 
@@ -73,6 +74,29 @@ S32 iTimeFixedNs(U64* ns)
 
     *ns = sFixedNs;
     return TRUE;
+}
+
+// iTimeSetSeed's value, and whether it was called.
+static U32 sSeed;
+static bool sSeedPinned;
+
+U32 iTimeSeed()
+{
+    return sSeedPinned ? sSeed : (U32)iTimeGet();
+}
+
+void iTimeSetSeed(U32 seed)
+{
+    sSeed = seed;
+    sSeedPinned = true;
+}
+
+void iTimeSeedPlay()
+{
+    if (sSeedPinned)
+    {
+        xsrand(sSeed);
+    }
 }
 
 void iTimeInit()

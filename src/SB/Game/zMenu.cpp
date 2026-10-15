@@ -84,7 +84,7 @@ S32 zMenuRunning()
 void zMenuInit(U32 theSceneID)
 {
     sInMenu = 1;
-    xsrand(iTimeGet());
+    xsrand(iTimeSeed());
     iTimeGet();
     xrand();
     zSceneInit(theSceneID, 0);

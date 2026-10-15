@@ -56,6 +56,19 @@ void iTimeStep();
 // iTimeFixedStep is not in use. What iVSync and the sound mixer read in a tour
 // instead of the host clock.
 S32 iTimeFixedNs(U64* ns);
+// What zGameInit and zMenuInit seed xrand with: the clock, as retail does,
+// unless iTimeSetSeed pinned a value. A tour pins one (iTour.h), because the
+// fixed clock at a level's start counts every frame presented before it, and
+// those change with anything that loads at boot. gc/iTime.h makes it
+// iTimeGet().
+U32 iTimeSeed();
+void iTimeSetSeed(U32 seed);
+// Seed xrand again as zGameLoop starts, when iTimeSetSeed pinned one; nothing
+// otherwise, as retail. How many draws a level's init makes depends on every
+// object in the scene, the always-loaded menu packages among them: four fewer
+// mnu4 widgets changed the state play began with. The draws made during init
+// still follow such changes. gc/iTime.h makes it nothing.
+void iTimeSeedPlay();
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 void iProfileClear(U32 sceneID);

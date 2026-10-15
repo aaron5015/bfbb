@@ -42,6 +42,12 @@
 //   stop                finish the recording (the end of the script does too)
 //   pos                 print the frame number, the player's position and
 //                       facing, and the camera's facing
+//   seed N              seed xrand with N at every level and menu start, and
+//                       again as play begins, from here on (iTimeSeed,
+//                       iTimeSeedPlay). A tour pins seed 1 without it; the
+//                       clock retail seeds from counts every frame presented
+//                       before the level. Before the first step that takes a
+//                       frame, it applies from the start
 //   quit                exit the process
 //
 // Buttons are the [pad] names from config.ini: a b x y z hud l1 r1 l2 r2 start

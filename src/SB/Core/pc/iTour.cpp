@@ -27,8 +27,12 @@ namespace
         OP_RECORD,
         OP_STOP,
         OP_POS,
+        OP_SEED,
         OP_QUIT
     };
+
+    // The seed a tour pins until a `seed` step says otherwise.
+    const U32 kDefaultSeed = 1;
 
     struct Step
     {
@@ -39,6 +43,7 @@ namespace
         S32 width;
         F32 sticks[4]; // left x, y, right x, y
         F32 target[3]; // goto: x, z, tolerance
+        U32 seed;
         char name[64];
     };
 
@@ -387,6 +392,9 @@ namespace
             exit(1);
         }
 
+        // Whether a step that takes frames has been read yet.
+        bool timed = false;
+
         char text[512];
         S32 line = 0;
         while (fgets(text, sizeof(text), f) != NULL)
@@ -518,6 +526,18 @@ namespace
             {
                 s->op = OP_POS;
             }
+            else if (strcmp(cmd, "seed") == 0)
+            {
+                s->op = OP_SEED;
+                s->seed = (U32)strtoul(p, NULL, 0);
+                // Before anything that takes a frame, it is the seed from the
+                // start: a level booted into is seeded before the script's
+                // first frame runs.
+                if (!timed)
+                {
+                    iTimeSetSeed(s->seed);
+                }
+            }
             else if (strcmp(cmd, "quit") == 0)
             {
                 s->op = OP_QUIT;
@@ -527,6 +547,10 @@ namespace
                 Fail(line, "unknown command", cmd);
             }
 
+            if (s->op != OP_POS && s->op != OP_SEED && s->op != OP_RECORD && s->op != OP_STOP)
+            {
+                timed = true;
+            }
             sCount++;
         }
 
@@ -669,6 +693,11 @@ namespace
                 Next();
                 continue;
 
+            case OP_SEED:
+                iTimeSetSeed(s->seed);
+                Next();
+                continue;
+
             case OP_QUIT:
                 Finish("quit");
             }
@@ -690,6 +719,7 @@ void iTourInit()
     }
 
     const char* script = getenv("BFBB_TOUR");
+    iTimeSetSeed(kDefaultSeed);
     Load(script);
 
     const char* out = getenv("BFBB_TOUR_OUT");

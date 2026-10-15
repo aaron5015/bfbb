@@ -365,7 +365,7 @@ void zGameInit(U32 theSceneID)
 {
     gGameWhereAmI = eGameWhere_InitStart;
     xtextbox::clear_layout_cache();
-    xsrand(iTimeGet());
+    xsrand(iTimeSeed());
     iTimeGet();
     xrand();
     gGameWhereAmI = eGameWhere_InitScene;
@@ -504,6 +504,7 @@ void zGameLoop()
 
     gGameWhereAmI = eGameWhere_LoopStart;
     zGameStateSwitch(eGameState_Play);
+    iTimeSeedPlay();
 
     iTime bus = (iTime)((GET_BUS_FREQUENCY() / 4) / (F32)GAME_VBLANKS_PER_SECOND);
     sTimeLast = iTimeGet() - bus;
