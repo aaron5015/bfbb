@@ -648,7 +648,7 @@ namespace
     // help line carries the table's description instead.
     const char* const kBindLabels[] = {
         "A button", "B button", "X button", "Y button", "Z (camera close)", "Show HUD",
-        "Camera left", "Camera right", "L2", "R2", "Start (pause)", "Select",
+        "Cruise bubble", "Talk / bus", "Spare L (L2)", "Spare R (R2)", "Start (pause)", "Select",
         "D-pad up", "D-pad down", "D-pad left", "D-pad right",
     };
     const S32 kBindLabelCount = (S32)(sizeof(kBindLabels) / sizeof(kBindLabels[0]));
