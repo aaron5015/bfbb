@@ -1192,6 +1192,14 @@ void iSystemInit(U32 options)
     }
 
     iTimeInit();
+
+    // A tour's clock, before the sound starts: the sound host decides at init
+    // whether to open a device or play voices out on this clock (iSndHostSDL).
+    if (iTourActive())
+    {
+        iTimeFixedStep(60);
+    }
+
     xPadInit();
     xSndInit();
     TRCInit();

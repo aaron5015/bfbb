@@ -289,7 +289,7 @@ void iTourInit()
            sOutDir[0] != '\0' ? sOutDir : "the current folder");
     fflush(stdout);
 
-    iTimeFixedStep(60);
+    // iSystemInit already runs the fixed clock: it starts it before the sound.
 
     sAt = 0;
     Begin();
