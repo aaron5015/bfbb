@@ -205,7 +205,8 @@ __declspec(weak)
 #else
 inline
 #endif
-grid_index get_grid_index(const xGrid& grid, F32 x, F32 z)
+grid_index
+get_grid_index(const xGrid& grid, F32 x, F32 z)
 {
     grid_index index = {};
     x = (x - grid.minx) * grid.inv_csizex;
@@ -230,7 +231,8 @@ template <class T>
 #ifndef XGRID_BOUND_HELPER_OUT_OF_LINE
 inline
 #endif
-    void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd, T cb)
+    void
+    xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd, T cb)
 #endif
 {
     xGridIterator it;

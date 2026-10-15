@@ -27,7 +27,8 @@ static zCamTweakLook zcam_fartweak;
 #if defined(PS2)
 inline
 #endif
-    static void zCameraTweak_LookPreCalc(zCamTweakLook* tlook, F32 d, F32 h, F32 pitch)
+    static void
+    zCameraTweak_LookPreCalc(zCamTweakLook* tlook, F32 d, F32 h, F32 pitch)
 {
     F32 tan = itan(pitch);
     F32 deltaH = d * tan;

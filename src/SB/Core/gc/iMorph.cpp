@@ -299,7 +299,8 @@ void iMorphRender(RpAtomic* model, RwMatrix* mat, S16** v_array, S16* weight, U3
 #if defined(PS2)
 asm
 #endif
-    void FastS16unpack(F32* dest, S16* v, S32 count, F32 scale)
+    void
+    FastS16unpack(F32* dest, S16* v, S32 count, F32 scale)
 {
 #if defined(PS2)
     lui v1, 0x3780 mtc1 v1, f0 nop mul.s f0, f0, f12 addiu t6, a2, -0x1 srl t6, t6, 3 sll t6, t6,
@@ -363,7 +364,8 @@ asm
 #if defined(PS2)
 asm
 #endif
-    void FastS16weight2(F32* dest, S16** v_array, S16* weight, S32 count, F32 scale)
+    void
+    FastS16weight2(F32* dest, S16** v_array, S16* weight, S32 count, F32 scale)
 {
 #if defined(PS2)
     lh a4, 0x0(a2)lh a5, 0x2(a2)pcpyh a4, a4 pcpyh a5, a5 pextlh v0, a4, a5 addiu t6, a3,
@@ -441,7 +443,8 @@ asm
 #if defined(PS2)
 asm
 #endif
-    void FastS16weight4(F32* dest, S16** v_array, S16* weight, S32 count, F32 scale)
+    void
+    FastS16weight4(F32* dest, S16** v_array, S16* weight, S32 count, F32 scale)
 {
 #if defined(PS2)
     lh a4, 0x0(a2)lh a5, 0x2(a2)lh a6, 0x4(a2)lh a7, 0x6(a2)pcpyh a4, a4 pcpyh a5, a5 pcpyh a6,

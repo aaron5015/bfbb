@@ -27,48 +27,59 @@ static st_STRAN_SCENE* XST_lock_next();
 #if defined(PS2)
 inline
 #endif
-    static void XST_unlock_all();
+    static void
+    XST_unlock_all();
 #if defined(PS2)
 inline
 #endif
-    static S32 XST_cnt_locked();
+    static S32
+    XST_cnt_locked();
 #if defined(PS2)
 inline
 #endif
-    static S32 XST_PreLoadScene(st_STRAN_SCENE* sdata, const char* path);
+    static S32
+    XST_PreLoadScene(st_STRAN_SCENE* sdata, const char* path);
 #if defined(PS2)
 inline
 #endif
-    static char* XST_translate_sid(U32 sid, char* extension);
+    static char*
+    XST_translate_sid(U32 sid, char* extension);
 #if defined(PS2)
 inline
 #endif
-    static char* XST_translate_sid_path(U32 sid, char* extension);
+    static char*
+    XST_translate_sid_path(U32 sid, char* extension);
 static st_STRAN_SCENE* XST_find_bySID(U32 sid, S32 findTheHOP);
 #if defined(PS2)
 inline
 #endif
-    static void XST_reset_raw();
+    static void
+    XST_reset_raw();
 #if defined(PS2)
 inline
 #endif
-    static void XST_unlock(st_STRAN_SCENE* sdata);
+    static void
+    XST_unlock(st_STRAN_SCENE* sdata);
 #if defined(PS2)
 inline
 #endif
-    static void XST_unlock_all();
+    static void
+    XST_unlock_all();
 #if defined(PS2)
 inline
 #endif
-    static st_STRAN_SCENE* XST_get_rawinst(S32 index);
+    static st_STRAN_SCENE*
+    XST_get_rawinst(S32 index);
 #if defined(PS2)
 inline
 #endif
-    static S32 XST_cnt_locked();
+    static S32
+    XST_cnt_locked();
 #if defined(PS2)
 inline
 #endif
-    static st_STRAN_SCENE* XST_nth_locked(S32 index);
+    static st_STRAN_SCENE*
+    XST_nth_locked(S32 index);
 
 S32 xSTStartup(st_PACKER_ASSETTYPE* handlers)
 {

@@ -31,7 +31,8 @@ void xParGroupInit(xParGroup* ps)
 #if defined(XBOX)
 inline
 #endif
-    static void xParGroupRegisterInit()
+    static void
+    xParGroupRegisterInit()
 {
     for (S32 i = 0; i < REG_TABLE_SIZE; i++)
     {

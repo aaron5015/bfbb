@@ -50,7 +50,8 @@ void zCameraTweak_Init(xBase& data, xDynAsset& asset, size_t);
 #if defined(PS2)
 inline
 #endif
-    void zCameraTweak_Init(zCameraTweak* tweak, CameraTweak_asset* asset);
+    void
+    zCameraTweak_Init(zCameraTweak* tweak, CameraTweak_asset* asset);
 void zCameraTweak_Save(zCameraTweak* tweak, xSerial* s);
 void zCameraTweak_Load(zCameraTweak* tweak, xSerial* s);
 S32 zCameraTweak_EventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* b3);

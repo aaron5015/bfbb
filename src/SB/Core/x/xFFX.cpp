@@ -46,7 +46,8 @@ xFFX* xFFXAlloc()
 #if defined(PS2)
 inline
 #endif
-    void xFFXFree(xFFX* ffx)
+    void
+    xFFXFree(xFFX* ffx)
 {
     ffx->next = alist;
     alist = ffx;
@@ -87,7 +88,8 @@ S16 xFFXAddEffect(xEnt* ent, void (*dof)(xEnt*, xScene*, F32, void*), void* fd)
 #if defined(PS2)
 inline
 #endif
-    U32 xFFXRemoveEffectByFData(xEnt* ent, void* fdata)
+    U32
+    xFFXRemoveEffectByFData(xEnt* ent, void* fdata)
 {
     xFFX** ffxh = &ent->ffx;
 
