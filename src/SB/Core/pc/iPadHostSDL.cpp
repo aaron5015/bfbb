@@ -664,6 +664,8 @@ void iPadHostPoll()
             // negates it again on the way to the game.
             s->stick_y = -s->stick_y;
             s->substick_y = -s->substick_y;
+
+            iPadStickRemap(&s->stick_x, &s->stick_y, &s->substick_x, &s->substick_y, TRUE);
         }
     }
 

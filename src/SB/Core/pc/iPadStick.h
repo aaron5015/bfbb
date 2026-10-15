@@ -37,4 +37,20 @@ void iPadStickSetDeadzone(F32 percent);
 // wants.
 S32 iPadStickDeadzone(S32 fallback);
 
+// config.ini's input.sticks: TRUE moves with the right stick and turns the
+// camera with the left. Set by iSystem and the settings screen.
+void iPadStickSetSwap(S32 swap);
+
+// config.ini's input.invert_camera_x and input.invert_camera_y. Set the same
+// way.
+void iPadStickSetInvert(S32 x, S32 y);
+
+// Turns a device's two sticks into the move and camera sticks the game reads:
+// exchanged when input.sticks says so, then the camera's axes reversed as
+// configured. Takes the backend's convention, Y up-positive.
+//
+// `canSwap` is FALSE for the keyboard. WASD and IJKL are keys named for what
+// they do, so exchanging them would only move the camera onto WASD.
+void iPadStickRemap(F32* moveX, F32* moveY, F32* camX, F32* camY, S32 canSwap);
+
 #endif

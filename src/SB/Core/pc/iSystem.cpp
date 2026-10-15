@@ -874,6 +874,10 @@ static void ApplyConfig()
         iPadStickSetDeadzone(percent);
     }
 
+    iPadStickSetSwap(iHostStrCaseCmp(iConfigGetString("input.sticks", "normal"), "swapped") == 0);
+    iPadStickSetInvert(iConfigGetBool("input.invert_camera_x", FALSE),
+                       iConfigGetBool("input.invert_camera_y", FALSE));
+
     // Where the music may be replaced from. Pushed rather than read, like the
     // text patch: nothing under here knows what config.ini is. The folder is
     // not scanned until the first sound asks for its bytes, so naming one costs

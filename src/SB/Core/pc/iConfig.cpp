@@ -168,8 +168,8 @@ namespace
         writeBindingSection(
             f, kPadSection, "a b x y lb rb lt rt ls rs back start dpup dpdown dpleft dpright",
             "; The '!' is for the gamecube preset, where l1 and l2 share a trigger and\n"
-            "; rb stands in for Z. ls and rs start bound to nothing. The sticks are\n"
-            "; not remappable: left moves, right turns the camera.\n"
+            "; rb stands in for Z. ls and rs start bound to nothing. Which stick\n"
+            "; moves and which turns the camera is input.sticks.\n"
             ";\n");
 
         writeBindingSection(

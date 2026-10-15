@@ -165,6 +165,18 @@ namespace
         iPadStickSetDeadzone(iHostStrCaseCmp(w, "auto") == 0 ? -1.0f : (F32)atof(w));
     }
 
+    void ApplySticks(const char* w)
+    {
+        iPadStickSetSwap(iHostStrCaseCmp(w, "swapped") == 0);
+    }
+
+    // Both axes, from config.ini: Store has already written this one there.
+    void ApplyInvert(const char*)
+    {
+        iPadStickSetInvert(iConfigGetBool("input.invert_camera_x", FALSE),
+                           iConfigGetBool("input.invert_camera_y", FALSE));
+    }
+
     // The startup applied the speed by multiplying the base scales (zMain.cpp,
     // after SB.INI); a change multiplies them again by new over old, so
     // SB.INI's base survives however often it is changed.
@@ -231,8 +243,14 @@ namespace
           "Auto|Xbox|GameCube|PlayStation|Original", NOW,
           "Controller type shown in button prompts.", ApplyIcons, false },
         { TAB_CONTROLS, "Camera speed", "input.camera_sensitivity", "0.5|0.75|1.0|1.25|1.5|2.0",
-          "0.5x|0.75x|1x|1.25x|1.5x|2x", NOW, "Right-stick camera speed.",
+          "0.5x|0.75x|1x|1.25x|1.5x|2x", NOW, "Camera stick speed.",
           ApplyCameraSpeed, false },
+        { TAB_CONTROLS, "Sticks", "input.sticks", "normal|swapped", "Normal|Swapped", NOW,
+          "Normal: left stick moves, right stick turns the camera.", ApplySticks, false },
+        { TAB_CONTROLS, "Invert camera X", "input.invert_camera_x", "off|on", "Off|On", NOW,
+          "Reverse the camera's left and right.", ApplyInvert, false },
+        { TAB_CONTROLS, "Invert camera Y", "input.invert_camera_y", "off|on", "Off|On", NOW,
+          "Reverse the camera's up and down.", ApplyInvert, false },
         { TAB_GAME, "Intro movies", "game.intro_movies", "on|off", "On|Off", RESTART,
           "Logos shown at startup.", NULL, false },
     };
