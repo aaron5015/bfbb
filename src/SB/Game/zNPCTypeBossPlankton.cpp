@@ -1589,6 +1589,18 @@ void zNPCBPlankton::refresh_orbit()
     else
     {
         territory_data& t = territory[active_territory];
+
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+        // The Plankton in b301, a scrapped level, has no territory links and no
+        // Robo-SpongeBob body to ride with, so he reaches here with no
+        // territory at all and would read origin->asset through NULL. The
+        // orbit stays where it was.
+        if (t.origin == NULL)
+        {
+            return;
+        }
+#endif
+
         xMovePointAsset& mp = *t.origin->asset;
 
         orbit.center = mp.pos;
