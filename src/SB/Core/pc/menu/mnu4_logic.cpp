@@ -62,7 +62,7 @@ void MNU4_BuildGroup(iAssetPkg& p)
         p.Item(H("PAUSE OPTION CONTROLS UIF"));
         p.Item(H(ISETTINGS_PAUSE_ENTRY));
         p.Item(H("PAUSE OPTION SAVE UIF"));
-        p.Item(H(IQUIT_DESKTOP_ENTRY));
+        p.Item(H(ISAVESCREEN_PAUSE_LOAD));
         p.Item(H("PAUSE OPTIONS PRESSX UIF"));
         p.Item(H("PAUSE OPTIONS PRESS TRI UIF"));
         p.End();
@@ -430,6 +430,7 @@ void MNU4_BuildGroup(iAssetPkg& p)
         p.Begin('GRUP', H("MNU4 PAUSE EXIT GAME GROUP"), a);
         p.Item(H("MNU4 EXIT GAME NO UIF"));
         p.Item(H("MNU4 EXIT GAME YES UIF"));
+        p.Item(H(IQUIT_DESKTOP_YES));
         p.Item(H("MNU4 EXIT GAME PROMPT UIF"));
         p.Item(H("BLUE ALPHA 1 UI"));
         p.Item(H("PAUSE OPTIONS PRESS TRI UIF"));
@@ -1519,19 +1520,6 @@ void MNU4_BuildPortal(iAssetPkg& p)
             p.Item(H(name));
         }
         p.Item(H(ISETTINGS_HELP));
-        p.End();
-    }
-
-    // Quit to Desktop's confirmation, as retail's MNU4 PAUSE EXIT GAME GROUP.
-    {
-        xGroupAsset a = kGroupDefaults;
-        p.Begin('GRUP', H(IQUIT_DESKTOP_GROUP), a);
-        p.Item(H(IQUIT_DESKTOP_NO));
-        p.Item(H(IQUIT_DESKTOP_YES));
-        p.Item(H(IQUIT_DESKTOP_PROMPT));
-        p.Item(H("BLUE ALPHA 1 UI"));
-        p.Item(H("PAUSE OPTIONS PRESS TRI UIF"));
-        p.Item(H("PAUSE OPTIONS PRESSX UIF"));
         p.End();
     }
 }

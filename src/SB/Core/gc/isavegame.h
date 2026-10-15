@@ -188,4 +188,7 @@ S32 iSGCheckForCorruptFiles(st_ISGSESSION*, char files[][64]);
 // The PC port keeps a still of the game for its save list; see pc/isavegame.h.
 #define iSGCaptureThumb()
 
+// The PC port can load a game from the pause menu; see pc/isavegame.h.
+#define iSGShowMenu(show, scene) (show)
+
 #endif

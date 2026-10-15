@@ -976,7 +976,7 @@ void zMainLoop()
             zCutSceneNamesTable_clearAll();
             zMainShowProgressBar();
 
-            if (sShowMenuOnBoot)
+            if (iSGShowMenu(sShowMenuOnBoot, &newGameSceneID))
             {
                 zMenuInit(menuModeID);
                 zMainShowProgressBar();

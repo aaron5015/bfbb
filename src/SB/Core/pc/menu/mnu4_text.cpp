@@ -31,7 +31,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("LD BADFORMAT TXT"),
            "{c=ffff0000}Save failed!{~:c}{n}The save folder could not be written to.{n}Press "
            "{i:ui_accept} to continue.");
-    p.Text(H("LD BADLOAD TXT"), "{c=ffff0000}Load failed!{~:c} Unable to load game. Press {i:ui_accept} to continue");
+    p.Text(H("LD BADLOAD TXT"), ISAVESCREEN_BADLOAD_SAY);
     p.Text(H("LD ERR NOCARD TXT"), "No save folder was found.");
     p.Text(H("LD ERR NOGAME TXT"), "No SpongeBob games were found.");
     p.Text(H("LD FORMAT PROMPT TXT"), "Your save folder is not ready.{n}{n}Do you wish to create it?");
@@ -100,7 +100,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("MNU4 BUSSTOP TXT"), "Pull the {i:button_exitlevel_text} to switch characters");
     p.Text(H("MNU4 D-PAD ADJUST TXT"), "{c=ff646464}{~:c}< > Adjust");
     p.Text(H("MNU4 EXIT GAME NO TXT"), "No");
-    p.Text(H("MNU4 EXIT GAME PROMPT TXT"), "Quit to Main Menu and lose all unsaved game data ?");
+    p.Text(H("MNU4 EXIT GAME PROMPT TXT"), "Quit the game and lose all unsaved game data ?");
     p.Text(H("MNU4 EXIT GAME YES TXT"), "Yes");
     p.Text(H("MNU4 FREE DISK TEXT"), "Available Free Space: {var:SpaceAvailableString}");
     p.Text(H("MNU4 OPTIONS SCREEN TXT"), "Screen Adjust");
@@ -125,7 +125,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("PAUSE OPTIONS CONTROLS TXT"), "Options");
     p.Text(H("PAUSE OPTIONS EXIT LEVEL TXT"), "Exit {var:CurrentScene}");
     p.Text(H("PAUSE OPTIONS LOAD TXT"), "Load Game");
-    p.Text(H("PAUSE OPTIONS QUIT TXT"), "Quit to Main Menu");
+    p.Text(H("PAUSE OPTIONS QUIT TXT"), "Quit Game");
     p.Text(H("PAUSE OPTIONS RETURN TXT"), "Return to previous menu");
     p.Text(H("PAUSE OPTIONS SAVE TXT"), "Save Game");
     p.Text(H("PAUSE OPTIONS TXT"), "{i:ui_options} Options");
@@ -246,9 +246,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("SOUND TITLE TXT"), "Sound Mode");
     p.Text(H("SQUARE TXT"), "{i:ui_misc}");
     p.Text(H("STEREO TXT"), "Stereo");
-    p.Text(H("SV BADSAVE TXT"),
-           "{c=ffff0000}Save failed!{~:c} There is not enough free space to create new save games. "
-           "Press {i:ui_accept} to continue.");
+    p.TextSpace(H(ISAVESCREEN_BADSAVE_TEXT), ISAVESCREEN_BADSAVE_SAY, 160);
     p.Text(H("SV FORMAT CONFIRM TXT"), "Are you sure you wish to create your save folder?");
     p.Text(H("SV MC DONTREMOVE PAL TXT"), "WARNING: {var:MCAccessType}...{n}Do not close the game while it is saving.");
     p.Text(H("SV MC DONTREMOVE TXT"), "Saving Game.....{n}Do not close the game while it is saving.");
@@ -256,7 +254,7 @@ void MNU4_BuildText(iAssetPkg& p)
            "There is not enough free space to create new save games. Press {i:ui_accept} to "
            "continue.");
     p.Text(H("SV NOSPACEGAME TXT"), "There is not enough space to save your game.");
-    p.Text(H("SV OVERWRITE TXT"), "A game already exists. Would you like to overwrite it?");
+    p.TextSpace(H(ISAVESCREEN_OVERWRITE_TEXT), ISAVESCREEN_OVERWRITE_ASK, 128);
     p.Text(H("SV RETRY TXT"), "{i:ui_accept} Retry");
     p.Text(H("TASK TXT 01"), "Complete task numero uno.");
     p.Text(H("TASK TXT 02"), "complete task numero dos.");
@@ -373,9 +371,10 @@ void MNU4_BuildText(iAssetPkg& p)
     // menu entries that open it.
     p.Text(H("PC SETTINGS TXT"), "Settings");
 
-    // The pause menu's Quit to Desktop and its confirmation.
+    // Quit Game's three choices (iQuitDesktop.h).
+    p.Text(H("PC QUIT MAIN MENU TXT"), "Quit to Main Menu");
     p.Text(H("PC QUIT DESKTOP TXT"), HOST_QUIT);
-    p.Text(H("PC QUIT DESKTOP PROMPT TXT"), HOST_QUIT " and lose all unsaved game data ?");
+    p.Text(H("PC QUIT CANCEL TXT"), "Cancel");
     p.TextSpace(H(ISETTINGS_TITLE_TEXT), "Settings", 256);
     p.TextSpace(H(ISETTINGS_HELP_TEXT), "", 256);
     for (S32 i = 0; i < ISETTINGS_ROWS; i++)

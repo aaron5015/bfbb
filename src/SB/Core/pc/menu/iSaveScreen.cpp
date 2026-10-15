@@ -17,6 +17,14 @@
 // rewritten as the list scrolls, inside the groups the retail screens focus.
 // Up and down move the selection here; the rows' own links play the sounds and
 // undo the screen on Back, as retail's rows did.
+//
+// The pause menu's Load Game is the save screen's widgets listing saves to
+// load. Retail cut loading from the pause menu: no game loop answers its
+// entry. A save picked there is read in the level and kept aside, because
+// leaving the level wipes the buffer it is read into. The level is left the
+// way Quit to Main Menu leaves it, and where the main loop would show the
+// title, iSGShowMenu puts the save back and sends it into the save's scene,
+// as a load on the title does.
 
 #include "iSaveScreen.h"
 
@@ -37,7 +45,9 @@
 #include "xPad.h"
 #include "xString.h"
 #include "xsavegame.h"
+#include "xserializer.h"
 #include "zGame.h"
+#include "zGameExtras.h"
 #include "zGameState.h"
 #include "zGlobals.h"
 #include "zSaveLoad.h"
@@ -77,6 +87,85 @@ namespace
     S32 sCount;
     S32 sSel;
     S32 sTop;
+
+    // The save screen's widgets are showing saves to load, from the pause menu.
+    bool sLoadInGame;
+
+    // A copy of the serial buffer, client by client: the whole game a save
+    // holds, which zGameInit builds the next scene from.
+    struct KeptClient
+    {
+        U32 id;
+        S32 size;
+        S32 offset;
+    };
+
+    struct SerialCopy
+    {
+        KeptClient* clients;
+        S32 count;
+        char* bytes;
+        S32 used;
+    };
+
+    SerialCopy* sCopying;
+
+    S32 CopyOutCB(U32 id, xSerial* xser)
+    {
+        const st_SERIAL_CLIENTINFO* c = xser->ctxtdata;
+        SerialCopy& k = *sCopying;
+        k.clients = (KeptClient*)realloc(k.clients, sizeof(KeptClient) * (size_t)(k.count + 1));
+        k.bytes = (char*)realloc(k.bytes, (size_t)(k.used + c->actsize));
+        KeptClient& kc = k.clients[k.count++];
+        kc.id = id;
+        kc.size = c->actsize;
+        kc.offset = k.used;
+        memcpy(k.bytes + k.used, c->membuf, (size_t)c->actsize);
+        k.used += c->actsize;
+        return 1;
+    }
+
+    S32 CopyInCB(U32 id, xSerial* xser)
+    {
+        const st_SERIAL_CLIENTINFO* c = xser->ctxtdata;
+        const SerialCopy& k = *sCopying;
+        for (S32 i = 0; i < k.count; i++)
+        {
+            if (k.clients[i].id == id)
+            {
+                const S32 n = k.clients[i].size < c->actsize ? k.clients[i].size : c->actsize;
+                memcpy(c->membuf, k.bytes + k.clients[i].offset, (size_t)n);
+                break;
+            }
+        }
+        return 1;
+    }
+
+    void SerialKeep(SerialCopy& k)
+    {
+        sCopying = &k;
+        xSerialTraverse(CopyOutCB);
+        sCopying = NULL;
+    }
+
+    void SerialPutBack(SerialCopy& k)
+    {
+        sCopying = &k;
+        xSerialTraverse(CopyInCB);
+        sCopying = NULL;
+    }
+
+    void SerialFree(SerialCopy& k)
+    {
+        free(k.clients);
+        free(k.bytes);
+        memset(&k, 0, sizeof(k));
+    }
+
+    // The save loaded from the pause menu, kept across the level's exit, which
+    // wipes the buffer it was read into. iSGShowMenu puts it back.
+    bool sPending;
+    SerialCopy sLoaded;
 
     void Send(const char* name, U32 event)
     {
@@ -307,15 +396,15 @@ namespace
         char text[ISAVESCREEN_ROW_TEXT_SIZE];
 
         S32 saves = sCount - ((save && sCount > 0 && sEntries[0].fresh) ? 1 : 0);
+        const char* name = !save ? "Load saved game" : sLoadInGame ? "Load Game" : "Save Game";
         char title[64];
         if (saves == 0)
         {
-            snprintf(title, sizeof(title), save ? "Save Game" : "Load saved game");
+            snprintf(title, sizeof(title), "%s", name);
         }
         else
         {
-            snprintf(title, sizeof(title), "%s{n}%d of %d", save ? "Save Game" : "Load saved game",
-                     (int)(sSel + 1), (int)sCount);
+            snprintf(title, sizeof(title), "%s{n}%d of %d", name, (int)(sSel + 1), (int)sCount);
         }
         iAssetTextSet(xStrHash(save ? "SAVE GAME TXT" : "LD LOAD GAME TXT"), title);
 
@@ -495,8 +584,9 @@ namespace
     }
 
     // What retail's SaveLoop does when the folder chooser is backed out of:
-    // put the pause menu's Options back, or the new-game question on the title.
-    void SaveBack()
+    // put the pause menu's Options back, with `entry` selected, or the
+    // new-game question on the title.
+    void SaveBack(const char* entry)
     {
         if (gGameState != 0)
         {
@@ -504,7 +594,7 @@ namespace
             Send("PAUSE OPTIONS BKG GROUP", eEventUIFocusOn_Select);
             Send("PAUSE OPTIONS GROUP", eEventUIFocusOn);
             Send("PAUSE OPTION MGR UIF", eEventUIFocusOn_Select);
-            Send("PAUSE OPTION SAVE UIF", eEventUIFocusOn_Select);
+            Send(entry, eEventUIFocusOn_Select);
         }
         else
         {
@@ -530,7 +620,7 @@ namespace
             Show(true);
             if (!Choose(true))
             {
-                SaveBack();
+                SaveBack("PAUSE OPTION SAVE UIF");
                 break;
             }
 
@@ -611,7 +701,117 @@ namespace
         sAccessType = 0;
         return saveSuccess;
     }
+
+    // Whether the pause menu's Load Game switched the game to Save mode: its
+    // confirm leaves it selected.
+    bool PauseLoadRequested()
+    {
+        _zUI* entry = (_zUI*)zSceneFindObject(xStrHash(ISAVESCREEN_PAUSE_LOAD));
+        return entry != NULL && (entry->uiFlags & 2) != 0;
+    }
+
+    // Loading throws the game in progress away, so the save screen's
+    // overwrite question asks about that instead. Yes is 3, as it is there.
+    bool ConfirmLoad()
+    {
+        const U32 id = xStrHash(ISAVESCREEN_OVERWRITE_TEXT);
+        iAssetTextSet(id, "Load this game and lose all unsaved game data ?");
+        const S32 answer = zSaveLoad_CardPromptOverwrite();
+        iAssetTextSet(id, ISAVESCREEN_OVERWRITE_ASK);
+        if (answer == 5)
+        {
+            zSaveLoad_ErrorPrompt(0);
+        }
+        return answer == 3;
+    }
+
+    void PauseLoadScreen()
+    {
+        zSaveLoadInit();
+        sAccessType = 1;
+        sLoadInGame = true;
+        Collect(false);
+        sSel = 0;
+        sTop = 0;
+
+        for (;;)
+        {
+            Show(true);
+            if (!Choose(true))
+            {
+                SaveBack(ISAVESCREEN_PAUSE_LOAD);
+                break;
+            }
+
+            const Entry& e = sEntries[sSel];
+            if (e.corrupt || !ConfirmLoad())
+            {
+                continue;
+            }
+            currentCard = e.tgt;
+            currentGame = e.game;
+
+            Send("SV GAMESLOT GROUP", eEventUIFocusOff_Unselect);
+            Send("SV MAKE INVISIBLE", eEventInvisible);
+            Send("SV SAVE GAME TITLE UIF", eEventInvisible);
+            DropStill(true);
+
+            // Read here, while the level's widgets are there for the read to
+            // show its progress on: between scenes there are none, and the
+            // read sends to them unchecked. A read that fails part way has
+            // written over the game in progress, which goes back.
+            SerialCopy playing = {};
+            SerialKeep(playing);
+            const S32 rc = zSaveLoad_LoadGame();
+            if (rc != 1)
+            {
+                SerialPutBack(playing);
+                SerialFree(playing);
+                const U32 id = xStrHash(ISAVESCREEN_BADSAVE_TEXT);
+                iAssetTextSet(id, ISAVESCREEN_BADLOAD_SAY);
+                zSaveLoad_ErrorPrompt(0);
+                iAssetTextSet(id, ISAVESCREEN_BADSAVE_SAY);
+                continue;
+            }
+            SerialFree(playing);
+            SerialFree(sLoaded);
+            SerialKeep(sLoaded);
+            sPending = true;
+
+            // What Quit to Main Menu's Yes sends.
+            Send("MNU4 NPCTALK", eEventInvisible);
+            Send("PAUSE STATE DISP", eEventDispatcher_SetGameState_Exit);
+            Send("MNU4 TELEPORT BOX", eEventInvisible);
+            break;
+        }
+
+        DropStill(true);
+        sLoadInGame = false;
+        sAccessType = 0;
+    }
 } // namespace
+
+S32 iSGShowMenu(S32 show, U32* scene)
+{
+    if (!sPending)
+    {
+        return show;
+    }
+    sPending = false;
+    SerialPutBack(sLoaded);
+    SerialFree(sLoaded);
+
+    // What the title does around a load: zMenuSetup's health, zMenuLoop's
+    // reset of the cheats, and the autosave LoadScreen turns on.
+    globals.player.MaxHealth = 3;
+    zGameExtras_NewGameReset();
+    globals.autoSaveFeature = 1;
+
+    // zMenuUpdateMode's answer to a save made on the menu.
+    const U32 code = SceneCode();
+    *scene = code == 'MNU3' ? 'HB00' : code;
+    return FALSE;
+}
 
 // The title's Settings entry comes through Load mode and the pause menu's
 // through Save mode; see iSettingsScreen.cpp.
@@ -647,6 +847,11 @@ U32 iSGSaveLoop()
     if (iQuitDesktopRequested())
     {
         iWindowRequestClose();
+        return 0;
+    }
+    if (gGameState != 0 && PauseLoadRequested())
+    {
+        PauseLoadScreen();
         return 0;
     }
     return SaveScreen();

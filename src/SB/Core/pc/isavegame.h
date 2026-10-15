@@ -264,4 +264,10 @@ S32 iSGThumbPath(S32 tgt, S32 game, char* out, U32 outsize);
 U32 iSGLoadLoop();
 U32 iSGSaveLoop();
 
+// Whether the main loop goes to the title after a game ends: `show`, its own
+// answer, unless the pause menu's Load Game picked a save. Then the save is
+// read here and FALSE sends the main loop straight into its scene, written to
+// *scene. gc/isavegame.h makes it `show`.
+S32 iSGShowMenu(S32 show, U32* scene);
+
 #endif

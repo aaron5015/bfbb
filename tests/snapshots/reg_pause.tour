@@ -1,6 +1,7 @@
 # The pause menu in Jellyfish Fields at 640x480 on Direct3D 9. The jf01 route
 # leaves Squidward's talk box at 2400; Start pauses on the Jellyfish Fields
-# task page, Right selects its second task, X opens the options.
+# task page, Right selects its second task, X opens the options. Quit Game,
+# four down, asks where to quit to.
 
 wait 2400
 press b
@@ -14,3 +15,14 @@ shot reg_pause_next_task 0
 press x
 wait 60
 shot reg_pause_options 0
+press down
+wait 30
+press down
+wait 30
+press down
+wait 30
+press down
+wait 30
+press a
+wait 60
+shot reg_pause_quit 0
