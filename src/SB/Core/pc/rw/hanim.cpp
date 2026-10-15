@@ -60,6 +60,14 @@ RwBool RpHAnimFrameSetHierarchy(RwFrame* frame, RpHAnimHierarchy* hierarchy)
     }
 
     data->hierarchy = asHierarchy(hierarchy);
+
+    // The frame owns the hierarchy: librw's frame destructor frees it only when
+    // parentFrame is that frame. iModel.cpp creates one for every skinned model
+    // whose stream carries none, and frees it by destroying the frame.
+    if (hierarchy != NULL)
+    {
+        data->hierarchy->parentFrame = reinterpret_cast<rw::Frame*>(frame);
+    }
     return TRUE;
 }
 
