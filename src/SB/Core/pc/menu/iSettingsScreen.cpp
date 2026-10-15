@@ -1086,8 +1086,8 @@ void iSettingsRun(S32 fromPause)
             BuildList();
             sSel = 0;
             sTop = 0;
+            // Selecting the row plays the turn's sound: its link's.
             SelectRow(0, true);
-            Send("MNU4 MOVE B SFX", eEventPlay);
             Draw();
             continue;
         }
