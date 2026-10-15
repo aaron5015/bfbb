@@ -258,7 +258,7 @@ Expert mode through panhandle are the cheats from the original button codes.
 
 ### Fixed bugs
 
-The port fixes these bugs from the original game. The two with a setting can be
+The port fixes these bugs from the original game. The ones with a setting can be
 turned off for console-accurate behaviour.
 
 | Bug | Fix | Setting |
@@ -266,6 +266,7 @@ turned off for console-accurate behaviour.
 | 3D sound is panned to the wrong side on GameCube. | Swaps left and right, as the community's Action Replay code does. | none |
 | The pause menu's bamboo frame has no rope at its corners. The rope is drawn on the horizontal poles, and the vertical poles are drawn over it. | Draws the vertical poles first. | `[fixes] menu_rope` |
 | The sky is missing on Goo Lagoon's pier. The skydome sits beyond the far clip plane, which that level sets at the fog distance. | Shrinks the dome around the camera until it fits. It looks the same on screen. | `[fixes] sky_clip` |
+| Hitting a Goo Lagoon beach umbrella plays a low, buzzing sound. A melee attack hits its target again on every frame of contact, and each hit starts another copy of the sound. | Hits a target once per contact. | `[fixes] melee_once` |
 
 ## How it works
 

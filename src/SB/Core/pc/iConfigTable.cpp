@@ -144,6 +144,10 @@ const iConfigSetting kConfigSettings[] = {
       "Shrink skydomes that are too large for the camera's far clip. Off: the\n"
       "; original sky, which is clipped on the Goo Lagoon pier.",
       ICONFIG_BOOL, NULL, kNone, kNone },
+    { "fixes", "melee_once", "on",
+      "Hit a target once per contact. Off: once per frame of contact, which stacks\n"
+      "; the Goo Lagoon umbrellas' hit sound into a buzz.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
     { "cheats", "all_warps", "off",
       "Let the pause menu's taxi go to every spatula, found or not.", ICONFIG_BOOL, NULL,
       kNone, kNone },

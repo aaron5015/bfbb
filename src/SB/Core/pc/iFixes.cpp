@@ -14,8 +14,26 @@ namespace
     // boundary and lose whichever vertices round the wrong way.
     const F32 kFarPlaneMargin = 0.98f;
 
+    // How long a target can go without a melee hit before the next one is a
+    // new contact. One attack's hits on a target land on consecutive updates;
+    // two attacks are further apart than this.
+    const F64 kMeleeContactGap = 0.1;
+
+    // Targets in contact at once. A spin touches two or three at most; when
+    // this fills, the stalest entry goes, which has long since ended.
+    const S32 kMeleeContacts = 16;
+
+    struct MeleeContact
+    {
+        const void* ent;
+        F64 last;
+    };
+
+    MeleeContact sMeleeContacts[kMeleeContacts];
+
     S32 sMenuRope = TRUE;
     S32 sSkyClip = TRUE;
+    S32 sMeleeOnce = TRUE;
 }
 
 S32 iFixMenuRope()
@@ -36,6 +54,54 @@ S32 iFixSkyClip()
 void iFixSetSkyClip(S32 on)
 {
     sSkyClip = on;
+}
+
+S32 iFixMeleeOnce()
+{
+    return sMeleeOnce;
+}
+
+void iFixSetMeleeOnce(S32 on)
+{
+    sMeleeOnce = on;
+}
+
+S32 iFixMeleeNewContact(const void* ent, F64 now)
+{
+    if (!sMeleeOnce || ent == NULL)
+    {
+        return TRUE;
+    }
+
+    for (S32 i = 0; i < kMeleeContacts; i++)
+    {
+        if (sMeleeContacts[i].ent == ent)
+        {
+            F64 gap = now - sMeleeContacts[i].last;
+            sMeleeContacts[i].last = now;
+
+            // A clock that went backwards is a new game, not a contact.
+            return gap < 0.0 || gap > kMeleeContactGap;
+        }
+    }
+
+    MeleeContact* slot = &sMeleeContacts[0];
+    for (S32 i = 0; i < kMeleeContacts; i++)
+    {
+        if (sMeleeContacts[i].ent == NULL)
+        {
+            slot = &sMeleeContacts[i];
+            break;
+        }
+        if (sMeleeContacts[i].last < slot->last)
+        {
+            slot = &sMeleeContacts[i];
+        }
+    }
+
+    slot->ent = ent;
+    slot->last = now;
+    return TRUE;
 }
 
 S32 iFixSkyDomeToFarPlane(RwMatrix* mat, const RwV3d* eye, const RwSphere* world, RwMatrix* saved)

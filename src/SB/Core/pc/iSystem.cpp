@@ -834,6 +834,7 @@ static void ApplyConfig()
     // and why it has a switch at all.
     iFixSetMenuRope(iConfigGetBool("fixes.menu_rope", TRUE));
     iFixSetSkyClip(iConfigGetBool("fixes.sky_clip", TRUE));
+    iFixSetMeleeOnce(iConfigGetBool("fixes.melee_once", TRUE));
 
     iCheatSetAllWarps(iConfigGetBool("cheats.all_warps", FALSE));
     iCheatSetBubbleBowl(iConfigGetBool("cheats.bubble_bowl", FALSE));

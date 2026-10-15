@@ -30,6 +30,7 @@
 #include "xEnt.h"
 #include "xEntBoulder.h"
 #include "xEvent.h"
+#include "xFixes.h"
 #include "xJaw.h"
 #include "xMath.h"
 #include "xMathInlines.h"
@@ -3830,7 +3831,13 @@ static S32 CheckObjectAgainstMeleeBound(xEnt* cbent, void* cbdata)
     {
         xFXShineStart((xVec3*)&cbent->model->Mat->pos, 1.0f, 0.3f, 0.01f, 0.1f, 0, NULL, NULL, 0.1f,
                       0);
-        zEntEvent(cbent, 0x163);
+        // Retail sends this on every update of contact; see iFixes.h.
+#ifdef PLATFORM_PC
+        if (iFixMeleeNewContact(cbent, gGameSeconds))
+#endif
+        {
+            zEntEvent(cbent, 0x163);
+        }
     }
 
     if (cbent->baseType == eBaseTypeNPC)

@@ -79,4 +79,33 @@ void iFixSetSkyClip(S32 on);
 S32 iFixSkyDomeToFarPlane(RwMatrix* mat, const RwV3d* eye, const RwSphere* world,
                           RwMatrix* saved);
 
+// **A melee hit reaches its target once per frame of contact, not once.**
+//
+// CheckObjectAgainstMeleeBound (zEntPlayer.cpp) sends eEventHit_Melee on every
+// update in which the attack's bound overlaps the target. SpongeBob's bubble
+// spin, Patrick's and Sandy's melee and the slide all run it once a frame
+// while they are live, and none of them remembers what it already hit. The
+// function is 100% matched, and the Xbox's xSFXEventCB, xSndPlayInternal and
+// voice allocator have no duplicate check either: the console does this too.
+//
+// 27 entities in the retail data link the event, and the Goo Lagoon beach
+// umbrellas are 18 of them. Each one's hit plays SFX 3f533410 or 3f533411,
+// Umbrella_hit1, a 2.1 s sample, and every update of contact starts another
+// copy of it one frame behind the last: 3 from a spin beside the umbrella, 9
+// from a spin at its pole, up to 16 from Patrick's swing. The copies
+// comb-filter one another into a lower, buzzing pitch. Above 60 fps there are
+// more of them, closer together. The other nine are 8 HB02 platforms that
+// send Run, and one HB03 object that turns its collision off and on and plays
+// a sound.
+//
+// The fix sends the event on the first update of a contact only. A contact
+// ends when the target goes kMeleeContactGap without a hit. Off: one event per
+// update of contact, as the game shipped.
+S32 iFixMeleeOnce();
+void iFixSetMeleeOnce(S32 on);
+
+// Whether a melee hit on `ent` at game time `now` starts a new contact, and so
+// should send eEventHit_Melee. Always TRUE with the fix off.
+S32 iFixMeleeNewContact(const void* ent, F64 now);
+
 #endif

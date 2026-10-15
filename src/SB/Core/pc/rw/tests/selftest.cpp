@@ -1101,6 +1101,33 @@ static void test_cameras()
         RwCameraEndUpdate(camera);
     }
 
+    // ---- one melee event per contact ----
+    {
+        static int umbrella;
+        static int other;
+        const F64 frame = 1.0 / 60.0;
+
+        check(iFixMeleeNewContact(&umbrella, 100.0) == TRUE, "the first update of contact is a hit");
+        check(iFixMeleeNewContact(&umbrella, 100.0 + frame) == FALSE,
+              "the next update of the same contact is not");
+        S32 again = 0;
+        for (S32 i = 2; i <= 8; i++)
+        {
+            again += iFixMeleeNewContact(&umbrella, 100.0 + i * frame);
+        }
+        check(again == 0, "nor is any of the rest of a spin's nine, while the updates keep coming");
+        check(iFixMeleeNewContact(&other, 100.0 + 8 * frame) == TRUE,
+              "a second target touched on the same update is its own contact");
+        check(iFixMeleeNewContact(&umbrella, 101.0) == TRUE, "a hit after a pause is a new contact");
+        check(iFixMeleeNewContact(&umbrella, 50.0) == TRUE,
+              "and so is one after the clock went backwards");
+
+        iFixSetMeleeOnce(FALSE);
+        check(iFixMeleeNewContact(&umbrella, 50.0 + frame) == TRUE,
+              "fixes.melee_once off hits on every update, as the game shipped");
+        iFixSetMeleeOnce(TRUE);
+    }
+
     reinterpret_cast<rw::Camera*>(camera)->setFrame(NULL);
     RwFrameDestroy(frame);
 
