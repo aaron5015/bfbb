@@ -176,6 +176,12 @@ bool iHostSetChildEnv(const char* name, const char* value);
 // of the check.
 bool iHostRunDetached(const char* exe, const char* workingDir);
 
+// Run `command` through the shell with a binary pipe to its stdin. NULL if it
+// could not be started. Close with iHostPipeClose, which waits for it to exit
+// and returns its exit status.
+FILE* iHostPipeOpen(const char* command);
+int iHostPipeClose(FILE* pipe);
+
 // `path` made absolute, without requiring it to exist -- it names a file that
 // is about to be written as often as one that is there. Separators in `out`
 // are '/', as iHostExeDir gives them.

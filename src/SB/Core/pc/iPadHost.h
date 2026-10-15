@@ -105,4 +105,8 @@ S32 iPadHostCaptureButton(S32 prime, char* out, S32 size);
 // every real controller and the keyboard are ignored.
 void iPadHostScript(S32 on, U32 buttons);
 
+// For iTour.h: the sticks port 0 holds while scripted, in iPadHostState's
+// units (full deflection at magnitude 1, Y up-positive).
+void iPadHostScriptSticks(F32 x, F32 y, F32 subx, F32 suby);
+
 #endif

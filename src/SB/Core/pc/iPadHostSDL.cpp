@@ -106,6 +106,7 @@ static const bool sReportPad = getenv("BFBB_PAD") != NULL;
 // Port 0 as a tour script holds it; see iPadHostScript.
 static bool sScripted;
 static U32 sScriptButtons;
+static F32 sScriptSticks[4];
 
 // ---------------------------------------------------------------------------
 // Buttons
@@ -520,6 +521,14 @@ void iPadHostScript(S32 on, U32 buttons)
     sScriptButtons = buttons;
 }
 
+void iPadHostScriptSticks(F32 x, F32 y, F32 subx, F32 suby)
+{
+    sScriptSticks[0] = x;
+    sScriptSticks[1] = y;
+    sScriptSticks[2] = subx;
+    sScriptSticks[3] = suby;
+}
+
 void iPadHostReloadBindings()
 {
     LoadPadBindings();
@@ -703,6 +712,10 @@ void iPadHostPoll()
         }
         sState[0].connected = true;
         sState[0].buttons = sScriptButtons;
+        sState[0].stick_x = sScriptSticks[0];
+        sState[0].stick_y = sScriptSticks[1];
+        sState[0].substick_x = sScriptSticks[2];
+        sState[0].substick_y = sScriptSticks[3];
         return;
     }
 

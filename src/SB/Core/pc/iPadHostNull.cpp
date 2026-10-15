@@ -73,6 +73,10 @@ void iPadHostScript(S32, U32)
 {
 }
 
+void iPadHostScriptSticks(F32, F32, F32, F32)
+{
+}
+
 S32 iPadHostCaptureKey(S32, char*, S32)
 {
     return FALSE;

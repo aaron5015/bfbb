@@ -242,3 +242,9 @@ const char* iSndHostName()
 {
     return "null (silent, but keeps time)";
 }
+
+// Nothing here mixes, so a recording gets no sound.
+void iSndHostSetSink(iSndHostSink sink)
+{
+    (void)sink;
+}

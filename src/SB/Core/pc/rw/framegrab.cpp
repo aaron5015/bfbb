@@ -69,33 +69,28 @@ namespace
     }
 } // namespace
 
-S32 iFrameGrabWrite(const char* path, S32 maxWidth)
+U8* iFrameGrabRGB(S32 maxWidth, S32* outWidth, S32* outHeight)
 {
     // Kept between calls; the copy target is a render target, not worth
     // making per shot.
     static RwRaster* sFrame;
 
-    if (path == NULL)
-    {
-        return FALSE;
-    }
-
     RwRaster* frame = iSnapshotCopyFrame(sFrame);
     sFrame = frame;
     if (frame == NULL)
     {
-        return FALSE;
+        return NULL;
     }
 
     rw::Image* img = reinterpret_cast<rw::Raster*>(frame)->toImage();
     if (img == NULL)
     {
-        return FALSE;
+        return NULL;
     }
     if (img->depth != 32 || img->width <= 0 || img->height <= 0)
     {
         img->destroy();
-        return FALSE;
+        return NULL;
     }
 
     const int sw = img->width;
@@ -112,14 +107,11 @@ S32 iFrameGrabWrite(const char* path, S32 maxWidth)
         }
     }
 
-    // Each row is a filter byte (0, none) and the pixels.
-    const size_t rowBytes = 1 + (size_t)w * 3;
-    const size_t rawSize = rowBytes * h;
-    U8* raw = (U8*)malloc(rawSize);
-    if (raw == NULL)
+    U8* rgb = (U8*)malloc((size_t)w * h * 3);
+    if (rgb == NULL)
     {
         img->destroy();
-        return FALSE;
+        return NULL;
     }
 
     // An area average, as the save stills do it.
@@ -132,8 +124,7 @@ S32 iFrameGrabWrite(const char* path, S32 maxWidth)
             y1 = y0 + 1;
         }
 
-        U8* row = raw + rowBytes * y;
-        row[0] = 0;
+        U8* row = rgb + (size_t)w * 3 * y;
 
         for (int x = 0; x < w; x++)
         {
@@ -157,7 +148,7 @@ S32 iFrameGrabWrite(const char* path, S32 maxWidth)
                 }
             }
 
-            U8* d = row + 1 + x * 3;
+            U8* d = row + x * 3;
             d[0] = (U8)(r / n);
             d[1] = (U8)(g / n);
             d[2] = (U8)(b / n);
@@ -165,6 +156,41 @@ S32 iFrameGrabWrite(const char* path, S32 maxWidth)
     }
 
     img->destroy();
+
+    *outWidth = w;
+    *outHeight = h;
+    return rgb;
+}
+
+S32 iFrameGrabWrite(const char* path, S32 maxWidth)
+{
+    if (path == NULL)
+    {
+        return FALSE;
+    }
+
+    S32 w, h;
+    U8* rgb = iFrameGrabRGB(maxWidth, &w, &h);
+    if (rgb == NULL)
+    {
+        return FALSE;
+    }
+
+    // Each row is a filter byte (0, none) and the pixels.
+    const size_t rowBytes = 1 + (size_t)w * 3;
+    const size_t rawSize = rowBytes * h;
+    U8* raw = (U8*)malloc(rawSize);
+    if (raw == NULL)
+    {
+        free(rgb);
+        return FALSE;
+    }
+    for (S32 y = 0; y < h; y++)
+    {
+        raw[rowBytes * y] = 0;
+        memcpy(raw + rowBytes * y + 1, rgb + (size_t)w * 3 * y, (size_t)w * 3);
+    }
+    free(rgb);
 
     // zlib stream: header, stored blocks of at most 65535 bytes, Adler-32.
     const size_t blocks = rawSize / 65535 + 1;

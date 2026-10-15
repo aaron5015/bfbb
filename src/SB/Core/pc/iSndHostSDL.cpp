@@ -750,6 +750,50 @@ bool iSndHostIsPlaying(S32 voice)
     return playing;
 }
 
+// A recording tour's sound: the silent path's step, mixed rather than skipped.
+// Whole frames only, with the remainder carried, so the recording has exactly
+// as many samples as the tour has time.
+static iSndHostSink sSink;
+static double sSinkCarry;
+
+static void iMixToSink(double frames)
+{
+    frames += sSinkCarry;
+    U32 whole = (U32)frames;
+    sSinkCarry = frames - (double)whole;
+
+    const U32 kChunk = 4096;
+    if (sMixBuffer == NULL || sMixBufferFrames < kChunk)
+    {
+        free(sMixBuffer);
+        sMixBuffer = (float*)malloc(sizeof(float) * 2 * kChunk);
+        sMixBufferFrames = sMixBuffer != NULL ? kChunk : 0;
+    }
+    if (sMixBuffer == NULL)
+    {
+        return;
+    }
+
+    while (whole > 0)
+    {
+        U32 n = whole < sMixBufferFrames ? whole : sMixBufferFrames;
+
+        SDL_LockMutex(sLock);
+        iMixLocked(n);
+        SDL_UnlockMutex(sLock);
+
+        iClamp(n);
+        sSink(sMixBuffer, n, sOutRate);
+        whole -= n;
+    }
+}
+
+void iSndHostSetSink(iSndHostSink sink)
+{
+    sSink = sink;
+    sSinkCarry = 0.0;
+}
+
 void iSndHostUpdate()
 {
     if (sDeviceUp)
@@ -776,6 +820,12 @@ void iSndHostUpdate()
     double frames = ((double)elapsed / 1000000000.0) * (double)sOutRate;
 
     iEnsureLock();
+
+    if (sSink != NULL)
+    {
+        iMixToSink(frames);
+        return;
+    }
 
     SDL_LockMutex(sLock);
 
