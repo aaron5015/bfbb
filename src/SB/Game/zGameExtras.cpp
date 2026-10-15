@@ -476,7 +476,7 @@ void GEC_dfltSound()
     {
         // Answering the old "why is HB01 in the string table" question: it is
         // there because retail's .rodata for this TU literally BEGINS with
-        //     "HB01 SBG01030 "
+        //     "HB01\0SBG01030\0"
         // -- checked with objdump -s -j .rodata on the target object, offset 0.
         // CodeWarrior pools string literals in order of first use, so retail's
         // source referenced "HB01" in this file before it referenced
