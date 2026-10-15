@@ -45,12 +45,13 @@ void iPadStickSetSwap(S32 swap);
 // way.
 void iPadStickSetInvert(S32 x, S32 y);
 
-// Turns a device's two sticks into the move and camera sticks the game reads:
-// exchanged when input.sticks says so, then the camera's axes reversed as
-// configured. Takes the backend's convention, Y up-positive.
-//
-// `canSwap` is FALSE for the keyboard. WASD and IJKL are keys named for what
-// they do, so exchanging them would only move the camera onto WASD.
-void iPadStickRemap(F32* moveX, F32* moveY, F32* camX, F32* camY, S32 canSwap);
+// Exchanges a controller's two sticks when input.sticks says so. The keyboard
+// does not call it: WASD and IJKL are keys named for what they do, so
+// exchanging them would only move the camera onto WASD.
+void iPadStickSwap(F32* moveX, F32* moveY, F32* camX, F32* camY);
+
+// Reverses the camera stick's axes as configured. iPadUpdate calls it only
+// while the camera reads the stick; a menu reads it as a d-pad, unreversed.
+void iPadStickInvertCamera(F32* camX, F32* camY);
 
 #endif

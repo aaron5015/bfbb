@@ -19,7 +19,6 @@
 
 #include "iPadBind.h"
 #include "iPadHost.h"
-#include "iPadStick.h"
 #include "iPadTokens.h"
 #include "xPad.h"
 
@@ -153,8 +152,6 @@ void iPadKeyboardPoll(iPadHostState* s)
     s->stick_y = KeyAxis(SDL_SCANCODE_S, SDL_SCANCODE_W);
     s->substick_x = KeyAxis(SDL_SCANCODE_J, SDL_SCANCODE_L);
     s->substick_y = KeyAxis(SDL_SCANCODE_K, SDL_SCANCODE_I);
-
-    iPadStickRemap(&s->stick_x, &s->stick_y, &s->substick_x, &s->substick_y, FALSE);
 }
 
 S32 iPadKeyboardCapture(S32 prime, char* out, S32 size)

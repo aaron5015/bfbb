@@ -1,5 +1,6 @@
 #include "iPad.h"
 #include "iPadHost.h"
+#include "iPadStick.h"
 
 #include <types.h>
 
@@ -137,7 +138,17 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     pad->analog1.x = iPadConvStick(x);
     pad->analog1.y = -iPadConvStick(y);
 
-    iPadShapeStick(host->substick_x, host->substick_y, IPAD_SUBSTICK_MAX, IPAD_SUBSTICK_XY, &x, &y);
+    // xPadUpdate sets this flag just before calling here while a menu reads
+    // both sticks as a d-pad. Only the camera gets the inverted axes.
+    const U32 kAnalogIsDigital = 0x10;
+    F32 camX = host->substick_x;
+    F32 camY = host->substick_y;
+    if (!(pad->flags & kAnalogIsDigital))
+    {
+        iPadStickInvertCamera(&camX, &camY);
+    }
+
+    iPadShapeStick(camX, camY, IPAD_SUBSTICK_MAX, IPAD_SUBSTICK_XY, &x, &y);
     pad->analog2.x = iPadConvStick(x);
     pad->analog2.y = -iPadConvStick(y);
 

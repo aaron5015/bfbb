@@ -23,9 +23,9 @@ void iPadStickSetInvert(S32 x, S32 y)
     sInvertY = y;
 }
 
-void iPadStickRemap(F32* moveX, F32* moveY, F32* camX, F32* camY, S32 canSwap)
+void iPadStickSwap(F32* moveX, F32* moveY, F32* camX, F32* camY)
 {
-    if (sSwap && canSwap)
+    if (sSwap)
     {
         F32 x = *moveX;
         F32 y = *moveY;
@@ -34,7 +34,10 @@ void iPadStickRemap(F32* moveX, F32* moveY, F32* camX, F32* camY, S32 canSwap)
         *camX = x;
         *camY = y;
     }
+}
 
+void iPadStickInvertCamera(F32* camX, F32* camY)
+{
     if (sInvertX)
     {
         *camX = -*camX;

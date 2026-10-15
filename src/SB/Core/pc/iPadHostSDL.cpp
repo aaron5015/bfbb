@@ -665,7 +665,7 @@ void iPadHostPoll()
             s->stick_y = -s->stick_y;
             s->substick_y = -s->substick_y;
 
-            iPadStickRemap(&s->stick_x, &s->stick_y, &s->substick_x, &s->substick_y, TRUE);
+            iPadStickSwap(&s->stick_x, &s->stick_y, &s->substick_x, &s->substick_y);
         }
     }
 

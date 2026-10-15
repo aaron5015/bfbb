@@ -2563,24 +2563,25 @@ static void test_pad_stick_deadzone()
     // input.sticks and input.invert_camera_*. The move stick reads (1, 2) and
     // the camera stick (3, 4) going in.
     F32 mx = 1.0f, my = 2.0f, cx = 3.0f, cy = 4.0f;
-    iPadStickRemap(&mx, &my, &cx, &cy, TRUE);
+    iPadStickSwap(&mx, &my, &cx, &cy);
+    iPadStickInvertCamera(&cx, &cy);
     check(mx == 1.0f && my == 2.0f && cx == 3.0f && cy == 4.0f, "the defaults change nothing");
 
     iPadStickSetInvert(TRUE, FALSE);
-    iPadStickRemap(&mx, &my, &cx, &cy, TRUE);
-    check(cx == -3.0f && cy == 4.0f && mx == 1.0f, "invert x reverses the camera's x alone");
+    iPadStickInvertCamera(&cx, &cy);
+    check(cx == -3.0f && cy == 4.0f, "invert x reverses the camera's x alone");
+
+    cx = 3.0f;
+    iPadStickSetInvert(FALSE, TRUE);
+    iPadStickInvertCamera(&cx, &cy);
+    check(cx == 3.0f && cy == -4.0f, "invert y reverses the camera's y alone");
 
     mx = 1.0f, my = 2.0f, cx = 3.0f, cy = 4.0f;
-    iPadStickSetInvert(FALSE, TRUE);
     iPadStickSetSwap(TRUE);
-    iPadStickRemap(&mx, &my, &cx, &cy, TRUE);
+    iPadStickSwap(&mx, &my, &cx, &cy);
+    iPadStickInvertCamera(&cx, &cy);
     check(mx == 3.0f && my == 4.0f && cx == 1.0f && cy == -2.0f,
           "swapped, the right stick moves and the left stick's y is the inverted one");
-
-    mx = 1.0f, my = 2.0f, cx = 3.0f, cy = 4.0f;
-    iPadStickRemap(&mx, &my, &cx, &cy, FALSE);
-    check(mx == 1.0f && my == 2.0f && cx == 3.0f && cy == -4.0f,
-          "the keyboard is never swapped, but its camera keys still invert");
 
     iPadStickSetSwap(FALSE);
     iPadStickSetInvert(FALSE, FALSE);
