@@ -217,6 +217,9 @@ xModelInstance* xModelInstanceAlloc(RpAtomic* data, void* object, U16 flags, U8 
 #endif
 
     dude->anim_coll.verts = NULL;
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+    dude->anim_coll.capacity = 0;
+#endif
 
     return dude;
 }
@@ -611,6 +614,9 @@ void xModelAnimCollStart(xModelInstance& model)
         if (size != 0)
         {
             model.anim_coll.verts = (xVec3*)xMemAlloc(gActiveHeap, size * sizeof(xVec3), 0);
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+            model.anim_coll.capacity = size;
+#endif
         }
     }
 }
@@ -621,6 +627,20 @@ void xModelAnimCollRefresh(const xModelInstance& cm)
     U32 size = iModelVertCount(m.Data);
     xMat4x3& mat = *(xMat4x3*)m.Mat;
     xMat4x3 old_mat = mat;
+
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+    // The buffer was sized in xModelAnimCollStart for the atomic the instance
+    // had then, and the LOD managers point the instance at another atomic every
+    // frame. In b301, a scrapped level, two simple objects start on their
+    // model's 64-vertex first atomic and collide with 529-vertex ones, so this
+    // wrote 6348 bytes into a 768-byte buffer, over the next model instance.
+    // Grow it instead.
+    if (size > m.anim_coll.capacity)
+    {
+        m.anim_coll.verts = (xVec3*)xMemAlloc(gActiveHeap, size * sizeof(xVec3), 0);
+        m.anim_coll.capacity = size;
+    }
+#endif
 
     mat = g_I3;
     iModelVertEval(m.Data, 0, size, m.Mat, NULL, m.anim_coll.verts);

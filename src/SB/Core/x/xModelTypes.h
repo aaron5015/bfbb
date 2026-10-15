@@ -60,6 +60,9 @@ struct xModelInstance
     struct
     {
         xVec3* verts;
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+        U32 capacity; // vertices verts has room for; see xModelAnimCollRefresh
+#endif
     } anim_coll;
 };
 
