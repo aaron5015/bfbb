@@ -1,0 +1,30 @@
+# Saving from the pause menu in Jellyfish Fields at 640x480 on Direct3D 9, into
+# the empty scratch save folder. Options is X on the pause page; Save Game is
+# two down. The list's first row is New save. After the save the game runs
+# again, and the next pause must not show the save screen's "Save Game" title
+# behind the task page.
+#
+# The list shows the free space on the disk, and reg_save_paused is the only
+# shot after the save, whose date it would show.
+
+wait 2400
+press b
+wait 120
+press start
+wait 60
+press x
+wait 60
+press down
+wait 30
+press down
+wait 30
+press a
+wait 90
+shot reg_save_list 0
+press a
+wait 240
+press b
+wait 60
+press start
+wait 120
+shot reg_save_paused 0
