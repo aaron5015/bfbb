@@ -17,8 +17,7 @@ The `reg_` cases are the regression suite: the game as the Xbox drew it,
 `[game] boot` and shoots SpongeBob at the spawn point, or the cutscene and the
 fight for a boss. The rest cover the menus, the pause menu, the `[cheats]`
 that change what is on screen, and the render settings, on the Jellyfish Rock
-spawn. b301 is missing: it crashes on load. The other cases are the README's
-screenshots.
+spawn. The other cases are the README's screenshots.
 
 The script runs `bin/bfbb.exe` (`--exe` for another build) hidden, with a
 scratch config, an empty save folder and no audio. The assets come from
