@@ -244,6 +244,10 @@ void xJSP_Destroy(xJSPHeader* jsp)
     RpClumpDestroy(jsp->clump);
 #ifdef PLATFORM_PC
     iHipolyWorldDetach(jsp->colltree);
+    if (globals.sceneCur->env->geom->jsp == jsp)
+    {
+        iEnvFreeNormals(globals.sceneCur->env->geom);
+    }
 #endif
     RwFree(jsp->colltree);
 
