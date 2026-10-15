@@ -108,4 +108,21 @@ void iFixSetMeleeOnce(S32 on);
 // should send eEventHit_Melee. Always TRUE with the fix off.
 S32 iFixMeleeNewContact(const void* ent, F64 now);
 
+// **The pause menu's task spatulas spin out of step with one another.**
+//
+// The level browser's task row is eight gold and eight silver spatula models,
+// shared by every world's page. zUI_ScenePortalUpdate hides all sixteen and
+// shows the ones the current world has earned, every frame. zUI_Update, which
+// is 100% matched, advances a UI model's animation only while it is visible,
+// so each spatula stops turning on any page that does not show it. Back on a
+// page that does, it resumes from where it stopped. A few page turns between
+// worlds with different tasks done leave every spatula at its own angle. The
+// gold and silver models share one animation (ATBL 85b5055b and 8b3dab0f both
+// play raw anim cfcf8553), so they drift against each other too.
+//
+// The fix gives all sixteen the time of a visible one every frame, in
+// iMenuSpin.cpp. Off: each spatula keeps its own time, as the game shipped.
+S32 iFixSpatulaSpin();
+void iFixSetSpatulaSpin(S32 on);
+
 #endif

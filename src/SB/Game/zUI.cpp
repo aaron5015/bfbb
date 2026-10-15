@@ -2,6 +2,7 @@
 
 #ifdef PLATFORM_PC
 #include "iMenuFrame.h"
+#include "iMenuSpin.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1958,6 +1959,22 @@ static void showWorld(U32 world)
     }
 }
 
+#ifdef PLATFORM_PC
+// Retail lets each task spatula keep its own spin time; see iMenuSpin.h.
+static void syncWorldSpin()
+{
+    xEnt* spin[2 * TASK_COUNT];
+
+    for (U32 i = 0; i < TASK_COUNT; i++)
+    {
+        spin[i] = sWorld[0].task[i].uiSpatGold;
+        spin[TASK_COUNT + i] = sWorld[0].task[i].uiSpatGray;
+    }
+
+    iMenuSpinSync(spin, 2 * TASK_COUNT);
+}
+#endif
+
 static void disable_ui(_zUI* ui)
 {
     if (ui)
@@ -2067,6 +2084,9 @@ void zUI_ScenePortalUpdate()
         refresh_patsocks(i);
         hideWorld();
         showWorld(i);
+#ifdef PLATFORM_PC
+        syncWorldSpin();
+#endif
 
         sCurrWorld = i;
 

@@ -148,6 +148,10 @@ const iConfigSetting kConfigSettings[] = {
       "Hit a target once per contact. Off: once per frame of contact, which stacks\n"
       "; the Goo Lagoon umbrellas' hit sound into a buzz.",
       ICONFIG_BOOL, NULL, kNone, kNone },
+    { "fixes", "spatula_spin", "on",
+      "Keep the pause menu's task spatulas spinning in step. Off: each one stops\n"
+      "; while its page is not shown, so they drift apart.",
+      ICONFIG_BOOL, NULL, kNone, kNone },
     { "cheats", "all_warps", "off",
       "Let the pause menu's taxi go to every spatula, found or not.", ICONFIG_BOOL, NULL,
       kNone, kNone },

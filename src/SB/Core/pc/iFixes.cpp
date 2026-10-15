@@ -34,6 +34,7 @@ namespace
     S32 sMenuRope = TRUE;
     S32 sSkyClip = TRUE;
     S32 sMeleeOnce = TRUE;
+    S32 sSpatulaSpin = TRUE;
 }
 
 S32 iFixMenuRope()
@@ -64,6 +65,16 @@ S32 iFixMeleeOnce()
 void iFixSetMeleeOnce(S32 on)
 {
     sMeleeOnce = on;
+}
+
+S32 iFixSpatulaSpin()
+{
+    return sSpatulaSpin;
+}
+
+void iFixSetSpatulaSpin(S32 on)
+{
+    sSpatulaSpin = on;
 }
 
 S32 iFixMeleeNewContact(const void* ent, F64 now)

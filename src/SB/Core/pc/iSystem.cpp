@@ -835,6 +835,7 @@ static void ApplyConfig()
     iFixSetMenuRope(iConfigGetBool("fixes.menu_rope", TRUE));
     iFixSetSkyClip(iConfigGetBool("fixes.sky_clip", TRUE));
     iFixSetMeleeOnce(iConfigGetBool("fixes.melee_once", TRUE));
+    iFixSetSpatulaSpin(iConfigGetBool("fixes.spatula_spin", TRUE));
 
     iCheatSetAllWarps(iConfigGetBool("cheats.all_warps", FALSE));
     iCheatSetBubbleBowl(iConfigGetBool("cheats.bubble_bowl", FALSE));

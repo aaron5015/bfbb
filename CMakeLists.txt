@@ -873,6 +873,7 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iMath.cpp
   ${PC_DIR}/iMemMgr.cpp
   ${PC_DIR}/iMenuFrame.cpp
+  ${PC_DIR}/iMenuSpin.cpp
   ${PC_DIR}/iPad.cpp
   ${PC_DIR}/iPadLayout.cpp
   ${PC_DIR}/iPadBind.cpp
