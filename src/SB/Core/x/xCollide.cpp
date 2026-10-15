@@ -2981,7 +2981,7 @@ xVec3 xVec3::operator+(const xVec3& v) const
 #endif
 
 #if !defined(PS2) && !defined(XBOX)
-xVec3& xVec3::operator+=(const xVec3& v)
+SHARED_OUTLINE xVec3& xVec3::operator+=(const xVec3& v)
 {
     x += v.x;
     y += v.y;
@@ -3012,7 +3012,7 @@ F32 xVec3::dot(const xVec3& v) const
 #endif
 
 #if !defined(PS2)
-xVec3& xVec3::normalize()
+SHARED_OUTLINE xVec3& xVec3::normalize()
 {
     *this /= length();
     return *this;

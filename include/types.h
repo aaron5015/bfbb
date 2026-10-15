@@ -220,6 +220,18 @@ typedef intptr_t SPtr;
 #define SHARED_INLINE inline
 #endif
 
+// For a function retail defines out of line in one .cpp while other units carry
+// their own inline copy -- xBound.cpp's and xCollide.cpp's xVec3 members, which
+// zParPTank and the boss units also define inline. CodeWarrior folds the
+// copies. A host emits the inline ones as COMDATs at -O0, and a plain definition
+// beside them is a duplicate symbol, so there it is SHARED_INLINE. Nothing on
+// the console, where the definition must stay exactly as retail wrote it.
+#if defined(PLATFORM_PC)
+#define SHARED_OUTLINE SHARED_INLINE
+#else
+#define SHARED_OUTLINE
+#endif
+
 #if defined(GAMECUBE) || defined(__MWERKS__)
 typedef signed char s8;
 typedef signed short s16;

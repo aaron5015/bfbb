@@ -200,8 +200,12 @@ inline void xGridCheckBound(xGrid& grid, const xBound& bound, const xQCData& qcd
 #if !defined(XGRID_DEFER_BOUND_HELPERS) && !defined(XGRID_GET_INDEX_DEFINED)
 #define XGRID_GET_INDEX_DEFINED
 
-#ifdef XGRID_WEAK_GET_INDEX
+#if defined(XGRID_WEAK_GET_INDEX) && defined(__MWERKS__)
 __declspec(weak)
+#elif defined(XGRID_WEAK_GET_INDEX)
+// The other units' copies are inline, which a host emits as COMDATs; a weak
+// definition beside them is a duplicate. See SHARED_INLINE in types.h.
+SHARED_INLINE
 #else
 inline
 #endif

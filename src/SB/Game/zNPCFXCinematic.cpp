@@ -3984,12 +3984,12 @@ static void NCIN_SBBNode_AR(const zCutsceneMgr*, NCINEntry* fxrec, RpAtomic* mod
     sb2->render_nodes();
 }
 
-__declspec(weak) void xCutscene::NoseyClear()
+WEAK void xCutscene::NoseyClear()
 {
     this->NoseySet(0);
 }
 
-__declspec(weak) void xCutscene::NoseySet(XCSNNosey* nosey)
+WEAK void xCutscene::NoseySet(XCSNNosey* nosey)
 {
     this->cb_nosey = nosey;
 }

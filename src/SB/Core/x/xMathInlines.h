@@ -113,8 +113,12 @@ inline F32 xsqrt(F32 x)
 
 // Inline in retail: every caller's TU emits its own weak copy (and its pool
 // literals); xBound.o owns the copy that survives linking.
-#ifdef XMATHINLINES_WEAK_XSQRT
+#if defined(XMATHINLINES_WEAK_XSQRT) && defined(__MWERKS__)
 __declspec(weak)
+#elif defined(XMATHINLINES_WEAK_XSQRT)
+// The other units' copies are inline, which a host emits as COMDATs; a weak
+// definition beside them is a duplicate. See SHARED_INLINE in types.h.
+SHARED_INLINE
 #else
 inline
 #endif

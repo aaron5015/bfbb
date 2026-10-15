@@ -409,7 +409,7 @@ F32 xVec3::length2() const
 #endif
 
 #if !defined(PS2) && !defined(XBOX)
-xVec3 xVec3::operator*(F32 f) const
+SHARED_OUTLINE xVec3 xVec3::operator*(F32 f) const
 {
     xVec3 temp = *this;
     temp *= f;
@@ -430,7 +430,7 @@ xVec3& xVec3::operator*=(F32 f)
 #endif
 
 #if !defined(PS2)
-F32 xVec3::length() const
+SHARED_OUTLINE F32 xVec3::length() const
 {
     return xsqrt(this->length2());
 }
