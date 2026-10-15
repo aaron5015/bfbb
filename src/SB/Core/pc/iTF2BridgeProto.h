@@ -28,6 +28,9 @@
 
 #define BRIDGE_WEAPON_MELEE 0x1u
 #define BRIDGE_WEAPON_FIRED 0x2u
+// The active weapon fires TF2 rockets. BFBB treats those as real projectiles and
+// does not also fire the instant crosshair stand-in when one is launched.
+#define BRIDGE_WEAPON_ROCKET 0x4u
 
 #define BRIDGE_MAX_HITSCAN_RAYS 32
 #define BRIDGE_MAX_ROCKETS 32

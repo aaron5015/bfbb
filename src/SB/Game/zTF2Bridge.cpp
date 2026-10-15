@@ -1,4 +1,5 @@
 #include "zTF2Bridge.h"
+#include "zTF2Splash.h"
 
 #include "iTF2Bridge.h"
 #include "iCamera.h"
@@ -72,11 +73,14 @@ struct TF2BridgeDebugRocket
     xVec3 sweepEnd;
     float sweepTime;
     bool sweepHit;
+    xVec3 incoming; // unit travel direction of the move that hit
+    xVec3 explosionOrigin; // impact pulled off the surface; the blast is centred here
+    float debugTime; // how long diagnostic markers stay up (bfbb_rocket_debug_lifetime)
     uint32_t explosionTargetCount;
     TF2BridgeDebugExplosionTarget explosionTargets[BRIDGE_MAX_ROCKETS];
 
     // Per-sample exposure visualization:
-    // 0 = outside NPC bound, 1 = outside blast, 2 = blocked, 3 = visible.
+    // 1 = outside blast, 2 = blocked, 3 = straight line, 4 = reached by bending around geometry.
     uint32_t exposureSampleCount;
     xVec3 exposureSamplePos[kMaxExposureSamples];
     uint8_t exposureSampleState[kMaxExposureSamples];
@@ -301,9 +305,9 @@ static TF2BridgeDebugRocket* TF2Bridge_AllocRocketTrack(int32_t entIndex)
     {
         if (sRocketDebug[i].entIndex == entIndex)
             return &sRocketDebug[i];
-        if (sRocketDebug[i].entIndex == 0 && freeTrack == NULL)
-            freeTrack = &sRocketDebug[i];
-        if (!sRocketDebug[i].active && sRocketDebug[i].impactTime <= 0.0f && freeTrack == NULL)
+        if (sRocketDebug[i].entIndex == 0 && sRocketDebug[i].impactTime <= 0.0f &&
+            sRocketDebug[i].sweepTime <= 0.0f && sRocketDebug[i].exposureSampleTime <= 0.0f &&
+            freeTrack == NULL)
             freeTrack = &sRocketDebug[i];
     }
 
@@ -331,19 +335,17 @@ static float TF2Bridge_GetBoundRadius(const xBound& bound)
 
 static bool IsTF2BridgeRobot(const zNPCCommon* npc);
 
-static F32 TF2Bridge_RocketExposureThreshold()
-{
-    const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_EXPOSURE_THRESHOLD");
-    if (value != NULL && value[0] != '\0')
-    {
-        const F32 threshold = (F32)atof(value);
-        if (threshold >= 0.0f && threshold <= 1.0f)
-            return threshold;
-    }
-
-    return 0.35f;
-}
-
+// ---------------------------------------------------------------------------
+// Rocket explosion, TF2 rules (see zTF2Splash.h for the rules and what is added).
+//
+// Tunables, all optional environment variables:
+//   BFBB_TF2BRIDGE_ROCKET_APPLY_DAMAGE   0 = compute and draw only (default 1)
+//   BFBB_TF2BRIDGE_SPLASH_WRAP           longest bent blast path as a multiple of
+//                                        the radius; 0 = pure TF2, no bending
+//                                        (default 1.6)
+//   BFBB_TF2BRIDGE_ROCKET_VERBOSE        1 = also print every sweep miss
+//   BFBB_TF2BRIDGE_LEGACY_ROCKET_HITSCAN 1 = a fired rocket also does the old
+//                                        instant crosshair hit (default 0)
 static bool TF2Bridge_RocketApplyDamage()
 {
     const char* value = getenv("BFBB_TF2BRIDGE_ROCKET_APPLY_DAMAGE");
@@ -353,60 +355,170 @@ static bool TF2Bridge_RocketApplyDamage()
     return true;
 }
 
-static bool TF2Bridge_RocketSampleVisible(const xVec3& origin, const xVec3& sample)
+static F32 TF2Bridge_SplashWrapScale()
 {
-    const F32 dx = sample.x - origin.x;
-    const F32 dy = sample.y - origin.y;
-    const F32 dz = sample.z - origin.z;
-    const F32 distanceSq = dx * dx + dy * dy + dz * dz;
+    const char* value = getenv("BFBB_TF2BRIDGE_SPLASH_WRAP");
+    if (value != NULL && value[0] != '\0')
+    {
+        const F32 v = (F32)atof(value);
+        return v < 0.0f ? 0.0f : v;
+    }
 
-    if (distanceSq <= 0.000001f)
-        return true;
-
-    const F32 distance = sqrtf(distanceSq);
-
-    const F32 rayEpsilon = 0.05f;
-    if (distance <= rayEpsilon)
-        return true;
-
-    const F32 invDistance = 1.0f / distance;
-    const F32 dirX = dx * invDistance;
-    const F32 dirY = dy * invDistance;
-    const F32 dirZ = dz * invDistance;
-
-    // The explosion is born on a world collision surface. Do not let that
-    // immediate contact count as an occluder of the explosion itself.
-    // Advance the visibility ray a small distance toward the sample; any
-    // geometry encountered after this point is a genuine occluder.
-    xRay3 ray;
-    ray.origin.x = origin.x + dirX * rayEpsilon;
-    ray.origin.y = origin.y + dirY * rayEpsilon;
-    ray.origin.z = origin.z + dirZ * rayEpsilon;
-    ray.dir.x = dirX;
-    ray.dir.y = dirY;
-    ray.dir.z = dirZ;
-    ray.min_t = 0.0f;
-    ray.max_t = distance - rayEpsilon;
-    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
-
-    xCollis worldHit;
-    memset(&worldHit, 0, sizeof(worldHit));
-    worldHit.flags = k_HIT_0x200;
-
-    if (iRayHitsEnv(&ray, globals.sceneCur->env, &worldHit) == 0)
-        return true;
-
-    return worldHit.dist < 0.0f || worldHit.dist >= ray.max_t - 0.01f;
+    return 1.6f;
 }
 
-static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rocket)
+static bool TF2Bridge_EnvFlag(const char* name)
+{
+    const char* value = getenv(name);
+    return value != NULL && value[0] != '\0' && atoi(value) != 0;
+}
+
+static tf2splash::V3 ToSplash(const xVec3& v)
+{
+    return tf2splash::Make(v.x, v.y, v.z);
+}
+
+// tf2splash callback: is the straight segment from..to blocked by the level?
+// Only the world (JSP) counts, like TF2's MASK_RADIUS_DAMAGE ignoring players
+// and projectiles.
+static bool TF2Bridge_SplashBlocked(void*, const tf2splash::V3& from, const tf2splash::V3& to)
+{
+    const F32 dx = to.x - from.x;
+    const F32 dy = to.y - from.y;
+    const F32 dz = to.z - from.z;
+    const F32 len = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (len < 0.0005f)
+        return false;
+
+    xRay3 ray;
+    ray.origin.x = from.x;
+    ray.origin.y = from.y;
+    ray.origin.z = from.z;
+    ray.dir.x = dx / len;
+    ray.dir.y = dy / len;
+    ray.dir.z = dz / len;
+    ray.min_t = 0.0f;
+    ray.max_t = len;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    xCollis hit;
+    memset(&hit, 0, sizeof(hit));
+    return iRayHitsEnv(&ray, globals.sceneCur->env, &hit) != 0;
+}
+
+// What a rocket's last move ran into.
+struct TF2BridgeSweepHit
+{
+    F32 dist;
+    xVec3 normal; // unit, facing back toward where the rocket came from
+    void* ent; // the entity struck, or NULL for level geometry
+};
+
+// Sweeps one rocket move. worldOnly skips entities (used for the first move, which
+// starts at the player's eye and must not hit the player or his own muzzle area).
+static bool TF2Bridge_SweepRocket(const xVec3& from, const xVec3& to, bool worldOnly,
+                                  TF2BridgeSweepHit* out)
+{
+    const F32 dx = to.x - from.x;
+    const F32 dy = to.y - from.y;
+    const F32 dz = to.z - from.z;
+    const F32 len = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (len < 0.0001f)
+        return false;
+
+    xRay3 ray;
+    ray.origin = from;
+    ray.dir.x = dx / len;
+    ray.dir.y = dy / len;
+    ray.dir.z = dz / len;
+    ray.min_t = 0.0f;
+    ray.max_t = len;
+    ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+
+    // World hit WITH its triangle normal. xRayHitsScene cannot provide it: it
+    // queries the environment into an uninitialised local xCollis, never asks for
+    // the normal, and does not copy one back, so every world normal it returned
+    // was zero. That made the old splash origin fall back to "back along the
+    // rocket's path", which sits almost inside the surface on a grazing hit.
+    xCollis envHit;
+    memset(&envHit, 0, sizeof(envHit));
+    envHit.flags = k_HIT_0x200;
+    const bool hitEnv = iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
+                        envHit.dist >= 0.0f && envHit.dist <= len;
+
+    F32 dist = hitEnv ? envHit.dist : FLOAT_MAX;
+    void* ent = NULL;
+
+    if (!worldOnly)
+    {
+        xCollis sceneHit;
+        memset(&sceneHit, 0, sizeof(sceneHit));
+        sceneHit.flags = k_HIT_0x200;
+        xRayHitsScene(globals.sceneCur, &ray, &sceneHit);
+
+        if ((sceneHit.flags & k_HIT_IT) != 0 && sceneHit.optr != NULL && sceneHit.dist >= 0.0f &&
+            sceneHit.dist <= len && sceneHit.dist < dist)
+        {
+            dist = sceneHit.dist;
+            ent = sceneHit.optr;
+        }
+    }
+
+    if (dist == FLOAT_MAX)
+        return false;
+
+    xVec3 n = { -ray.dir.x, -ray.dir.y, -ray.dir.z };
+    if (ent == NULL)
+    {
+        const F32 nl = sqrtf(envHit.norm.x * envHit.norm.x + envHit.norm.y * envHit.norm.y +
+                             envHit.norm.z * envHit.norm.z);
+        if (nl > 0.5f)
+        {
+            n.x = envHit.norm.x / nl;
+            n.y = envHit.norm.y / nl;
+            n.z = envHit.norm.z / nl;
+            if (n.x * ray.dir.x + n.y * ray.dir.y + n.z * ray.dir.z > 0.0f)
+            {
+                n.x = -n.x;
+                n.y = -n.y;
+                n.z = -n.z;
+            }
+        }
+    }
+    else
+    {
+        // Hit an entity: push the explosion out along centre -> impact.
+        const xBound& bound = ((xEnt*)ent)->bound;
+        const xVec3* c = xBoundCenter(&bound);
+        const F32 hx = from.x + ray.dir.x * dist - c->x;
+        const F32 hy = from.y + ray.dir.y * dist - c->y;
+        const F32 hz = from.z + ray.dir.z * dist - c->z;
+        const F32 hl = sqrtf(hx * hx + hy * hy + hz * hz);
+        if (hl > 0.0001f)
+        {
+            n.x = hx / hl;
+            n.y = hy / hl;
+            n.z = hz / hl;
+        }
+    }
+
+    out->dist = dist;
+    out->normal = n;
+    out->ent = ent;
+    return true;
+}
+
+// Detonates a rocket at rocket->impact with TF2's rules.
+//   directEnt: the entity the rocket struck, if any. TF2 gives that one full
+//   damage with no line-of-sight test (CTFRadiusDamageInfo::ApplyToEntity).
+static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEnt)
 {
     if (rocket == NULL || globals.sceneCur == NULL)
         return;
 
     rocket->explosionTargetCount = 0;
     rocket->exposureSampleCount = 0;
-    rocket->exposureSampleTime = 5.0f;
+    rocket->exposureSampleTime = rocket->debugTime;
 
     st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
     if (npclist == NULL)
@@ -414,9 +526,12 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
     const F32 baseDamage = rocket->damage;
     const F32 radius = rocket->radius;
-    const F32 radiusSq = radius * radius;
-    const F32 exposureThreshold = TF2Bridge_RocketExposureThreshold();
     const bool applyDamage = TF2Bridge_RocketApplyDamage();
+    const F32 wrapScale = TF2Bridge_SplashWrapScale();
+    const xVec3 origin = rocket->explosionOrigin;
+
+    tf2splash::Explosion boom(ToSplash(origin), ToSplash(rocket->impactNormal), radius, wrapScale,
+                              TF2Bridge_SplashBlocked, NULL);
 
     for (S32 i = 0; i < npclist->cnt; ++i)
     {
@@ -424,24 +539,18 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
         if (!IsTF2BridgeRobot(npc) || !npc->IsAlive())
             continue;
 
-        xBox sampleBox;
-        xBoundGetBox(sampleBox, npc->bound);
-
         const xVec3* center = xBoundCenter(&npc->bound);
         if (center == NULL)
             continue;
 
-        // The broad-phase bound test is only a cheap way to reject NPCs that
-        // cannot possibly overlap the blast.  The actual exposure decision
-        // below is made from the sampled bound volume.
+        // TF2 candidate test: the nearest point of the bound must be within the radius.
         xSphere blastSphere;
-        blastSphere.center = rocket->impact;
+        blastSphere.center = origin;
         blastSphere.r = radius;
 
         xCollis blastHit;
         memset(&blastHit, 0, sizeof(blastHit));
         blastHit.flags = k_HIT_0x200;
-
         xSphereHitsBound(&blastSphere, &npc->bound, &blastHit);
         if ((blastHit.flags & 0x1) == 0)
             continue;
@@ -451,171 +560,111 @@ static void TF2Bridge_BuildRocketExplosionDiagnostics(TF2BridgeDebugRocket* rock
 
         TF2BridgeDebugExplosionTarget& target =
             rocket->explosionTargets[rocket->explosionTargetCount++];
-
         target.pos = *center;
         target.distance = 0.0f;
         target.npcType = (int32_t)npc->SelfType();
         target.visible = false;
 
-        // Sample the NPC's actual bound volume.  A sample only contributes to
-        // splash exposure if it is BOTH inside the rocket's radius and visible
-        // from the explosion.  This prevents a large NPC bound from producing
-        // 100% exposure when the actual robot is outside the blast sphere.
-        S32 blastSamples = 0;
-        S32 visibleSamples = 0;
-        S32 totalSamples = 0;
-        F32 nearestVisibleDistance = FLOAT_MAX;
+        const bool direct = directEnt != NULL && (void*)static_cast<xEnt*>(npc) == directEnt;
 
-        const F32 sampleFrac[4] = { 0.125f, 0.375f, 0.625f, 0.875f };
+        // Body points: centre first (TF2's BodyTarget), then lower and upper, then
+        // four around the middle. Only the first three are tried for a bent path.
+        xBox box;
+        xBoundGetBox(box, npc->bound);
+        const F32 cx = center->x, cy = center->y, cz = center->z;
+        const F32 ex = 0.5f * (box.upper.x - box.lower.x);
+        const F32 ey = 0.5f * (box.upper.y - box.lower.y);
+        const F32 ez = 0.5f * (box.upper.z - box.lower.z);
+        const S32 kPoints = 7;
+        tf2splash::V3 pts[7] = {
+            tf2splash::Make(cx, cy, cz),
+            tf2splash::Make(cx, cy - 0.7f * ey, cz),
+            tf2splash::Make(cx, cy + 0.7f * ey, cz),
+            tf2splash::Make(cx + 0.4f * ex, cy, cz),
+            tf2splash::Make(cx - 0.4f * ex, cy, cz),
+            tf2splash::Make(cx, cy, cz + 0.4f * ez),
+            tf2splash::Make(cx, cy, cz - 0.4f * ez),
+        };
 
-        for (S32 sx = 0; sx < 4; ++sx)
+        uint8_t states[7] = {};
+        F32 reach;
+        bool wrapped = false;
+
+        if (direct)
         {
-            for (S32 sy = 0; sy < 4; ++sy)
-            {
-                for (S32 sz = 0; sz < 4; ++sz)
-                {
-                    xVec3 sample;
-                    sample.x = sampleBox.lower.x +
-                        (sampleBox.upper.x - sampleBox.lower.x) * sampleFrac[sx];
-                    sample.y = sampleBox.lower.y +
-                        (sampleBox.upper.y - sampleBox.lower.y) * sampleFrac[sy];
-                    sample.z = sampleBox.lower.z +
-                        (sampleBox.upper.z - sampleBox.lower.z) * sampleFrac[sz];
-
-                    xCollis inside;
-                    memset(&inside, 0, sizeof(inside));
-                    xVecHitsBound(&sample, &npc->bound, &inside);
-
-                    if ((inside.flags & 0x1) == 0)
-                        continue;
-
-                    const uint32_t sampleIndex = totalSamples;
-                    if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                    {
-                        rocket->exposureSamplePos[sampleIndex] = sample;
-                        rocket->exposureSampleState[sampleIndex] = 1; // outside blast
-                        rocket->exposureSampleCount = sampleIndex + 1;
-                    }
-
-                    ++totalSamples;                    const F32 dx = sample.x - rocket->impact.x;
-                    const F32 dy = sample.y - rocket->impact.y;
-                    const F32 dz = sample.z - rocket->impact.z;
-                    const F32 sampleDistSq = dx * dx + dy * dy + dz * dz;
-
-                    if (sampleDistSq > radiusSq)
-                        continue;
-
-                    ++blastSamples;
-
-                    if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                        rocket->exposureSampleState[sampleIndex] = 2; // blocked
-
-                    // The rocket impact lies on the collision surface.
-                    // Start splash visibility just outside that exact surface
-                    // using the triangle's collision normal. This avoids
-                    // starting rays inside floors, rocks, walls, or other JSP
-                    // triangles when the projectile strikes at an angle.
-                    const F32 kSplashOriginEpsilon = 0.02f;
-                    xVec3 splashOrigin = rocket->impact;
-                    splashOrigin.x += rocket->impactNormal.x * kSplashOriginEpsilon;
-                    splashOrigin.y += rocket->impactNormal.y * kSplashOriginEpsilon;
-                    splashOrigin.z += rocket->impactNormal.z * kSplashOriginEpsilon;
-
-                    if (TF2Bridge_RocketSampleVisible(splashOrigin, sample))
-                    {
-                        ++visibleSamples;
-
-                        if (sampleIndex < TF2BridgeDebugRocket::kMaxExposureSamples)
-                            rocket->exposureSampleState[sampleIndex] = 3; // visible
-
-                        const F32 sampleDistance = sqrtf(sampleDistSq);
-                        if (sampleDistance < nearestVisibleDistance)
-                            nearestVisibleDistance = sampleDistance;
-                    }
-                }
-            }
+            for (S32 k = 0; k < kPoints; ++k)
+                states[k] = tf2splash::kStateVisible;
+            reach = 0.0f;
+        }
+        else
+        {
+            reach = boom.Evaluate(pts, kPoints, 3, states);
+            wrapped = boom.LastWasWrapped();
         }
 
-        // Exposure is the visible fraction of the NPC volume that is actually
-        // inside the blast. Samples outside the radius must not count as hidden
-        // splash exposure.
-        const F32 exposure =
-            blastSamples > 0
-                ? (F32)visibleSamples / (F32)blastSamples
-                : 0.0f;
-
-        target.distance =
-            nearestVisibleDistance < FLOAT_MAX
-                ? nearestVisibleDistance
-                : radius;
-
-        if (totalSamples == 0 || blastSamples == 0 || exposure < exposureThreshold)
+        for (S32 k = 0; k < kPoints; ++k)
         {
-            printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d BLOCKED threshold=%.1f%% damage=0\n",
-                (int)target.npcType, (double)target.distance,
-                (int)visibleSamples, (int)blastSamples,
-                (double)(exposure * 100.0f),
-                (int)blastSamples, (int)totalSamples,
-                (double)(exposureThreshold * 100.0f));
+            const uint32_t idx = rocket->exposureSampleCount;
+            if (idx >= TF2BridgeDebugRocket::kMaxExposureSamples)
+                break;
+            rocket->exposureSamplePos[idx].x = pts[k].x;
+            rocket->exposureSamplePos[idx].y = pts[k].y;
+            rocket->exposureSamplePos[idx].z = pts[k].z;
+            rocket->exposureSampleState[idx] = states[k];
+            rocket->exposureSampleCount = idx + 1;
+        }
+
+        if (reach < 0.0f)
+        {
+            printf("bfbb: tf2bridge -- rocket splash type %d BLOCKED (no clear path inside radius %.2f) "
+                   "wrap=%.2f damage=0\n",
+                   (int)target.npcType, (double)radius, (double)wrapScale);
             continue;
         }
 
-        // This target passed the splash exposure threshold, so mark it as
-        // a valid splash hit for the diagnostic renderer. The actual damage
-        // decision remains controlled by the exposure threshold above.
         target.visible = true;
+        target.distance = reach;
 
-        // TF2 RadiusDamage uses linear distance falloff:
-        // damage - distance * (damage / radius).
-        // Use the nearest actually exposed point of the sampled bound rather
-        // than the NPC center, which may be outside the blast while part of
-        // the NPC is legitimately inside it.
-        F32 t = radius > 0.0001f
-            ? target.distance / radius
-            : 1.0f;
-        if (t < 0.0f) t = 0.0f;
-        if (t > 1.0f) t = 1.0f;
+        const F32 scale = tf2splash::RocketFalloffScale(reach, radius);
+        const F32 damage = baseDamage * scale;
 
-        const F32 damageScale = 1.0f - t;
-        const F32 damage = baseDamage * damageScale;
+        // BFBB reads the vector as the direction the hit travelled; the knock goal
+        // sends the robot along it (horizontally). Blast direction = origin -> robot.
+        // (The old code passed the impact POSITION here, so knockback went in a
+        // direction that depended on where in the level the rocket landed.)
+        xVec3 push = { center->x - origin.x, center->y - origin.y, center->z - origin.z };
+        F32 pl = sqrtf(push.x * push.x + push.y * push.y + push.z * push.z);
+        if (pl < 0.001f || (push.x * push.x + push.z * push.z) < 0.0004f * pl * pl)
+        {
+            push = rocket->incoming; // on top of / under the blast: use the rocket's heading
+            pl = 1.0f;
+        }
+        push.x /= pl;
+        push.y /= pl;
+        push.z /= pl;
 
         if (damage > 0.0f && applyDamage)
-            npc->Damage(DMGTYP_SIDE, NULL, &rocket->impact);
+            npc->Damage(DMGTYP_SIDE, NULL, &push);
 
-        printf("bfbb: tf2bridge -- rocket explosion target type %d dist=%.2f exposure=%d/%d (%.1f%%) blastSamples=%d/%d damage=%.2f scale=%.3f VISIBLE applyDamage=%d\n",
-            (int)target.npcType, (double)target.distance,
-            (int)visibleSamples, (int)blastSamples,
-            (double)(exposure * 100.0f),
-            (int)blastSamples, (int)totalSamples,
-            (double)damage, (double)damageScale,
-            applyDamage ? 1 : 0);
+        printf("bfbb: tf2bridge -- rocket splash type %d %s dist=%.2f/%.2f scale=%.2f damage=%.1f "
+               "applyDamage=%d\n",
+               (int)target.npcType, direct ? "DIRECT" : (wrapped ? "VISIBLE(wrapped)" : "VISIBLE"),
+               (double)reach, (double)radius, (double)scale, (double)damage, applyDamage ? 1 : 0);
     }
 
-    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f exposureThreshold=%.1f%% applyDamage=%d targets=%u\n",
-        (double)radius, (double)baseDamage,
-        (double)(exposureThreshold * 100.0f),
-        applyDamage ? 1 : 0,
-        (unsigned)rocket->explosionTargetCount);
+    printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f wrap=%.2f applyDamage=%d "
+           "targets=%u waypoints=%d\n",
+           (double)radius, (double)baseDamage, (double)wrapScale, applyDamage ? 1 : 0,
+           (unsigned)rocket->explosionTargetCount, boom.WaypointCount());
 }
 
-static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
+static void TF2Bridge_ProcessRockets(const BridgeIntentPacket* in)
 {
     if (in == NULL || globals.sceneCur == NULL || in->scale <= 0.0f)
         return;
 
-    if (in->rocketDebugLifetime <= 0.0f)
-    {
-        for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
-        {
-            sRocketDebug[i].active = false;
-            sRocketDebug[i].impacted = false;
-            sRocketDebug[i].impactTime = 0.0f;
-            sRocketDebug[i].entIndex = 0;
-            sRocketDebug[i].hasPrevious = false;
-            sRocketDebug[i].sweepTime = 0.0f;
-        }
-        return;
-    }
+    const bool verbose = TF2Bridge_EnvFlag("BFBB_TF2BRIDGE_ROCKET_VERBOSE");
+    const F32 debugTime = in->rocketDebugLifetime > 0.0f ? in->rocketDebugLifetime : 0.0f;
 
     bool seen[BRIDGE_MAX_ROCKETS] = {};
     const uint32_t count = in->rocketCount > BRIDGE_MAX_ROCKETS ? BRIDGE_MAX_ROCKETS : in->rocketCount;
@@ -645,166 +694,80 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
                                      in->rocketPos[i][2], in->scale);
         rocket->radius = in->rocketRadius[i] / in->scale;
         rocket->damage = in->rocketDamage[i];
-        rocket->active = true;
+        rocket->debugTime = debugTime;
 
-        // If this entity index was reused after its old diagnostic expired,
-        // start a fresh trajectory instead of inheriting the previous one.
-        if (rocket->impacted && rocket->impactTime <= 0.0f)
+        // Already exploded in BFBB. TF2 may not have removed the entity yet (or the
+        // impact datagram was lost), so keep telling it until it is gone. The track
+        // itself is only recycled once the entity leaves the packet (below). The
+        // old code restarted the track when its marker timer ran out, which could
+        // explode a rocket twice.
+        if (rocket->terminated)
         {
-            rocket->hasPrevious = false;
-            rocket->impacted = false;
+            iTF2BridgeSendRocketImpact(entIndex, rocket->impact.x, rocket->impact.y, rocket->impact.z);
+            continue;
         }
 
-        if (!rocket->impacted && rocket->hasPrevious)
+        rocket->active = true;
+
+        // First sighting: TF2 spawns the rocket at the muzzle, ahead of the eye. Start
+        // this first move at the eye so a player pressed against a wall (muzzle behind
+        // it) still hits that wall. World only, so SpongeBob's own bound is ignored.
+        bool worldOnly = false;
+        xVec3 from = rocket->prevPos;
+        if (!rocket->hasPrevious)
         {
-            const xVec3 delta = {
-                pos.x - rocket->prevPos.x,
-                pos.y - rocket->prevPos.y,
-                pos.z - rocket->prevPos.z
-            };
-            const float len = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+            from = FromSource(in->ex, in->ey, in->ez, in->scale);
+            worldOnly = true;
+        }
 
-            if (len > 0.0001f)
-            {
-                rocket->sweepStart = rocket->prevPos;
-                rocket->sweepEnd = pos;
-                rocket->sweepTime = 5.0f;
-                rocket->sweepHit = false;
+        rocket->sweepStart = from;
+        rocket->sweepEnd = pos;
+        rocket->sweepTime = debugTime;
+        rocket->sweepHit = false;
 
-                xRay3 ray;
-                ray.origin = rocket->prevPos;
-                ray.dir.x = delta.x / len;
-                ray.dir.y = delta.y / len;
-                ray.dir.z = delta.z / len;
-                ray.min_t = 0.0f;
-                ray.max_t = len;
-                ray.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
+        TF2BridgeSweepHit sweep;
+        if (TF2Bridge_SweepRocket(from, pos, worldOnly, &sweep))
+        {
+            const F32 dx = pos.x - from.x, dy = pos.y - from.y, dz = pos.z - from.z;
+            const F32 len = sqrtf(dx * dx + dy * dy + dz * dz);
+            rocket->incoming.x = dx / len;
+            rocket->incoming.y = dy / len;
+            rocket->incoming.z = dz / len;
 
-                // Use BFBB's native scene ray query rather than only
-                // the JSP environment. This includes the environment plus
-                // collision-bearing scene entities/NPCs, which is the same
-                // collision path BFBB itself uses for scene ray tests.
-                xCollis sceneHit;
-                memset(&sceneHit, 0, sizeof(sceneHit));
-                sceneHit.flags = k_HIT_0x200;
+            rocket->impact.x = from.x + rocket->incoming.x * sweep.dist;
+            rocket->impact.y = from.y + rocket->incoming.y * sweep.dist;
+            rocket->impact.z = from.z + rocket->incoming.z * sweep.dist;
+            rocket->impactNormal = sweep.normal;
 
-                xRayHitsScene(globals.sceneCur, &ray, &sceneHit);
+            // TF2 (CTFBaseRocket::Explode) pulls out of the surface by 1 Source unit.
+            const F32 pull = 1.0f / in->scale;
+            rocket->explosionOrigin.x = rocket->impact.x + sweep.normal.x * pull;
+            rocket->explosionOrigin.y = rocket->impact.y + sweep.normal.y * pull;
+            rocket->explosionOrigin.z = rocket->impact.z + sweep.normal.z * pull;
 
-                const bool hitScene =
-                    (sceneHit.flags & k_HIT_IT) != 0 &&
-                    sceneHit.dist >= 0.0f &&
-                    sceneHit.dist <= len;
+            rocket->sweepHit = true;
+            rocket->impacted = true;
+            rocket->terminated = true;
+            rocket->active = false;
+            rocket->impactTime = debugTime;
 
-                const bool hitEntity = hitScene && sceneHit.optr != NULL;
-                rocket->sweepHit = hitScene;
+            TF2Bridge_RocketExplode(rocket, sweep.ent);
 
-                if (hitEntity)
-                {
-                    printf("bfbb: tf2bridge -- rocket %d hit scene entity id %u at %.2f\n",
-                        entIndex, (unsigned)sceneHit.oid,
-                        (double)sceneHit.dist);
-                }
+            iTF2BridgeSendRocketImpact(entIndex, rocket->impact.x, rocket->impact.y, rocket->impact.z);
 
-                if (!hitScene)
-                {
-                    xCollis envHit;
-                    memset(&envHit, 0, sizeof(envHit));
-                    envHit.flags = k_HIT_0x200;
-
-                    const bool hitEnv =
-                        iRayHitsEnv(&ray, globals.sceneCur->env, &envHit) != 0 &&
-                        envHit.dist >= 0.0f && envHit.dist <= len;
-
-                    // Diagnostic-only long probe. Keep the actual rocket sweep unchanged;
-                    // this tells us whether the JSP query can see the same surface when given
-                    // a longer segment from the exact same starting point and direction.
-                    const float probeLen = 8.0f;
-                    xRay3 probeRay;
-                    probeRay.origin = rocket->prevPos;
-                    probeRay.dir = ray.dir;
-                    probeRay.min_t = 0.0f;
-                    probeRay.max_t = probeLen;
-                    probeRay.flags = XRAY3_USE_MIN | XRAY3_USE_MAX;
-
-                    xCollis probeHit;
-                    memset(&probeHit, 0, sizeof(probeHit));
-                    probeHit.flags = k_HIT_0x200;
-
-                    const bool probeHitEnv =
-                        iRayHitsEnv(&probeRay, globals.sceneCur->env, &probeHit) != 0 &&
-                        probeHit.dist >= 0.0f && probeHit.dist <= probeLen;
-
-                    printf("bfbb: tf2bridge -- rocket %d sweep MISS len=%.3f start=(%.3f %.3f %.3f) end=(%.3f %.3f %.3f) sceneFlags=0x%08x sceneDist=%.3f env=%s envDist=%.3f longProbe=%s probeDist=%.3f\n",
-                        entIndex, (double)len,
-                        (double)rocket->sweepStart.x, (double)rocket->sweepStart.y, (double)rocket->sweepStart.z,
-                        (double)rocket->sweepEnd.x, (double)rocket->sweepEnd.y, (double)rocket->sweepEnd.z,
-                        (unsigned)sceneHit.flags, (double)sceneHit.dist,
-                        hitEnv ? "HIT" : "MISS", hitEnv ? (double)envHit.dist : -1.0,
-                        probeHitEnv ? "HIT" : "MISS", probeHitEnv ? (double)probeHit.dist : -1.0);
-                }
-
-                if (hitScene)
-                {
-                    rocket->impact.x = rocket->prevPos.x + ray.dir.x * sceneHit.dist;
-                    rocket->impact.y = rocket->prevPos.y + ray.dir.y * sceneHit.dist;
-                    rocket->impact.z = rocket->prevPos.z + ray.dir.z * sceneHit.dist;
-
-                    // Keep the actual JSP collision normal. Splash visibility
-                    // should begin just outside the surface we struck, not
-                    // merely along the projectile's incoming direction.
-                    rocket->impactNormal = sceneHit.norm;
-                    const F32 normalLen = sqrtf(
-                        rocket->impactNormal.x * rocket->impactNormal.x +
-                        rocket->impactNormal.y * rocket->impactNormal.y +
-                        rocket->impactNormal.z * rocket->impactNormal.z);
-                    if (normalLen > 0.0001f)
-                    {
-                        rocket->impactNormal.x /= normalLen;
-                        rocket->impactNormal.y /= normalLen;
-                        rocket->impactNormal.z /= normalLen;
-
-                        // Ensure the normal points back toward the projectile
-                        // side of the surface.
-                        const F32 normalDotIncoming =
-                            rocket->impactNormal.x * ray.dir.x +
-                            rocket->impactNormal.y * ray.dir.y +
-                            rocket->impactNormal.z * ray.dir.z;
-                        if (normalDotIncoming > 0.0f)
-                        {
-                            rocket->impactNormal.x = -rocket->impactNormal.x;
-                            rocket->impactNormal.y = -rocket->impactNormal.y;
-                            rocket->impactNormal.z = -rocket->impactNormal.z;
-                        }
-                    }
-                    else
-                    {
-                        rocket->impactNormal = {-ray.dir.x, -ray.dir.y, -ray.dir.z};
-                    }
-
-                    rocket->impacted = true;
-                    rocket->terminated = true;
-                    rocket->active = false;
-                    rocket->impactTime = 5.0f;
-                    rocket->exposureSampleTime = 5.0f;
-
-                    // Build the splash diagnostic once, at the moment the
-                    // rocket impacts. This deliberately does not apply damage.
-                    TF2Bridge_BuildRocketExplosionDiagnostics(rocket);
-
-                    // BFBB is authoritative for world collision. Tell the
-                    // actual TF2 rocket to terminate at this exact impact
-                    // point; this is still not an explosion/damage event.
-                    iTF2BridgeSendRocketImpact(entIndex, rocket->impact.x,
-                                               rocket->impact.y, rocket->impact.z);
-
-                    printf("bfbb: tf2bridge -- rocket %d impact source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) radius=%.2f\n",
-                        entIndex,
-                        (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
-                        (double)in->rocketPos[i][2],
-                        (double)rocket->impact.x, (double)rocket->impact.y,
-                        (double)rocket->impact.z, (double)rocket->radius);
-                }
-            }
+            printf("bfbb: tf2bridge -- rocket %d impact %s source=(%.2f %.2f %.2f) bfbb=(%.2f %.2f %.2f) "
+                   "normal=(%.2f %.2f %.2f) radius=%.2f\n",
+                   entIndex, sweep.ent != NULL ? "ENTITY" : "world",
+                   (double)in->rocketPos[i][0], (double)in->rocketPos[i][1], (double)in->rocketPos[i][2],
+                   (double)rocket->impact.x, (double)rocket->impact.y, (double)rocket->impact.z,
+                   (double)sweep.normal.x, (double)sweep.normal.y, (double)sweep.normal.z,
+                   (double)rocket->radius);
+        }
+        else if (verbose)
+        {
+            printf("bfbb: tf2bridge -- rocket %d sweep clear (%.2f %.2f %.2f)->(%.2f %.2f %.2f)\n",
+                   entIndex, (double)from.x, (double)from.y, (double)from.z, (double)pos.x,
+                   (double)pos.y, (double)pos.z);
         }
 
         rocket->pos = pos;
@@ -812,38 +775,82 @@ static void TF2Bridge_ProcessRocketDiagnostics(const BridgeIntentPacket* in)
         rocket->hasPrevious = true;
     }
 
-    // A rocket no longer present in the TF2 packet is no longer drawn as a
-    // live diagnostic. An impact marker, if one exists, is allowed to finish
-    // its configured lifetime.
+    // Recycle the track of any rocket TF2 no longer reports. An impact marker that
+    // is still being drawn is left to finish its lifetime.
     for (uint32_t i = 0; i < BRIDGE_MAX_ROCKETS; ++i)
     {
         if (sRocketDebug[i].entIndex != 0 && !seen[i])
         {
-            // The entity has disappeared from TF2's projectile list. This is
-            // the point at which its diagnostic track may finally be reused.
-            sRocketDebug[i] = {};
+            sRocketDebug[i].active = false;
+            sRocketDebug[i].entIndex = 0;
+            sRocketDebug[i].hasPrevious = false;
+            sRocketDebug[i].terminated = false;
+            sRocketDebug[i].impacted = sRocketDebug[i].impactTime > 0.0f;
         }
     }
+}
 
-    // Numeric source/BFBB comparison, throttled so one fast rocket does not
-    // flood the console.
-    if (count > 0)
+// One weapon-fire event from TF2: a hitscan volley, a melee swing, or a gun shot.
+// Every such packet is queued by the platform layer and handled here exactly once
+// (the old code only looked at the newest packet each frame and silently dropped
+// the shots in any older one).
+static bool sLastAttack = false;
+
+static void TF2Bridge_ProcessWeaponEvent(const BridgeIntentPacket* ev)
+{
+    const bool melee = (ev->weaponflags & BRIDGE_WEAPON_MELEE) != 0;
+    const bool fired = (ev->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
+    // A fired rocket is a real projectile now; it damages on impact. It must not
+    // also do the old instant "ray at the crosshair" stand-in, which ignored walls.
+    const bool rocketGun = (ev->weaponflags & BRIDGE_WEAPON_ROCKET) != 0 &&
+                           !TF2Bridge_EnvFlag("BFBB_TF2BRIDGE_LEGACY_ROCKET_HITSCAN");
+
+    if (ev->hitscanCount > 0)
     {
-        sRocketDebugPrintTimer -= gSceneUpdateTime;
-        if (sRocketDebugPrintTimer <= 0.0f)
+        const uint32_t count = ev->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
+            ? BRIDGE_MAX_HITSCAN_RAYS : ev->hitscanCount;
+        sHitscanDebugCount = count;
+        sHitscanDebugTime = 2.0f;
+
+        // One diagnostic line per hitscan packet. This compares the exact
+        // Source fire point/direction with the BFBB coordinates used by
+        // collision and with the camera that BFBB is actually rendering.
+        const xVec3 debugOrigin = FromSource(ev->hitscanOrigin[0],
+            ev->hitscanOrigin[1], ev->hitscanOrigin[2], ev->scale);
+        const xVec3 debugDir = FromSource(ev->hitscanDir[0][0],
+            ev->hitscanDir[0][1], ev->hitscanDir[0][2], 1.0f);
+        const xMat4x3& debugCam = globals.camera.mat;
+        printf("bfbb: tf2bridge -- hitscan debug sourceOrigin %.2f %.2f %.2f sourceDir %.3f %.3f %.3f\\n",
+            (double)ev->hitscanOrigin[0], (double)ev->hitscanOrigin[1],
+            (double)ev->hitscanOrigin[2], (double)ev->hitscanDir[0][0],
+            (double)ev->hitscanDir[0][1], (double)ev->hitscanDir[0][2]);
+        printf("bfbb: tf2bridge -- hitscan debug bfbbOrigin %.2f %.2f %.2f bfbbDir %.3f %.3f %.3f camera %.2f %.2f %.2f at %.3f %.3f %.3f\\n",
+            (double)debugOrigin.x, (double)debugOrigin.y, (double)debugOrigin.z,
+            (double)debugDir.x, (double)debugDir.y, (double)debugDir.z,
+            (double)debugCam.pos.x, (double)debugCam.pos.y, (double)debugCam.pos.z,
+            (double)debugCam.at.x, (double)debugCam.at.y, (double)debugCam.at.z);
+
+        for (uint32_t i = 0; i < count; ++i)
         {
-            const uint32_t i = 0;
-            const xVec3 bfbbPos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
-                                             in->rocketPos[i][2], in->scale);
-            printf("bfbb: tf2bridge -- rocket %d source=(%.2f %.2f %.2f) bfbb=(%.3f %.3f %.3f) radius=%.2f\n",
-                in->rocketEntIndex[i],
-                (double)in->rocketPos[i][0], (double)in->rocketPos[i][1],
-                (double)in->rocketPos[i][2],
-                (double)bfbbPos.x, (double)bfbbPos.y, (double)bfbbPos.z,
-                (double)(in->rocketRadius[i] / in->scale));
-            sRocketDebugPrintTimer = 0.25f;
+            const xVec3 origin = FromSource(ev->hitscanOrigin[0],
+                ev->hitscanOrigin[1], ev->hitscanOrigin[2], ev->scale);
+            const xVec3 dir = FromSource(ev->hitscanDir[i][0],
+                ev->hitscanDir[i][1], ev->hitscanDir[i][2], 1.0f);
+            sHitscanDebugRays[i].origin = origin;
+            sHitscanDebugRays[i].end.x = origin.x + dir.x * (ev->hitscanRange / ev->scale);
+            sHitscanDebugRays[i].end.y = origin.y + dir.y * (ev->hitscanRange / ev->scale);
+            sHitscanDebugRays[i].end.z = origin.z + dir.z * (ev->hitscanRange / ev->scale);
+            TF2Bridge_FireHitscanRay(ev, ev->hitscanOrigin,
+                ev->hitscanDir[i], ev->hitscanRange, i);
         }
     }
+    else if (fired && !rocketGun)
+    {
+        TF2Bridge_FireAtNPCs(ev);
+    }
+    (void)melee;
+
+    sLastAttack = (ev->buttons & BRIDGE_IN_ATTACK) != 0;
 }
 
 void zTF2Bridge_Frame()
@@ -870,64 +877,37 @@ void zTF2Bridge_Frame()
     // that do not yet report through the common weapon bases. A packet with
     // BRIDGE_WEAPON_FIRED is consumed instead of the attack edge, so one TF2
     // attack cannot produce two BFBB hits.
+    // Weapon events first, oldest to newest.
+    BridgeIntentPacket ev;
+    while (iTF2BridgePopEvent(&ev))
+    {
+        if (playing)
+        {
+            TF2Bridge_ProcessWeaponEvent(&ev);
+        }
+    }
+
     static uint32_t sLastIntentSeq = 0;
-    static bool sLastAttack = false;
     const BridgeIntentPacket* attackIn = iTF2BridgeGetIntent();
     if (playing && attackIn != NULL && attackIn->seq != sLastIntentSeq)
     {
         const bool attack = (attackIn->buttons & BRIDGE_IN_ATTACK) != 0;
-        const bool fired = (attackIn->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
+        const bool event = attackIn->hitscanCount > 0 || (attackIn->weaponflags & BRIDGE_WEAPON_FIRED) != 0;
+        const bool rocketGun = (attackIn->weaponflags & BRIDGE_WEAPON_ROCKET) != 0 &&
+                               !TF2Bridge_EnvFlag("BFBB_TF2BRIDGE_LEGACY_ROCKET_HITSCAN");
 
-        TF2Bridge_ProcessRocketDiagnostics(attackIn);
+        TF2Bridge_ProcessRockets(attackIn);
 
-        if (attackIn->hitscanCount > 0)
-        {
-            const uint32_t count = attackIn->hitscanCount > BRIDGE_MAX_HITSCAN_RAYS
-                ? BRIDGE_MAX_HITSCAN_RAYS : attackIn->hitscanCount;
-            sHitscanDebugCount = count;
-            sHitscanDebugTime = 2.0f;
-
-            // One diagnostic line per hitscan packet. This compares the exact
-            // Source fire point/direction with the BFBB coordinates used by
-            // collision and with the camera that BFBB is actually rendering.
-            const xVec3 debugOrigin = FromSource(attackIn->hitscanOrigin[0],
-                attackIn->hitscanOrigin[1], attackIn->hitscanOrigin[2], attackIn->scale);
-            const xVec3 debugDir = FromSource(attackIn->hitscanDir[0][0],
-                attackIn->hitscanDir[0][1], attackIn->hitscanDir[0][2], 1.0f);
-            const xMat4x3& debugCam = globals.camera.mat;
-            printf("bfbb: tf2bridge -- hitscan debug sourceOrigin %.2f %.2f %.2f sourceDir %.3f %.3f %.3f\\n",
-                (double)attackIn->hitscanOrigin[0], (double)attackIn->hitscanOrigin[1],
-                (double)attackIn->hitscanOrigin[2], (double)attackIn->hitscanDir[0][0],
-                (double)attackIn->hitscanDir[0][1], (double)attackIn->hitscanDir[0][2]);
-            printf("bfbb: tf2bridge -- hitscan debug bfbbOrigin %.2f %.2f %.2f bfbbDir %.3f %.3f %.3f camera %.2f %.2f %.2f at %.3f %.3f %.3f\\n",
-                (double)debugOrigin.x, (double)debugOrigin.y, (double)debugOrigin.z,
-                (double)debugDir.x, (double)debugDir.y, (double)debugDir.z,
-                (double)debugCam.pos.x, (double)debugCam.pos.y, (double)debugCam.pos.z,
-                (double)debugCam.at.x, (double)debugCam.at.y, (double)debugCam.at.z);
-
-            for (uint32_t i = 0; i < count; ++i)
-            {
-                const xVec3 origin = FromSource(attackIn->hitscanOrigin[0],
-                    attackIn->hitscanOrigin[1], attackIn->hitscanOrigin[2], attackIn->scale);
-                const xVec3 dir = FromSource(attackIn->hitscanDir[i][0],
-                    attackIn->hitscanDir[i][1], attackIn->hitscanDir[i][2], 1.0f);
-                sHitscanDebugRays[i].origin = origin;
-                sHitscanDebugRays[i].end.x = origin.x + dir.x * (attackIn->hitscanRange / attackIn->scale);
-                sHitscanDebugRays[i].end.y = origin.y + dir.y * (attackIn->hitscanRange / attackIn->scale);
-                sHitscanDebugRays[i].end.z = origin.z + dir.z * (attackIn->hitscanRange / attackIn->scale);
-                TF2Bridge_FireHitscanRay(attackIn, attackIn->hitscanOrigin,
-                    attackIn->hitscanDir[i], attackIn->hitscanRange, i);
-            }
-        }
-        else if (fired)
+        // Fallback for weapons that never report a fire event: the attack edge.
+        // (Events, including this packet if it is one, were handled above.)
+        if (!event && !rocketGun && attack && !sLastAttack)
         {
             TF2Bridge_FireAtNPCs(attackIn);
         }
-        else if (attack && !sLastAttack)
+        if (!event)
         {
-            TF2Bridge_FireAtNPCs(attackIn);
+            sLastAttack = attack;
         }
-        sLastAttack = attack;
         sLastIntentSeq = attackIn->seq;
     }
 
@@ -1398,6 +1378,7 @@ void zTF2Bridge_DebugRenderRockets()
 
             // Exposure sample markers:
             //   green = visible to the explosion
+            //   cyan  = reached by bending around geometry (wrap)
             //   red   = inside the blast but blocked by world geometry
             //   yellow = inside the NPC bound but outside the blast radius
             // These deliberately last five seconds so the individual sample
@@ -1420,6 +1401,10 @@ void zTF2Bridge_DebugRenderRockets()
                     else if (rocket.exposureSampleState[s] == 3)
                     {
                         cr = 60; cg = 255; cb = 80;
+                    }
+                    else if (rocket.exposureSampleState[s] == 4)
+                    {
+                        cr = 60; cg = 200; cb = 255; // reached by bending around geometry
                     }
 
                     RwIm3DVertex sampleVerts[6];

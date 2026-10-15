@@ -65,6 +65,22 @@ namespace
     double sIntentAt = -1000.0;
     uint32_t sLastSeq = 0;
 
+    // Fire events must not be coalesced away with the "newest intent wins" rule.
+    const int kEventCap = 32;
+    struct EventSlot
+    {
+        BridgeIntentPacket pkt;
+        double at;
+    };
+    EventSlot sEvents[kEventCap];
+    int sEventHead = 0;
+    int sEventCount = 0;
+
+    bool IsEvent(const BridgeIntentPacket& p)
+    {
+        return p.hitscanCount > 0 || (p.weaponflags & BRIDGE_WEAPON_FIRED) != 0;
+    }
+
     double Now()
     {
         using namespace std::chrono;
@@ -173,6 +189,19 @@ void iTF2BridgePoll()
         sLastSeq = p.seq;
         sHaveIntent = true;
         sIntentAt = Now();
+
+        if (IsEvent(p))
+        {
+            if (sEventCount == kEventCap)
+            {
+                sEventHead = (sEventHead + 1) % kEventCap;
+                --sEventCount;
+            }
+            EventSlot& slot = sEvents[(sEventHead + sEventCount) % kEventCap];
+            slot.pkt = p;
+            slot.at = sIntentAt;
+            ++sEventCount;
+        }
     }
 }
 
@@ -215,6 +244,26 @@ void iTF2BridgeSetStick(S32 valid, F32 x, F32 y)
     sStickValid = valid != 0;
     sStickX = x;
     sStickY = y;
+}
+
+bool iTF2BridgePopEvent(BridgeIntentPacket* out)
+{
+    while (sEventCount > 0)
+    {
+        const EventSlot& slot = sEvents[sEventHead];
+        const bool fresh = Now() - slot.at <= kStaleSeconds;
+        if (fresh && out != NULL)
+        {
+            *out = slot.pkt;
+        }
+        sEventHead = (sEventHead + 1) % kEventCap;
+        --sEventCount;
+        if (fresh)
+        {
+            return out != NULL;
+        }
+    }
+    return false;
 }
 
 const BridgeIntentPacket* iTF2BridgeGetIntent()

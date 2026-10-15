@@ -38,6 +38,12 @@ void iTF2BridgeApplyPad(iPadHostState* pad);
 // back to the raw TF2 movement axes.
 void iTF2BridgeSetStick(S32 valid, F32 x, F32 y);
 
+// Weapon-fire events (a packet carrying hitscan rays or the FIRED flag). Poll
+// queues every one, so a shot is not lost when a newer packet arrives in the same
+// frame. Returns false when none are waiting; events older than a quarter second
+// are discarded.
+bool iTF2BridgePopEvent(BridgeIntentPacket* out);
+
 // The newest intent, or NULL when none has arrived in the last quarter second.
 const BridgeIntentPacket* iTF2BridgeGetIntent();
 
