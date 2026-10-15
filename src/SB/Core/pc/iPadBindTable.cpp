@@ -420,3 +420,60 @@ bool iPadBindHeld(const iPadBind& bind, bool (*held)(S16 id))
 
     return false;
 }
+
+namespace
+{
+    // Does holding exactly the positive inputs of `presser`'s alternative
+    // `alt` satisfy `other`?
+    bool pressSets(const iPadBind& presser, S32 alt, const iPadBind& other)
+    {
+        for (S32 o = 0; o < other.alts; o++)
+        {
+            bool all = true;
+            for (S32 i = 0; i < other.length[o] && all; i++)
+            {
+                bool down = false;
+                for (S32 j = 0; j < presser.length[alt]; j++)
+                {
+                    if (!presser.negate[alt][j] && presser.id[alt][j] == other.id[o][i])
+                    {
+                        down = true;
+                    }
+                }
+
+                if (down == (other.negate[o][i] != 0))
+                {
+                    all = false;
+                }
+            }
+
+            if (all)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+} // namespace
+
+bool iPadBindOverlap(const iPadBind& a, const iPadBind& b)
+{
+    for (S32 alt = 0; alt < a.alts; alt++)
+    {
+        if (pressSets(a, alt, b))
+        {
+            return true;
+        }
+    }
+
+    for (S32 alt = 0; alt < b.alts; alt++)
+    {
+        if (pressSets(b, alt, a))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}

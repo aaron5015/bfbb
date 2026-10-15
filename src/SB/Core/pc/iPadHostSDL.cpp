@@ -535,6 +535,11 @@ void iPadHostReloadBindings()
     iPadKeyboardInit();
 }
 
+const iPadBind* iPadHostBindings(S32 pad)
+{
+    return pad ? sPadBind : iPadKeyboardBindings();
+}
+
 S32 iPadHostCaptureKey(S32 prime, char* out, S32 size)
 {
     return iPadKeyboardCapture(prime, out, size);

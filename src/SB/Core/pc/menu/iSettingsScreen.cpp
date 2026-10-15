@@ -674,6 +674,38 @@ namespace
                mask == XPAD_BUTTON_DOWN || mask == XPAD_BUTTON_START;
     }
 
+    // A help line naming the rows that one press of `row`'s input also sets,
+    // or "" when there are none.
+    void SharedWith(bool pad, S32 row, char* out, size_t size)
+    {
+        out[0] = '\0';
+
+        const iPadBind* binds = iPadHostBindings(pad);
+        if (binds == NULL)
+        {
+            return;
+        }
+
+        size_t have = 0;
+        for (S32 i = 0; i < kPadBindButtonCount && i < IPAD_BIND_MAX_BUTTONS; i++)
+        {
+            if (i == row || !iPadBindOverlap(binds[row], binds[i]))
+            {
+                continue;
+            }
+
+            const char* label = i < kBindLabelCount ? kBindLabels[i] : kPadBindButtons[i].name;
+            const int n = snprintf(out + have, size - have, "%s%s",
+                                   have == 0 ? "{n}Shares an input with " : ", ", label);
+            if (n < 0 || (size_t)n >= size - have)
+            {
+                out[have] = '\0';
+                break;
+            }
+            have += (size_t)n;
+        }
+    }
+
     void DrawBindPage(bool pad, S32 sel, S32 top, const char* help)
     {
         Layout();
@@ -721,10 +753,15 @@ namespace
         else
         {
             const char* does = kPadBindButtons[sel].does;
+            // Short enough that the line of buttons after it always fits in
+            // the help text's 256 bytes (mnu4_text.cpp); SharedWith stops at a
+            // whole name.
+            char shared[100];
+            SharedWith(pad, sel, shared, sizeof(shared));
             snprintf(text, sizeof(text),
-                     "%s%s{n}{i:button_picture_01} Change  %s"
+                     "%s%s%s{n}{i:button_picture_01} Change  %s"
                      "{i:button_picture_03} Back",
-                     does != NULL ? "Action: " : "", does != NULL ? does : "",
+                     does != NULL ? "Action: " : "", does != NULL ? does : "", shared,
                      MenuNeeds(sel) ? "" : "{i:button_picture_04} Clear  ");
         }
         DrawHelp(text);

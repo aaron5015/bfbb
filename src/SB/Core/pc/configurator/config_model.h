@@ -115,6 +115,12 @@ void ConfigModelBindSetText(ConfigModelDevice device, S32 row, const char* text)
 // row to. A preset that names a printed letter rather than a position says so.
 void ConfigModelBindDescribeDefault(ConfigModelDevice device, S32 row, char* out, size_t outSize);
 
+// The names of the other rows that one press of this row's input also sets,
+// separated by ", ", or "" for none. Each row counts with what it runs with:
+// its box, or its default when the box is empty. A box that does not parse
+// counts as bound to nothing.
+void ConfigModelBindDescribeOverlaps(ConfigModelDevice device, S32 row, char* out, size_t outSize);
+
 // The input names a binding for this device may use.
 const iPadBindToken* ConfigModelBindTokens(ConfigModelDevice device, S32* count);
 

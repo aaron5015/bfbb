@@ -3,6 +3,8 @@
 
 #include <types.h>
 
+struct iPadBind;
+
 // PC-only. There is no GameCube counterpart to this file: the console reads
 // its controllers through one API that is always present, so iPad.cpp there
 // talks to PADRead directly. A host has several possible input sources and
@@ -93,6 +95,10 @@ const char* iPadHostInputForLabel(char letter);
 //
 // Re-read [pad] and [keyboard], after iConfigSet has changed one.
 void iPadHostReloadBindings();
+
+// The bindings in force for the controller (`pad` TRUE) or the keyboard, one
+// per row of kPadBindButtons. NULL from a backend that reads none.
+const iPadBind* iPadHostBindings(S32 pad);
 
 // The next key, or the next input on the controller on port 0, to go down,
 // written as its binding name ("space", "lb"). Called every frame while

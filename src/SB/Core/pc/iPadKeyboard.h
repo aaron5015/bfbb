@@ -4,6 +4,7 @@
 #include <types.h>
 
 struct iPadHostState;
+struct iPadBind;
 
 // PC-only: the keyboard standing in for port 0 when no controller is on it. A
 // keyboard is not a second player; it is what makes the port playable on a
@@ -22,5 +23,8 @@ void iPadKeyboardPoll(iPadHostState* s);
 
 // iPadHostCaptureKey's half; see iPadHost.h.
 S32 iPadKeyboardCapture(S32 prime, char* out, S32 size);
+
+// The [keyboard] bindings as last loaded, one per row of kPadBindButtons.
+const iPadBind* iPadKeyboardBindings();
 
 #endif

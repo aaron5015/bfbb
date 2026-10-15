@@ -2027,6 +2027,30 @@ static void test_pad_bindings()
     check(!iPadBindParse("nonesuch", kFakeTokens, kFakeTokenCount, "test", &b),
           "and not as the start of a longer word");
 
+    // One press setting two buttons, which the binding screens report.
+    {
+        iPadBind x;
+        iPadBind y;
+
+        iPadBindParse("one", kFakeTokens, kFakeTokenCount, "test", &x);
+        iPadBindParse("three, one", kFakeTokens, kFakeTokenCount, "test", &y);
+        check(iPadBindOverlap(x, y), "two bindings sharing an input overlap");
+
+        iPadBindParse("two", kFakeTokens, kFakeTokenCount, "test", &y);
+        check(!iPadBindOverlap(x, y), "and two on different inputs do not");
+
+        iPadBindParse("one+!two", kFakeTokens, kFakeTokenCount, "test", &x);
+        iPadBindParse("one+two", kFakeTokens, kFakeTokenCount, "test", &y);
+        check(!iPadBindOverlap(x, y), "the gamecube preset's l1 and l2 do not overlap");
+
+        iPadBindParse("two", kFakeTokens, kFakeTokenCount, "test", &x);
+        check(iPadBindOverlap(x, y) && iPadBindOverlap(y, x),
+              "but its z does overlap l2, since the chord holds z down, either way round");
+
+        iPadBindParse("", kFakeTokens, kFakeTokenCount, "test", &x);
+        check(!iPadBindOverlap(x, x), "and an empty binding overlaps nothing");
+    }
+
     // Whitespace is not significant anywhere.
     check(bind_says("  one  +  ! two  ,  three  ", FAKE(THREE)), "spaces around the operators");
 

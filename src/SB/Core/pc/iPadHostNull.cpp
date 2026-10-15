@@ -69,6 +69,11 @@ void iPadHostReloadBindings()
 {
 }
 
+const iPadBind* iPadHostBindings(S32)
+{
+    return NULL;
+}
+
 void iPadHostScript(S32, U32)
 {
 }

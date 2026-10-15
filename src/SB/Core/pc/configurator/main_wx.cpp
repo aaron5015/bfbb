@@ -111,8 +111,8 @@ namespace
         return section >= ConfigModelSectionCount();
     }
 
-    // What a binding row says under its box: what the button does, and what
-    // an empty box means.
+    // What a binding row says under its box: what the button does, what an
+    // empty box means, and which other rows the same press sets.
     wxString DescribeBinding(ConfigModelDevice device, S32 row)
     {
         char def[256];
@@ -125,6 +125,13 @@ namespace
             text << does << ". ";
         }
         text << "Default: " << def << ".";
+
+        char shared[256];
+        ConfigModelBindDescribeOverlaps(device, row, shared, sizeof(shared));
+        if (shared[0] != '\0')
+        {
+            text << " Shares an input with " << shared << ".";
+        }
         return text;
     }
 
@@ -970,15 +977,17 @@ namespace
     // under the caret while a path is being typed.
     void ConfigFrame::RefreshRow(Row& row)
     {
-        // A binding's description says what the default is, which the value
-        // does not change.
+        wxString text;
         if (row.bindRow >= 0)
         {
-            return;
+            text = DescribeBinding(row.device, row.bindRow);
         }
-
-        char text[768];
-        ConfigModelDescribe(row.setting, text, sizeof(text));
+        else
+        {
+            char described[768];
+            ConfigModelDescribe(row.setting, described, sizeof(described));
+            text = described;
+        }
 
         if (row.descriptionText == text)
         {
@@ -1074,6 +1083,17 @@ namespace
             value.Trim(true).Trim(false);
             ConfigModelBindSetText(row->device, row->bindRow, value.utf8_str());
             RefreshApply();
+
+            // Every row on the page, not just this one: a description names
+            // the other rows its input sets, and this change can add or take
+            // away this row from any of theirs.
+            for (size_t i = 0; i < mRows.size(); i++)
+            {
+                if (mRows[i].bindRow >= 0)
+                {
+                    RefreshRow(mRows[i]);
+                }
+            }
             return;
         }
 

@@ -169,6 +169,14 @@ bool iPadBindParse(const char* text, const iPadBindToken* tokens, S32 tokenCount
 // Is the binding satisfied right now? `held` answers for one device input id.
 bool iPadBindHeld(const iPadBind& bind, bool (*held)(S16 id));
 
+// Whether one press sets both buttons: holding exactly what an alternative of
+// either names satisfies the other. Exact about '+' and '!', so the gamecube
+// preset's `lt+!rb` and `lt+rb` do not overlap. Ids are compared as they are,
+// so the keyboard's `shift` is not matched against `lshift`.
+//
+// For the binding screens, which say when two rows share an input.
+bool iPadBindOverlap(const iPadBind& a, const iPadBind& b);
+
 // Which config.ini section a device reads, and which column of the table it
 // defaults from. The two always travel together -- a device that read [pad]
 // and defaulted from the keyboard column would be a silent mess -- so they are

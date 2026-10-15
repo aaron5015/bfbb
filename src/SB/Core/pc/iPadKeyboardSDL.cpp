@@ -104,6 +104,11 @@ void iPadKeyboardInit()
     iPadBindLoad(IPAD_BIND_KEYBOARD, tokens, count, sKeyBind);
 }
 
+const iPadBind* iPadKeyboardBindings()
+{
+    return sKeyBind;
+}
+
 void iPadKeyboardPoll(iPadHostState* s)
 {
     s->connected = true;
