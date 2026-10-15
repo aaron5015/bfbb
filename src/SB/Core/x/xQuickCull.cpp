@@ -72,7 +72,8 @@ static void xQuickCullCellForVec(xQCControl* ctrl, xQCData* c, const xVec3* v)
 #if defined(PS2)
 inline
 #endif
-    static void xQuickCullCellMerge(xQCData* o, const xQCData* a, const xQCData* b)
+    static void
+    xQuickCullCellMerge(xQCData* o, const xQCData* a, const xQCData* b)
 {
     o->xmin = MIN(a->xmin, b->xmin);
     o->ymin = MIN(a->ymin, b->ymin);
@@ -164,7 +165,8 @@ void xQuickCullForSphere(xQCControl* ctrl, xQCData* q, const xSphere* s)
 #if defined(XBOX)
 inline
 #endif
-    void xQuickCullForBox(xQCControl* ctrl, xQCData* q, const xBox* box)
+    void
+    xQuickCullForBox(xQCControl* ctrl, xQCData* q, const xBox* box)
 {
     xQCData a;
     xQuickCullCellForVec(ctrl, &a, &box->lower);

@@ -89,7 +89,8 @@ xSerial::~xSerial()
 #if defined(PS2)
 inline
 #endif
-    void xSerial::operator delete(void*)
+    void
+    xSerial::operator delete(void*)
 {
 }
 
@@ -348,7 +349,8 @@ S32 xSerial::rdbit()
 #if defined(PS2)
 inline
 #endif
-    void xSerial::prepare(U32 idtag)
+    void
+    xSerial::prepare(U32 idtag)
 {
     st_SERIAL_CLIENTINFO* clt = XSER_get_client(idtag);
     this->idtag = clt->idtag;
@@ -368,7 +370,8 @@ void xSerialWipeMainBuffer()
 #if defined(PS2)
 inline
 #endif
-    static void xSER_init_tables()
+    static void
+    xSER_init_tables()
 {
     for (S32 i = 0; i < 32; i++)
     {

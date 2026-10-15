@@ -636,7 +636,8 @@ void xMat4x3Toworld(xVec3* o, const xMat4x3* m, const xVec3* v)
 #if defined(XBOX)
 inline
 #endif
-    void xMat4x3Mul(xMat4x3* o, const xMat4x3* a, const xMat4x3* b)
+    void
+    xMat4x3Mul(xMat4x3* o, const xMat4x3* a, const xMat4x3* b)
 {
     xVec3 v;
 
@@ -870,7 +871,8 @@ void xBoxUnion(xBox& a, const xBox& b, const xBox& c)
 #if defined(PS2)
 inline
 #endif
-    void xBoxFromCircle(xBox& box, const xVec3& center, const xVec3& dir, F32 r)
+    void
+    xBoxFromCircle(xBox& box, const xVec3& center, const xVec3& dir, F32 r)
 {
     xVec3 ext = { 0.0f, 0.0f, 0.0f };
 #if defined(PS2)

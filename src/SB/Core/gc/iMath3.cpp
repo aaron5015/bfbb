@@ -23,7 +23,8 @@ void iMath3Exit()
 #if defined(XBOX)
 inline
 #endif
-    void iSphereIsectVec(const xSphere* s, const xVec3* v, xIsect* isx)
+    void
+    iSphereIsectVec(const xSphere* s, const xVec3* v, xIsect* isx)
 {
     xVec3Sub(&isx->norm, v, &s->center);
 
@@ -486,7 +487,8 @@ static U32 ClipPlane(F32 denom, F32 numer, F32* t_in, F32* t_out)
 #if defined(PS2)
 inline
 #endif
-    static U32 ClipBox(const xVec3* r3, const xVec3* r4, const xVec3* r5, F32* t_in, F32* t_out)
+    static U32
+    ClipBox(const xVec3* r3, const xVec3* r4, const xVec3* r5, F32* t_in, F32* t_out)
 {
     return (ClipPlane(r5->x, -r4->x - r3->x, t_in, t_out) &&
             ClipPlane(-r5->x, r4->x - r3->x, t_in, t_out) &&
@@ -847,7 +849,8 @@ void iBoxBoundVec(xBox* o, const xBox* b, const xVec3* v)
 #if defined(XBOX)
 inline
 #endif
-    F32 xVec2Dist(F32 x1, F32 y1, F32 x2, F32 y2)
+    F32
+    xVec2Dist(F32 x1, F32 y1, F32 x2, F32 y2)
 {
     F32 x = x1 - x2;
     F32 y = y1 - y2;

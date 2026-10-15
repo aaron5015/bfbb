@@ -406,7 +406,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        void ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius);
+        void
+        ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius);
 } // namespace
 
 void xParEmitterEmitOCircleEdge(xPar* p, xParEmitterAsset* a, F32 dt)
@@ -419,7 +420,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        void ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius)
+        void
+        ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius)
     {
         xMat3x3 mat;
 
@@ -464,8 +466,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        void transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
-                                const xMat4x3& mat);
+        void
+        transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a, const xMat4x3& mat);
 } // namespace
 
 xMat4x3* xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
@@ -497,8 +499,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        void transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
-                                const xMat4x3& mat)
+        void
+        transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a, const xMat4x3& mat)
     {
         const xPEEntBone& eb = a.e_entbone;
 
@@ -553,7 +555,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        xVec3 get_random_offset(const xPEEntBone& eb, const xMat4x3& mat);
+        xVec3
+        get_random_offset(const xPEEntBone& eb, const xMat4x3& mat);
 } // namespace
 
 void xParEmitterEmitEntBone(xPar* p, xParEmitterAsset* a, F32 dt, const xMat4x3& mat)
@@ -576,7 +579,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        xVec3 get_random_offset(const xPEEntBone& eb, const xMat4x3& mat)
+        xVec3
+        get_random_offset(const xPEEntBone& eb, const xMat4x3& mat)
     {
         xVec3 off;
 
@@ -687,7 +691,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        xVec3 get_random_offset(const xBound& b, F32 expand, U32 subtype);
+        xVec3
+        get_random_offset(const xBound& b, F32 expand, U32 subtype);
 } // namespace
 
 void xParEmitterEmitEntBound(xPar* p, xParEmitterAsset* a, F32 dt, const xEnt* ent)
@@ -723,7 +728,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        xVec3 get_random_offset(const xBound& b, F32 expand, U32 subtype)
+        xVec3
+        get_random_offset(const xBound& b, F32 expand, U32 subtype)
     {
         xVec3 off;
 

@@ -18,7 +18,8 @@ void xFogInit(void* b, void* tasset)
 #if defined(PS2)
 inline
 #endif
-    void xFogInit(xBase* ent, xFogAsset* tasset)
+    void
+    xFogInit(xBase* ent, xFogAsset* tasset)
 {
     xBaseInit(ent, (xBaseAsset*)tasset);
     ent->eventFunc = xFogEventCB;
@@ -37,7 +38,8 @@ inline
 #if defined(PS2)
 inline
 #endif
-    void xFogReset(_xFog* ent)
+    void
+    xFogReset(_xFog* ent)
 {
     xBaseReset((xBase*)ent, (xBaseAsset*)ent->tasset);
 }

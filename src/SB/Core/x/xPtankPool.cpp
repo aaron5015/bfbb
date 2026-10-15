@@ -144,7 +144,8 @@ namespace
 #if defined(PS2)
         inline
 #endif
-        RpAtomic* create_ptank(U32 flags)
+        RpAtomic*
+        create_ptank(U32 flags)
     {
         U32 dataFlags = flags | rpPTANKDFLAGSTRUCTURE;
         RpAtomic* ptank = RpPTankAtomicCreate(MAX_PARTICLES, dataFlags, rpPTANKDFLAGNONE);
@@ -247,7 +248,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        U32 create_ptanks(group_data& group, u32 count);
+        U32
+        create_ptanks(group_data& group, u32 count);
 } // namespace
 
 void xPTankPoolSceneEnter()

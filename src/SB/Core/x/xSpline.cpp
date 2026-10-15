@@ -299,7 +299,8 @@ void BasisToCoef3(xCoef3* coef, F32 (*N)[4], xVec3* v1, xVec3* v2, xVec3* v3, xV
 #ifdef PS2
 inline
 #endif
-    void CoefToUnity3(xCoef3* coef1, xCoef3* coef2, F32 f1, F32 f2)
+    void
+    CoefToUnity3(xCoef3* coef1, xCoef3* coef2, F32 f1, F32 f2)
 {
     U32 i;
     F32 a;

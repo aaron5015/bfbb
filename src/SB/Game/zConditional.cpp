@@ -21,7 +21,8 @@ void zConditionalInit(void* b, void* asset)
 #if defined(PS2)
 inline
 #endif
-    void zConditionalInit(xBase* b, zCondAsset* asset)
+    void
+    zConditionalInit(xBase* b, zCondAsset* asset)
 {
     _zConditional* cond = (_zConditional*)b;
 
@@ -42,7 +43,8 @@ inline
 #if defined(PS2)
 inline
 #endif
-    void zConditionalReset(_zConditional* ent)
+    void
+    zConditionalReset(_zConditional* ent)
 {
     xBaseReset(ent, ent->asset);
 }

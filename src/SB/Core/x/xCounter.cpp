@@ -12,7 +12,8 @@ namespace
 #if defined(PS2)
     inline
 #endif
-        void add_tweaks(_xCounter&)
+        void
+        add_tweaks(_xCounter&)
     {
         return;
     }

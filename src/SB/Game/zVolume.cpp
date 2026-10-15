@@ -34,7 +34,8 @@ PreCalcOcclude gOccludeCalc[10];
 #if defined(PS2)
 inline
 #endif
-    static void zVolumeInit(zVolume* vol, xVolumeAsset* asset)
+    static void
+    zVolumeInit(zVolume* vol, xVolumeAsset* asset)
 {
     vol->Init(asset);
     vol->eventFunc = zVolumeEventCB;
