@@ -17,10 +17,10 @@ namespace
     // RenderWare has an allocator -- that is the whole point of the file. A
     // settings file is a few dozen lines; a file that exceeds these is
     // truncated with a message rather than silently losing its tail.
-    // 64 was enough when every setting was a feature switch. The two binding
-    // sections are one line per game button each, so a file that spells out
-    // every binding is already 45 lines before anyone adds a comment.
-    const S32 kMaxEntries = 128;
+    // Room for every setting in kConfigSettings and every [keyboard] and [pad]
+    // row several times over. A setting past the cap reads as missing, so the
+    // appender writes it again on every run and the file grows without end.
+    const S32 kMaxEntries = 512;
     const S32 kMaxKey = 64;
     const S32 kMaxValue = 512;
     const S32 kMaxLine = 512;
