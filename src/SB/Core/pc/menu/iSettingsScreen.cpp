@@ -249,8 +249,7 @@ namespace
     const Setting kSettings[] = {
         { TAB_VIDEO, "Window", "video.mode", "borderless|windowed|fullscreen",
           "Borderless|Windowed|Fullscreen", NOW,
-          "Borderless fills the screen as a window. Alt+Enter also switches.",
-          ApplyMode, true },
+          "Borderless fills the screen as a window. Alt+Enter also switches.", ApplyMode, true },
         { TAB_VIDEO, "Resolution", "video.resolution", NULL, NULL, RESTART,
           "Rendering resolution. The image is scaled to fit the window.", NULL, false },
         { TAB_VIDEO, "VSync", "video.vsync", "on|off", "On|Off", NOW,
@@ -258,22 +257,19 @@ namespace
           false },
         { TAB_VIDEO, "Frame rate limit", "video.framerate", "30|60|120|144|165|240|display|off",
           "30|60|120|144|165|240|Monitor|Unlimited", NOW,
-          "Maximum frames per second. 60 is the original.", ApplyFrameRate,
-          false },
+          "Maximum frames per second. 60 is the original.", ApplyFrameRate, false },
         { TAB_VIDEO, "Field of view", "video.fov", "60|65|70|75|80|85|90|95|100|105|110", NULL, NOW,
-          "Horizontal field of view in degrees at 4:3. 75 is the original.",
-          ApplyFOV, false },
-        { TAB_VIDEO, "HUD layout", "video.ui", "pillarbox|native", "4:3 (original)|Screen edges", NOW,
-          "HUD position on wide screens.", ApplyUI, false },
-        { TAB_VIDEO, "Draw distance", "video.draw_distance", "on|off", "Unlimited|Console", NEXT_AREA,
-          "How far away objects are drawn.", ApplyDrawDistance, false },
+          "Horizontal field of view in degrees at 4:3. 75 is the original.", ApplyFOV, false },
+        { TAB_VIDEO, "HUD layout", "video.ui", "pillarbox|native", "4:3 (original)|Screen edges",
+          NOW, "HUD position on wide screens.", ApplyUI, false },
+        { TAB_VIDEO, "Draw distance", "video.draw_distance", "on|off", "Unlimited|Console",
+          NEXT_AREA, "How far away objects are drawn.", ApplyDrawDistance, false },
         { TAB_VIDEO, "Anti-aliasing", "video.msaa", "1|2|4|8", "Off|2x|4x|8x", RESTART,
           "Smooths jagged edges. Lowers performance.", NULL, false },
-        { TAB_VIDEO, "Glow", "xbox.glow", "on|off", "On|Off", NOW,
-          "Xbox bloom effect.", ApplyGlow, false },
-        { TAB_VIDEO, "Screen warps", "xbox.distortion", "on|off", "On|Off", NOW,
-          "Cruise Bubble screen distortion.", ApplyDistortion,
+        { TAB_VIDEO, "Glow", "xbox.glow", "on|off", "On|Off", NOW, "Xbox bloom effect.", ApplyGlow,
           false },
+        { TAB_VIDEO, "Screen warps", "xbox.distortion", "on|off", "On|Off", NOW,
+          "Cruise Bubble screen distortion.", ApplyDistortion, false },
         { TAB_VIDEO, "Loading-screen still", "xbox.snapshot", "on|off", "On|Off", NOW,
           "Show a still of the previous level on the loading screen. Also used for save pictures.",
           ApplySnapshot, false },
@@ -292,14 +288,13 @@ namespace
         { TAB_CONTROLS, "Controller buttons", "bind.pad", "", "Change", NOW,
           "Controller buttons for each game button.", NULL, false },
         { TAB_CONTROLS, "Stick deadzone", "input.deadzone", "auto|5|10|15|20|25|30",
-          "Auto|5%|10%|15%|20%|25%|30%", NOW,
-          "How far a stick moves before input registers.", ApplyDeadzone, false },
+          "Auto|5%|10%|15%|20%|25%|30%", NOW, "How far a stick moves before input registers.",
+          ApplyDeadzone, false },
         { TAB_CONTROLS, "Button pictures", "input.button_icons", "auto|xbox|gamecube|ps2|off",
           "Auto|Xbox|GameCube|PlayStation|Original", NOW,
           "Controller type shown in button prompts.", ApplyIcons, false },
         { TAB_CONTROLS, "Camera speed", "input.camera_sensitivity", "0.5|0.75|1.0|1.25|1.5|2.0",
-          "0.5x|0.75x|1x|1.25x|1.5x|2x", NOW, "Camera stick speed.",
-          ApplyCameraSpeed, false },
+          "0.5x|0.75x|1x|1.25x|1.5x|2x", NOW, "Camera stick speed.", ApplyCameraSpeed, false },
         { TAB_CONTROLS, "Sticks", "input.sticks", "normal|swapped", "Normal|Swapped", NOW,
           "Normal: left stick moves, right stick turns the camera.", ApplySticks, false },
         { TAB_CONTROLS, "Invert camera X", "input.invert_camera_x", "off|on", "Off|On", NOW,
@@ -315,8 +310,8 @@ namespace
           "0.25|0.5|0.75|1.0|1.25|1.5|2.0|2.5|3.0", "0.25x|0.5x|0.75x|1x|1.25x|1.5x|2x|2.5x|3x",
           NOW, "How far the camera turns for each movement of the mouse.", NULL, false },
         { TAB_CONTROLS, "Mouse smoothing", "mouse.smoothing", "0|10|20|40|80",
-          "Off|10 ms|20 ms|40 ms|80 ms", NOW, "Spreads each mouse movement over a few frames.", NULL,
-          false },
+          "Off|10 ms|20 ms|40 ms|80 ms", NOW, "Spreads each mouse movement over a few frames.",
+          NULL, false },
         { TAB_GAME, "Intro movies", "game.intro_movies", "on|off", "On|Off", RESTART,
           "Logos shown at startup.", NULL, false },
     };
@@ -693,7 +688,8 @@ namespace
         sTop += page;
         S32 most = sListCount - ISETTINGS_ROWS;
         sTop = sTop < 0 ? 0 : (sTop > most ? most : sTop);
-        sSel = sSel < sTop ? sTop : (sSel >= sTop + ISETTINGS_ROWS ? sTop + ISETTINGS_ROWS - 1 : sSel);
+        sSel =
+            sSel < sTop ? sTop : (sSel >= sTop + ISETTINGS_ROWS ? sTop + ISETTINGS_ROWS - 1 : sSel);
         SelectRow(sSel - sTop, true);
         Draw();
     }
@@ -1669,6 +1665,6 @@ void iSettingsApplyAudio()
     F32 music = 0.1f * (F32)iConfigGetInt("audio.music_volume", 7);
     xSndSetCategoryVol(SND_CAT_MUSIC, CLAMP(music, 0.0f, 1.0f));
     iSettingsApplySFXVolume(iConfigGetInt("audio.sfx_volume", 10));
-    iSettingsApplySoundMode(iHostStrCaseCmp(iConfigGetString("audio.sound_mode", "stereo"),
-                                            "mono") != 0);
+    iSettingsApplySoundMode(
+        iHostStrCaseCmp(iConfigGetString("audio.sound_mode", "stereo"), "mono") != 0);
 }
