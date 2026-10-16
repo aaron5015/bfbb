@@ -3,6 +3,8 @@
 #ifdef PLATFORM_PC
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "menu/iMenuMouse.h"
 #endif
 
 #include "zSaveLoad.h"
@@ -372,6 +374,12 @@ void zUIFont_Render(xEnt* e)
             var_104.a >>= 1;
         }
     }
+
+#ifdef PLATFORM_PC
+    // Brighter under the menu pointer, for the hints it can click. See
+    // menu/iMenuMouse.h.
+    iMenuMouseTint(ent, &var_104.r, &var_104.g, &var_104.b);
+#endif
 
     if (!(ent->uiFlags & 0x4))
     {

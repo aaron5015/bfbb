@@ -33,6 +33,9 @@ namespace
     S32 sOwned;
     S32 sAcceptQueued;
 
+    // The hint under the pointer, drawn brighter.
+    const xBase* sHoverHint;
+
     // Window pixels to the menus' units: through the letterbox every backend
     // puts the render size in, then through the centred 4:3 UI box.
     S32 ToMenu(F32 wx, F32 wy, F32* mx, F32* my)
@@ -506,6 +509,7 @@ U32 iMenuMouseUpdate(S32 inMenu)
     sRowOverNext = 0;
     sMoved = 0;
     sClicked = 0;
+    sHoverHint = NULL;
 
     S32 accept = sAcceptQueued;
     sAcceptQueued = 0;
@@ -538,9 +542,10 @@ U32 iMenuMouseUpdate(S32 inMenu)
     // A hint like "{i:ui_options} Options" presses its button, on any screen,
     // wherever no option is under the pointer.
     U32 hint = 0;
+    const xBase* hovered = NULL;
     if (sShowing && over == NULL && !sRowOver)
     {
-        PickHint(s, &hint);
+        hovered = PickHint(s, &hint);
     }
 
     sShowing = iPadHostSetPointer(TRUE, over != NULL || sRowOver || hint != 0);
@@ -548,6 +553,7 @@ U32 iMenuMouseUpdate(S32 inMenu)
     {
         return 0;
     }
+    sHoverHint = hovered;
 
     sMoved = moved;
     sClicked = clicked;
@@ -580,6 +586,36 @@ U32 iMenuMouseUpdate(S32 inMenu)
     }
 
     return add;
+}
+
+void iMenuMouseBrighten(U8* r, U8* g, U8* b)
+{
+    if ((S32)*r + *g + *b > 600)
+    {
+        // White text: SpongeBob's yellow.
+        *r = 255;
+        *g = 230;
+        *b = 90;
+        return;
+    }
+
+    // The menus' dark teal, 0 70 85, to a vivid one about twice as bright
+    // rather than toward white: a faded colour is how these menus draw what
+    // is NOT selected.
+    S32 rr = *r / 2;
+    S32 gg = *g * 2 + 20;
+    S32 bb = *b * 2 + 20;
+    *r = (U8)rr;
+    *g = (U8)(gg > 255 ? 255 : gg);
+    *b = (U8)(bb > 255 ? 255 : bb);
+}
+
+void iMenuMouseTint(const xBase* ent, U8* r, U8* g, U8* b)
+{
+    if (ent != NULL && ent == sHoverHint)
+    {
+        iMenuMouseBrighten(r, g, b);
+    }
 }
 
 S32 iMenuMouseOver(xBase* ent)

@@ -270,6 +270,9 @@ namespace
     S32 sTop;
     bool sRestart;
 
+    // The tab under the menu pointer, or -1.
+    S32 sHoverTab = -1;
+
     void BuildList()
     {
         sListCount = 0;
@@ -567,12 +570,21 @@ namespace
     // the first picture; TAB_COUNT is the whole bar.
     void TitleText(char* title, size_t size, S32 last)
     {
+        // A tab under the pointer is brighter, in iMenuMouseBrighten's teal.
+        U8 r = 0;
+        U8 g = 70;
+        U8 b = 85;
+        iMenuMouseBrighten(&r, &g, &b);
+        char hover[16];
+        snprintf(hover, sizeof(hover), "{c=ff%02x%02x%02x}", r, g, b);
+
         snprintf(title, size, "{i:button_picture_07}");
         for (S32 t = 0; t < TAB_COUNT && t <= last; t++)
         {
-            char one[48];
-            snprintf(one, sizeof(one), t == sTab ? "%s%s" : "%s{c=ff6f98a3}%s{~:c}",
-                     t == 0 ? " " : "   ", kTabNames[t]);
+            const char* colour = (t == sTab) ? "" : (t == sHoverTab ? hover : "{c=ff6f98a3}");
+            char one[64];
+            snprintf(one, sizeof(one), "%s%s%s%s", t == 0 ? " " : "   ", colour, kTabNames[t],
+                     t == sTab ? "" : "{~:c}");
             strncat(title, one, size - strlen(title) - 1);
         }
         if (last >= TAB_COUNT)
@@ -1107,6 +1119,7 @@ void iSettingsRun(S32 fromPause)
 {
     BuildResolutions();
     sTab = TAB_DISPLAY;
+    sHoverTab = -1;
     BuildList();
     sSel = 0;
     sTop = 0;
@@ -1185,6 +1198,11 @@ void iSettingsRun(S32 fromPause)
         // button that turns that way. Asked every frame, which is what shows
         // the glove over the bar.
         const S32 pointedTab = PointerTab();
+        if (pointedTab != sHoverTab)
+        {
+            sHoverTab = pointedTab;
+            Draw();
+        }
         if (page == 0 && iMenuMouseClicked() && pointedTab >= 0 && pointedTab != sTab)
         {
             tab = pointedTab;

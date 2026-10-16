@@ -32,6 +32,15 @@ struct xBase;
 // iPad.cpp's menu hook; see iPad.h. Registered by iSystem.cpp.
 U32 iMenuMouseUpdate(S32 inMenu);
 
+// The colour to draw `ent`'s text in. A hint under the pointer is drawn
+// brighter, so it reads as something to click; an option needs no such thing,
+// since hovering selects it and the menu's own highlight moves.
+void iMenuMouseTint(const xBase* ent, U8* r, U8* g, U8* b);
+
+// A colour brighter than `r g b` in the menus' manner: the dark teal they are
+// drawn in goes to a vivid one, and text already light goes yellow.
+void iMenuMouseBrighten(U8* r, U8* g, U8* b);
+
 // Whether the pointer is over `ent`, a zUI or zUIFont, this frame. FALSE when
 // no pointer is showing or `ent` is not visible.
 S32 iMenuMouseOver(xBase* ent);
