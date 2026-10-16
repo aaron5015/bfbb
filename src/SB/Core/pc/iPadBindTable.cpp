@@ -28,24 +28,26 @@
 //
 // A preset overrides it by LETTER. See kPadBindPresets below.
 //
-// The `key` column is the keyboard and the mouse. The two combat buttons lead
-// with a mouse button and name a key after it, so either works and the prompt
-// draws the mouse. Under the Xbox layout, which the keyboard gets with no pad
-// plugged in, that puts Bubble Spin on the left button and Bubble Bounce on the
-// right.
+// The `key` column is the keyboard and the mouse, laid out the way a PC game
+// would be: E to talk and use, Escape to pause, Space and Enter to confirm,
+// Backspace to go back, Tab for the HUD. The attacks lead with a mouse button
+// and name a key after it, so either works and the prompt draws the mouse.
+// Under the Xbox layout, which the keyboard gets with no pad plugged in, that
+// puts Bubble Spin on the left button, Bubble Bounce on the right and Bubble
+// Bash on the middle.
 const iPadBindButton kPadBindButtons[] = {
-    { "a", XPAD_BUTTON_X, "a", "space", "jump, confirm" },
-    { "b", XPAD_BUTTON_TRIANGLE, "b", "mouse2, lctrl", "cancel; Bubble Spin on gamecube" },
-    { "x", XPAD_BUTTON_O, "x", "mouse1, e", "options; Bubble Bounce on gamecube" },
-    { "y", XPAD_BUTTON_SQUARE, "y", "q", "Bubble Bash" },
-    { "z", XPAD_BUTTON_Z, "lb", "f", "pull the camera in close" },
-    { "hud", XPAD_BUTTON_HUD, "rb", "g", "show the HUD" },
-    { "l1", XPAD_BUTTON_L1, "lt", "z", "launch the cruise bubble" },
-    { "r1", XPAD_BUTTON_R1, "rt", "c", "talk, call the bus" },
-    { "l2", XPAD_BUTTON_L2, "lb", "x", "no move; menus and dialogue can read it" },
-    { "r2", XPAD_BUTTON_R2, "rb", "v", "no move; menus and dialogue can read it" },
-    { "start", XPAD_BUTTON_START, "start", "enter", "pause" },
-    { "select", XPAD_BUTTON_SELECT, "back", "backspace", NULL },
+    { "a", XPAD_BUTTON_X, "a", "space, enter", "jump, confirm" },
+    { "b", XPAD_BUTTON_TRIANGLE, "b", "mouse2, backspace", "cancel; Bubble Spin on gamecube" },
+    { "x", XPAD_BUTTON_O, "x", "mouse1, f", "options; Bubble Bounce on gamecube" },
+    { "y", XPAD_BUTTON_SQUARE, "y", "q, mouse3", "Bubble Bash" },
+    { "z", XPAD_BUTTON_Z, "lb", "v", "pull the camera in close" },
+    { "hud", XPAD_BUTTON_HUD, "rb", "tab", "show the HUD" },
+    { "l1", XPAD_BUTTON_L1, "lt", "r", "launch the cruise bubble" },
+    { "r1", XPAD_BUTTON_R1, "rt", "e", "talk, call the bus" },
+    { "l2", XPAD_BUTTON_L2, "lb", "pageup", "no move; menus and dialogue can read it" },
+    { "r2", XPAD_BUTTON_R2, "rb", "pagedown", "no move; menus and dialogue can read it" },
+    { "start", XPAD_BUTTON_START, "start", "escape", "pause" },
+    { "select", XPAD_BUTTON_SELECT, "back", "m", NULL },
     { "up", XPAD_BUTTON_UP, "dpup", "up", "d-pad; also walks" },
     { "down", XPAD_BUTTON_DOWN, "dpdown", "down", NULL },
     { "left", XPAD_BUTTON_LEFT, "dpleft", "left", NULL },

@@ -390,15 +390,11 @@ static void test_config()
             check(strstr(grown, "shadow_resolution = auto") != NULL, "and so is another");
 
             // The bindings are not in the settings table -- they come from
-            // iPadBind.cpp -- and are appended the same way. The file names two
-            // of them, so the rest have to arrive.
-            //
-            // [keyboard] writes values; [pad] writes the same listing commented
-            // out, because an uncommented line there would beat input.preset
-            // and pin the pad to whichever preset made the file. That the pad
-            // side is COMMENTED is the whole point, so it is what is checked.
-            check(countLinesStartingWith(grown, "y ") == 1,
-                  "a keyboard binding the file omits arrives as a value");
+            // iPadBind.cpp -- and are NOT appended. An appended line would be a
+            // value, and a value pins that key past any later change to the
+            // defaults; an omitted one is answered by the build's default.
+            check(countLinesStartingWith(grown, "y ") == 0,
+                  "a keyboard binding the file omits is left to the default");
 
             // The pad's does NOT arrive. A generated file lists those commented
             // so input.preset stays in charge, and a comment is not an entry --
@@ -1131,7 +1127,7 @@ static void test_config_model_bindings()
 
     char def[256];
     ConfigModelBindDescribeDefault(CONFIG_MODEL_KEYBOARD, a, def, sizeof(def));
-    check(strcmp(def, "space") == 0, "the keyboard default is the table's key");
+    check(strcmp(def, iPadBindFind("a")->key) == 0, "the keyboard default is the table's key");
     ConfigModelBindDescribeDefault(CONFIG_MODEL_PAD, a, def, sizeof(def));
     check(strstr(def, "printed A") != NULL, "and a face button's pad default names its letter");
 
@@ -2344,8 +2340,10 @@ static void test_pad_keyboard_glyphs()
 
     if (jump != NULL)
     {
+        // The first of the row's alternatives, which is the one a prompt draws.
         const char* key = iPadKeyboardBoundInput(jump->mask);
-        check(key != NULL && strcmp(key, jump->key) == 0,
+        size_t first = strcspn(jump->key, ", ");
+        check(key != NULL && strlen(key) == first && strncmp(key, jump->key, first) == 0,
               "the keyboard names the key the jump row defaults to");
     }
 

@@ -135,22 +135,28 @@ namespace
         // Commented, they are what they should be: a listing of every button
         // and what is on it now, with uncommenting one the way to take it over.
         //
-        // [keyboard] has no preset behind it, so its lines are the values and
-        // are written as values.
+        // [keyboard] is commented for the same reason with the build in place
+        // of the preset: a live line pins that key past any change to the
+        // defaults in a later build.
         bool pad = (section == kPadSection);
 
         if (pad)
         {
             fprintf(f, "; These are what input.preset gives you. Uncomment a line to take that\n");
             fprintf(f, "; one button over; the rest keep following the preset.\n");
-            fprintf(f, ";\n");
         }
+        else
+        {
+            fprintf(f, "; These are the defaults. Uncomment a line to take that one button\n");
+            fprintf(f, "; over; the rest keep the defaults of whichever build reads them.\n");
+        }
+        fprintf(f, ";\n");
 
         for (S32 i = 0; i < kPadBindButtonCount; i++)
         {
             const iPadBindButton* b = &kPadBindButtons[i];
             const char* value = pad ? iPadBindPadDefault(b) : b->key;
-            const char* lead = pad ? "; " : "";
+            const char* lead = "; ";
 
             if (b->does != NULL)
             {
@@ -369,21 +375,12 @@ namespace
                 missing++;
             }
         }
-        // Only [keyboard]. [pad] is neither counted here nor written below: a
-        // generated file lists the pad bindings COMMENTED, so input.preset
-        // stays in charge of them, and a comment is not an entry -- fileHas
-        // would call all fifteen missing on every run and append fifteen more
-        // commented lines each time. Nothing is lost by leaving them out, since
-        // a pad binding the file does not mention is answered by the preset,
-        // which is what the setting is for.
-        for (S32 i = 0; i < kPadBindButtonCount; i++)
-        {
-            if (!fileHas(kKeyboardSection, kPadBindButtons[i].name))
-            {
-                missing++;
-            }
-        }
-
+        // Neither [pad] nor [keyboard] is counted here or written below: a
+        // generated file lists the bindings COMMENTED, and a comment is not an
+        // entry -- fileHas would call every one missing on every run and append
+        // them again each time. Nothing is lost by leaving them out, since a
+        // binding the file does not mention is answered by the preset or the
+        // build's own default.
         if (missing == 0)
         {
             return;
@@ -418,33 +415,6 @@ namespace
             }
             fprintf(f, "\n; %s\n", kConfigSettings[i].comment);
             fprintf(f, "%s = %s\n", kConfigSettings[i].name, kConfigSettings[i].value);
-        }
-
-        // The keyboard bindings, one line each, carrying their grammar in the
-        // header the file already has further up. [pad] is left alone, for the
-        // reason given where the count is taken.
-        bool wroteHeader = false;
-        for (S32 i = 0; i < kPadBindButtonCount; i++)
-        {
-            const iPadBindButton* b = &kPadBindButtons[i];
-            if (fileHas(kKeyboardSection, b->name))
-            {
-                continue;
-            }
-            if (!wroteHeader)
-            {
-                fprintf(f, "\n[%s]\n", kKeyboardSection);
-                wroteHeader = true;
-            }
-
-            if (b->does != NULL)
-            {
-                fprintf(f, "%-6s = %-9s ; %s\n", b->name, b->key, b->does);
-            }
-            else
-            {
-                fprintf(f, "%-6s = %s\n", b->name, b->key);
-            }
         }
 
         fclose(f);
