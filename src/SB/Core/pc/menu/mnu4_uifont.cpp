@@ -3162,8 +3162,10 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         p.Link(eEventUISelect, eEventPlay, H("MNU4 MOVE A SFX"));
         p.End();
 
+        // Centred between the row's arrows.
         a.pos.x = 330.0f;
         a.dim[0] = 270;
+        a.uiFontFlags |= 0x4;
         sprintf(name, ISETTINGS_VALUE_TEXT, (int)i);
         a.textAssetID = H(name);
         sprintf(name, ISETTINGS_VALUE, (int)i);

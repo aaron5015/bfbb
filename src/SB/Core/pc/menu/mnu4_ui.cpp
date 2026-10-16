@@ -1651,10 +1651,10 @@ void MNU4_BuildUI(iAssetPkg& p)
         p.End();
     }
 
-    // The settings screen's volume sliders, in the Options page's own bamboo
-    // and arrows ("CONTROL HASH UI", "CONTROL OFF UI" above). Placed on their
-    // rows by iSettingsScreen.cpp, so the positions here are only sizes. A
-    // higher z draws later: the arrow over its glow, a notch over nothing.
+    // The settings screen's volume sliders and value arrows, in the Options
+    // page's own bamboo and arrows ("CONTROL HASH UI", "CONTROL OFF UI"
+    // above). Placed on their rows by iSettingsScreen.cpp, so the positions
+    // here are only sizes. A higher z draws later: the arrow over its glow.
     for (S32 s = 0; s < ISETTINGS_SLIDERS; s++)
     {
         char name[48];
@@ -1677,12 +1677,18 @@ void MNU4_BuildUI(iAssetPkg& p)
             p.Begin('UI  ', H(name), a);
             p.End();
         }
+    }
+
+    // A pair of arrows for each row, either side of its value.
+    for (S32 row = 0; row < ISETTINGS_ROWS; row++)
+    {
+        char name[48];
 
         for (S32 side = 0; side < 2; side++)
         {
             zUIAsset a = kUIDefaults;
-            a.dim[0] = 26;
-            a.dim[1] = 26;
+            a.dim[0] = ISETTINGS_ARROW_SIZE;
+            a.dim[1] = ISETTINGS_ARROW_SIZE;
             if (side == 0)
             {
                 a.uva[0] = 1.0f;
@@ -1708,14 +1714,14 @@ void MNU4_BuildUI(iAssetPkg& p)
 
             a.pos = xVec3{ 0.0f, 0.0f, 3.0f };
             a.textureID = H("ui_arrowup");
-            sprintf(name, side == 0 ? ISETTINGS_SLIDER_LEFT : ISETTINGS_SLIDER_RIGHT, (int)s);
+            sprintf(name, side == 0 ? ISETTINGS_ARROW_LEFT : ISETTINGS_ARROW_RIGHT, (int)row);
             p.Begin('UI  ', H(name), a);
             p.End();
 
             a.pos.z = 2.0f;
             a.textureID = H("ui_arrowup_glow");
-            sprintf(name, side == 0 ? ISETTINGS_SLIDER_LEFT_GLOW : ISETTINGS_SLIDER_RIGHT_GLOW,
-                    (int)s);
+            sprintf(name, side == 0 ? ISETTINGS_ARROW_LEFT_GLOW : ISETTINGS_ARROW_RIGHT_GLOW,
+                    (int)row);
             p.Begin('UI  ', H(name), a);
             p.End();
         }

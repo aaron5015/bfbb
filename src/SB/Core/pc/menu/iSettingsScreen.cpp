@@ -788,18 +788,8 @@ namespace
         return -1;
     }
 
-    void HoverColour(char* out, size_t size)
-    {
-        U8 r = 0;
-        U8 g = 70;
-        U8 b = 85;
-        iMenuMouseBrighten(&r, &g, &b);
-        snprintf(out, size, "{c=ff%02x%02x%02x}", r, g, b);
-    }
-
-    // A value as the row shows it, "< Stereo >", with the arrow under the
-    // pointer lit. The colour tags draw nothing, so the pointer measures the
-    // same text without them.
+    // A value as the row shows it: its name, which the row's arrows sit either
+    // side of; nothing on a slider, which is all bamboo.
     void ValueText(const Setting& s, S32 row, char* out, size_t size)
     {
         if (IsBindEntry(s))
@@ -813,15 +803,8 @@ namespace
             return;
         }
 
-        char value[80];
-        Name(s, IndexOf(s), value, sizeof(value));
-
-        char lit[16];
-        HoverColour(lit, sizeof(lit));
-        const bool left = sHoverRow == row && sHoverPart == PART_LEFT;
-        const bool right = sHoverRow == row && sHoverPart == PART_RIGHT;
-        snprintf(out, size, "%s<%s %s %s>%s", left ? lit : "", left ? "{~:c}" : "", value,
-                 right ? lit : "", right ? "{~:c}" : "");
+        // The arrows either side are the row's own sprites.
+        Name(s, IndexOf(s), out, size);
     }
 
     void PlaceUI(const char* name, F32 x, F32 y)
@@ -840,13 +823,51 @@ namespace
         Send(name, on ? eEventVisible : eEventInvisible);
     }
 
-    // Notch n's left edge, and the two arrows', across the value column.
-    const F32 kSliderArrowW = 26.0f;
+    // The value column: 270 across from x0, an arrow at each end, and the
+    // eleven notches centred between them.
+    const F32 kValueW = 270.0f;
+    const F32 kArrow = (F32)ISETTINGS_ARROW_SIZE;
     const F32 kSliderStep = 18.0f;
+    const F32 kNotchW = 22.0f;
+
+    F32 ValueX()
+    {
+        return 330.0f + 0.6f * iMenuWideMargin();
+    }
 
     F32 SliderNotchX(F32 x0, S32 n)
     {
-        return x0 + kSliderArrowW + 4.0f + kSliderStep * n;
+        const F32 run = kNotchW + kSliderStep * (ISETTINGS_SLIDER_LEVELS - 1);
+        return x0 + 0.5f * (kValueW - run) + kSliderStep * n;
+    }
+
+    // The arrows either side of every row with something to step through, the
+    // one under the pointer glowing as the Options page's did.
+    void DrawArrows()
+    {
+        const F32 x0 = ValueX();
+        char name[48];
+        for (S32 row = 0; row < ISETTINGS_ROWS; row++)
+        {
+            const bool shown =
+                sTop + row < sListCount && !IsBindEntry(kSettings[sList[sTop + row]]);
+            const F32 y = ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * row + 0.5f * (32.0f - kArrow);
+            const bool litLeft = shown && sHoverRow == row && sHoverPart == PART_LEFT;
+            const bool litRight = shown && sHoverRow == row && sHoverPart == PART_RIGHT;
+
+            sprintf(name, ISETTINGS_ARROW_LEFT, (int)row);
+            PlaceUI(name, x0, y);
+            ShowUI(name, shown);
+            sprintf(name, ISETTINGS_ARROW_LEFT_GLOW, (int)row);
+            PlaceUI(name, x0, y);
+            ShowUI(name, litLeft);
+            sprintf(name, ISETTINGS_ARROW_RIGHT, (int)row);
+            PlaceUI(name, x0 + kValueW - kArrow, y);
+            ShowUI(name, shown);
+            sprintf(name, ISETTINGS_ARROW_RIGHT_GLOW, (int)row);
+            PlaceUI(name, x0 + kValueW - kArrow, y);
+            ShowUI(name, litRight);
+        }
     }
 
     // The bamboo on every row whose setting is a volume, and nothing left over
@@ -868,7 +889,7 @@ namespace
             }
         }
 
-        const F32 x0 = 330.0f + 0.6f * iMenuWideMargin();
+        const F32 x0 = ValueX();
         char name[48];
         for (S32 k = 0; k < ISETTINGS_SLIDERS; k++)
         {
@@ -892,29 +913,11 @@ namespace
                 PlaceUI(name, nx, ny);
                 ShowUI(name, shown && n > level);
             }
-
-            const F32 rightX = SliderNotchX(x0, ISETTINGS_SLIDER_LEVELS - 1) + 22.0f + 4.0f;
-            const bool litLeft = shown && sHoverRow == row && sHoverPart == PART_LEFT;
-            const bool litRight = shown && sHoverRow == row && sHoverPart == PART_RIGHT;
-
-            sprintf(name, ISETTINGS_SLIDER_LEFT, (int)k);
-            PlaceUI(name, x0, y + 3.0f);
-            ShowUI(name, shown);
-            sprintf(name, ISETTINGS_SLIDER_LEFT_GLOW, (int)k);
-            PlaceUI(name, x0, y + 3.0f);
-            ShowUI(name, litLeft);
-            sprintf(name, ISETTINGS_SLIDER_RIGHT, (int)k);
-            PlaceUI(name, rightX, y + 3.0f);
-            ShowUI(name, shown);
-            sprintf(name, ISETTINGS_SLIDER_RIGHT_GLOW, (int)k);
-            PlaceUI(name, rightX, y + 3.0f);
-            ShowUI(name, litRight);
         }
     }
 
-    // What on row `row`'s value the pointer is over. The arrows of a text
-    // value are measured out of its layout: everything up to "<" is the left,
-    // everything from the space before ">" is the right.
+    // What on row `row`'s value the pointer is over: an arrow, a notch on a
+    // slider, or neither.
     S32 PointerPart(S32 row)
     {
         if (row < 0 || sTop + row >= sListCount)
@@ -922,30 +925,30 @@ namespace
             return PART_NONE;
         }
         const Setting& s = kSettings[sList[sTop + row]];
+        if (IsBindEntry(s))
+        {
+            return PART_NONE;
+        }
+
         char name[48];
+        sprintf(name, ISETTINGS_ARROW_LEFT, (int)row);
+        if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+        {
+            return PART_LEFT;
+        }
+        sprintf(name, ISETTINGS_ARROW_RIGHT, (int)row);
+        if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+        {
+            return PART_RIGHT;
+        }
 
         if (IsSlider(s))
         {
-            const S32 k = SliderFor(row);
-            if (k < 0)
-            {
-                return PART_NONE;
-            }
-            sprintf(name, ISETTINGS_SLIDER_LEFT, (int)k);
-            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
-            {
-                return PART_LEFT;
-            }
-            sprintf(name, ISETTINGS_SLIDER_RIGHT, (int)k);
-            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
-            {
-                return PART_RIGHT;
-            }
             F32 px;
             F32 py;
             if (iMenuMousePosition(&px, &py))
             {
-                const F32 x0 = 330.0f + 0.6f * iMenuWideMargin();
+                const F32 x0 = ValueX();
                 const F32 y = ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * row;
                 if (py >= y && py < y + 32.0f)
                 {
@@ -965,42 +968,6 @@ namespace
             return PART_NONE;
         }
 
-        if (IsBindEntry(s))
-        {
-            return PART_NONE;
-        }
-
-        sprintf(name, ISETTINGS_VALUE, (int)row);
-        xBase* ent = zSceneFindObject(xStrHash(name));
-        F32 px;
-        F32 py;
-        if (!iMenuMouseOver(ent) || !iMenuMousePosition(&px, &py))
-        {
-            return PART_NONE;
-        }
-
-        char value[80];
-        Name(s, IndexOf(s), value, sizeof(value));
-        char upto[96];
-        F32 leftEnd;
-        F32 rightStart;
-        if (!iMenuMouseTextEnd(ent, "<", &leftEnd))
-        {
-            return PART_NONE;
-        }
-        snprintf(upto, sizeof(upto), "< %s", value);
-        if (!iMenuMouseTextEnd(ent, upto, &rightStart))
-        {
-            return PART_NONE;
-        }
-        if (px <= leftEnd + 6.0f)
-        {
-            return PART_LEFT;
-        }
-        if (px >= rightStart + 2.0f)
-        {
-            return PART_RIGHT;
-        }
         return PART_NONE;
     }
 
@@ -1013,6 +980,7 @@ namespace
         iAssetTextSet(xStrHash(ISETTINGS_TITLE_TEXT), title);
 
         DrawSliders();
+        DrawArrows();
 
         for (S32 row = 0; row < ISETTINGS_ROWS; row++)
         {

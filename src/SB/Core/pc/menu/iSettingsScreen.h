@@ -26,18 +26,22 @@
 #define ISETTINGS_SCROLL_TRACK "PC SET SCROLL TRACK UIF"
 #define ISETTINGS_SCROLL_THUMB "PC SET SCROLL THUMB UIF"
 
-// The volume sliders, in the retail Options page's bamboo: a notch per level
-// from 0 to 10, yellow up to the level and plain past it, between the page's
-// two arrows. Two sets, which is as many slider rows as a tab shows; each is
-// placed on its row as the screen is drawn. "%d" is the set, then the notch.
+// The retail Options page's arrows either side of each row's value, and their
+// glow for the one under the pointer. "%d" is the row.
+#define ISETTINGS_ARROW_LEFT "PC SET ARROW %d LEFT"
+#define ISETTINGS_ARROW_RIGHT "PC SET ARROW %d RIGHT"
+#define ISETTINGS_ARROW_LEFT_GLOW "PC SET ARROW %d LEFT GLOW"
+#define ISETTINGS_ARROW_RIGHT_GLOW "PC SET ARROW %d RIGHT GLOW"
+#define ISETTINGS_ARROW_SIZE 20
+
+// The volume sliders, in the same page's bamboo: a notch per level from 0 to
+// 10, yellow up to the level and plain past it, between the row's arrows. Two
+// sets, which is as many slider rows as a tab shows; each is placed on its row
+// as the screen is drawn. "%d" is the set, then the notch.
 #define ISETTINGS_SLIDERS 2
 #define ISETTINGS_SLIDER_LEVELS 11
 #define ISETTINGS_SLIDER_ON "PC SET SLIDER %d ON %d"
 #define ISETTINGS_SLIDER_OFF "PC SET SLIDER %d OFF %d"
-#define ISETTINGS_SLIDER_LEFT "PC SET SLIDER %d LEFT"
-#define ISETTINGS_SLIDER_RIGHT "PC SET SLIDER %d RIGHT"
-#define ISETTINGS_SLIDER_LEFT_GLOW "PC SET SLIDER %d LEFT GLOW"
-#define ISETTINGS_SLIDER_RIGHT_GLOW "PC SET SLIDER %d RIGHT GLOW"
 
 // The menu entries that open it.
 #define ISETTINGS_TITLE_ENTRY "MNU3 START SETTINGS UIF"

@@ -1531,13 +1531,17 @@ void MNU4_BuildPortal(iAssetPkg& p)
                 sprintf(name, ISETTINGS_SLIDER_OFF, (int)s, (int)n);
                 p.Item(H(name));
             }
-            sprintf(name, ISETTINGS_SLIDER_LEFT, (int)s);
+        }
+        for (S32 row = 0; row < ISETTINGS_ROWS; row++)
+        {
+            char name[48];
+            sprintf(name, ISETTINGS_ARROW_LEFT, (int)row);
             p.Item(H(name));
-            sprintf(name, ISETTINGS_SLIDER_RIGHT, (int)s);
+            sprintf(name, ISETTINGS_ARROW_RIGHT, (int)row);
             p.Item(H(name));
-            sprintf(name, ISETTINGS_SLIDER_LEFT_GLOW, (int)s);
+            sprintf(name, ISETTINGS_ARROW_LEFT_GLOW, (int)row);
             p.Item(H(name));
-            sprintf(name, ISETTINGS_SLIDER_RIGHT_GLOW, (int)s);
+            sprintf(name, ISETTINGS_ARROW_RIGHT_GLOW, (int)row);
             p.Item(H(name));
         }
         p.End();
