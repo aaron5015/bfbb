@@ -65,7 +65,9 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("LEVEL TXT 9"), "Industrial Park");
     p.Text(H("MAX TXT"), "Max!");
     p.Text(H("MIN TXT"), "Min");
-    p.Text(H("MNIU4 NPCTALK TXT"), "Pull the {i:button_talktonpc_text} to Talk");
+    // "Pull the {i:button_talktonpc_text}", worded for the device. See
+    // iTextPatch.h.
+    p.Text(H("MNIU4 NPCTALK TXT"), "{i:pc_say_3c} to Talk");
     p.Text(H("MNU3 CREDITS TXT"), "Credits");
     p.Text(H("MNU3 NEW GAME TXT"), "New Game");
     p.Text(H("MNU3 PROMOTIONAL MATERIALS TXT"), "Promo Materials");
@@ -97,7 +99,7 @@ void MNU4_BuildText(iAssetPkg& p)
            "{red=.3}{blue=0}{green=0}Autosaving Data...{~:c}{n}{n}Do not close the game while it is "
            "saving.");
     p.Text(H("MNU4 AUTO SAVE TXT"), "Please do not close the game while it is saving.");
-    p.Text(H("MNU4 BUSSTOP TXT"), "Pull the {i:button_exitlevel_text} to switch characters");
+    p.Text(H("MNU4 BUSSTOP TXT"), "{i:pc_say_1c} to switch characters");
     p.Text(H("MNU4 D-PAD ADJUST TXT"), "{c=ff646464}{~:c}< > Adjust");
     p.Text(H("MNU4 EXIT GAME NO TXT"), "No");
     p.Text(H("MNU4 EXIT GAME PROMPT TXT"), "Quit the game and lose all unsaved game data ?");

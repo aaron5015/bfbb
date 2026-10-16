@@ -667,19 +667,22 @@ S32 iTextPatchRulesFit()
 
 const char* iTextPatchInsert(U32 assetID)
 {
-    if (!sEnabled)
-    {
-        return NULL;
-    }
-
     hashPhrases();
 
+    // Answered with the switch off as well, with the phrase as shipped: the
+    // menus built in code (menu/mnu4_text.cpp) are written with these names in
+    // them and have no other text to fall back on.
     for (size_t i = 0; i < kPhraseCount; i++)
     {
         if (sPhraseID[i] == assetID)
         {
-            return talkIsTrigger() ? kPhrases[i].from : kPhrasePress[i / 3];
+            return (!sEnabled || talkIsTrigger()) ? kPhrases[i].from : kPhrasePress[i / 3];
         }
+    }
+
+    if (!sEnabled)
+    {
+        return NULL;
     }
 
     for (size_t i = 0; i < 2; i++)

@@ -1650,7 +1650,11 @@ static void test_textpatch()
 
     // Global, and later tests do not expect it on.
     iTextPatchSetEnabled(FALSE);
-    check(iTextPatchInsert(iTextPatchAssetID("pc_say_1c")) == NULL, "off, no include is answered");
+    said = iTextPatchInsert(iTextPatchAssetID("pc_say_1c"));
+    check(said != NULL && strcmp(said, "Pull the {i:button_exitlevel_text}") == 0,
+          "off, a placeholder says what shipped");
+    check(iTextPatchInsert(iTextPatchAssetID("button_exitlevel_text")) == NULL,
+          "and the include is the asset's own");
 }
 
 static void test_file()
