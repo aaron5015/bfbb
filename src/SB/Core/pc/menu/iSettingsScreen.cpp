@@ -65,6 +65,10 @@ namespace
         RESTART
     };
 
+    // What backs out of the screen and its pages: cancel, and the pause
+    // button, which is Escape on a keyboard and what a PC player reaches for.
+    const U32 kBack = XPAD_BUTTON_TRIANGLE | XPAD_BUTTON_START;
+
     // The tabs, in order. The shoulder buttons move between them.
     enum Tab
     {
@@ -622,6 +626,7 @@ namespace
             iMenuWidePlace(name, 330.0f + s, 270.0f);
         }
         iMenuWidePlace(ISETTINGS_HELP, 55.0f - s, 545.0f + 2.0f * s);
+        iMenuWidePlace(ISETTINGS_BACK, 420.0f + s, 180.0f);
     }
 
     zUIFont* Widget(const char* name)
@@ -1063,7 +1068,7 @@ namespace
             {
                 return true;
             }
-            if (pressed & XPAD_BUTTON_TRIANGLE)
+            if (pressed & kBack)
             {
                 return false;
             }
@@ -1270,7 +1275,7 @@ namespace
             zSaveLoad_Tick();
             const U32 pressed = mPad[globals.currentActivePad].pressed;
 
-            if (pressed & XPAD_BUTTON_TRIANGLE)
+            if (pressed & kBack)
             {
                 Send("MNU4 DENY SFX", eEventPlay);
                 break;
@@ -1490,7 +1495,7 @@ void iSettingsRun(S32 fromPause)
         zSaveLoad_Tick();
         const U32 pressed = mPad[globals.currentActivePad].pressed;
 
-        if (pressed & XPAD_BUTTON_TRIANGLE)
+        if (pressed & kBack)
         {
             Send("MNU4 DENY SFX", eEventPlay);
             break;

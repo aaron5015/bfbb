@@ -3203,6 +3203,23 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         p.End();
     }
 
+    // Right-aligned under the help, as the pause menu puts its Return.
+    {
+        zUIFontAsset a = kUIFontDefaults;
+        a.pos =
+            xVec3{ 420.0f, ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * ISETTINGS_ROWS + 68.0f, 0.0f };
+        a.dim[0] = 180;
+        a.dim[1] = 28;
+        a.uiFontFlags = 0x61 | 0x2;
+        a.textAssetID = H(ISETTINGS_BACK_TEXT);
+        a.space[0] = 22;
+        a.space[1] = 22;
+        a.cdim[0] = 22;
+        a.cdim[1] = 22;
+        p.Begin('UIFT', H(ISETTINGS_BACK), a);
+        p.End();
+    }
+
     // The pause menu's entry, at the top of the list where retail's Options
     // was: the settings screen has that page's volumes, sound mode and
     // vibration, and retail's page is no longer reachable. Confirm leaves it

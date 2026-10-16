@@ -1519,6 +1519,7 @@ void MNU4_BuildPortal(iAssetPkg& p)
             p.Item(H(name));
         }
         p.Item(H(ISETTINGS_HELP));
+        p.Item(H(ISETTINGS_BACK));
         p.Item(H(ISETTINGS_SCROLL_TRACK));
         p.Item(H(ISETTINGS_SCROLL_THUMB));
         for (S32 s = 0; s < ISETTINGS_SLIDERS; s++)

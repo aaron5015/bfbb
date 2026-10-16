@@ -379,6 +379,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("PC QUIT CANCEL TXT"), "Cancel");
     p.TextSpace(H(ISETTINGS_TITLE_TEXT), "Settings", 256);
     p.TextSpace(H(ISETTINGS_HELP_TEXT), "", 256);
+    p.Text(H(ISETTINGS_BACK_TEXT), "{i:ui_cancel} Back");
     for (S32 i = 0; i < ISETTINGS_ROWS; i++)
     {
         char name[32];

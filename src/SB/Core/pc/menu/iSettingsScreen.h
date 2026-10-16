@@ -21,6 +21,11 @@
 #define ISETTINGS_HELP_TEXT "PC SET HELP TXT"
 #define ISETTINGS_GROUP "PC SETTINGS GROUP"
 
+// "Back", under the help line: a hint like the pause menu's, so the pointer
+// can leave the screen as the cancel button does.
+#define ISETTINGS_BACK "PC SET BACK UIF"
+#define ISETTINGS_BACK_TEXT "PC SET BACK TXT"
+
 // The scrollbar beside the rows: a faint track and the thumb on it, drawn
 // only while a tab has more rows than fit.
 #define ISETTINGS_SCROLL_TRACK "PC SET SCROLL TRACK UIF"
