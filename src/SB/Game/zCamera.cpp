@@ -120,7 +120,7 @@ namespace
 #ifdef PLATFORM_PC
 namespace
 {
-    // The free orbit a touchscreen drag steers. PC only.
+    // The free orbit a touchscreen drag or the mouse steers. PC only.
     //
     // **Why the retail rig had to go, and what is kept.** zCameraUpdate builds
     // the camera out of a distance, a height and a yaw, and every drag-facing
@@ -144,9 +144,49 @@ namespace
     // the height that framing implies is read back out of whatever goals this
     // frame produced, and the orbit is built around THAT. Change the framing
     // and this follows it.
+    //
+    // **The turn is exact; the follow is not.** The angles go straight to the
+    // camera, since a mouse that turns late feels like lag. The point it orbits
+    // trails the player instead, a little sideways and more vertically, so a
+    // jump or a step does not jolt the whole view with it. Retail's camera got
+    // the same softness from mvtm and the spring on its height; the orbit
+    // snaps the camera every frame and so has to supply its own.
+    //
+    // **It aims from where it puts the camera.** zCameraUpdate's yaw_goal is
+    // the direction to the player from where the camera WAS. With retail's
+    // easing that one frame does not show; with a snapped camera the player
+    // slides off centre by a frame of turn on every sweep.
     F32 sOrbitYaw;
     F32 sOrbitPitch;
     S32 sOrbitOn;
+
+    // The point being orbited, trailing the player, and the framing it is
+    // orbited at, trailing the goals. Changes of framing -- the near camera,
+    // lasso, a bounce -- arrive as a step in the goals and are eased here.
+    xVec3 sOrbitPivot;
+    F32 sOrbitRadius;
+    F32 sOrbitAim;
+
+    // How much of the radius the camera may use, after the collision below
+    // pulled it in. The pull is instant; going back out is eased, so passing
+    // a pillar does not pop the view in and out.
+    F32 sOrbitReach;
+
+    // Where the orbit put the camera this frame, for comparing with where the
+    // collision left it, and where it was left, for the next frame to tell
+    // whether anything else has moved it since.
+    xVec3 sOrbitPlaced;
+    xVec3 sOrbitLeft;
+
+    // Time constants, in seconds, of the trailing above.
+    const F32 kOrbitFollowXZ = 0.04f;
+    const F32 kOrbitFollowY = 0.12f;
+    const F32 kOrbitFraming = 0.15f;
+    const F32 kOrbitReachOut = 0.25f;
+
+    // Further than this from the player in one frame and the pivot did not
+    // trail him, he was moved: a respawn, a warp. It jumps with him.
+    const F32 kOrbitSnap = 4.0f;
 
     // How far the camera may be swung above and below the aim point. Retail's
     // own extremes measured about the same point are +70 and -67 degrees, so
@@ -154,13 +194,24 @@ namespace
     const F32 kOrbitPitchMin = -1.0471976f; // -60 degrees
     const F32 kOrbitPitchMax = 1.3089969f; // 75 degrees
 
-    // Past this much disagreement between where the orbit thinks the camera is
-    // and where it actually is, something other than the player moved it -- a
-    // cutscene, a warp, a bus ride -- and the orbit takes the camera's word for
-    // it rather than yanking the view back.
+    // Further than this, in world units, from where the orbit left the camera
+    // last frame and something other than the player moved it -- a cutscene, a
+    // warp, a bus ride -- and the orbit takes the camera's word for it rather
+    // than yanking the view back. zCameraUpdate's own vertical_lerp nudge moves
+    // it by a fraction of one frame of the player's movement, well under this.
     const F32 kOrbitResync = 0.5f;
 
-    bool zCameraOrbit(xCamera* cam, F32& dgoal, F32& hgoal, F32& pgoal, F32& pitch_goal)
+    // The fraction of the way a value trailing with time constant `tau`
+    // closes on its target in `dt`.
+    F32 zCameraOrbitShare(F32 dt, F32 tau)
+    {
+        return 1.0f - xexp(-dt / tau);
+    }
+
+    // Rebuilds the goals -- position and look -- from the orbit, or returns
+    // false and leaves them alone. `yaw` and `pitch` are this frame's turn.
+    bool zCameraOrbit(xCamera* cam, F32 dt, F32 yaw, F32 pitch, F32& dgoal, F32& hgoal, F32& pgoal,
+                      F32& yaw_goal, F32& pitch_goal)
     {
         F32 aim = hgoal - dgoal * itan(pitch_goal);
         F32 rise = hgoal - aim;
@@ -171,26 +222,89 @@ namespace
             return false;
         }
 
-        F32 yaw = iCameraLookYaw();
-        F32 pitch = iCameraLookPitch();
+        const xVec3& tgt = cam->tgt_mat->pos;
 
-        if (!sOrbitOn || (yaw == 0.0f && pitch == 0.0f &&
-                          xabs(xDangleClamp(sOrbitYaw - cam->pcur)) > kOrbitResync))
+        // The player was moved, or the camera was: a respawn, a warp, a
+        // cutscene handing the camera back somewhere else. Either way the
+        // orbit starts again from what is there now.
+        if (sOrbitOn && (xVec3Dist(&sOrbitPivot, &tgt) > kOrbitSnap ||
+                         xVec3Dist(&sOrbitLeft, &cam->mat.pos) > kOrbitResync))
+        {
+            sOrbitOn = 0;
+        }
+
+        if (!sOrbitOn)
         {
             sOrbitOn = 1;
-            sOrbitYaw = cam->pcur;
-            sOrbitPitch = pitch_goal;
+            sOrbitPivot = tgt;
+            sOrbitRadius = radius;
+            sOrbitAim = aim;
+            sOrbitReach = 1.0f;
+            sOrbitYaw = xatan2(cam->mat.pos.x - tgt.x, cam->mat.pos.z - tgt.z);
+            sOrbitPitch = CLAMP(pitch_goal, kOrbitPitchMin, kOrbitPitchMax);
         }
 
         sOrbitYaw = xDangleClamp(sOrbitYaw + yaw);
         sOrbitPitch = CLAMP(sOrbitPitch + pitch, kOrbitPitchMin, kOrbitPitchMax);
 
-        dgoal = radius * icos(sOrbitPitch);
-        hgoal = aim + radius * isin(sOrbitPitch);
-        pgoal = sOrbitYaw;
+        F32 xz = zCameraOrbitShare(dt, kOrbitFollowXZ);
+        F32 y = zCameraOrbitShare(dt, kOrbitFollowY);
+        sOrbitPivot.x += (tgt.x - sOrbitPivot.x) * xz;
+        sOrbitPivot.y += (tgt.y - sOrbitPivot.y) * y;
+        sOrbitPivot.z += (tgt.z - sOrbitPivot.z) * xz;
+
+        F32 framing = zCameraOrbitShare(dt, kOrbitFraming);
+        sOrbitRadius += (radius - sOrbitRadius) * framing;
+        sOrbitAim += (aim - sOrbitAim) * framing;
+
+        sOrbitReach += (1.0f - sOrbitReach) * zCameraOrbitShare(dt, kOrbitReachOut);
+
+        // The camera on a sphere about the aim point. Positive pitch is above
+        // it, looking down, which is the engine's sign for the look as well.
+        xVec3 at;
+        at.x = sOrbitPivot.x;
+        at.y = sOrbitPivot.y + sOrbitAim;
+        at.z = sOrbitPivot.z;
+
+        F32 reach = sOrbitRadius * sOrbitReach;
+        F32 flat = reach * icos(sOrbitPitch);
+
+        sOrbitPlaced.x = at.x + flat * isin(sOrbitYaw);
+        sOrbitPlaced.y = at.y + reach * isin(sOrbitPitch);
+        sOrbitPlaced.z = at.z + flat * icos(sOrbitYaw);
+
+        // As goals relative to the player, in the form xCameraMove takes them
+        // under flag 0x20: a world-space angle, a flat distance and a height.
+        F32 dx = sOrbitPlaced.x - tgt.x;
+        F32 dz = sOrbitPlaced.z - tgt.z;
+        dgoal = xsqrt(SQR(dx) + SQR(dz));
+        hgoal = sOrbitPlaced.y - tgt.y;
+        pgoal = xatan2(dx, dz);
+
+        yaw_goal = xDangleClamp(sOrbitYaw + PI);
         pitch_goal = sOrbitPitch;
 
         return true;
+    }
+
+    // After xCameraUpdate, whose collision may have pulled the camera in
+    // toward the player. Shortens the reach to match, so the next frame starts
+    // from where the camera could actually go.
+    void zCameraOrbitCollided(xCamera* cam)
+    {
+        // The collision sweeps from here; see _xCameraUpdate.
+        xVec3 from = cam->tgt_mat->pos;
+        from.y += 0.7f;
+
+        F32 wanted = xVec3Dist(&sOrbitPlaced, &from);
+        F32 got = xVec3Dist(&cam->mat.pos, &from);
+
+        if (wanted > 0.01f && got < wanted)
+        {
+            sOrbitReach *= got / wanted;
+        }
+
+        sOrbitLeft = cam->mat.pos;
     }
 } // namespace
 #endif
@@ -1262,8 +1376,8 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     //
     // Taken over here rather than earlier so that everything feeding the goals
     // -- the near camera, lasso and wall framing, the height multipliers, the
-    // bounce cases -- has already had its say, and everything after them, which
-    // is the collision and the look-at, still gets its own.
+    // bounce cases -- has already had its say, and the collision after them
+    // still gets its own. The look is the orbit's as well as the position.
     //
     // `mvtm` and `lktm` are the SECONDS xCameraMove and xCameraLookYPR take to
     // reach a goal, and 0.1 of it is the rest of what felt wrong: on a stick
@@ -1279,8 +1393,19 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     F32 mvtm_was = mvtm;
     F32 lktm_was = lktm;
 
+    // The turn is read whenever gameplay has the camera, including the frames
+    // the wall jump keeps for itself, so the mouse can tell a camera that is
+    // briefly busy from one that is not running.
+    F32 turn_yaw = 0.0f;
+    F32 turn_pitch = 0.0f;
+    if (iCameraLookActive())
+    {
+        turn_yaw = iCameraLookYaw();
+        turn_pitch = iCameraLookPitch();
+    }
+
     if (iCameraLookActive() && wall_jump_enabled == WJVS_DISABLED &&
-        zCameraOrbit(cam, dgoal, hgoal, pgoal, pitch_goal))
+        zCameraOrbit(cam, dt, turn_yaw, turn_pitch, dgoal, hgoal, pgoal, yaw_goal, pitch_goal))
     {
         mvtm = 0.0f;
         lktm = 0.0f;
@@ -1334,6 +1459,13 @@ void zCameraUpdate(xCamera* cam, F32 dt)
     }
 
     xCameraUpdate(cam, dt);
+
+#ifdef PLATFORM_PC
+    if (sOrbitOn)
+    {
+        zCameraOrbitCollided(cam);
+    }
+#endif
 
     if (lassocam_enabled && stop_track == 0)
     {
