@@ -102,9 +102,18 @@ namespace
         return iHostStrCaseCmp(w, "on") == 0;
     }
 
+    iWindowMode ModeFor(const char* w)
+    {
+        if (iHostStrCaseCmp(w, "windowed") == 0)
+        {
+            return iWINDOW_WINDOWED;
+        }
+        return iHostStrCaseCmp(w, "fullscreen") == 0 ? iWINDOW_FULLSCREEN : iWINDOW_BORDERLESS;
+    }
+
     void ApplyMode(const char* w)
     {
-        iWindowSetMode(iHostStrCaseCmp(w, "windowed") == 0 ? iWINDOW_WINDOWED : iWINDOW_BORDERLESS);
+        iWindowSetMode(ModeFor(w));
     }
 
     void ApplyVSync(const char* w)
@@ -1035,17 +1044,20 @@ namespace
         Send("MNU4 MOVE B SFX", eEventPlay);
         Store(s, word);
 
-        // Exclusive fullscreen is a video mode the renderer picks at startup,
-        // and so is going back from it.
-        const bool live = s.when != RESTART && s.apply != NULL &&
-                          !(strcmp(s.key, "video.mode") == 0 &&
-                            (iHostStrCaseCmp(word, "fullscreen") == 0 ||
-                             iWindowGetMode() == iWINDOW_FULLSCREEN));
+        bool live = s.when != RESTART && s.apply != NULL;
         if (live)
         {
             s.apply(word);
+
+            // A window the renderer could not switch -- Vulkan's exclusive
+            // fullscreen is set at startup -- is kept as chosen for next time.
+            if (strcmp(s.key, "video.mode") == 0 && iWindowGetMode() != ModeFor(word))
+            {
+                live = false;
+                sRestart = true;
+            }
         }
-        else if (s.when == RESTART || strcmp(s.key, "video.mode") == 0)
+        else if (s.when == RESTART)
         {
             sRestart = true;
         }
