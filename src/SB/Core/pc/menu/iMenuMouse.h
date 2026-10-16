@@ -22,6 +22,10 @@ struct xBase;
 // prompts and the port's own screens. Clicking where no option is does nothing,
 // which keeps a click from skipping anything.
 //
+// **A hint is a button.** Text that leads with a button picture -- "{i:ui_options}
+// Options", "{i:ui_cancel} Return to Game" -- presses that button when clicked,
+// where no option is under the pointer.
+//
 // The settings and save screens keep their own selection in code rather than
 // in links. They ask iMenuMouseOver about their rows and do their own moving.
 

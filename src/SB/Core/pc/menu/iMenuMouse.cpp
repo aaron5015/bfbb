@@ -15,6 +15,8 @@
 #include "zUI.h"
 #include "zUIFont.h"
 
+#include <string.h>
+
 namespace
 {
     // The pointer in the menus' own units, 640x480 across the UI box.
@@ -325,6 +327,103 @@ namespace
         }
     }
 
+    // The button a hint names, for hints like "{i:ui_options} Options" that
+    // lead with a button picture: the bit the picture is of, or 0 for text
+    // that is anything else. Formatting tags before the picture are skipped.
+    U32 HintButton(const zUIFont* ent)
+    {
+        struct Name
+        {
+            const char* include;
+            U32 mask;
+        };
+
+        // The disc's own mapping, the one iTextPatch.cpp's pictureForBit and
+        // iPadGlyph.cpp read: 1 accept, 2 the third choice, 3 cancel, 4
+        // options.
+        static const Name kNames[] = {
+            { "ui_accept", XPAD_BUTTON_X },
+            { "ui_misc", XPAD_BUTTON_SQUARE },
+            { "ui_cancel", XPAD_BUTTON_TRIANGLE },
+            { "ui_options", XPAD_BUTTON_O },
+            { "button_picture_01", XPAD_BUTTON_X },
+            { "button_picture_02", XPAD_BUTTON_SQUARE },
+            { "button_picture_03", XPAD_BUTTON_TRIANGLE },
+            { "button_picture_04", XPAD_BUTTON_O },
+        };
+
+        const char* s = ent->text;
+        if (s == NULL)
+        {
+            return 0;
+        }
+
+        while (*s == ' ')
+        {
+            s++;
+        }
+
+        while (*s == '{')
+        {
+            const char* close = strchr(s, '}');
+            if (close == NULL)
+            {
+                return 0;
+            }
+
+            const char* name = NULL;
+            if (strncmp(s, "{i:", 3) == 0)
+            {
+                name = s + 3;
+            }
+            else if (strncmp(s, "{insert:", 8) == 0)
+            {
+                name = s + 8;
+            }
+
+            if (name != NULL)
+            {
+                size_t n = (size_t)(close - name);
+                for (size_t i = 0; i < sizeof(kNames) / sizeof(kNames[0]); i++)
+                {
+                    if (strlen(kNames[i].include) == n && strncmp(name, kNames[i].include, n) == 0)
+                    {
+                        return kNames[i].mask;
+                    }
+                }
+                return 0;
+            }
+
+            s = close + 1;
+        }
+
+        return 0;
+    }
+
+    // The hint under the pointer and the button it names, or NULL.
+    zUIFont* PickHint(zScene* s, U32* mask)
+    {
+        zUIFont* font = (zUIFont*)s->baseList[eBaseTypeUIFont];
+        for (U32 i = 0; i < s->baseCount[eBaseTypeUIFont]; i++)
+        {
+            zUIFont* ui = &font[i];
+            if (!xEntIsVisible(ui) || !(ui->baseFlags & 1))
+            {
+                continue;
+            }
+
+            U32 bit = HintButton(ui);
+            F32 x0, y0, x1, y1;
+            if (bit != 0 && TextRect(ui, &x0, &y0, &x1, &y1) && sX >= x0 && sX < x1 && sY >= y0 &&
+                sY < y1)
+            {
+                *mask = bit;
+                return ui;
+            }
+        }
+        return NULL;
+    }
+
     bool HasMoveLink(const xBase* b)
     {
         for (S32 i = 0; i < b->linkCount; i++)
@@ -436,7 +535,15 @@ U32 iMenuMouseUpdate(S32 inMenu)
         over = Pick(s, &step);
     }
 
-    sShowing = iPadHostSetPointer(TRUE, over != NULL || sRowOver);
+    // A hint like "{i:ui_options} Options" presses its button, on any screen,
+    // wherever no option is under the pointer.
+    U32 hint = 0;
+    if (sShowing && over == NULL && !sRowOver)
+    {
+        PickHint(s, &hint);
+    }
+
+    sShowing = iPadHostSetPointer(TRUE, over != NULL || sRowOver || hint != 0);
     if (!sShowing)
     {
         return 0;
@@ -466,6 +573,10 @@ U32 iMenuMouseUpdate(S32 inMenu)
     {
         bool startOnly = !HasLink(over, eEventPadPressX) && HasLink(over, eEventPadPressStart);
         add |= startOnly ? XPAD_BUTTON_START : XPAD_BUTTON_X;
+    }
+    else if (hint != 0 && clicked)
+    {
+        add |= hint;
     }
 
     return add;
