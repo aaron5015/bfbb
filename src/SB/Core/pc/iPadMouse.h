@@ -53,7 +53,7 @@ void iPadMouseSetCapture(S32 on);
 // without eating the movement the camera is about to read.
 S32 iPadMouseSawInput();
 
-// Whether a mouse is attached at all.
+// Whether there is a mouse: SDL lists one, or one has moved or clicked.
 S32 iPadMousePresent();
 
 #endif

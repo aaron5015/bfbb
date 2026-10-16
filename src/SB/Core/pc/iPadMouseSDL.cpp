@@ -27,6 +27,7 @@ namespace
     S32 sPressed;
     S32 sSaw;
     S32 sPresent;
+    S32 sEverSeen;
 
     S32 sWatching;
     S32 sCaptured;
@@ -184,7 +185,14 @@ void iPadMousePoll()
     sPendingActivity = 0;
     SDL_UnlockSpinlock(&sLock);
 
-    sPresent = SDL_HasMouse() ? 1 : 0;
+    // SDL_HasMouse alone is not enough: under D3D9 on Windows it has answered
+    // false with a mouse plugged in. A mouse that has moved or clicked is
+    // there.
+    if (activity)
+    {
+        sEverSeen = 1;
+    }
+    sPresent = (sEverSeen || SDL_HasMouse()) ? 1 : 0;
 
     SDL_Window* focus = SDL_GetKeyboardFocus();
     if (focus == NULL)
