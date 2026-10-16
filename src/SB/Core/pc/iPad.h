@@ -30,4 +30,11 @@ void iPadKill();
 // reads. The Xbox archives transpose O and TRIANGLE. See iPad.cpp.
 U32 iPadTalkBoxButtons(U32 pressed);
 
+// PC-only. Called once a frame on port 0 with whether a menu is up, after the
+// devices are read and before anything sees the buttons; what it returns is
+// added to them. The menu pointer lives behind it (menu/iMenuMouse.h), which
+// needs the game's UI and so is set from iSystem.cpp rather than called here.
+typedef U32 (*iPadMenuHookFn)(S32 inMenu);
+void iPadSetMenuHook(iPadMenuHookFn fn);
+
 #endif

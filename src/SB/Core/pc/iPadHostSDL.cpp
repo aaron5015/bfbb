@@ -920,6 +920,26 @@ S32 iPadHostKeyboardIsLive()
     return (sKeyboardOnPort0 || sKeyboardLive) ? TRUE : FALSE;
 }
 
+S32 iPadHostSetPointer(S32 on, S32 hand)
+{
+    S32 shown = on && !sScripted && iPadMousePresent() && iPadHostKeyboardIsLive();
+    iPadMouseSetPointer(shown, hand);
+    return shown;
+}
+
+S32 iPadHostPointer(F32* x, F32* y, S32* moved, S32* clicked, S32* wheel)
+{
+    if (!iPadMousePointerAt(x, y))
+    {
+        return FALSE;
+    }
+
+    *moved = iPadMouseMoved();
+    *clicked = iPadMouseButtonPressed(1);
+    *wheel = iPadMouseWheel();
+    return TRUE;
+}
+
 const char* iPadHostPadKind()
 {
     S32 slot = sPortSlot[0];

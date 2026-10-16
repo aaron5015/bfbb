@@ -83,6 +83,16 @@ const char* iPadHostBoundInput(U32 xpadButton);
 // no pad on port 0 it is always the keyboard.
 S32 iPadHostKeyboardIsLive();
 
+// The menu pointer. With `on` the OS cursor is the game's own -- the glove
+// with `hand` -- capture is let go, and the left button stops being a binding.
+// TRUE if a pointer is showing, which needs a mouse and the keyboard and mouse
+// to be what the player is using.
+S32 iPadHostSetPointer(S32 on, S32 hand);
+
+// Where the pointer is, in window pixels, and what it did in the last poll.
+// FALSE when no window of ours has focus.
+S32 iPadHostPointer(F32* x, F32* y, S32* moved, S32* clicked, S32* wheel);
+
 // What sort of controller is on port 0, as the name of a glyph set: "xbox",
 // "gamecube", "ps2". NULL when there is no pad, or when the backend cannot
 // tell one kind from another -- `video.button_icons = auto` then falls back on

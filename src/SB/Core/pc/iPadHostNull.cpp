@@ -60,6 +60,16 @@ S32 iPadHostKeyboardIsLive()
     return FALSE;
 }
 
+S32 iPadHostSetPointer(S32, S32)
+{
+    return FALSE;
+}
+
+S32 iPadHostPointer(F32*, F32*, S32*, S32*, S32*)
+{
+    return FALSE;
+}
+
 const char* iPadHostPadKind()
 {
     return NULL;

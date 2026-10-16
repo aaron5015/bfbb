@@ -7,10 +7,8 @@
 // decides what the movement means, reads [mouse], and hands the turn to
 // iCameraLook.h as its own source.
 //
-// The pointer is held only while the camera is taking the turn. A camera that
-// stops reading it -- the game paused, a menu, a cutscene, a conversation --
-// gets the pointer back to the desktop after a moment, and gets it taken again
-// the frame it starts reading. Nothing in the game has to say it is paused.
+// The pointer is held through play, cutscenes and dialogue, and let go while a
+// menu is up, which iMenuMouse.cpp turns into a pointer of the game's own.
 
 // Called once per iPadHostPoll, after the device has been polled.
 void iMouseLookUpdate();

@@ -74,6 +74,9 @@ static bool KeyDown(S32 id)
     case KEY_EITHER_ALT:
         return ScancodeDown(SDL_SCANCODE_LALT) || ScancodeDown(SDL_SCANCODE_RALT);
     case KEY_MOUSE_1:
+        // In a menu the left button is the pointer's click, which
+        // iMenuMouse.cpp turns into accept on whatever it is over.
+        return !iPadMousePointerOn() && iPadMouseButton(1) != 0;
     case KEY_MOUSE_2:
     case KEY_MOUSE_3:
     case KEY_MOUSE_4:

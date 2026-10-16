@@ -3,7 +3,11 @@
 
 #include "iPadMouse.h"
 
+#include "iHost.h"
+
 #include <SDL3/SDL.h>
+
+#include <stdio.h>
 
 namespace
 {
@@ -29,9 +33,34 @@ namespace
     S32 sPresent;
     S32 sEverSeen;
 
+    S32 sMoved;
+    U32 sDown;
+
     S32 sWatching;
     S32 sCaptured;
     SDL_Window* sCaptureWindow;
+
+    // The menu pointer. Built from res/cursor at a size that follows the
+    // window, since a cursor is drawn by the OS at its own pixel size and a
+    // 32-pixel arrow disappears on a 4K screen.
+    struct CursorImage
+    {
+        const char* file;
+        S32 hotX;
+        S32 hotY; // at the file's own size
+        SDL_Surface* source;
+        SDL_Cursor* cursor;
+    };
+
+    CursorImage sCursors[2] = {
+        { "arrow.png", 33, 3, NULL, NULL },
+        { "hand.png", 52, 4, NULL, NULL },
+    };
+    S32 sCursorSize;
+    S32 sCursorsLoaded;
+    S32 sPointer;
+    S32 sWantHand;
+    S32 sShownHand = -1; // -1: nothing of ours set
 
     // Mouse events SDL makes up from a finger or a pen. A touchscreen is
     // iPadTouch.cpp's to read, and a drag across its on-screen stick must not
@@ -147,6 +176,114 @@ namespace
             SDL_SetWindowRelativeMouseMode(sCaptureWindow, true);
         }
     }
+
+    void LoadCursorSources()
+    {
+        if (sCursorsLoaded)
+        {
+            return;
+        }
+        sCursorsLoaded = 1;
+
+        char dir[512];
+        if (!iHostExeDir(dir, sizeof(dir)))
+        {
+            return;
+        }
+
+        for (S32 i = 0; i < 2; i++)
+        {
+            char path[640];
+            snprintf(path, sizeof(path), "%s/cursor/%s", dir, sCursors[i].file);
+
+            SDL_Surface* loaded = SDL_LoadPNG(path);
+            if (loaded == NULL)
+            {
+                printf("bfbb: no menu pointer at %s (%s); the system's is used\n", path,
+                       SDL_GetError());
+                fflush(stdout);
+                continue;
+            }
+
+            // Scaling wants true colour, and the files are paletted.
+            sCursors[i].source = SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_RGBA32);
+            SDL_DestroySurface(loaded);
+        }
+    }
+
+    // About a twentieth of the window's height: 54 pixels at 1080, the size
+    // the arrow is drawn at, and never under the OS's own 32.
+    S32 CursorSizeFor(SDL_Window* window)
+    {
+        S32 w = 0;
+        S32 h = 0;
+        if (window == NULL || !SDL_GetWindowSizeInPixels(window, &w, &h) || h <= 0)
+        {
+            return 48;
+        }
+        S32 size = h / 20;
+        return size < 32 ? 32 : (size > 128 ? 128 : size);
+    }
+
+    void BuildCursors(S32 size)
+    {
+        for (S32 i = 0; i < 2; i++)
+        {
+            CursorImage& c = sCursors[i];
+            if (c.cursor != NULL)
+            {
+                SDL_DestroyCursor(c.cursor);
+                c.cursor = NULL;
+            }
+            if (c.source == NULL)
+            {
+                continue;
+            }
+
+            SDL_Surface* scaled = SDL_ScaleSurface(c.source, size, size, SDL_SCALEMODE_LINEAR);
+            if (scaled == NULL)
+            {
+                continue;
+            }
+            S32 hx = c.hotX * size / c.source->w;
+            S32 hy = c.hotY * size / c.source->h;
+            c.cursor = SDL_CreateColorCursor(scaled, hx, hy);
+            SDL_DestroySurface(scaled);
+        }
+        sCursorSize = size;
+    }
+
+    void ApplyPointer(SDL_Window* focus)
+    {
+        if (!sPointer)
+        {
+            // Over the game itself the OS pointer is in the way.
+            if (SDL_CursorVisible())
+            {
+                SDL_HideCursor();
+            }
+            return;
+        }
+
+        LoadCursorSources();
+        S32 size = CursorSizeFor(focus);
+        if (size != sCursorSize)
+        {
+            BuildCursors(size);
+            sShownHand = -1;
+        }
+
+        S32 want = sWantHand ? 1 : 0;
+        if (want != sShownHand && sCursors[want].cursor != NULL)
+        {
+            SDL_SetCursor(sCursors[want].cursor);
+            sShownHand = want;
+        }
+        if (!SDL_CursorVisible())
+        {
+            SDL_ShowCursor();
+        }
+    }
 } // namespace
 
 void iPadMouseInit()
@@ -211,6 +348,8 @@ void iPadMousePoll()
         sHeld = 0;
         sPressed = 0;
         sSaw = 0;
+        sMoved = 0;
+        sDown = 0;
         return;
     }
 
@@ -219,6 +358,10 @@ void iPadMousePoll()
     sWheel = wheel;
     sHeld = held | down; // a click inside one poll still reads as held for it
     sSaw = activity;
+    sMoved = (dx != 0.0f || dy != 0.0f) ? 1 : 0;
+    sDown = down;
+
+    ApplyPointer(focus);
 
     sPressed = 0;
     for (S32 n = 1; n <= 5; n++)
@@ -263,8 +406,75 @@ S32 iPadMousePressed()
 
 void iPadMouseSetCapture(S32 on)
 {
-    sCaptured = on ? 1 : 0;
+    sCaptured = (on && !sPointer) ? 1 : 0;
     ApplyCapture(sCaptured ? SDL_GetKeyboardFocus() : NULL);
+}
+
+void iPadMouseSetPointer(S32 on, S32 hand)
+{
+    on = on ? 1 : 0;
+    sWantHand = hand ? 1 : 0;
+
+    if (on != sPointer)
+    {
+        sPointer = on;
+        if (on)
+        {
+            // Let go first: relative mode hides the cursor and pins it.
+            iPadMouseSetCapture(0);
+        }
+    }
+
+    SDL_Window* focus = SDL_GetKeyboardFocus();
+    if (focus != NULL)
+    {
+        ApplyPointer(focus);
+    }
+}
+
+S32 iPadMousePointerOn()
+{
+    return sPointer;
+}
+
+S32 iPadMousePointerAt(F32* x, F32* y)
+{
+    SDL_Window* focus = SDL_GetKeyboardFocus();
+    if (focus == NULL)
+    {
+        return FALSE;
+    }
+
+    // SDL reports the pointer in window coordinates, which are points and not
+    // pixels on a scaled display.
+    F32 mx = 0.0f;
+    F32 my = 0.0f;
+    SDL_GetMouseState(&mx, &my);
+
+    S32 pw = 0;
+    S32 ph = 0;
+    S32 lw = 0;
+    S32 lh = 0;
+    if (SDL_GetWindowSizeInPixels(focus, &pw, &ph) && SDL_GetWindowSize(focus, &lw, &lh) &&
+        lw > 0 && lh > 0)
+    {
+        mx *= (F32)pw / (F32)lw;
+        my *= (F32)ph / (F32)lh;
+    }
+
+    *x = mx;
+    *y = my;
+    return TRUE;
+}
+
+S32 iPadMouseMoved()
+{
+    return sMoved;
+}
+
+S32 iPadMouseButtonPressed(S32 n)
+{
+    return (n >= 1 && n <= 5 && (sDown & (1u << (n - 1)))) ? 1 : 0;
 }
 
 S32 iPadMouseSawInput()

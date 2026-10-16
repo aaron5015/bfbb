@@ -8,6 +8,13 @@
 #include "xPad.h"
 #include "xTRC.h"
 
+static iPadMenuHookFn sMenuHook;
+
+void iPadSetMenuHook(iPadMenuHookFn fn)
+{
+    sMenuHook = fn;
+}
+
 S32 iPadInit()
 {
     iPadHostInit();
@@ -132,6 +139,15 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     // wants four. A host controller has four, so nothing has to be shared.
     *on = host->buttons;
 
+    // xPadUpdate sets this flag just before calling here while a menu reads
+    // both sticks as a d-pad, which is exactly while one is on screen.
+    const U32 kAnalogIsDigital = 0x10;
+
+    if (pad->port == 0 && sMenuHook != NULL)
+    {
+        *on |= sMenuHook((pad->flags & kAnalogIsDigital) != 0);
+    }
+
     F32 x;
     F32 y;
 
@@ -148,9 +164,7 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     pad->analog1.x = iPadConvStick(x);
     pad->analog1.y = -iPadConvStick(y);
 
-    // xPadUpdate sets this flag just before calling here while a menu reads
-    // both sticks as a d-pad. Only the camera gets the inverted axes.
-    const U32 kAnalogIsDigital = 0x10;
+    // Only the camera gets the inverted axes, not a menu.
     F32 camX = host->substick_x;
     F32 camY = host->substick_y;
     if (!(pad->flags & kAnalogIsDigital))

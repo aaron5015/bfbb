@@ -17,6 +17,7 @@
 #include "iTRC.h"
 #include "iSnapshot.h"
 #include "iPadGlyph.h"
+#include "menu/iMenuMouse.h"
 #include "iHipoly.h"
 #include "iSoundtrack.h"
 #include "iTextPatch.h"
@@ -1059,6 +1060,9 @@ void iSystemInit(U32 options)
     // RenderWareInit opens a window: everything below may want a setting.
     iConfigLoad();
     ApplyConfig();
+
+    // The menu pointer needs the game's UI, which iPad.cpp cannot reach.
+    iPadSetMenuHook(iMenuMouseUpdate);
 
     xDebugInit();
     xMemInit();

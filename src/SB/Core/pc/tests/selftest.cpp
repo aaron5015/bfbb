@@ -2395,8 +2395,7 @@ static void test_pad_keyboard_glyphs()
 }
 
 // Two sources turn the camera at once, and it sees the sum. A source that is
-// not steering contributes nothing, and the camera reading the turn is what
-// the mouse uses to tell a running camera from a paused one.
+// not steering contributes nothing.
 static void test_camera_look()
 {
     iCameraLookSetActive(iCAMERALOOK_TOUCH, FALSE);
@@ -2408,11 +2407,8 @@ static void test_camera_look()
 
     iCameraLookSet(iCAMERALOOK_TOUCH, 1.0f, 1.0f);
     iCameraLookSet(iCAMERALOOK_MOUSE, 0.25f, -0.5f);
-    iCameraLookTaken();
     check(iCameraLookYaw() == 0.25f, "an inactive source adds nothing");
     check(iCameraLookPitch() == -0.5f, "on either axis");
-    check(iCameraLookTaken(), "reading the turn is seen");
-    check(!iCameraLookTaken(), "and the flag clears");
 
     iCameraLookSetActive(iCAMERALOOK_TOUCH, TRUE);
     iCameraLookSet(iCAMERALOOK_TOUCH, 1.0f, 0.0f);

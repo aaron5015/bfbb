@@ -34,6 +34,7 @@
 #include "iPadGlyph.h"
 #include "iPadStick.h"
 #include "iScreen.h"
+#include "iMenuMouse.h"
 #include "iMenuWide.h"
 #include "iSnapshot.h"
 #include "iTime.h"
@@ -617,6 +618,26 @@ namespace
         Send(name, on ? eEventUISelect : eEventUIUnselect);
     }
 
+    // The row on screen the pointer is over, label or value, or -1.
+    S32 PointerRow()
+    {
+        for (S32 row = 0; row < ISETTINGS_ROWS && sTop + row < sListCount; row++)
+        {
+            char name[32];
+            sprintf(name, ISETTINGS_LABEL, (int)row);
+            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+            {
+                return row;
+            }
+            sprintf(name, ISETTINGS_VALUE, (int)row);
+            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+            {
+                return row;
+            }
+        }
+        return -1;
+    }
+
     // "Keep this?" for a change that could leave the player without a picture
     // they can use. Anything but a yes within the time puts it back.
     bool Confirm()
@@ -1050,6 +1071,7 @@ void iSettingsRun(S32 fromPause)
     sRestart = false;
 
     Show(fromPause);
+    iMenuMouseOwn(TRUE);
 
     for (;;)
     {
@@ -1085,6 +1107,24 @@ void iSettingsRun(S32 fromPause)
             }
             SelectRow(sSel - sTop, true);
             Draw();
+        }
+
+        // The pointer selects the row it moves onto, and a click on a row is
+        // the accept button on it, pressed next frame.
+        const S32 pointed = PointerRow();
+        if (pointed >= 0 && (iMenuMouseMoved() || iMenuMouseClicked()))
+        {
+            if (sTop + pointed != sSel)
+            {
+                SelectRow(sSel - sTop, false);
+                sSel = sTop + pointed;
+                SelectRow(pointed, true);
+                Draw();
+            }
+            if (iMenuMouseClicked())
+            {
+                iMenuMouseAccept();
+            }
         }
 
         // L1 and R1 turn the page, and go round.
@@ -1124,6 +1164,7 @@ void iSettingsRun(S32 fromPause)
         }
     }
 
+    iMenuMouseOwn(FALSE);
     iConfigSave();
     Hide(fromPause);
 }

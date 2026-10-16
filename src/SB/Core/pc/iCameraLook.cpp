@@ -7,7 +7,6 @@ namespace
     S32 sActive[iCAMERALOOK_SOURCE_COUNT];
     F32 sYaw[iCAMERALOOK_SOURCE_COUNT];
     F32 sPitch[iCAMERALOOK_SOURCE_COUNT];
-    S32 sTaken;
 } // namespace
 
 void iCameraLookSet(iCameraLookSource source, F32 yaw, F32 pitch)
@@ -24,13 +23,6 @@ void iCameraLookSetActive(iCameraLookSource source, S32 on)
         sYaw[source] = 0.0f;
         sPitch[source] = 0.0f;
     }
-}
-
-S32 iCameraLookTaken()
-{
-    S32 taken = sTaken;
-    sTaken = 0;
-    return taken;
 }
 
 S32 iCameraLookActive()
@@ -53,7 +45,6 @@ F32 iCameraLookYaw()
         y += sYaw[i];
         sYaw[i] = 0.0f;
     }
-    sTaken = 1;
     return y;
 }
 
@@ -65,6 +56,5 @@ F32 iCameraLookPitch()
         p += sPitch[i];
         sPitch[i] = 0.0f;
     }
-    sTaken = 1;
     return p;
 }

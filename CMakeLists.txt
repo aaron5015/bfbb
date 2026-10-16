@@ -1435,7 +1435,9 @@ if(NOT ANDROID)
   add_custom_command(TARGET bfbb POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${PC_DIR}/res/buttons $<TARGET_FILE_DIR:bfbb>/buttons
-    COMMENT "Staging the button glyphs"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${PC_DIR}/res/cursor $<TARGET_FILE_DIR:bfbb>/cursor
+    COMMENT "Staging the button glyphs and the menu pointer"
   )
 endif()
 

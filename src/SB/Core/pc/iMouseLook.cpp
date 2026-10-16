@@ -19,14 +19,7 @@ namespace
     // on an 800 dpi mouse -- turns the camera 80 degrees.
     const F32 kRadPerCount = 0.0035f;
 
-    // How long the camera may go without reading the turn before the pointer
-    // is handed back. Long enough to ride out the frames where gameplay keeps
-    // its own camera -- a wall jump, a bounce pad -- so the cursor does not
-    // flicker into view.
-    const F32 kReleaseAfter = 0.5f;
-
     S32 sActive;
-    F32 sIdle = kReleaseAfter;
     F32 sOwedX;
     F32 sOwedY;
     Uint64 sLastNS;
@@ -85,27 +78,23 @@ void iMouseLookUpdate()
     F32 dy;
     iPadMouseTake(&dx, &dy);
 
-    // Asked every poll so the flag means "since the last poll".
-    S32 taken = iCameraLookTaken();
-
     if (!sActive)
     {
         // Taken and dropped rather than left, so the counts that pile up while
         // a pad is in use do not spin the camera when the mouse comes back.
         Drop();
-        sIdle = kReleaseAfter;
         iPadMouseSetCapture(0);
         return;
     }
 
-    sIdle = taken ? 0.0f : sIdle + dt;
-    S32 steering = sIdle < kReleaseAfter;
+    // Held through cutscenes and dialogue as well as play; only a menu, which
+    // wants the pointer, lets it go. iPadMouseSetCapture refuses while the
+    // pointer is up.
+    iPadMouseSetCapture(iConfigGetBool("mouse.capture", TRUE));
 
-    iPadMouseSetCapture(steering && iConfigGetBool("mouse.capture", TRUE));
-
-    if (!steering)
+    if (iPadMousePointerOn())
     {
-        // Moving the mouse over a pause menu must not swing the camera the
+        // Moving the pointer over a pause menu must not swing the camera the
         // moment play resumes.
         Drop();
         iCameraLookSet(iCAMERALOOK_MOUSE, 0.0f, 0.0f);

@@ -56,4 +56,19 @@ S32 iPadMouseSawInput();
 // Whether there is a mouse: SDL lists one, or one has moved or clicked.
 S32 iPadMousePresent();
 
+// The pointer, for menus. While it is on the OS cursor is shown as the
+// game's own -- the sponge arrow, or the glove with `hand` -- capture is let
+// go, and the left button stops being a binding: it is the menu's click.
+void iPadMouseSetPointer(S32 on, S32 hand);
+S32 iPadMousePointerOn();
+
+// Where the pointer is, in the focused window's pixels. FALSE with no
+// focused window.
+S32 iPadMousePointerAt(F32* x, F32* y);
+
+// Whether the device moved in the last poll, and whether button `n` went
+// down in it.
+S32 iPadMouseMoved();
+S32 iPadMouseButtonPressed(S32 n);
+
 #endif

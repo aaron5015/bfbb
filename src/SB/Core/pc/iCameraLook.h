@@ -34,11 +34,6 @@ void iCameraLookSet(iCameraLookSource source, F32 yaw, F32 pitch);
 // and the retail camera does not swing behind the player by itself.
 void iCameraLookSetActive(iCameraLookSource source, S32 on);
 
-// Whether the camera has read the turn since the last call, and clears it. A
-// source asks this to tell a camera that is being steered from one that is
-// not running at all -- paused, in a menu, in a cutscene.
-S32 iCameraLookTaken();
-
 // Declared again in xPad.h for zCamera.cpp, which is decomp and already
 // includes that header. Yaw and pitch are consumed by the read.
 S32 iCameraLookActive();

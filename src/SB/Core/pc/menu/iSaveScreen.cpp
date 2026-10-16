@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "iAssetOverride.h"
+#include "iMenuMouse.h"
 #include "iMenuWide.h"
 #include "iQuitDesktop.h"
 #include "iSaveThumb.h"
@@ -480,7 +481,22 @@ namespace
     // Up and down. Returns once the player has chosen a save (TRUE, the choice
     // in sSel) or backed out (FALSE; the rows' Back links have already taken
     // the screen down).
-    bool Choose(bool save)
+    // The row on screen the pointer is over, or -1.
+    S32 PointerRow(bool save)
+    {
+        for (S32 row = 0; row < ISAVESCREEN_ROWS && sTop + row < sCount; row++)
+        {
+            char name[32];
+            RowName(save, row, name);
+            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+            {
+                return row;
+            }
+        }
+        return -1;
+    }
+
+    bool ChooseLoop(bool save)
     {
         promptSel = -1;
 
@@ -491,6 +507,25 @@ namespace
             if (promptSel == 4)
             {
                 return false;
+            }
+
+            // The pointer selects the row it moves onto, and a click on a row
+            // is the accept button on it, pressed next frame so the row's own
+            // links fire.
+            const S32 pointed = PointerRow(save);
+            if (pointed >= 0 && (iMenuMouseMoved() || iMenuMouseClicked()))
+            {
+                if (sTop + pointed != sSel)
+                {
+                    SelectRow(save, sSel - sTop, false);
+                    sSel = sTop + pointed;
+                    SelectRow(save, pointed, true);
+                    Draw(save);
+                }
+                if (iMenuMouseClicked())
+                {
+                    iMenuMouseAccept();
+                }
             }
 
             const U32 pressed = mPad[globals.currentActivePad].pressed;
@@ -525,6 +560,14 @@ namespace
                 return true;
             }
         }
+    }
+
+    bool Choose(bool save)
+    {
+        iMenuMouseOwn(TRUE);
+        bool chosen = ChooseLoop(save);
+        iMenuMouseOwn(FALSE);
+        return chosen;
     }
 
     U32 SceneCode()

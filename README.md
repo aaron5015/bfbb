@@ -302,3 +302,6 @@ behind build flags.
 - Platform layer: [SDL](https://github.com/libsdl-org/SDL).
 - Movie and music decoding: [FFmpeg](https://ffmpeg.org/).
 - Settings program: [wxWidgets](https://www.wxwidgets.org/).
+- Menu pointer: the
+  [SpongeBob Sponge Arrow & Hand Cursor](https://sweezy-cursors.com/cursor/spongebob-sponge-arrow-hand-cursor/)
+  from Sweezy Cursors.
