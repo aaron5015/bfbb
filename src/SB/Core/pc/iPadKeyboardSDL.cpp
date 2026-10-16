@@ -122,6 +122,31 @@ const iPadBind* iPadKeyboardBindings()
     return sKeyBind;
 }
 
+// iPadBindSoleInput for alternative `alt` rather than the first: its one input
+// that has to be held, or -1 for a chord.
+static S16 SoleInputOf(const iPadBind& bind, S32 alt)
+{
+    if (alt >= bind.alts)
+    {
+        return -1;
+    }
+
+    S16 found = -1;
+    for (S32 i = 0; i < bind.length[alt]; i++)
+    {
+        if (bind.negate[alt][i])
+        {
+            continue;
+        }
+        if (found >= 0)
+        {
+            return -1;
+        }
+        found = bind.id[alt][i];
+    }
+    return found;
+}
+
 const char* iPadKeyboardBoundInput(U32 xpadButton)
 {
     for (S32 i = 0; i < kPadBindButtonCount && i < IPAD_BIND_MAX_BUTTONS; i++)
@@ -133,7 +158,24 @@ const char* iPadKeyboardBoundInput(U32 xpadButton)
 
         S32 count;
         const iPadBindToken* tokens = iPadKeyTokens(&count);
-        S16 id = iPadBindSoleInput(sKeyBind[i]);
+        S16 id = SoleInputOf(sKeyBind[i], 0);
+
+        // In a menu the left button is the pointer's click and presses nothing
+        // else, so a prompt there names whatever comes after it -- `options`
+        // is "mouse1, f", and the pause map says F.
+        if (id == KEY_MOUSE_1 && iPadMousePointerOn())
+        {
+            for (S32 alt = 1; alt < sKeyBind[i].alts; alt++)
+            {
+                S16 next = SoleInputOf(sKeyBind[i], alt);
+                if (next >= 0)
+                {
+                    id = next;
+                    break;
+                }
+            }
+        }
+
         return (id >= 0) ? iPadBindTokenName(id, tokens, count) : NULL;
     }
 
