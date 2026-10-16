@@ -950,7 +950,7 @@ void zUI_Render(xEnt* ent)
                     cz = z >= 0.0f ? 0.00001f : -0.00001f;
                 }
 
-                F32 cooz = 1.0f / cz;
+                F32 cooz = xScreenUIRecipZ(cz);
                 F32 cameraZ = RwCameraGetNearClipPlane(camera);
 
                 RwIm2DVertexSetScreenX(&Vertex[0], x1);
