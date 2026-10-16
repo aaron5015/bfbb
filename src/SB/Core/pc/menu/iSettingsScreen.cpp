@@ -560,23 +560,65 @@ namespace
         iMenuWidePlace(ISETTINGS_HELP, 55.0f - s, 545.0f + 2.0f * s);
     }
 
+    // The tab bar: the shoulder buttons' pictures either side, the tab showing
+    // in the menu's own dark teal and the rest faded toward the background.
+    //
+    // Cut off after tab `last`'s name for the pointer to measure, -1 for just
+    // the first picture; TAB_COUNT is the whole bar.
+    void TitleText(char* title, size_t size, S32 last)
+    {
+        snprintf(title, size, "{i:button_picture_07}");
+        for (S32 t = 0; t < TAB_COUNT && t <= last; t++)
+        {
+            char one[48];
+            snprintf(one, sizeof(one), t == sTab ? "%s%s" : "%s{c=ff6f98a3}%s{~:c}",
+                     t == 0 ? " " : "   ", kTabNames[t]);
+            strncat(title, one, size - strlen(title) - 1);
+        }
+        if (last >= TAB_COUNT)
+        {
+            strncat(title, "   {i:button_picture_05}", size - strlen(title) - 1);
+        }
+    }
+
+    // The tab under the pointer on the tab bar: a name, or the shoulder
+    // picture either side, which turns the page the way its button does.
+    // -1 when the pointer is not on the bar.
+    S32 PointerTab()
+    {
+        xBase* bar = zSceneFindObject(xStrHash(ISETTINGS_TITLE));
+        F32 px;
+        F32 py;
+        if (!iMenuMouseOver(bar) || !iMenuMousePosition(&px, &py))
+        {
+            return -1;
+        }
+
+        // Each tab takes the gap before its name as well as the name.
+        char title[256];
+        F32 end;
+        TitleText(title, sizeof(title), -1);
+        if (!iMenuMouseTextEnd(bar, title, &end) || px <= end)
+        {
+            return (sTab + TAB_COUNT - 1) % TAB_COUNT;
+        }
+        for (S32 t = 0; t < TAB_COUNT; t++)
+        {
+            TitleText(title, sizeof(title), t);
+            if (iMenuMouseTextEnd(bar, title, &end) && px <= end + 4.0f)
+            {
+                return t;
+            }
+        }
+        return (sTab + 1) % TAB_COUNT;
+    }
+
     void Draw()
     {
         Layout();
 
-        // The tab bar: the shoulder buttons' pictures either side, the tab
-        // showing in the menu's own dark teal and the rest faded toward the
-        // background.
         char title[256];
-        snprintf(title, sizeof(title), "{i:button_picture_07} ");
-        for (S32 t = 0; t < TAB_COUNT; t++)
-        {
-            char one[48];
-            snprintf(one, sizeof(one), t == sTab ? "%s   " : "{c=ff6f98a3}%s{~:c}   ",
-                     kTabNames[t]);
-            strncat(title, one, sizeof(title) - strlen(title) - 1);
-        }
-        strncat(title, "{i:button_picture_05}", sizeof(title) - strlen(title) - 1);
+        TitleText(title, sizeof(title), TAB_COUNT);
         iAssetTextSet(xStrHash(ISETTINGS_TITLE_TEXT), title);
 
         for (S32 row = 0; row < ISETTINGS_ROWS; row++)
@@ -1137,10 +1179,22 @@ void iSettingsRun(S32 fromPause)
         {
             page = 1;
         }
+        S32 tab = (sTab + page + TAB_COUNT) % TAB_COUNT;
+
+        // Or a click on the tab bar: a name, or the picture of the shoulder
+        // button that turns that way. Asked every frame, which is what shows
+        // the glove over the bar.
+        const S32 pointedTab = PointerTab();
+        if (page == 0 && iMenuMouseClicked() && pointedTab >= 0 && pointedTab != sTab)
+        {
+            tab = pointedTab;
+            page = 1;
+        }
+
         if (page != 0)
         {
             SelectRow(sSel - sTop, false);
-            sTab = (Tab)((sTab + page + TAB_COUNT) % TAB_COUNT);
+            sTab = (Tab)tab;
             BuildList();
             sSel = 0;
             sTop = 0;

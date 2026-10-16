@@ -8,6 +8,7 @@
 #include "iWindow.h"
 #include "xEnt.h"
 #include "xEvent.h"
+#include "xFont.h"
 #include "xPad.h"
 #include "zGlobals.h"
 #include "zScene.h"
@@ -62,9 +63,120 @@ namespace
         return b != NULL && (b->baseType == eBaseTypeUI || b->baseType == eBaseTypeUIFont);
     }
 
-    // Under the pointer, and how far from the middle of the option, for the
-    // menus whose options overlap -- the title list's are 60 high and 30
-    // apart. -1 when not under it.
+    // Where an option's words are drawn, in the menus' units: its text laid out
+    // exactly as zUIFont_Render lays it out, lines and justification and all.
+    //
+    // Not the option's rectangle. That is the box the words may use, and the
+    // words sit at the top of it and as wide as they happen to be: the title
+    // list's boxes are 60 high and 30 apart, so a box test puts the option
+    // below under the lower half of every word.
+    void BuildBox(const zUIFont* ent, const char* text, xtextbox& tb)
+    {
+        const zUIFontAsset& a = *ent->fasset;
+
+        tb = xtextbox::create();
+        tb.font.id = a.fontID;
+        tb.font.width = NSCREENX(a.cdim[0]);
+        tb.font.height = NSCREENY(a.cdim[1]);
+        tb.font.space = NSCREENX(a.space[0]) - tb.font.width;
+        tb.font.clip.assign(NSCREENX(a.pos.x), NSCREENY(a.pos.y), NSCREENX(a.dim[0]),
+                            NSCREENY(a.dim[1]));
+        tb.bounds = tb.font.clip;
+        tb.bounds.contract(NSCREENX(a.inset[2]), NSCREENY(a.inset[0]), NSCREENX(a.inset[3]),
+                           NSCREENY(a.inset[1]));
+        tb.flags = (ent->uiFontFlags & 0x4) ? 0x2 : ((ent->uiFontFlags & 0x2) ? 0x1 : 0);
+        tb.set_text(text);
+
+        if (a.uiFontFlags & 0xc00)
+        {
+            S32 size;
+            F32 yextent = tb.yextent(NSCREENY(a.max_height), size, false);
+            if (yextent > tb.bounds.h)
+            {
+                if ((a.uiFontFlags & 0xc00) == 0xc00)
+                {
+                    tb.bounds.y -= 0.5f * (yextent - tb.bounds.h);
+                }
+                else if (a.uiFontFlags & 0x400)
+                {
+                    tb.bounds.y -= yextent - tb.bounds.h;
+                }
+                tb.bounds.h = yextent;
+            }
+        }
+    }
+
+    // Where a laid-out line starts, after its justification.
+    F32 LineX(const xtextbox& tb, const xtextbox::jot_line& line)
+    {
+        F32 x = tb.bounds.x + line.bounds.x;
+        if (tb.flags & 0x2)
+        {
+            x += 0.5f * (tb.bounds.w - line.bounds.w);
+        }
+        else if (tb.flags & 0x1)
+        {
+            x += tb.bounds.w - line.bounds.w;
+        }
+        return x;
+    }
+
+    bool TextRect(const zUIFont* ent, F32* x0, F32* y0, F32* x1, F32* y1)
+    {
+        if (ent->text == NULL || ent->text[0] == '\0')
+        {
+            return false;
+        }
+
+        xtextbox tb;
+        BuildBox(ent, ent->text, tb);
+
+        const xtextbox::layout& l = tb.temp_layout(false);
+        if (l._lines_size == 0)
+        {
+            return false;
+        }
+
+        // xtextbox::layout::render's placement of each line.
+        const F32 top = l._lines[0].bounds.y;
+        F32 lx0 = 1e9f;
+        F32 ly0 = 1e9f;
+        F32 lx1 = -1e9f;
+        F32 ly1 = -1e9f;
+        for (size_t i = 0; i < l._lines_size; i++)
+        {
+            const xtextbox::jot_line& line = l._lines[i];
+            if (line.bounds.w <= 0.0f)
+            {
+                continue;
+            }
+
+            F32 x = LineX(tb, line);
+            F32 y = tb.bounds.y + line.bounds.y - top;
+
+            lx0 = x < lx0 ? x : lx0;
+            ly0 = y < ly0 ? y : ly0;
+            lx1 = x + line.bounds.w > lx1 ? x + line.bounds.w : lx1;
+            ly1 = y + line.bounds.h > ly1 ? y + line.bounds.h : ly1;
+        }
+        if (lx1 < lx0)
+        {
+            return false;
+        }
+
+        // A little slack round the words, so the gap between two letters or a
+        // short word is not a miss.
+        const F32 kSlackX = 8.0f;
+        const F32 kSlackY = 4.0f;
+        *x0 = lx0 * 640.0f - kSlackX;
+        *y0 = ly0 * 480.0f - kSlackY;
+        *x1 = lx1 * 640.0f + kSlackX;
+        *y1 = ly1 * 480.0f + kSlackY;
+        return true;
+    }
+
+    // Under the pointer, and how far from the middle of the option, for options
+    // that still overlap. -1 when not under it.
     F32 Distance(const _zUI* ui)
     {
         const zUIAsset* a = ui->sasset;
@@ -72,6 +184,10 @@ namespace
         F32 y0 = a->pos.y;
         F32 x1 = x0 + a->dim[0];
         F32 y1 = y0 + a->dim[1];
+        if (ui->baseType == eBaseTypeUIFont)
+        {
+            TextRect((const zUIFont*)ui, &x0, &y0, &x1, &y1);
+        }
         if (sX < x0 || sX >= x1 || sY < y0 || sY >= y1)
         {
             return -1.0f;
@@ -134,10 +250,13 @@ namespace
         return -1;
     }
 
+    // From the options selected now. Not from the managers, which are selected
+    // under every page of a menu and would reach the pages not showing.
     void AddStart(_zUI* ui)
     {
         if ((ui->baseFlags & 1) && (ui->uiFlags & 0x8) && (ui->uiFlags & 0x2) &&
-            sStepCount < kMax && FindStep(ui) < 0)
+            ui->sasset->dim[0] >= 8 && ui->sasset->dim[1] >= 8 && sStepCount < kMax &&
+            FindStep(ui) < 0)
         {
             sSteps[sStepCount].node = ui;
             sSteps[sStepCount].from = -1;
@@ -206,11 +325,29 @@ namespace
         }
     }
 
+    bool HasMoveLink(const xBase* b)
+    {
+        for (S32 i = 0; i < b->linkCount; i++)
+        {
+            if (IsMove(b->link[i].srcEvent))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // The option under the pointer that a pad could select, or NULL.
+    //
+    // One the walk reaches counts even hidden and out of focus: the pause
+    // map's level bubbles are each drawn only while selected and focused, and
+    // the walk is what says they are this screen's. A shown option under the
+    // pointer still wins over a hidden one.
     _zUI* Pick(zScene* s, S32* step)
     {
         _zUI* best = NULL;
         F32 bestDistance = 0.0f;
+        bool bestShown = false;
         *step = -1;
 
         for (S32 type = 0; type < 2; type++)
@@ -220,29 +357,42 @@ namespace
             {
                 _zUI* ui = (type == 0) ? &((_zUI*)s->baseList[eBaseTypeUI])[i] :
                                          &((zUIFont*)s->baseList[eBaseTypeUIFont])[i];
-                if (!IsLive(ui))
+
+                S32 at = FindStep(ui);
+                if (at < 0)
+                {
+                    continue;
+                }
+
+                // Reachable, or the selected option itself if it is part of a
+                // list or has something to accept. The taxi reads accept off
+                // the pad rather than through a link, so a list is enough.
+                bool reached = sSteps[at].from >= 0;
+                bool shown = IsLive(ui);
+                if (reached ? (ui->sasset->dim[0] < 8 || ui->sasset->dim[1] < 8) :
+                              (!shown || !(HasMoveLink(ui) || HasLink(ui, eEventPadPressX) ||
+                                           HasLink(ui, eEventPadPressStart))))
                 {
                     continue;
                 }
 
                 F32 d = Distance(ui);
-                if (d < 0.0f || (best != NULL && d >= bestDistance))
+                if (d < 0.0f)
                 {
                     continue;
                 }
-
-                // Reachable, or already selected and something to accept.
-                S32 at = FindStep(ui);
-                bool selectable =
-                    at >= 0 && (sSteps[at].from >= 0 || HasLink(ui, eEventPadPressX) ||
-                                HasLink(ui, eEventPadPressStart));
-                if (!selectable)
+                if (best != NULL && (bestShown && !shown))
+                {
+                    continue;
+                }
+                if (best != NULL && bestShown == shown && d >= bestDistance)
                 {
                     continue;
                 }
 
                 best = ui;
                 bestDistance = d;
+                bestShown = shown;
                 *step = at;
             }
         }
@@ -346,6 +496,50 @@ S32 iMenuMouseMoved()
 S32 iMenuMouseClicked()
 {
     return sShowing && sClicked;
+}
+
+S32 iMenuMousePosition(F32* x, F32* y)
+{
+    if (!sShowing)
+    {
+        return FALSE;
+    }
+    *x = sX;
+    *y = sY;
+    return TRUE;
+}
+
+S32 iMenuMouseTextEnd(xBase* ent, const char* prefix, F32* x)
+{
+    if (ent == NULL || ent->baseType != eBaseTypeUIFont)
+    {
+        return FALSE;
+    }
+
+    const zUIFont* font = (const zUIFont*)ent;
+    if (font->text == NULL || font->text[0] == '\0')
+    {
+        return FALSE;
+    }
+
+    // Two layouts through one shared buffer, so the first is read out before
+    // the second is made.
+    xtextbox tb;
+    BuildBox(font, font->text, tb);
+    const xtextbox::layout& whole = tb.temp_layout(false);
+    if (whole._lines_size == 0)
+    {
+        return FALSE;
+    }
+    const F32 start = LineX(tb, whole._lines[0]);
+
+    xtextbox part;
+    BuildBox(font, prefix, part);
+    const xtextbox::layout& upto = part.temp_layout(false);
+    const F32 width = (upto._lines_size != 0) ? upto._lines[0].bounds.w : 0.0f;
+
+    *x = (start + width) * 640.0f;
+    return TRUE;
 }
 
 void iMenuMouseOwn(S32 on)

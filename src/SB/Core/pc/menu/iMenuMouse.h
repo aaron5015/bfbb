@@ -37,6 +37,14 @@ S32 iMenuMouseOver(xBase* ent);
 S32 iMenuMouseMoved();
 S32 iMenuMouseClicked();
 
+// The pointer in the menus' 640x480 units. FALSE when none is showing.
+S32 iMenuMousePosition(F32* x, F32* y);
+
+// Where, across the menus' 640 units, the words of `prefix` end when `ent` (a
+// zUIFont) draws its whole text: `prefix` is the start of that text. For one
+// string that is several targets, such as the settings screen's tab bar.
+S32 iMenuMouseTextEnd(xBase* ent, const char* prefix, F32* x);
+
 // For a screen that keeps its own selection: while owned, hovering and
 // clicking do nothing on their own and the screen moves its selection itself.
 // Its rows have links as well, which the selection in code would disagree with.
