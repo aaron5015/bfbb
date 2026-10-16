@@ -1521,6 +1521,25 @@ void MNU4_BuildPortal(iAssetPkg& p)
         p.Item(H(ISETTINGS_HELP));
         p.Item(H(ISETTINGS_SCROLL_TRACK));
         p.Item(H(ISETTINGS_SCROLL_THUMB));
+        for (S32 s = 0; s < ISETTINGS_SLIDERS; s++)
+        {
+            char name[48];
+            for (S32 n = 0; n < ISETTINGS_SLIDER_LEVELS; n++)
+            {
+                sprintf(name, ISETTINGS_SLIDER_ON, (int)s, (int)n);
+                p.Item(H(name));
+                sprintf(name, ISETTINGS_SLIDER_OFF, (int)s, (int)n);
+                p.Item(H(name));
+            }
+            sprintf(name, ISETTINGS_SLIDER_LEFT, (int)s);
+            p.Item(H(name));
+            sprintf(name, ISETTINGS_SLIDER_RIGHT, (int)s);
+            p.Item(H(name));
+            sprintf(name, ISETTINGS_SLIDER_LEFT_GLOW, (int)s);
+            p.Item(H(name));
+            sprintf(name, ISETTINGS_SLIDER_RIGHT_GLOW, (int)s);
+            p.Item(H(name));
+        }
         p.End();
     }
 }

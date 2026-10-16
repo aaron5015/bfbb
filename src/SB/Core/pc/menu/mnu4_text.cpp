@@ -385,6 +385,6 @@ void MNU4_BuildText(iAssetPkg& p)
         sprintf(name, ISETTINGS_LABEL_TEXT, (int)i);
         p.TextSpace(H(name), "", 64);
         sprintf(name, ISETTINGS_VALUE_TEXT, (int)i);
-        p.TextSpace(H(name), "", 96);
+        p.TextSpace(H(name), "", 128);
     }
 }

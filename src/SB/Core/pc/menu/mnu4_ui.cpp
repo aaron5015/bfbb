@@ -1650,4 +1650,74 @@ void MNU4_BuildUI(iAssetPkg& p)
         p.Link(eEventVisible, eEventRun, H("AUTO_SAVE_FAILED_TIMER"));
         p.End();
     }
+
+    // The settings screen's volume sliders, in the Options page's own bamboo
+    // and arrows ("CONTROL HASH UI", "CONTROL OFF UI" above). Placed on their
+    // rows by iSettingsScreen.cpp, so the positions here are only sizes. A
+    // higher z draws later: the arrow over its glow, a notch over nothing.
+    for (S32 s = 0; s < ISETTINGS_SLIDERS; s++)
+    {
+        char name[48];
+
+        for (S32 n = 0; n < ISETTINGS_SLIDER_LEVELS; n++)
+        {
+            zUIAsset a = kUIDefaults;
+            // Every fifth notch is the tall one, as on the page.
+            const bool major = (n % 5) == 0;
+            a.pos = xVec3{ 0.0f, 0.0f, 2.0f };
+            a.dim[0] = 22;
+            a.dim[1] = major ? 30 : 24;
+            a.textureID = H("ui_bamboo_y");
+            sprintf(name, ISETTINGS_SLIDER_ON, (int)s, (int)n);
+            p.Begin('UI  ', H(name), a);
+            p.End();
+
+            a.textureID = H("ui_bamboo_b");
+            sprintf(name, ISETTINGS_SLIDER_OFF, (int)s, (int)n);
+            p.Begin('UI  ', H(name), a);
+            p.End();
+        }
+
+        for (S32 side = 0; side < 2; side++)
+        {
+            zUIAsset a = kUIDefaults;
+            a.dim[0] = 26;
+            a.dim[1] = 26;
+            if (side == 0)
+            {
+                a.uva[0] = 1.0f;
+                a.uva[1] = 0.0f;
+                a.uvb[0] = 1.0f;
+                a.uvb[1] = 1.0f;
+                a.uvc[0] = 0.0f;
+                a.uvc[1] = 1.0f;
+                a.uvd[0] = 0.0f;
+                a.uvd[1] = 0.0f;
+            }
+            else
+            {
+                a.uva[0] = 0.0f;
+                a.uva[1] = 1.0f;
+                a.uvb[0] = 0.0f;
+                a.uvb[1] = 0.0f;
+                a.uvc[0] = 1.0f;
+                a.uvc[1] = 0.0f;
+                a.uvd[0] = 1.0f;
+                a.uvd[1] = 1.0f;
+            }
+
+            a.pos = xVec3{ 0.0f, 0.0f, 3.0f };
+            a.textureID = H("ui_arrowup");
+            sprintf(name, side == 0 ? ISETTINGS_SLIDER_LEFT : ISETTINGS_SLIDER_RIGHT, (int)s);
+            p.Begin('UI  ', H(name), a);
+            p.End();
+
+            a.pos.z = 2.0f;
+            a.textureID = H("ui_arrowup_glow");
+            sprintf(name, side == 0 ? ISETTINGS_SLIDER_LEFT_GLOW : ISETTINGS_SLIDER_RIGHT_GLOW,
+                    (int)s);
+            p.Begin('UI  ', H(name), a);
+            p.End();
+        }
+    }
 }

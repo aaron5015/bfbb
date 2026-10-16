@@ -755,6 +755,255 @@ namespace
         return (sTab + 1) % TAB_COUNT;
     }
 
+    // What the pointer is over on a row's value: one of the two arrows, a
+    // slider notch, or anywhere else on it. Kept so that the arrow under it can
+    // be drawn lit.
+    enum
+    {
+        PART_NONE = 0,
+        PART_LEFT = -1,
+        PART_RIGHT = 1,
+        PART_NOTCH = 2 // PART_NOTCH + n is notch n
+    };
+    S32 sHoverRow = -1;
+    S32 sHoverPart = PART_NONE;
+
+    // The on-screen row each slider set is drawn on this time, or -1.
+    S32 sSliderRow[ISETTINGS_SLIDERS];
+
+    bool IsSlider(const Setting& s)
+    {
+        return strcmp(s.key, "audio.music_volume") == 0 || strcmp(s.key, "audio.sfx_volume") == 0;
+    }
+
+    S32 SliderFor(S32 row)
+    {
+        for (S32 k = 0; k < ISETTINGS_SLIDERS; k++)
+        {
+            if (sSliderRow[k] == row)
+            {
+                return k;
+            }
+        }
+        return -1;
+    }
+
+    void HoverColour(char* out, size_t size)
+    {
+        U8 r = 0;
+        U8 g = 70;
+        U8 b = 85;
+        iMenuMouseBrighten(&r, &g, &b);
+        snprintf(out, size, "{c=ff%02x%02x%02x}", r, g, b);
+    }
+
+    // A value as the row shows it, "< Stereo >", with the arrow under the
+    // pointer lit. The colour tags draw nothing, so the pointer measures the
+    // same text without them.
+    void ValueText(const Setting& s, S32 row, char* out, size_t size)
+    {
+        if (IsBindEntry(s))
+        {
+            snprintf(out, size, "{i:button_picture_01} Change");
+            return;
+        }
+        if (IsSlider(s))
+        {
+            out[0] = '\0';
+            return;
+        }
+
+        char value[80];
+        Name(s, IndexOf(s), value, sizeof(value));
+
+        char lit[16];
+        HoverColour(lit, sizeof(lit));
+        const bool left = sHoverRow == row && sHoverPart == PART_LEFT;
+        const bool right = sHoverRow == row && sHoverPart == PART_RIGHT;
+        snprintf(out, size, "%s<%s %s %s>%s", left ? lit : "", left ? "{~:c}" : "", value,
+                 right ? lit : "", right ? "{~:c}" : "");
+    }
+
+    void PlaceUI(const char* name, F32 x, F32 y)
+    {
+        xBase* b = zSceneFindObject(xStrHash(name));
+        if (b != NULL && b->baseType == eBaseTypeUI)
+        {
+            _zUI* ui = (_zUI*)b;
+            ui->sasset->pos.x = x;
+            ui->sasset->pos.y = y;
+        }
+    }
+
+    void ShowUI(const char* name, bool on)
+    {
+        Send(name, on ? eEventVisible : eEventInvisible);
+    }
+
+    // Notch n's left edge, and the two arrows', across the value column.
+    const F32 kSliderArrowW = 26.0f;
+    const F32 kSliderStep = 18.0f;
+
+    F32 SliderNotchX(F32 x0, S32 n)
+    {
+        return x0 + kSliderArrowW + 4.0f + kSliderStep * n;
+    }
+
+    // The bamboo on every row whose setting is a volume, and nothing left over
+    // from the last tab.
+    void DrawSliders()
+    {
+        for (S32 k = 0; k < ISETTINGS_SLIDERS; k++)
+        {
+            sSliderRow[k] = -1;
+        }
+
+        S32 used = 0;
+        for (S32 row = 0; row < ISETTINGS_ROWS && sTop + row < sListCount; row++)
+        {
+            const Setting& s = kSettings[sList[sTop + row]];
+            if (IsSlider(s) && used < ISETTINGS_SLIDERS)
+            {
+                sSliderRow[used++] = row;
+            }
+        }
+
+        const F32 x0 = 330.0f + 0.6f * iMenuWideMargin();
+        char name[48];
+        for (S32 k = 0; k < ISETTINGS_SLIDERS; k++)
+        {
+            const S32 row = sSliderRow[k];
+            const bool shown = row >= 0;
+            const F32 y = ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * row;
+            S32 level = 0;
+            if (shown)
+            {
+                level = atoi(iConfigGetString(kSettings[sList[sTop + row]].key, "0"));
+            }
+
+            for (S32 n = 0; n < ISETTINGS_SLIDER_LEVELS; n++)
+            {
+                const F32 nx = SliderNotchX(x0, n);
+                const F32 ny = y + ((n % 5) == 0 ? 1.0f : 4.0f);
+                sprintf(name, ISETTINGS_SLIDER_ON, (int)k, (int)n);
+                PlaceUI(name, nx, ny);
+                ShowUI(name, shown && n <= level);
+                sprintf(name, ISETTINGS_SLIDER_OFF, (int)k, (int)n);
+                PlaceUI(name, nx, ny);
+                ShowUI(name, shown && n > level);
+            }
+
+            const F32 rightX = SliderNotchX(x0, ISETTINGS_SLIDER_LEVELS - 1) + 22.0f + 4.0f;
+            const bool litLeft = shown && sHoverRow == row && sHoverPart == PART_LEFT;
+            const bool litRight = shown && sHoverRow == row && sHoverPart == PART_RIGHT;
+
+            sprintf(name, ISETTINGS_SLIDER_LEFT, (int)k);
+            PlaceUI(name, x0, y + 3.0f);
+            ShowUI(name, shown);
+            sprintf(name, ISETTINGS_SLIDER_LEFT_GLOW, (int)k);
+            PlaceUI(name, x0, y + 3.0f);
+            ShowUI(name, litLeft);
+            sprintf(name, ISETTINGS_SLIDER_RIGHT, (int)k);
+            PlaceUI(name, rightX, y + 3.0f);
+            ShowUI(name, shown);
+            sprintf(name, ISETTINGS_SLIDER_RIGHT_GLOW, (int)k);
+            PlaceUI(name, rightX, y + 3.0f);
+            ShowUI(name, litRight);
+        }
+    }
+
+    // What on row `row`'s value the pointer is over. The arrows of a text
+    // value are measured out of its layout: everything up to "<" is the left,
+    // everything from the space before ">" is the right.
+    S32 PointerPart(S32 row)
+    {
+        if (row < 0 || sTop + row >= sListCount)
+        {
+            return PART_NONE;
+        }
+        const Setting& s = kSettings[sList[sTop + row]];
+        char name[48];
+
+        if (IsSlider(s))
+        {
+            const S32 k = SliderFor(row);
+            if (k < 0)
+            {
+                return PART_NONE;
+            }
+            sprintf(name, ISETTINGS_SLIDER_LEFT, (int)k);
+            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+            {
+                return PART_LEFT;
+            }
+            sprintf(name, ISETTINGS_SLIDER_RIGHT, (int)k);
+            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+            {
+                return PART_RIGHT;
+            }
+            F32 px;
+            F32 py;
+            if (iMenuMousePosition(&px, &py))
+            {
+                const F32 x0 = 330.0f + 0.6f * iMenuWideMargin();
+                const F32 y = ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * row;
+                if (py >= y && py < y + 32.0f)
+                {
+                    // The nearest notch, over the whole run of them.
+                    const F32 first = SliderNotchX(x0, 0) + 11.0f;
+                    const F32 last = SliderNotchX(x0, ISETTINGS_SLIDER_LEVELS - 1) + 11.0f;
+                    if (px >= first - kSliderStep * 0.5f && px < last + kSliderStep * 0.5f)
+                    {
+                        S32 n = (S32)((px - first) / kSliderStep + 0.5f);
+                        n = n < 0 ?
+                                0 :
+                                (n >= ISETTINGS_SLIDER_LEVELS ? ISETTINGS_SLIDER_LEVELS - 1 : n);
+                        return PART_NOTCH + n;
+                    }
+                }
+            }
+            return PART_NONE;
+        }
+
+        if (IsBindEntry(s))
+        {
+            return PART_NONE;
+        }
+
+        sprintf(name, ISETTINGS_VALUE, (int)row);
+        xBase* ent = zSceneFindObject(xStrHash(name));
+        F32 px;
+        F32 py;
+        if (!iMenuMouseOver(ent) || !iMenuMousePosition(&px, &py))
+        {
+            return PART_NONE;
+        }
+
+        char value[80];
+        Name(s, IndexOf(s), value, sizeof(value));
+        char upto[96];
+        F32 leftEnd;
+        F32 rightStart;
+        if (!iMenuMouseTextEnd(ent, "<", &leftEnd))
+        {
+            return PART_NONE;
+        }
+        snprintf(upto, sizeof(upto), "< %s", value);
+        if (!iMenuMouseTextEnd(ent, upto, &rightStart))
+        {
+            return PART_NONE;
+        }
+        if (px <= leftEnd + 6.0f)
+        {
+            return PART_LEFT;
+        }
+        if (px >= rightStart + 2.0f)
+        {
+            return PART_RIGHT;
+        }
+        return PART_NONE;
+    }
+
     void Draw()
     {
         Layout();
@@ -762,6 +1011,8 @@ namespace
         char title[256];
         TitleText(title, sizeof(title), TAB_COUNT);
         iAssetTextSet(xStrHash(ISETTINGS_TITLE_TEXT), title);
+
+        DrawSliders();
 
         for (S32 row = 0; row < ISETTINGS_ROWS; row++)
         {
@@ -774,18 +1025,8 @@ namespace
             }
 
             const Setting& s = kSettings[sList[i]];
-            char value[80];
-            Name(s, IndexOf(s), value, sizeof(value));
-
-            char shown[96];
-            if (IsBindEntry(s))
-            {
-                snprintf(shown, sizeof(shown), "{i:button_picture_01} Change");
-            }
-            else
-            {
-                snprintf(shown, sizeof(shown), "< %s >", value);
-            }
+            char shown[128];
+            ValueText(s, row, shown, sizeof(shown));
             SetText(ISETTINGS_LABEL_TEXT, row, s.label);
             SetText(ISETTINGS_VALUE_TEXT, row, shown);
         }
@@ -1133,6 +1374,8 @@ namespace
     }
 
     // Left and right stop at the ends; X goes round.
+    void ChangeTo(S32 to);
+
     void Change(S32 dir, bool wrap)
     {
         const Setting& s = Selected();
@@ -1153,6 +1396,16 @@ namespace
         {
             to = (to + n) % n;
         }
+        ChangeTo(to);
+    }
+
+    // The selected setting to its word `to`, applied, confirmed if it asks to
+    // be. Nothing for a word it has already.
+    void ChangeTo(S32 to)
+    {
+        const Setting& s = Selected();
+        const S32 n = WordCount(Words(s));
+        const S32 was = IndexOf(s);
         if (to < 0 || to >= n || to == was)
         {
             return;
@@ -1303,6 +1556,17 @@ void iSettingsRun(S32 fromPause)
         // The pointer selects the row it moves onto, and a click on a row is
         // the accept button on it, pressed next frame.
         const S32 pointed = PointerRow();
+
+        // The arrow under the pointer is drawn lit, so the screen is redrawn
+        // when that changes.
+        const S32 part = PointerPart(pointed);
+        if (pointed != sHoverRow || part != sHoverPart)
+        {
+            sHoverRow = pointed;
+            sHoverPart = part;
+            Draw();
+        }
+
         if (pointed >= 0 && (iMenuMouseMoved() || iMenuMouseClicked()))
         {
             if (sTop + pointed != sSel)
@@ -1312,9 +1576,23 @@ void iSettingsRun(S32 fromPause)
                 SelectRow(pointed, true);
                 Draw();
             }
+
+            // An arrow steps that way, a notch is that level, and anywhere
+            // else on the row is the accept button.
             if (iMenuMouseClicked())
             {
-                iMenuMouseAccept();
+                if (part == PART_LEFT || part == PART_RIGHT)
+                {
+                    Change(part, false);
+                }
+                else if (part >= PART_NOTCH)
+                {
+                    ChangeTo(part - PART_NOTCH);
+                }
+                else
+                {
+                    iMenuMouseAccept();
+                }
             }
         }
 
