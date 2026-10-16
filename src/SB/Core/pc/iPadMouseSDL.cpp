@@ -40,9 +40,25 @@ namespace
         return which != SDL_TOUCH_MOUSEID && which != SDL_PEN_MOUSEID;
     }
 
+    // SDL numbers the middle button 2 and the right 3. A binding's `mouse2` is
+    // the right button and `mouse3` the middle, as everywhere else on PC.
     U32 ButtonBit(Uint8 button)
     {
-        return (button >= 1 && button <= 5) ? (1u << (button - 1)) : 0;
+        switch (button)
+        {
+        case SDL_BUTTON_LEFT:
+            return 1u << 0;
+        case SDL_BUTTON_RIGHT:
+            return 1u << 1;
+        case SDL_BUTTON_MIDDLE:
+            return 1u << 2;
+        case SDL_BUTTON_X1:
+            return 1u << 3;
+        case SDL_BUTTON_X2:
+            return 1u << 4;
+        default:
+            return 0;
+        }
     }
 
     bool SDLCALL Watch(void*, SDL_Event* e)

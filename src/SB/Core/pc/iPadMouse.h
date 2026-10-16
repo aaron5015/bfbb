@@ -32,7 +32,8 @@ void iPadMousePoll();
 // positive, which is the device's own sign and the screen's.
 void iPadMouseTake(F32* dx, F32* dy);
 
-// Whether mouse button `n` (1 to 5) is held, as of the last poll.
+// Whether mouse button `n` (1 to 5) is held, as of the last poll. 1 is the
+// left button, 2 the right, 3 the middle, 4 and 5 the side buttons.
 S32 iPadMouseButton(S32 n);
 
 // Wheel notches in the last poll: positive up, negative down.
