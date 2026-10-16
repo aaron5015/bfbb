@@ -176,9 +176,11 @@ namespace
             f, kKeyboardSection,
             "any key by name -- letters, digits, space, enter, tab, escape,\n"
             ";   backspace, shift, ctrl, alt, up, down, left, right, f1 to f12,\n"
-            ";   and the numeric keypad as numpad0 to numpad9",
-            "; Only read while nothing is on the controller. WASD moves and IJKL turns\n"
-            "; the camera; those are not remappable.\n"
+            ";   the numeric keypad as numpad0 to numpad9, and the mouse as\n"
+            ";   mouse1 to mouse5, wheelup and wheeldown",
+            "; Read alongside the controller. WASD moves and IJKL turns the camera;\n"
+            "; those are not remappable, and [mouse] turns it too. A wheel notch\n"
+            "; presses its button for one frame, so it suits presses, not holds.\n"
             ";\n");
     }
 

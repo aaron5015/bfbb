@@ -55,6 +55,11 @@ const char* iPadHostBoundInput(U32)
     return NULL;
 }
 
+S32 iPadHostKeyboardIsLive()
+{
+    return FALSE;
+}
+
 const char* iPadHostPadKind()
 {
     return NULL;

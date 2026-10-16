@@ -1,4 +1,5 @@
 #include "iPad.h"
+#include "iPadBind.h"
 #include "iPadHost.h"
 #include "iPadStick.h"
 
@@ -135,6 +136,15 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     F32 y;
 
     iPadShapeStick(host->stick_x, host->stick_y, IPAD_STICK_MAX, IPAD_STICK_XY, &x, &y);
+
+    // Scales the shaped stick rather than the raw axes, so it shrinks the
+    // deflection the game reads and not the octagon.
+    if (host->buttons & XPAD_BUTTON_WALK)
+    {
+        x *= 0.42f;
+        y *= 0.42f;
+    }
+
     pad->analog1.x = iPadConvStick(x);
     pad->analog1.y = -iPadConvStick(y);
 

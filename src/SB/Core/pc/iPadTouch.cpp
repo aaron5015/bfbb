@@ -435,7 +435,7 @@ void iPadTouchPoll(iPadHostState* s, bool padOnPort0)
 
     // The camera turns with the finger while the controls are showing, and the
     // retail camera, springs and all, comes back with a controller.
-    iCameraLookSetActive(sShowing);
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, sShowing);
 
     if (!sShowing)
     {
@@ -465,7 +465,7 @@ void iPadTouchPoll(iPadHostState* s, bool padOnPort0)
     // down. Yaw runs against the way the C-stick pushes pgoal, and the engine's
     // pitch is positive-down.
     F32 perPixel = kCameraTurnPerHeight / h;
-    iCameraLookSet(-turnX * perPixel, turnY * perPixel);
+    iCameraLookSet(iCAMERALOOK_TOUCH, -turnX * perPixel, turnY * perPixel);
 
     s->connected = true;
     s->buttons |= sHeld;

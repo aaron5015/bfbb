@@ -226,6 +226,17 @@ const iConfigSetting kConfigSettings[] = {
     { "input", "touch_controls", "auto",
       "On-screen touch controls: auto (on for Android), on or off.",
       ICONFIG_ENUM, "auto|on|off", kNone, kNone },
+    { "mouse", "look", "auto",
+      "Turn the camera with the mouse: auto (while the keyboard and mouse are in\n"
+      "; use), on or off.",
+      ICONFIG_ENUM, "auto|on|off", kNone, kNone },
+    { "mouse", "sensitivity", "1.0", "How far the camera turns per inch of mouse movement.",
+      ICONFIG_FLOAT, NULL, 0.1f, 10.0f },
+    { "mouse", "smoothing", "0", "Milliseconds to spread each mouse movement over. 0: none.",
+      ICONFIG_INT, NULL, 0.0f, 100.0f },
+    { "mouse", "capture", "on",
+      "Hide the pointer and keep it in the window while the mouse turns the camera.", ICONFIG_BOOL,
+      NULL, kNone, kNone },
     { "audio", "soundtrack", "",
       "Folder with replacement music. Empty: the game's music. Files are matched to\n"
       "; tracks by asset name, or by 'asset name = file' lines in a soundtrack.txt.",

@@ -28,7 +28,10 @@
 #include "iConfig.h"
 #include "iHost.h"
 #include "iPadBind.h"
+#include "iCameraLook.h"
+#include "iMouseLook.h"
 #include "iPadKeyboard.h"
+#include "iPadMouse.h"
 #include "iPadStick.h"
 #include "iPadTokens.h"
 #include "iPadTouch.h"
@@ -49,6 +52,10 @@ static S32 sPortSlot[IPAD_MAX_CONTROLLERS];
 
 static iPadHostState sState[IPAD_MAX_CONTROLLERS];
 static bool sKeyboardOnPort0;
+
+// Which device the player last used, as opposed to which is plugged in. See
+// iPadHostKeyboardIsLive.
+static bool sKeyboardLive = true;
 
 #ifdef __ANDROID__
 // The system back button, as a press of Start. It arrives as SDL_SCANCODE_AC_BACK
@@ -202,6 +209,45 @@ static void ClearState(iPadHostState* s)
     s->stick_y = 0.0f;
     s->substick_x = 0.0f;
     s->substick_y = 0.0f;
+}
+
+// Whether a state has anything in it: a button down, a stick off centre. The
+// threshold is well past resting drift and well under a deliberate push,
+// because this decides which device the player is USING and a pad left on the
+// desk must not keep claiming it.
+static bool StateIsActive(const iPadHostState& s)
+{
+    const F32 kNudge = 0.35f;
+
+    return s.buttons != 0 || s.stick_x < -kNudge || s.stick_x > kNudge || s.stick_y < -kNudge ||
+           s.stick_y > kNudge || s.substick_x < -kNudge || s.substick_x > kNudge ||
+           s.substick_y < -kNudge || s.substick_y > kNudge;
+}
+
+static bool StickCentred(F32 x, F32 y)
+{
+    const F32 kCentred = 0.01f;
+    return x > -kCentred && x < kCentred && y > -kCentred && y < kCentred;
+}
+
+// The keyboard laid over the pad. Buttons are OR'd. A stick is the pad's unless
+// the pad's is centred, because the pad reports what its stick is doing and the
+// keyboard reports only what is held.
+static void MergeKeyboard(iPadHostState* into, const iPadHostState& kb)
+{
+    into->buttons |= kb.buttons;
+
+    if (StickCentred(into->stick_x, into->stick_y))
+    {
+        into->stick_x = kb.stick_x;
+        into->stick_y = kb.stick_y;
+    }
+
+    if (StickCentred(into->substick_x, into->substick_y))
+    {
+        into->substick_x = kb.substick_x;
+        into->substick_y = kb.substick_y;
+    }
 }
 
 static void ChooseController()
@@ -386,6 +432,7 @@ void iPadHostInit()
     ChooseController();
     LoadPadBindings();
     iPadKeyboardInit();
+    iPadMouseInit();
     iPadTouchInit();
 
 #ifdef __ANDROID__
@@ -435,6 +482,10 @@ void iPadHostInit()
 
 void iPadHostExit()
 {
+    // First, so the pointer is given back before anything on the way out can
+    // fail and leave it held by a window that is closing.
+    iPadMouseExit();
+
     for (S32 i = 0; i < IPAD_MAX_CONTROLLERS; i++)
     {
         if (sGamepad[i] != NULL)
@@ -683,15 +734,42 @@ void iPadHostPoll()
         }
     }
 
+    // Before the keyboard, which reads the mouse buttons and wheel off it.
+    iPadMousePoll();
+
+    // Both devices, always, so someone with a controller plugged in can play on
+    // the keyboard without unplugging it.
+    iPadHostState kb;
+    ClearState(&kb);
+    iPadKeyboardPoll(&kb);
+
     sKeyboardOnPort0 = !sState[0].connected;
     if (sKeyboardOnPort0)
     {
-        iPadKeyboardPoll(&sState[0]);
+        sState[0] = kb;
+    }
+    else
+    {
+        MergeKeyboard(&sState[0], kb);
+    }
+
+    // Only a deliberate input moves this, so a resting pad and an untouched
+    // keyboard both leave it where it was. The second test only runs with the
+    // keyboard idle, so what it sees in the merged state is the pad's.
+    if (StateIsActive(kb) || iPadMouseSawInput())
+    {
+        sKeyboardLive = true;
+    }
+    else if (!sKeyboardOnPort0 && StateIsActive(sState[0]))
+    {
+        sKeyboardLive = false;
     }
 
     // The on-screen controls add to whatever holds port 0, and stand aside
     // while a controller there is in use.
     iPadTouchPoll(&sState[0], !sKeyboardOnPort0);
+
+    iMouseLookUpdate();
 
 #ifdef __ANDROID__
     // Held for one poll and released for one, so the game sees a press edge for
@@ -726,6 +804,10 @@ void iPadHostPoll()
         sState[0].stick_y = sScriptSticks[1];
         sState[0].substick_x = sScriptSticks[2];
         sState[0].substick_y = sScriptSticks[3];
+
+        // The mouse is a real device too, and the tour's camera is its own.
+        iCameraLookSetActive(iCAMERALOOK_MOUSE, FALSE);
+        iPadMouseSetCapture(0);
         return;
     }
 
@@ -814,6 +896,11 @@ const char* iPadHostName()
 
 const char* iPadHostBoundInput(U32 xpadButton)
 {
+    if (iPadHostKeyboardIsLive())
+    {
+        return iPadKeyboardBoundInput(xpadButton);
+    }
+
     for (S32 i = 0; i < kPadBindButtonCount && i < IPAD_BIND_MAX_BUTTONS; i++)
     {
         if (kPadBindButtons[i].mask != xpadButton)
@@ -826,6 +913,11 @@ const char* iPadHostBoundInput(U32 xpadButton)
     }
 
     return NULL;
+}
+
+S32 iPadHostKeyboardIsLive()
+{
+    return (sKeyboardOnPort0 || sKeyboardLive) ? TRUE : FALSE;
 }
 
 const char* iPadHostPadKind()

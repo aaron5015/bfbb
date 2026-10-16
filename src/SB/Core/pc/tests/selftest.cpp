@@ -35,6 +35,7 @@
 #include "xSnd.h"
 #include "iMath.h"
 #include "iMemMgr.h"
+#include "iCameraLook.h"
 #include "iPadLayout.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
@@ -2310,6 +2311,36 @@ static void test_pad_bindings()
     }
 }
 
+// Two sources turn the camera at once, and it sees the sum. A source that is
+// not steering contributes nothing, and the camera reading the turn is what
+// the mouse uses to tell a running camera from a paused one.
+static void test_camera_look()
+{
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, FALSE);
+    iCameraLookSetActive(iCAMERALOOK_MOUSE, FALSE);
+    check(!iCameraLookActive(), "no source, no orbit");
+
+    iCameraLookSetActive(iCAMERALOOK_MOUSE, TRUE);
+    check(iCameraLookActive(), "one source is enough");
+
+    iCameraLookSet(iCAMERALOOK_TOUCH, 1.0f, 1.0f);
+    iCameraLookSet(iCAMERALOOK_MOUSE, 0.25f, -0.5f);
+    iCameraLookTaken();
+    check(iCameraLookYaw() == 0.25f, "an inactive source adds nothing");
+    check(iCameraLookPitch() == -0.5f, "on either axis");
+    check(iCameraLookTaken(), "reading the turn is seen");
+    check(!iCameraLookTaken(), "and the flag clears");
+
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, TRUE);
+    iCameraLookSet(iCAMERALOOK_TOUCH, 1.0f, 0.0f);
+    iCameraLookSet(iCAMERALOOK_MOUSE, 0.5f, 0.0f);
+    check(iCameraLookYaw() == 1.5f, "two sources add");
+    check(iCameraLookYaw() == 0.0f, "and a read consumes them");
+
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, FALSE);
+    iCameraLookSetActive(iCAMERALOOK_MOUSE, FALSE);
+}
+
 // Where each set prints the face buttons. This is what a prompt falls back on
 // when there is no binding to ask -- nobody on a pad, or a button chorded --
 // and getting it wrong draws the button beside the one that acts.
@@ -3002,6 +3033,7 @@ static void test_pad()
     test_pad_stick_deadzone();
     test_pad_layout();
     test_pad_face_glyphs();
+    test_camera_look();
     test_pad_stick_shape();
 
     iPadHostExit();

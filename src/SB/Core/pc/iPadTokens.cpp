@@ -84,6 +84,16 @@ static const iPadBindToken kKeyTokens[] = {
     { "numpadstar", SDL_SCANCODE_KP_MULTIPLY },
     { "numpadslash", SDL_SCANCODE_KP_DIVIDE },
     { "numpaddot", SDL_SCANCODE_KP_PERIOD },
+    { "mouse1", KEY_MOUSE_1 },
+    { "mouse2", KEY_MOUSE_2 },
+    { "mouse3", KEY_MOUSE_3 },
+    { "mouse4", KEY_MOUSE_4 },
+    { "mouse5", KEY_MOUSE_5 },
+
+    // A notch is held for the one poll it arrived in, which is enough for
+    // anything the game reads as a press and nothing it reads as held.
+    { "wheelup", KEY_WHEEL_UP },
+    { "wheeldown", KEY_WHEEL_DOWN },
 };
 
 static const S32 kKeyTokenCount = (S32)(sizeof(kKeyTokens) / sizeof(kKeyTokens[0]));

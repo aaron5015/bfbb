@@ -6,14 +6,12 @@
 struct iPadHostState;
 struct iPadBind;
 
-// PC-only: the keyboard standing in for port 0 when no controller is on it. A
-// keyboard is not a second player; it is what makes the port playable on a
-// machine with no pad.
+// PC-only: the keyboard and the mouse buttons on port 0. A keyboard is not a
+// second player. It is read every frame and laid over whatever controller is on
+// port 0, so either can be picked up at any moment.
 //
 // Behind its own seam rather than inside an input backend. Which controller API
-// a backend talks to says nothing about how it should read a keyboard, and the
-// game asks for the two together: the keyboard is what port 0 falls back to,
-// not a device of its own.
+// a backend talks to says nothing about how it should read a keyboard.
 
 void iPadKeyboardInit();
 
@@ -26,5 +24,11 @@ S32 iPadKeyboardCapture(S32 prime, char* out, S32 size);
 
 // The [keyboard] bindings as last loaded, one per row of kPadBindButtons.
 const iPadBind* iPadKeyboardBindings();
+
+// The key or mouse button bound to one XPAD_BUTTON_*, by the name config.ini
+// writes it as -- "e", "space", "mouse1". NULL when nothing is bound to it, and
+// NULL for a chord, which has no single name. The keyboard's half of
+// iPadHostBoundInput.
+const char* iPadKeyboardBoundInput(U32 xpadButton);
 
 #endif

@@ -33,6 +33,12 @@
 // exclusive: Z+L is L2 and is NOT also L1. Without `!` the port's default
 // bindings could not say that, and holding the modifier would press both.
 
+// Held to move slowly. A keyboard is on or off where a stick is every speed
+// between, so this gives it the rest of the range. A bit beside the game's own
+// XPAD_BUTTON_* because a binding row needs one; iPad.cpp scales the stick by
+// it and no game code reads it.
+#define XPAD_BUTTON_WALK 0x400000
+
 #define IPAD_BIND_ALTS 4
 #define IPAD_BIND_CHORD 3
 

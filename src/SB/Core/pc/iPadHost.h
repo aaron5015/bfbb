@@ -63,11 +63,25 @@ const char* iPadHostName();
 // bound is a chord: `l2 = lt+rb` is two inputs and there is no single name for
 // it.
 //
+// Answers for the device the player is using, which iPadHostKeyboardIsLive
+// says. On the keyboard this names a KEY, so "a" out of here is the south face
+// button or the A key depending on which, and a caller that turns the name into
+// a picture has to ask.
+//
 // For the button prompts. A glyph has to follow the BINDING rather than the
 // console, or the game would keep drawing the disc's button while a different
 // one presses it. Only a backend can answer: the parsed bindings hold opaque
 // ids and only the backend has the table that names them. See iPadGlyph.h.
 const char* iPadHostBoundInput(U32 xpadButton);
+
+// Whether the keyboard and mouse are what the player is using: what the
+// prompts draw, and what `mouse.look = auto` turns on for.
+//
+// The device last TOUCHED, not the last one plugged in. Both feed port 0 at
+// once, so being connected settles nothing. A key or the mouse makes it the
+// keyboard; a pad button, or a stick pushed past a nudge, makes it the pad. With
+// no pad on port 0 it is always the keyboard.
+S32 iPadHostKeyboardIsLive();
 
 // What sort of controller is on port 0, as the name of a glyph set: "xbox",
 // "gamecube", "ps2". NULL when there is no pad, or when the backend cannot

@@ -27,10 +27,16 @@
 // it happens to name are an Xbox pad's.
 //
 // A preset overrides it by LETTER. See kPadBindPresets below.
+//
+// The `key` column is the keyboard and the mouse. The two combat buttons lead
+// with a mouse button and name a key after it, so either works and the prompt
+// draws the mouse. Under the Xbox layout, which the keyboard gets with no pad
+// plugged in, that puts Bubble Spin on the left button and Bubble Bounce on the
+// right.
 const iPadBindButton kPadBindButtons[] = {
     { "a", XPAD_BUTTON_X, "a", "space", "jump, confirm" },
-    { "b", XPAD_BUTTON_TRIANGLE, "b", "lctrl", "cancel; Bubble Spin on gamecube" },
-    { "x", XPAD_BUTTON_O, "x", "e", "options; Bubble Bounce on gamecube" },
+    { "b", XPAD_BUTTON_TRIANGLE, "b", "mouse2, lctrl", "cancel; Bubble Spin on gamecube" },
+    { "x", XPAD_BUTTON_O, "x", "mouse1, e", "options; Bubble Bounce on gamecube" },
     { "y", XPAD_BUTTON_SQUARE, "y", "q", "Bubble Bash" },
     { "z", XPAD_BUTTON_Z, "lb", "f", "pull the camera in close" },
     { "hud", XPAD_BUTTON_HUD, "rb", "g", "show the HUD" },
@@ -44,6 +50,10 @@ const iPadBindButton kPadBindButtons[] = {
     { "down", XPAD_BUTTON_DOWN, "dpdown", "down", NULL },
     { "left", XPAD_BUTTON_LEFT, "dpleft", "left", NULL },
     { "right", XPAD_BUTTON_RIGHT, "dpright", "right", NULL },
+
+    // Last so the presets, which line up with this table by position, need no
+    // entry for it. Unbound on a pad, whose stick is already every speed.
+    { "walk", XPAD_BUTTON_WALK, "", "shift", "hold to move slowly" },
 };
 
 const S32 kPadBindButtonCount = (S32)(sizeof(kPadBindButtons) / sizeof(kPadBindButtons[0]));

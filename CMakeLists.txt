@@ -362,7 +362,7 @@ if(BFBB_INPUT_BACKEND STREQUAL "null")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostNull.cpp)
 elseif(BFBB_INPUT_BACKEND STREQUAL "sdl")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp ${PC_DIR}/iPadTokens.cpp
-                    ${PC_DIR}/iPadTouch.cpp)
+                    ${PC_DIR}/iPadTouch.cpp ${PC_DIR}/iPadMouseSDL.cpp ${PC_DIR}/iMouseLook.cpp)
 
   # So the self-test knows which backend it is linked against: the contract it
   # checks is the same either way, but "no controller on port 0" means an

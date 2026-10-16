@@ -1,6 +1,5 @@
-// The keyboard, standing in for port 0 when no controller is on it. The
-// argument for it living behind its own seam rather than inside an input
-// backend is in iPadKeyboard.h.
+// The keyboard and the mouse buttons on port 0. The argument for it living
+// behind its own seam rather than inside an input backend is in iPadKeyboard.h.
 //
 //     WASD          left stick        IJKL        c-stick
 //
@@ -19,6 +18,7 @@
 
 #include "iPadBind.h"
 #include "iPadHost.h"
+#include "iPadMouse.h"
 #include "iPadTokens.h"
 #include "xPad.h"
 
@@ -73,6 +73,16 @@ static bool KeyDown(S32 id)
         return ScancodeDown(SDL_SCANCODE_LCTRL) || ScancodeDown(SDL_SCANCODE_RCTRL);
     case KEY_EITHER_ALT:
         return ScancodeDown(SDL_SCANCODE_LALT) || ScancodeDown(SDL_SCANCODE_RALT);
+    case KEY_MOUSE_1:
+    case KEY_MOUSE_2:
+    case KEY_MOUSE_3:
+    case KEY_MOUSE_4:
+    case KEY_MOUSE_5:
+        return iPadMouseButton(id - KEY_MOUSE_1 + 1) != 0;
+    case KEY_WHEEL_UP:
+        return iPadMouseWheel() > 0;
+    case KEY_WHEEL_DOWN:
+        return iPadMouseWheel() < 0;
     default:
         return ScancodeDown(id);
     }
@@ -107,6 +117,24 @@ void iPadKeyboardInit()
 const iPadBind* iPadKeyboardBindings()
 {
     return sKeyBind;
+}
+
+const char* iPadKeyboardBoundInput(U32 xpadButton)
+{
+    for (S32 i = 0; i < kPadBindButtonCount && i < IPAD_BIND_MAX_BUTTONS; i++)
+    {
+        if (kPadBindButtons[i].mask != xpadButton)
+        {
+            continue;
+        }
+
+        S32 count;
+        const iPadBindToken* tokens = iPadKeyTokens(&count);
+        S16 id = iPadBindSoleInput(sKeyBind[i]);
+        return (id >= 0) ? iPadBindTokenName(id, tokens, count) : NULL;
+    }
+
+    return NULL;
 }
 
 void iPadKeyboardPoll(iPadHostState* s)
@@ -178,6 +206,15 @@ S32 iPadKeyboardCapture(S32 prime, char* out, S32 size)
             found = code;
         }
         sWasDown[code] = down;
+    }
+
+    // A mouse button binds like a key. iPadMousePressed is a press edge
+    // already, so it needs no state of its own here; the prime only has to
+    // ignore it.
+    S32 click = iPadMousePressed();
+    if (found < 0 && !prime && click != 0)
+    {
+        found = KEY_MOUSE_1 + click - 1;
     }
 
     if (found < 0)
