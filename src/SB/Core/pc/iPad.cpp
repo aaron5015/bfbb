@@ -1,4 +1,5 @@
 #include "iPad.h"
+#include "iConfig.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
 #include "iPadStick.h"
@@ -245,4 +246,9 @@ U32 iPadTalkBoxButtons(U32 pressed)
         swapped |= XPAD_BUTTON_O;
     }
     return swapped;
+}
+
+U8 iPadVibrationDefault()
+{
+    return iConfigGetBool("input.vibration", TRUE) ? 1 : 0;
 }

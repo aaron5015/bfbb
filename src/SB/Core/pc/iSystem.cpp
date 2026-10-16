@@ -18,6 +18,7 @@
 #include "iSnapshot.h"
 #include "iPadGlyph.h"
 #include "menu/iMenuMouse.h"
+#include "menu/iSettingsScreen.h"
 #include "iHipoly.h"
 #include "iSoundtrack.h"
 #include "iTextPatch.h"
@@ -1212,6 +1213,11 @@ void iSystemInit(U32 options)
 
     xPadInit();
     xSndInit();
+
+    // Over xSndInit's defaults: the volumes and sound mode live in config.ini
+    // here, not in the save file.
+    iSettingsApplyAudio();
+
     TRCInit();
 
     iPadHostSetHotkey(iHipolyHotkey);

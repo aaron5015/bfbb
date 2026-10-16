@@ -226,6 +226,7 @@ const iConfigSetting kConfigSettings[] = {
     { "input", "touch_controls", "auto",
       "On-screen touch controls: auto (on for Android), on or off.",
       ICONFIG_ENUM, "auto|on|off", kNone, kNone },
+    { "input", "vibration", "on", "Controller vibration.", ICONFIG_BOOL, NULL, kNone, kNone },
     { "mouse", "look", "auto",
       "Turn the camera with the mouse: auto (while the keyboard and mouse are in\n"
       "; use), on or off.",
@@ -237,6 +238,11 @@ const iConfigSetting kConfigSettings[] = {
     { "mouse", "capture", "on",
       "Hide the pointer and keep it in the window while the mouse turns the camera.", ICONFIG_BOOL,
       NULL, kNone, kNone },
+    { "audio", "music_volume", "7", "Music volume, 0 to 10.", ICONFIG_INT, NULL, 0.0f, 10.0f },
+    { "audio", "sfx_volume", "10", "Sound effect and voice volume, 0 to 10.", ICONFIG_INT, NULL,
+      0.0f, 10.0f },
+    { "audio", "sound_mode", "stereo", "Speaker output: stereo or mono.", ICONFIG_ENUM,
+      "stereo|mono", kNone, kNone },
     { "audio", "soundtrack", "",
       "Folder with replacement music. Empty: the game's music. Files are matched to\n"
       "; tracks by asset name, or by 'asset name = file' lines in a soundtrack.txt.",

@@ -230,7 +230,7 @@ int main(S32 argc, char** argv)
     iEnvStartup();
     zEntPickup_Startup();
     zCameraTweakGlobal_Init();
-    globals.option_vibration = 1; // 0x6c0
+    globals.option_vibration = iPadVibrationDefault(); // 0x6c0
     globals.pad0 = xPadEnable(globals.currentActivePad); // 0x6d1
     globals.pad1 = 0;
     gDebugPad = 0;

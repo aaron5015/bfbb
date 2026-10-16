@@ -96,7 +96,7 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         p.Link(eEventPadPressRight, eEventPlay, H("MNU4 MOVE B SFX"));
         p.Link(eEventPadPressO, eEventUIFocusOff_Unselect, H("PAUSE GROUP"));
         p.Link(eEventPadPressO, eEventUIFocusOn, H("PAUSE OPTIONS GROUP"));
-        p.Link(eEventPadPressO, eEventUISelect, H("PAUSE OPTION CONTROLS UIF"));
+        p.Link(eEventPadPressO, eEventUISelect, H(ISETTINGS_PAUSE_ENTRY));
         p.Link(eEventPadPressUp, eEventPlay, H("MNU4 PING SFX"));
         p.Link(eEventPadPressDown, eEventPlay, H("MNU4 PING SFX"));
         p.Link(eEventPadPressUp, eEventRun, H("PAUSE_TIMER0"));
@@ -383,7 +383,7 @@ void MNU4_BuildUIFont(iAssetPkg& p)
 
     {
         zUIFontAsset a = kUIFontDefaults;
-        a.pos = xVec3{ 300.0f, 190.0f, 0.0f };
+        a.pos = xVec3{ 270.0f, 150.0f, 0.0f };
         a.dim[0] = 300; a.dim[1] = 40;
         a.uiFontFlags = 0x271;
         a.textAssetID = H("PAUSE OPTIONS SAVE TXT");
@@ -407,7 +407,7 @@ void MNU4_BuildUIFont(iAssetPkg& p)
     // does: that is how iSGSaveLoop tells it from Save.
     {
         zUIFontAsset a = kUIFontDefaults;
-        a.pos = xVec3{ 325.0f, 230.0f, 0.0f };
+        a.pos = xVec3{ 300.0f, 190.0f, 0.0f };
         a.dim[0] = 300; a.dim[1] = 40;
         a.uiFontFlags = 0x271;
         a.textAssetID = H("PAUSE OPTIONS LOAD TXT");
@@ -427,7 +427,7 @@ void MNU4_BuildUIFont(iAssetPkg& p)
 
     {
         zUIFontAsset a = kUIFontDefaults;
-        a.pos = xVec3{ 350.0f, 270.0f, 0.0f };
+        a.pos = xVec3{ 325.0f, 230.0f, 0.0f };
         a.dim[0] = 300; a.dim[1] = 40;
         a.uiFontFlags = 0x271;
         a.textAssetID = H("PAUSE OPTIONS QUIT TXT");
@@ -3171,6 +3171,24 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         p.End();
     }
 
+    // The scrollbar: two filled boxes, which is what a zUIFont with no text
+    // and 0x8 draws, in its background colour. iSettingsScreen.cpp moves the
+    // thumb and shows them both only when a tab's rows do not all fit.
+    for (S32 i = 0; i < 2; i++)
+    {
+        zUIFontAsset a = kUIFontDefaults;
+        a.pos = xVec3{ 606.0f, ISETTINGS_ROW_Y, 0.0f };
+        a.dim[0] = 6;
+        a.dim[1] = (U16)(ISETTINGS_ROW_STEP * ISETTINGS_ROWS - 2.0f);
+        a.uiFontFlags = 0x8;
+        a.bcolor[0] = 0;
+        a.bcolor[1] = 70;
+        a.bcolor[2] = 85;
+        a.bcolor[3] = (i == 0) ? 50 : 220;
+        p.Begin('UIFT', H(i == 0 ? ISETTINGS_SCROLL_TRACK : ISETTINGS_SCROLL_THUMB), a);
+        p.End();
+    }
+
     {
         zUIFontAsset a = kUIFontDefaults;
         a.pos = xVec3{ 55.0f, ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * ISETTINGS_ROWS + 6.0f, 0.0f };
@@ -3183,12 +3201,14 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         p.End();
     }
 
-    // The pause menu's entry, between Options and Save. Confirm leaves it
+    // The pause menu's entry, at the top of the list where retail's Options
+    // was: the settings screen has that page's volumes, sound mode and
+    // vibration, and retail's page is no longer reachable. Confirm leaves it
     // selected on purpose: that is how iSGSaveLoop knows it was this entry and
     // not Save that switched the game to Save mode.
     {
         zUIFontAsset a = kUIFontDefaults;
-        a.pos = xVec3{ 270.0f, 150.0f, 0.0f };
+        a.pos = xVec3{ 225.0f, 110.0f, 0.0f };
         a.dim[0] = 300; a.dim[1] = 40;
         a.uiFontFlags = 0x271;
         a.textAssetID = H("PC SETTINGS TXT");
@@ -3196,8 +3216,6 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         a.cdim[0] = 32; a.cdim[1] = 32;
         p.Begin('UIFT', H(ISETTINGS_PAUSE_ENTRY), a);
         p.Link(eEventUISelect, eEventPlay, H("MNU4 MOVE A SFX"));
-        p.Link(eEventPadPressUp, eEventUIUnselect, H(ISETTINGS_PAUSE_ENTRY));
-        p.Link(eEventPadPressUp, eEventUISelect, H("PAUSE OPTION CONTROLS UIF"));
         p.Link(eEventPadPressDown, eEventUIUnselect, H(ISETTINGS_PAUSE_ENTRY));
         p.Link(eEventPadPressDown, eEventUISelect, H("PAUSE OPTION SAVE UIF"));
         p.Link(eEventPadPressX, eEventUIFocusOff, H("PAUSE OPTIONS GROUP"));

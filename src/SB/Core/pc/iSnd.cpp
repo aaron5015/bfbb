@@ -191,6 +191,11 @@ static S32 sWhoLeft;
 // volume curve the mix uses. See the block above iApplyVoiceMix.
 static S32 sXboxRolloff = TRUE;
 
+void iSndSetXboxRolloff(S32 on)
+{
+    sXboxRolloff = on ? TRUE : FALSE;
+}
+
 static iSndExternalCallback sExternalCallback;
 static bool sStereo = true;
 static bool sSuspended;

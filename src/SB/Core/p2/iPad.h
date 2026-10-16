@@ -19,4 +19,7 @@ void iPadStopRumble(_tagxPad* pad);
 void iPadStartRumble(_tagxPad* pad, _tagxRumble* rumble);
 void iPadKill();
 
+// Whether vibration starts on. Always, on a console; the PC reads config.ini.
+#define iPadVibrationDefault() 1
+
 #endif

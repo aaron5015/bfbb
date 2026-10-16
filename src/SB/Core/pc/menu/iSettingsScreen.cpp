@@ -50,6 +50,11 @@
 #include "zScene.h"
 #include "zCamera.h"
 #include "zUI.h"
+#include "zUIFont.h"
+#include "zMusic.h"
+#include "zRumble.h"
+#include "xSnd.h"
+#include "iSnd.h"
 
 namespace
 {
@@ -63,13 +68,13 @@ namespace
     // The tabs, in order. The shoulder buttons move between them.
     enum Tab
     {
-        TAB_DISPLAY,
-        TAB_EFFECTS,
+        TAB_VIDEO,
+        TAB_AUDIO,
         TAB_CONTROLS,
         TAB_GAME,
         TAB_COUNT
     };
-    const char* const kTabNames[TAB_COUNT] = { "Display", "Effects", "Controls", "Game" };
+    const char* const kTabNames[TAB_COUNT] = { "Video", "Audio", "Controls", "Game" };
 
     struct Setting
     {
@@ -209,39 +214,75 @@ namespace
         iPadGlyphSetEnabled(iHostStrCaseCmp(w, "off") != 0);
     }
 
+    // The three the retail Options page set, and set the same way:
+    // zDispatcher.cpp's handlers for its commands.
+    void ApplyMusicVolume(const char* w)
+    {
+        iSettingsApplyMusicVolume(atoi(w));
+    }
+
+    void ApplySFXVolume(const char* w)
+    {
+        iSettingsApplySFXVolume(atoi(w));
+    }
+
+    void ApplySoundMode(const char* w)
+    {
+        iSettingsApplySoundMode(iHostStrCaseCmp(w, "mono") != 0);
+    }
+
+    void ApplyRolloff(const char* w)
+    {
+        iSndSetXboxRolloff(On(w));
+    }
+
+    // And a pulse when it goes on, as retail's page gave one.
+    void ApplyVibration(const char* w)
+    {
+        iSettingsApplyVibration(On(w), TRUE);
+    }
+
     const Setting kSettings[] = {
-        { TAB_DISPLAY, "Window", "video.mode", "borderless|windowed|fullscreen",
+        { TAB_VIDEO, "Window", "video.mode", "borderless|windowed|fullscreen",
           "Borderless|Windowed|Fullscreen", NOW,
           "Borderless fills the screen as a window. Alt+Enter also switches.",
           ApplyMode, true },
-        { TAB_DISPLAY, "Resolution", "video.resolution", NULL, NULL, RESTART,
+        { TAB_VIDEO, "Resolution", "video.resolution", NULL, NULL, RESTART,
           "Rendering resolution. The image is scaled to fit the window.", NULL, false },
-        { TAB_DISPLAY, "VSync", "video.vsync", "on|off", "On|Off", NOW,
+        { TAB_VIDEO, "VSync", "video.vsync", "on|off", "On|Off", NOW,
           "Wait for the display's refresh before showing a frame. Prevents tearing.", ApplyVSync,
           false },
-        { TAB_DISPLAY, "Frame rate limit", "video.framerate", "30|60|120|144|165|240|display|off",
+        { TAB_VIDEO, "Frame rate limit", "video.framerate", "30|60|120|144|165|240|display|off",
           "30|60|120|144|165|240|Monitor|Unlimited", NOW,
           "Maximum frames per second. 60 is the original.", ApplyFrameRate,
           false },
-        { TAB_DISPLAY, "Field of view", "video.fov", "60|65|70|75|80|85|90|95|100|105|110", NULL, NOW,
+        { TAB_VIDEO, "Field of view", "video.fov", "60|65|70|75|80|85|90|95|100|105|110", NULL, NOW,
           "Horizontal field of view in degrees at 4:3. 75 is the original.",
           ApplyFOV, false },
-        { TAB_DISPLAY, "HUD layout", "video.ui", "pillarbox|native", "4:3 (original)|Screen edges", NOW,
+        { TAB_VIDEO, "HUD layout", "video.ui", "pillarbox|native", "4:3 (original)|Screen edges", NOW,
           "HUD position on wide screens.", ApplyUI, false },
-        { TAB_DISPLAY, "Draw distance", "video.draw_distance", "on|off", "Unlimited|Console", NEXT_AREA,
+        { TAB_VIDEO, "Draw distance", "video.draw_distance", "on|off", "Unlimited|Console", NEXT_AREA,
           "How far away objects are drawn.", ApplyDrawDistance, false },
-        { TAB_DISPLAY, "Anti-aliasing", "video.msaa", "1|2|4|8", "Off|2x|4x|8x", RESTART,
+        { TAB_VIDEO, "Anti-aliasing", "video.msaa", "1|2|4|8", "Off|2x|4x|8x", RESTART,
           "Smooths jagged edges. Lowers performance.", NULL, false },
-        { TAB_EFFECTS, "Glow", "xbox.glow", "on|off", "On|Off", NOW,
+        { TAB_VIDEO, "Glow", "xbox.glow", "on|off", "On|Off", NOW,
           "Xbox bloom effect.", ApplyGlow, false },
-        { TAB_EFFECTS, "Screen warps", "xbox.distortion", "on|off", "On|Off", NOW,
+        { TAB_VIDEO, "Screen warps", "xbox.distortion", "on|off", "On|Off", NOW,
           "Cruise Bubble screen distortion.", ApplyDistortion,
           false },
-        { TAB_EFFECTS, "Loading-screen still", "xbox.snapshot", "on|off", "On|Off", NOW,
+        { TAB_VIDEO, "Loading-screen still", "xbox.snapshot", "on|off", "On|Off", NOW,
           "Show a still of the previous level on the loading screen. Also used for save pictures.",
           ApplySnapshot, false },
-        { TAB_EFFECTS, "Cave echo", "xbox.reverb", "on|off", "On|Off", NEXT_AREA,
+        { TAB_AUDIO, "Music volume", "audio.music_volume", "0|1|2|3|4|5|6|7|8|9|10", NULL, NOW,
+          "How loud the music is.", ApplyMusicVolume, false },
+        { TAB_AUDIO, "Effects volume", "audio.sfx_volume", "0|1|2|3|4|5|6|7|8|9|10", NULL, NOW,
+          "How loud sound effects and voices are.", ApplySFXVolume, false },
+        { TAB_AUDIO, "Sound mode", "audio.sound_mode", "stereo|mono", "Stereo|Mono", NOW,
+          "Mono plays everything through both speakers alike.", ApplySoundMode, false },
+        { TAB_AUDIO, "Cave echo", "xbox.reverb", "on|off", "On|Off", NEXT_AREA,
           "Reverb in caves and the Mermalair.", NULL, false },
+        { TAB_AUDIO, "Distance falloff", "xbox.sound_rolloff", "on|off", "Xbox|GameCube", NOW,
+          "How sounds fade with distance. GameCube is louder far away.", ApplyRolloff, false },
         { TAB_CONTROLS, "Keyboard buttons", "bind.keyboard", "", "Change", NOW,
           "Keys for each game button.", NULL, false },
         { TAB_CONTROLS, "Controller buttons", "bind.pad", "", "Change", NOW,
@@ -261,6 +302,17 @@ namespace
           "Reverse the camera's left and right.", ApplyInvert, false },
         { TAB_CONTROLS, "Invert camera Y", "input.invert_camera_y", "off|on", "Off|On", NOW,
           "Reverse the camera's up and down.", ApplyInvert, false },
+        { TAB_CONTROLS, "Vibration", "input.vibration", "on|off", "On|Off", NOW,
+          "Controller vibration.", ApplyVibration, false },
+        { TAB_CONTROLS, "Mouse camera", "mouse.look", "auto|on|off", "Auto|On|Off", NOW,
+          "Turn the camera with the mouse. Auto: while using the keyboard and mouse.", NULL,
+          false },
+        { TAB_CONTROLS, "Mouse sensitivity", "mouse.sensitivity",
+          "0.25|0.5|0.75|1.0|1.25|1.5|2.0|2.5|3.0", "0.25x|0.5x|0.75x|1x|1.25x|1.5x|2x|2.5x|3x",
+          NOW, "How far the camera turns for each movement of the mouse.", NULL, false },
+        { TAB_CONTROLS, "Mouse smoothing", "mouse.smoothing", "0|10|20|40|80",
+          "Off|10 ms|20 ms|40 ms|80 ms", NOW, "Spreads each mouse movement over a few frames.", NULL,
+          false },
         { TAB_GAME, "Intro movies", "game.intro_movies", "on|off", "On|Off", RESTART,
           "Logos shown at startup.", NULL, false },
     };
@@ -572,6 +624,75 @@ namespace
         iMenuWidePlace(ISETTINGS_HELP, 55.0f - s, 545.0f + 2.0f * s);
     }
 
+    zUIFont* Widget(const char* name)
+    {
+        xBase* b = zSceneFindObject(xStrHash(name));
+        return (b != NULL && b->baseType == eBaseTypeUIFont) ? (zUIFont*)b : NULL;
+    }
+
+    // The track spans the rows; the thumb is the share of them showing, where
+    // they are. Both hidden when every row fits.
+    void DrawScrollbar()
+    {
+        zUIFont* track = Widget(ISETTINGS_SCROLL_TRACK);
+        zUIFont* thumb = Widget(ISETTINGS_SCROLL_THUMB);
+        if (track == NULL || thumb == NULL)
+        {
+            return;
+        }
+
+        const bool needed = sListCount > ISETTINGS_ROWS;
+        Send(ISETTINGS_SCROLL_TRACK, needed ? eEventVisible : eEventInvisible);
+        Send(ISETTINGS_SCROLL_THUMB, needed ? eEventVisible : eEventInvisible);
+        if (!needed)
+        {
+            return;
+        }
+
+        const F32 x = 606.0f + 0.6f * iMenuWideMargin();
+        const F32 top = ISETTINGS_ROW_Y;
+        const F32 height = ISETTINGS_ROW_STEP * ISETTINGS_ROWS - 2.0f;
+
+        track->fasset->pos.x = x;
+        thumb->fasset->pos.x = x;
+        thumb->fasset->pos.y = top + height * (F32)sTop / (F32)sListCount;
+        thumb->fasset->dim[1] = (U16)(height * (F32)ISETTINGS_ROWS / (F32)sListCount);
+    }
+
+    void Draw();
+    void SelectRow(S32 row, bool on);
+
+    // A click on the track above or below the thumb turns a page, as on any
+    // scrollbar.
+    void ScrollbarClick()
+    {
+        zUIFont* thumb = Widget(ISETTINGS_SCROLL_THUMB);
+        F32 px;
+        F32 py;
+        if (thumb == NULL || sListCount <= ISETTINGS_ROWS || !iMenuMouseClicked() ||
+            !iMenuMouseOver(zSceneFindObject(xStrHash(ISETTINGS_SCROLL_TRACK))) ||
+            !iMenuMousePosition(&px, &py))
+        {
+            return;
+        }
+
+        const F32 y0 = thumb->fasset->pos.y;
+        const F32 y1 = y0 + thumb->fasset->dim[1];
+        S32 page = (py < y0) ? -ISETTINGS_ROWS : (py >= y1 ? ISETTINGS_ROWS : 0);
+        if (page == 0)
+        {
+            return;
+        }
+
+        SelectRow(sSel - sTop, false);
+        sTop += page;
+        S32 most = sListCount - ISETTINGS_ROWS;
+        sTop = sTop < 0 ? 0 : (sTop > most ? most : sTop);
+        sSel = sSel < sTop ? sTop : (sSel >= sTop + ISETTINGS_ROWS ? sTop + ISETTINGS_ROWS - 1 : sSel);
+        SelectRow(sSel - sTop, true);
+        Draw();
+    }
+
     // The tab bar: the shoulder buttons' pictures either side, the tab showing
     // in the menu's own dark teal and the rest faded toward the background.
     //
@@ -669,6 +790,7 @@ namespace
             SetText(ISETTINGS_VALUE_TEXT, row, shown);
         }
 
+        DrawScrollbar();
         DrawHelp(NULL);
     }
 
@@ -1130,7 +1252,7 @@ S32 iSettingsRequested(S32 fromPause)
 void iSettingsRun(S32 fromPause)
 {
     BuildResolutions();
-    sTab = TAB_DISPLAY;
+    sTab = TAB_VIDEO;
     sHoverTab = -1;
     BuildList();
     sSel = 0;
@@ -1175,6 +1297,8 @@ void iSettingsRun(S32 fromPause)
             SelectRow(sSel - sTop, true);
             Draw();
         }
+
+        ScrollbarClick();
 
         // The pointer selects the row it moves onto, and a click on a row is
         // the accept button on it, pressed next frame.
@@ -1251,4 +1375,47 @@ void iSettingsRun(S32 fromPause)
     iMenuMouseOwn(FALSE);
     iConfigSave();
     Hide(fromPause);
+}
+
+void iSettingsApplyMusicVolume(S32 level)
+{
+    F32 v = 0.1f * (F32)level;
+    xSndSetCategoryVol(SND_CAT_MUSIC, CLAMP(v, 0.0f, 1.0f));
+    zMusicRefreshVolume();
+}
+
+void iSettingsApplySFXVolume(S32 level)
+{
+    F32 v = 0.1f * (F32)level;
+    v = CLAMP(v, 0.0f, 1.0f);
+    xSndSetCategoryVol(SND_CAT_GAME, v);
+    xSndSetCategoryVol(SND_CAT_DIALOG, v);
+    xSndSetCategoryVol(SND_CAT_UI, v);
+}
+
+void iSettingsApplySoundMode(S32 stereo)
+{
+    // The mixer reads iSnd's flag; zVar's Sound Mode reads gSnd's.
+    iSndStereo(stereo ? 1 : 0);
+    gSnd.stereo = stereo ? 1 : 0;
+}
+
+void iSettingsApplyVibration(S32 on, S32 pulse)
+{
+    globals.option_vibration = on ? 1 : 0;
+    xPadRumbleEnable(globals.currentActivePad, globals.option_vibration);
+    if (on && pulse)
+    {
+        zRumbleStart(globals.currentActivePad, SDR_Test);
+    }
+}
+
+void iSettingsApplyAudio()
+{
+    // The fader only: nothing is playing yet, and zMusic is not up to refresh.
+    F32 music = 0.1f * (F32)iConfigGetInt("audio.music_volume", 7);
+    xSndSetCategoryVol(SND_CAT_MUSIC, CLAMP(music, 0.0f, 1.0f));
+    iSettingsApplySFXVolume(iConfigGetInt("audio.sfx_volume", 10));
+    iSettingsApplySoundMode(iHostStrCaseCmp(iConfigGetString("audio.sound_mode", "stereo"),
+                                            "mono") != 0);
 }

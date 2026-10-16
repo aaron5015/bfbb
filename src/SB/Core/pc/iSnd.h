@@ -88,6 +88,10 @@ void iSndSetPitch(U32 snd, F32 pitch);
 void iSndStartStereo(U32 id1, U32 id2, F32 pitch);
 void iSndStereo(U32 stereo);
 
+// PC-only: config.ini's xbox.sound_rolloff, changed while running. Read at
+// init otherwise.
+void iSndSetXboxRolloff(S32 on);
+
 void iSndWaitForDeadSounds();
 void iSndSuspendCD(U32);
 

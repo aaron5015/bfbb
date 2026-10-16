@@ -27,4 +27,7 @@ void iPadKill();
 // inline function still changes CodeWarrior's code for the caller.
 #define iPadTalkBoxButtons(pressed) (pressed)
 
+// Whether vibration starts on. Always, on a console; the PC reads config.ini.
+#define iPadVibrationDefault() 1
+
 #endif

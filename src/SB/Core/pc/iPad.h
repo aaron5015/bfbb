@@ -30,6 +30,10 @@ void iPadKill();
 // reads. The Xbox archives transpose O and TRIANGLE. See iPad.cpp.
 U32 iPadTalkBoxButtons(U32 pressed);
 
+// Whether vibration starts on: config.ini's input.vibration, which on PC is
+// one setting for the install rather than a value in each save file.
+U8 iPadVibrationDefault();
+
 // PC-only. Called once a frame on port 0 with whether a menu is up, after the
 // devices are read and before anything sees the buttons; what it returns is
 // added to them. The menu pointer lives behind it (menu/iMenuMouse.h), which

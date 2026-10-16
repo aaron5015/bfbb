@@ -21,6 +21,11 @@
 #define ISETTINGS_HELP_TEXT "PC SET HELP TXT"
 #define ISETTINGS_GROUP "PC SETTINGS GROUP"
 
+// The scrollbar beside the rows: a faint track and the thumb on it, drawn
+// only while a tab has more rows than fit.
+#define ISETTINGS_SCROLL_TRACK "PC SET SCROLL TRACK UIF"
+#define ISETTINGS_SCROLL_THUMB "PC SET SCROLL THUMB UIF"
+
 // The menu entries that open it.
 #define ISETTINGS_TITLE_ENTRY "MNU3 START SETTINGS UIF"
 #define ISETTINGS_PAUSE_ENTRY "PAUSE OPTION SETTINGS UIF"
@@ -36,5 +41,16 @@ S32 iSettingsRequested(S32 fromPause);
 // Run the screen until the player backs out, then put back the menu it came
 // from.
 void iSettingsRun(S32 fromPause);
+
+// What the retail Options page set -- the volumes, the sound mode and
+// vibration -- which retail kept in each save file and the PC keeps in
+// config.ini, one for the install. Levels are 0 to 10, as the page showed them.
+void iSettingsApplyMusicVolume(S32 level);
+void iSettingsApplySFXVolume(S32 level);
+void iSettingsApplySoundMode(S32 stereo);
+void iSettingsApplyVibration(S32 on, S32 pulse);
+
+// The three sound ones from config.ini, once the sound system is up.
+void iSettingsApplyAudio();
 
 #endif

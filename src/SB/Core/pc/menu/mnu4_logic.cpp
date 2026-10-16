@@ -59,7 +59,6 @@ void MNU4_BuildGroup(iAssetPkg& p)
         p.Begin('GRUP', H("PAUSE OPTIONS GROUP"), a);
         p.Item(H("PAUSE OPTION MGR UIF"));
         p.Item(H("PAUSE OPTION QUIT UIF"));
-        p.Item(H("PAUSE OPTION CONTROLS UIF"));
         p.Item(H(ISETTINGS_PAUSE_ENTRY));
         p.Item(H("PAUSE OPTION SAVE UIF"));
         p.Item(H(ISAVESCREEN_PAUSE_LOAD));
@@ -1520,6 +1519,8 @@ void MNU4_BuildPortal(iAssetPkg& p)
             p.Item(H(name));
         }
         p.Item(H(ISETTINGS_HELP));
+        p.Item(H(ISETTINGS_SCROLL_TRACK));
+        p.Item(H(ISETTINGS_SCROLL_THUMB));
         p.End();
     }
 }

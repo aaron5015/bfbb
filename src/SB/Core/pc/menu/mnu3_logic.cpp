@@ -311,7 +311,6 @@ void MNU3_BuildGroup(iAssetPkg& p)
         p.Item(H("MNU3 START PRESS X UIF"));
         p.Item(H("MNU3 START PROMO UIF"));
         p.Item(H("MNU3 START CREDITS UIF"));
-        p.Item(H("MNU3 START CONTROLS UIF"));
         p.Item(H(ISETTINGS_TITLE_ENTRY));
         p.Item(H("MNU3 START LOAD UIF"));
         p.Item(H("MNU3 START NEWGAME UIF"));

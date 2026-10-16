@@ -2937,6 +2937,21 @@ S32 xSGT_LoadLoadCB(void* vp, st_XSAVEGAME_DATA* xsgdata, st_XSAVEGAME_READCONTE
 S32 xSGT_LoadPrefsCB(void* vp, st_XSAVEGAME_DATA* xsgdata, st_XSAVEGAME_READCONTEXT* rctxt, U32 ui,
                      S32 i)
 {
+#ifdef PLATFORM_PC
+    // Read past and left alone. The PC keeps the volumes, the sound mode and
+    // vibration in config.ini for the whole install (menu/iSettingsScreen.h),
+    // so loading a save must not put back the ones it was made with. The save
+    // still writes them, so the file stays the shape every platform reads.
+    U32 stereo;
+    F32 musicVol;
+    F32 gameVol;
+    decltype(globals.option_vibration) vibration;
+    xSGReadData(xsgdata, rctxt, &stereo, 1);
+    xSGReadData(xsgdata, rctxt, &musicVol, 1);
+    xSGReadData(xsgdata, rctxt, &gameVol, 1);
+    xSGReadData(xsgdata, rctxt, &vibration, 1);
+    return 1;
+#else
 #if defined(PS2)
     char bigbuf[32] = {};
 
@@ -2958,6 +2973,7 @@ S32 xSGT_LoadPrefsCB(void* vp, st_XSAVEGAME_DATA* xsgdata, st_XSAVEGAME_READCONT
         xPadRumbleEnable(globals.currentActivePad, 0);
     }
     return 1;
+#endif
 }
 
 U32 zSaveLoad_slotIsEmpty(U32 i)
