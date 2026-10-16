@@ -625,8 +625,8 @@ namespace
             sprintf(name, ISETTINGS_VALUE, (int)row);
             iMenuWidePlace(name, 330.0f + s, 270.0f);
         }
-        iMenuWidePlace(ISETTINGS_HELP, 55.0f - s, 545.0f + 2.0f * s);
-        iMenuWidePlace(ISETTINGS_BACK, 420.0f + s, 180.0f);
+        iMenuWidePlace(ISETTINGS_HELP, 55.0f - s, 390.0f + s);
+        iMenuWidePlace(ISETTINGS_BACK, 450.0f + s, 150.0f);
     }
 
     zUIFont* Widget(const char* name)

@@ -3194,7 +3194,8 @@ void MNU4_BuildUIFont(iAssetPkg& p)
     {
         zUIFontAsset a = kUIFontDefaults;
         a.pos = xVec3{ 55.0f, ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * ISETTINGS_ROWS + 6.0f, 0.0f };
-        a.dim[0] = 545; a.dim[1] = 60;
+        a.dim[0] = 390;
+        a.dim[1] = 60;
         a.uiFontFlags = 0x61;
         a.textAssetID = H(ISETTINGS_HELP_TEXT);
         a.space[0] = 18; a.space[1] = 18;
@@ -3203,12 +3204,11 @@ void MNU4_BuildUIFont(iAssetPkg& p)
         p.End();
     }
 
-    // Right-aligned under the help, as the pause menu puts its Return.
+    // Right-aligned beside the help, clear of the frame below it.
     {
         zUIFontAsset a = kUIFontDefaults;
-        a.pos =
-            xVec3{ 420.0f, ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * ISETTINGS_ROWS + 68.0f, 0.0f };
-        a.dim[0] = 180;
+        a.pos = xVec3{ 450.0f, ISETTINGS_ROW_Y + ISETTINGS_ROW_STEP * ISETTINGS_ROWS + 8.0f, 0.0f };
+        a.dim[0] = 150;
         a.dim[1] = 28;
         a.uiFontFlags = 0x61 | 0x2;
         a.textAssetID = H(ISETTINGS_BACK_TEXT);
