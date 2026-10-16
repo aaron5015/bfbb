@@ -25,7 +25,13 @@
 
 namespace
 {
-    // One glyph a set can hold, and the file it comes out of.
+    // A set is a FOLDER OF FILES, not a fixed twelve.
+    //
+    // Retail has twelve prompt textures, so a console set has twelve pictures
+    // and nothing forces a cache. A keyboard has no such number: a prompt draws
+    // whatever key is bound to that button, and [keyboard] can name any of a
+    // hundred. So a glyph is looked up by FILE NAME and cached as it is asked
+    // for, and a set is however many files it happens to hold.
     //
     // The face four are named for their POSITION rather than for a letter,
     // because the letter is the one thing that is not shared: the button east
@@ -38,42 +44,24 @@ namespace
     // button_move_text and button_camtoggle_text ask for, and those prompts
     // mean "push the stick", not "press the click", so they resolve straight to
     // a file and never go near a binding.
-    const char* const kGlyphNames[] = { "south", "east", "west",       "north",
-                                        "lt",    "rt",   "lb",         "rb",
-                                        "start", "back", "stick_left", "stick_right" };
 
-    const S32 kGlyphCount = (S32)(sizeof(kGlyphNames) / sizeof(kGlyphNames[0]));
-
-    enum
-    {
-        GLYPH_SOUTH,
-        GLYPH_EAST,
-        GLYPH_WEST,
-        GLYPH_NORTH,
-        GLYPH_LT,
-        GLYPH_RT,
-        GLYPH_LB,
-        GLYPH_RB,
-        GLYPH_START,
-        GLYPH_BACK,
-        GLYPH_STICK_LEFT,
-        GLYPH_STICK_RIGHT
-    };
-
-    // A binding is written in SDL's input names, and those four ARE positions
-    // -- SDL calls the east button `b` whatever is printed on it -- so this is
-    // a rename, not a mapping. Every other input's name is already the file's.
+    // A PAD binding is written in SDL's input names, and those four ARE
+    // positions -- SDL calls the east button `b` whatever is printed on it --
+    // so this is a rename, not a mapping.
+    //
+    // It must NOT be applied to a keyboard binding. There "a" is the A key, and
+    // renaming it to "south" would draw a face button for it.
     struct TokenGlyph
     {
         const char* token;
-        S32 glyph;
+        const char* glyph;
     };
 
     const TokenGlyph kTokenGlyphs[] = {
-        { "a", GLYPH_SOUTH },
-        { "b", GLYPH_EAST },
-        { "x", GLYPH_WEST },
-        { "y", GLYPH_NORTH },
+        { "a", "south" },
+        { "b", "east" },
+        { "x", "west" },
+        { "y", "north" },
     };
 
     const S32 kTokenGlyphCount = (S32)(sizeof(kTokenGlyphs) / sizeof(kTokenGlyphs[0]));
@@ -112,22 +100,22 @@ namespace
     {
         const char* name;
         U32 mask;
-        S32 fallback;
+        const char* fallback;
     };
 
     const Slot kSlots[] = {
-        { "pad_button1", XPAD_BUTTON_X, GLYPH_SOUTH },
-        { "pad_button2", XPAD_BUTTON_SQUARE, GLYPH_NORTH },
-        { "pad_button3", XPAD_BUTTON_TRIANGLE, GLYPH_EAST },
-        { "pad_button4", XPAD_BUTTON_O, GLYPH_WEST },
-        { "pad_button_L1", XPAD_BUTTON_L1, GLYPH_LT },
-        { "pad_button_R1", XPAD_BUTTON_R1, GLYPH_RT },
-        { "pad_button_L2", XPAD_BUTTON_L2, GLYPH_LB },
-        { "pad_button_R2", XPAD_BUTTON_HUD, GLYPH_RB },
-        { "pad_button_start", XPAD_BUTTON_START, GLYPH_START },
-        { "pad_button_select", XPAD_BUTTON_SELECT, GLYPH_BACK },
-        { "pad_button_L_analog", 0, GLYPH_STICK_LEFT },
-        { "pad_button_R_analog", 0, GLYPH_STICK_RIGHT },
+        { "pad_button1", XPAD_BUTTON_X, "south" },
+        { "pad_button2", XPAD_BUTTON_SQUARE, "north" },
+        { "pad_button3", XPAD_BUTTON_TRIANGLE, "east" },
+        { "pad_button4", XPAD_BUTTON_O, "west" },
+        { "pad_button_L1", XPAD_BUTTON_L1, "lt" },
+        { "pad_button_R1", XPAD_BUTTON_R1, "rt" },
+        { "pad_button_L2", XPAD_BUTTON_L2, "lb" },
+        { "pad_button_R2", XPAD_BUTTON_HUD, "rb" },
+        { "pad_button_start", XPAD_BUTTON_START, "start" },
+        { "pad_button_select", XPAD_BUTTON_SELECT, "back" },
+        { "pad_button_L_analog", 0, "stick_left" },
+        { "pad_button_R_analog", 0, "stick_right" },
     };
 
     const S32 kSlotCount = (S32)(sizeof(kSlots) / sizeof(kSlots[0]));
@@ -141,9 +129,23 @@ namespace
     char sActive[64];
     char sRoot[512];
 
-    // NULL until a glyph is first asked for, and NULL again for a file that is
-    // not there -- a set may hold only the glyphs it wants to override.
-    RwTexture* sGlyph[kGlyphCount];
+    // One file that has been asked for, whether or not it was there. `tex` is
+    // NULL for a file a set does not hold, and the entry is kept anyway: a set
+    // may carry only the glyphs it wants to override, and without the negative
+    // answer every prompt of every frame would stat the same missing file.
+    struct Glyph
+    {
+        char name[32];
+        RwTexture* tex;
+    };
+
+    // Twelve is what retail's prompts can ask for at once. The slack is for a
+    // keyboard set, where the twelve are drawn from a hundred possible keys and
+    // a rebind mid-session asks for a file the cache has not seen.
+    const S32 kGlyphMax = 48;
+
+    Glyph sGlyph[kGlyphMax];
+    S32 sGlyphCount;
     S32 sLoaded;
 
     // So an unreadable set says so once rather than once per frame per prompt.
@@ -151,14 +153,15 @@ namespace
 
     void dropGlyphs()
     {
-        for (S32 i = 0; i < kGlyphCount; i++)
+        for (S32 i = 0; i < sGlyphCount; i++)
         {
-            if (sGlyph[i] != NULL)
+            if (sGlyph[i].tex != NULL)
             {
-                RwTextureDestroy(sGlyph[i]);
-                sGlyph[i] = NULL;
+                RwTextureDestroy(sGlyph[i].tex);
+                sGlyph[i].tex = NULL;
             }
         }
+        sGlyphCount = 0;
         sLoaded = 0;
     }
 
@@ -229,6 +232,15 @@ namespace
             return sChoice;
         }
 
+        // A keyboard is a device with its own pictures, not the absence of a
+        // pad, and with both plugged in it is the one last touched that the
+        // prompts should show. Asked before iPadHostPadKind, which answers
+        // about the controller whether or not anyone is holding it.
+        if (iPadHostKeyboardIsLive())
+        {
+            return "keyboard";
+        }
+
         const char* kind = iPadHostPadKind();
         if (kind != NULL)
         {
@@ -282,49 +294,79 @@ namespace
             return false;
         }
 
-        for (S32 i = 0; i < kGlyphCount; i++)
-        {
-            sGlyph[i] = loadGlyph(want, kGlyphNames[i]);
-        }
-
         snprintf(sActive, sizeof(sActive), "%s", want);
         sLoaded = 1;
 
         // Printed on every change, not just the first, because under "auto"
         // this is what a controller being swapped mid-game looks like from
         // outside -- and a set that quietly did not change is the failure worth
-        // seeing.
-        S32 have = 0;
-        for (S32 i = 0; i < kGlyphCount; i++)
-        {
-            have += (sGlyph[i] != NULL) ? 1 : 0;
-        }
-        printf("bfbb: button prompts from buttons/%s (%d of %d glyphs)\n", want, (int)have,
-               (int)kGlyphCount);
+        // seeing. No count to go with it: nothing has been read yet, and what a
+        // set holds is not knowable without listing the folder.
+        printf("bfbb: button prompts from buttons/%s\n", want);
         fflush(stdout);
 
         return true;
     }
 
-    // The glyph for one device input, named as a binding names it.
-    S32 glyphIndex(const char* token)
+    // The texture for one file of the live set, read the first time it is asked
+    // for and remembered after -- including a miss, so a set that does not hold
+    // it is not stat'd again every frame.
+    RwTexture* glyphNamed(const char* file)
     {
-        for (S32 i = 0; i < kTokenGlyphCount; i++)
+        if (file == NULL || file[0] == '\0')
         {
-            if (iHostStrCaseCmp(kTokenGlyphs[i].token, token) == 0)
+            return NULL;
+        }
+
+        for (S32 i = 0; i < sGlyphCount; i++)
+        {
+            if (iHostStrCaseCmp(sGlyph[i].name, file) == 0)
             {
-                return kTokenGlyphs[i].glyph;
+                return sGlyph[i].tex;
             }
         }
 
-        for (S32 i = 0; i < kGlyphCount; i++)
+        if ((size_t)strlen(file) >= sizeof(sGlyph[0].name))
         {
-            if (iHostStrCaseCmp(kGlyphNames[i], token) == 0)
+            return NULL;
+        }
+
+        // Full. Only reachable by rebinding over and over in one session, and
+        // starting the cache again costs one reload of what is on screen --
+        // which is cheaper than growing without limit or never caching again.
+        if (sGlyphCount == kGlyphMax)
+        {
+            const char* set = sActive;
+            char keep[64];
+            snprintf(keep, sizeof(keep), "%s", set);
+            dropGlyphs();
+            snprintf(sActive, sizeof(sActive), "%s", keep);
+            sLoaded = 1;
+        }
+
+        Glyph* g = &sGlyph[sGlyphCount++];
+        snprintf(g->name, sizeof(g->name), "%s", file);
+        g->tex = loadGlyph(sActive, file);
+        return g->tex;
+    }
+
+    // The FILE a bound input is drawn from. On a pad the four face names are
+    // positions under another name and get renamed; on the keyboard they are
+    // the letter keys and must be left exactly as they are.
+    const char* glyphFileFor(const char* token, S32 fromKeyboard)
+    {
+        if (!fromKeyboard)
+        {
+            for (S32 i = 0; i < kTokenGlyphCount; i++)
             {
-                return i;
+                if (iHostStrCaseCmp(kTokenGlyphs[i].token, token) == 0)
+                {
+                    return kTokenGlyphs[i].glyph;
+                }
             }
         }
-        return -1;
+
+        return token;
     }
 } // namespace
 
@@ -395,7 +437,7 @@ RwTexture* iPadGlyphFor(const char* name, U32 nameLen)
         return NULL;
     }
 
-    S32 index = found->fallback;
+    const char* file = found->fallback;
 
     // Where THIS set prints the button, when there turns out to be no binding
     // to ask. Without it a GameCube set would draw its X beside "Return to
@@ -403,11 +445,7 @@ RwTexture* iPadGlyphFor(const char* name, U32 nameLen)
     const char* printed = iPadLayoutFaceGlyph(sActive, found->mask);
     if (printed != NULL)
     {
-        S32 at = glyphIndex(printed);
-        if (at >= 0)
-        {
-            index = at;
-        }
+        file = printed;
     }
 
     // A prompt about a game button asks what presses it. A prompt about a stick
@@ -417,13 +455,14 @@ RwTexture* iPadGlyphFor(const char* name, U32 nameLen)
         const char* input = iPadHostBoundInput(found->mask);
         if (input != NULL)
         {
-            S32 bound = glyphIndex(input);
-            if (bound >= 0 && sGlyph[bound] != NULL)
+            const char* bound = glyphFileFor(input, iPadHostKeyboardIsLive());
+            RwTexture* tex = glyphNamed(bound);
+            if (tex != NULL)
             {
-                index = bound;
+                return tex;
             }
         }
     }
 
-    return sGlyph[index];
+    return glyphNamed(file);
 }

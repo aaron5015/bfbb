@@ -36,6 +36,7 @@
 #include "iMath.h"
 #include "iMemMgr.h"
 #include "iCameraLook.h"
+#include "iPadKeyboard.h"
 #include "iPadLayout.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
@@ -2311,6 +2312,69 @@ static void test_pad_bindings()
     }
 }
 
+// The keyboard's own bindings, which a prompt names while the keyboard is in
+// use. `b` on a pad is the east face button and `b` on a keyboard is the B key,
+// and drawing one for the other is the fault this guards.
+static void test_pad_keyboard_glyphs()
+{
+#ifdef BFBB_INPUT_HAVE_KEYBOARD
+    const iPadBindButton* jump = iPadBindFind("a");
+    check(jump != NULL, "there is a row for jump");
+
+    if (jump != NULL)
+    {
+        const char* key = iPadKeyboardBoundInput(jump->mask);
+        check(key != NULL && strcmp(key, jump->key) == 0,
+              "the keyboard names the key the jump row defaults to");
+    }
+
+    // A row that leads with a mouse button names the button, which is what its
+    // prompt draws.
+    const iPadBindButton* spin = iPadBindFind("x");
+    if (spin != NULL)
+    {
+        const char* input = iPadKeyboardBoundInput(spin->mask);
+        check(input != NULL && strcmp(input, "mouse1") == 0,
+              "a mouse-then-key binding names the mouse button");
+    }
+
+    check(iPadKeyboardBoundInput(0) == NULL, "a button no row carries names nothing");
+
+    // A set is a folder of files named after binding tokens, so every token the
+    // keyboard defaults bind must have a picture. Read from the source tree,
+    // which is what the build copies.
+    S32 missing = 0;
+    char first[64] = "";
+    for (S32 i = 0; i < kPadBindButtonCount; i++)
+    {
+        const char* key = iPadKeyboardBoundInput(kPadBindButtons[i].mask);
+        if (key == NULL)
+        {
+            continue;
+        }
+
+        char path[768];
+        snprintf(path, sizeof(path), "%s/src/SB/Core/pc/res/buttons/keyboard/%s.png",
+                 BFBB_SOURCE_DIR, key);
+        if (!iHostPathExists(path))
+        {
+            if (missing++ == 0)
+            {
+                snprintf(first, sizeof(first), "%s", key);
+            }
+        }
+    }
+    if (missing != 0)
+    {
+        printf("  (%d bound key(s) have no picture, first is '%s' -- run tools/keyglyphs.py)\n",
+               (int)missing, first);
+    }
+    check(missing == 0, "every key the defaults bind has a picture in buttons/keyboard");
+#else
+    check(true, "no keyboard in this build");
+#endif
+}
+
 // Two sources turn the camera at once, and it sees the sum. A source that is
 // not steering contributes nothing, and the camera reading the turn is what
 // the mouse uses to tell a running camera from a paused one.
@@ -3033,6 +3097,7 @@ static void test_pad()
     test_pad_stick_deadzone();
     test_pad_layout();
     test_pad_face_glyphs();
+    test_pad_keyboard_glyphs();
     test_camera_look();
     test_pad_stick_shape();
 

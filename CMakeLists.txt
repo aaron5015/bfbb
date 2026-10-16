@@ -1763,7 +1763,8 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   ${AUDIO_SOURCES}
   ${HOST_SOURCES}
 )
-target_compile_definitions(pc_selftest PRIVATE ${INPUT_DEFINES} ${AUDIO_DEFINES})
+target_compile_definitions(pc_selftest PRIVATE ${INPUT_DEFINES} ${AUDIO_DEFINES}
+                           BFBB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 # pc_selftest compiles the backend sources itself rather than linking
 # bfbb_platform, so the backends' libraries are its own to ask for.
