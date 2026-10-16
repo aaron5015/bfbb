@@ -20,6 +20,7 @@
 
 #ifdef PLATFORM_PC
 #include "iPadGlyph.h"
+#include "iTextPatch.h"
 #endif
 
 #include <string.h>
@@ -3829,6 +3830,19 @@ namespace
         }
 
         U32 id = xStrHash(ti.value.text, ti.value.size);
+
+#ifdef PLATFORM_PC
+        // Wording that follows the device in the player's hands. See
+        // iTextPatch.h.
+        const char* said = iTextPatchInsert(id);
+        if (said != NULL)
+        {
+            j.context = (char*)said;
+            j.context_size = strlen(said);
+            j.flag.insert = true;
+            return;
+        }
+#endif
 
         if (id)
         {

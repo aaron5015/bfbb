@@ -1632,8 +1632,29 @@ static void test_textpatch()
           "an unterminated asset is left alone");
     check(p.buf[0] == 'X', "and not written to");
 
+    // The talk and exit prompts. The phrase goes at load and an include stands
+    // in for it; what the include says is decided as it is drawn. This process
+    // has no pad, so the keyboard is live and R1 is not a trigger.
+    patch_setup(&p, "Pull the {i:button_exitlevel_text} to enter the Theater", 64);
+    patch_run(&p, "a level's exit prompt");
+    check(strcmp(p.buf, "{i:pc_say_1c} to enter the Theater") == 0,
+          "the trigger phrase becomes a placeholder");
+    patch_setup(&p, "Press the {insert:button_talktonpc_text} button to read", 64);
+    patch_run(&p, "a sign");
+    check(strcmp(p.buf, "{i:pc_say_4b} to read") == 0, "and so does the button form");
+
+    const char* said = iTextPatchInsert(iTextPatchAssetID("pc_say_1c"));
+    check(said != NULL && strcmp(said, "Press {i:button_exitlevel_text}") == 0,
+          "off a trigger the placeholder says Press");
+    said = iTextPatchInsert(iTextPatchAssetID("button_exitlevel_text"));
+    check(said != NULL && strcmp(said, "{i:button_picture_05}") == 0,
+          "and the include loses its Trigger");
+    check(iTextPatchInsert(iTextPatchAssetID("button_jump_text")) == NULL,
+          "an include that names no trigger draws its own asset");
+
     // Global, and later tests do not expect it on.
     iTextPatchSetEnabled(FALSE);
+    check(iTextPatchInsert(iTextPatchAssetID("pc_say_1c")) == NULL, "off, no include is answered");
 }
 
 static void test_file()
