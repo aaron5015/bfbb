@@ -1015,18 +1015,20 @@ namespace
     // The row on screen the pointer is over, label or value, or -1.
     S32 PointerRow()
     {
+        // The label, the value's words, and the arrows either side of them,
+        // which are outside the words now that the words are centred.
+        static const char* const kParts[] = { ISETTINGS_LABEL, ISETTINGS_VALUE,
+                                              ISETTINGS_ARROW_LEFT, ISETTINGS_ARROW_RIGHT };
         for (S32 row = 0; row < ISETTINGS_ROWS && sTop + row < sListCount; row++)
         {
-            char name[32];
-            sprintf(name, ISETTINGS_LABEL, (int)row);
-            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+            for (size_t i = 0; i < sizeof(kParts) / sizeof(kParts[0]); i++)
             {
-                return row;
-            }
-            sprintf(name, ISETTINGS_VALUE, (int)row);
-            if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
-            {
-                return row;
+                char name[48];
+                sprintf(name, kParts[i], (int)row);
+                if (iMenuMouseOver(zSceneFindObject(xStrHash(name))))
+                {
+                    return row;
+                }
             }
         }
         return -1;
