@@ -72,6 +72,7 @@
 #include "zNPCTypeTiki.h"
 #include "zNPCTypeTiki.h"
 #include "zNPCMessenger.h"
+#include "zNPCTypeDutchman.h"
 #include "zParPTank.h"
 #include "zPlatform.h"
 #include "zRumble.h"
