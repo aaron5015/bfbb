@@ -631,8 +631,8 @@ namespace
     }
 
     // The track spans the rows; the thumb is the share of them showing, where
-    // they are. Both hidden when every row fits.
-    void DrawScrollbar()
+    // they are. Both hidden when every row fits. `count` rows from row `top`.
+    void DrawScrollbar(S32 top, S32 count)
     {
         zUIFont* track = Widget(ISETTINGS_SCROLL_TRACK);
         zUIFont* thumb = Widget(ISETTINGS_SCROLL_THUMB);
@@ -641,7 +641,7 @@ namespace
             return;
         }
 
-        const bool needed = sListCount > ISETTINGS_ROWS;
+        const bool needed = count > ISETTINGS_ROWS;
         Send(ISETTINGS_SCROLL_TRACK, needed ? eEventVisible : eEventInvisible);
         Send(ISETTINGS_SCROLL_THUMB, needed ? eEventVisible : eEventInvisible);
         if (!needed)
@@ -650,13 +650,13 @@ namespace
         }
 
         const F32 x = 606.0f + 0.6f * iMenuWideMargin();
-        const F32 top = ISETTINGS_ROW_Y;
+        const F32 y = ISETTINGS_ROW_Y;
         const F32 height = ISETTINGS_ROW_STEP * ISETTINGS_ROWS - 2.0f;
 
         track->fasset->pos.x = x;
         thumb->fasset->pos.x = x;
-        thumb->fasset->pos.y = top + height * (F32)sTop / (F32)sListCount;
-        thumb->fasset->dim[1] = (U16)(height * (F32)ISETTINGS_ROWS / (F32)sListCount);
+        thumb->fasset->pos.y = y + height * (F32)top / (F32)count;
+        thumb->fasset->dim[1] = (U16)(height * (F32)ISETTINGS_ROWS / (F32)count);
     }
 
     void Draw();
@@ -871,6 +871,34 @@ namespace
         }
     }
 
+    // Every row's arrows and every slider put away, for a bind page, which has
+    // the rows without them.
+    void HideValueParts()
+    {
+        char name[48];
+        for (S32 row = 0; row < ISETTINGS_ROWS; row++)
+        {
+            sprintf(name, ISETTINGS_ARROW_LEFT, (int)row);
+            ShowUI(name, false);
+            sprintf(name, ISETTINGS_ARROW_LEFT_GLOW, (int)row);
+            ShowUI(name, false);
+            sprintf(name, ISETTINGS_ARROW_RIGHT, (int)row);
+            ShowUI(name, false);
+            sprintf(name, ISETTINGS_ARROW_RIGHT_GLOW, (int)row);
+            ShowUI(name, false);
+        }
+        for (S32 k = 0; k < ISETTINGS_SLIDERS; k++)
+        {
+            for (S32 n = 0; n < ISETTINGS_SLIDER_LEVELS; n++)
+            {
+                sprintf(name, ISETTINGS_SLIDER_ON, (int)k, (int)n);
+                ShowUI(name, false);
+                sprintf(name, ISETTINGS_SLIDER_OFF, (int)k, (int)n);
+                ShowUI(name, false);
+            }
+        }
+    }
+
     // The bamboo on every row whose setting is a volume, and nothing left over
     // from the last tab.
     void DrawSliders()
@@ -1000,7 +1028,7 @@ namespace
             SetText(ISETTINGS_VALUE_TEXT, row, shown);
         }
 
-        DrawScrollbar();
+        DrawScrollbar(sTop, sListCount);
         DrawHelp(NULL);
     }
 
@@ -1147,6 +1175,8 @@ namespace
         Layout();
         iAssetTextSet(xStrHash(ISETTINGS_TITLE_TEXT),
                       pad ? "Controller buttons" : "Keyboard buttons");
+        HideValueParts();
+        DrawScrollbar(top, BindRows());
 
         for (S32 r = 0; r < ISETTINGS_ROWS; r++)
         {
