@@ -1560,7 +1560,7 @@ void zNPCBPatrick::Process(xScene* xscn, F32 dt)
             {
                 if ((coll->optr && ((xBase*)coll->optr)->baseType == eBaseTypeDynamic &&
                      ((xEnt*)coll->optr)->driver == this) ||
-                    coll->optr == this)
+                    coll->optr == (xEnt*)this)
                 {
                     this->bossFlags |= 2;
                     doDamage = 1;
