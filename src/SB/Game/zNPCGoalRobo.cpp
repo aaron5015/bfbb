@@ -995,7 +995,7 @@ F32 __deadstripped_zNPCGoalRobo_bomb_radius()
 
 void zNPCGoalAlertFodBomb::Detonate()
 {
-    zNPCFodBomb* npc = *(zNPCFodBomb**)(&psyche->clt_owner);
+    zNPCFodBomb* npc = (zNPCFodBomb*)(psyche->clt_owner);
     npc->SndPlayRandom(NPC_STYP_ATTACK);
     NPCHazard* haz = HAZ_Acquire();
     if (haz != NULL)
@@ -8016,7 +8016,7 @@ S32 zNPCGoalTubeAttack::MarySpinDown(F32 dt)
 
 void zNPCGoalTubeAttack::MaryzFury()
 {
-    zNPCTubelet* npc = *(zNPCTubelet**)(&psyche->clt_owner);
+    zNPCTubelet* npc = (zNPCTubelet*)(psyche->clt_owner);
     NPCHazard* haz = HAZ_Acquire();
     if (haz != NULL)
     {
