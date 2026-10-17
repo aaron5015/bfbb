@@ -1186,7 +1186,7 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     // BFBB's normal damage path still owns HP, damage goal, death animation,
     // rewards, and native collision/bounce handling.
     best->Damage(DMGTYP_SIDE, NULL, &dir);
-    if (melee)
+    if (melee && best->SelfType() == NPC_TYPE_FODDER)
         printf("bfbb: tf2bridge -- melee knockback override target=%p mult=%.2f\n",
                (void*)best, (double)sPendingKnockbackMultiplier);
     printf("bfbb: tf2bridge -- shot hit NPC type %d at %.2f\n", (int)best->SelfType(),
