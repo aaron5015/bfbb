@@ -600,6 +600,15 @@ namespace
         c.action = sound_context::ACTION_SET;
     }
 
+// The group a talk box names as its speaker. Retail passes &obj, the stack slot
+// holding the pointer, so xGroupGetCount and xGroupGetItemPtr read a group out
+// of the stack frame; no retail talk box names a group, so it never runs there.
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+#define TALKBOX_SPEAKER_GROUP(obj) ((xGroup*)(obj))
+#else
+#define TALKBOX_SPEAKER_GROUP(obj) ((xGroup*)&(obj))
+#endif
+
     static bool trigger_sound(const xtextbox::jot& j)
     {
         if (shared.quitting)
@@ -668,10 +677,10 @@ namespace
                     else if (obj->baseType == 0x11)
                     {
                         U32 i = 0;
-                        U32 size = xGroupGetCount((xGroup*)&obj);
+                        U32 size = xGroupGetCount(TALKBOX_SPEAKER_GROUP(obj));
                         for (; i < size; i++)
                         {
-                            xBase* entry = xGroupGetItemPtr((xGroup*)&obj, i);
+                            xBase* entry = xGroupGetItemPtr(TALKBOX_SPEAKER_GROUP(obj), i);
                             if (entry && entry->baseType == 0x2B)
                             {
                                 npc = (zNPCCommon*)entry;
