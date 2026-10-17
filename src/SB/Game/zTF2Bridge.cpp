@@ -49,6 +49,26 @@ static TF2BridgeDebugRay sHitscanDebugRays[BRIDGE_MAX_HITSCAN_RAYS];
 static uint32_t sHitscanDebugCount = 0;
 static float sHitscanDebugTime = 0.0f;
 
+static void* sPendingKnockbackTarget = NULL;
+static float sPendingKnockbackDirX = 0.0f;
+static float sPendingKnockbackDirZ = 1.0f;
+static float sPendingKnockbackMultiplier = 1.0f;
+static bool sPendingKnockbackOverride = false;
+
+int zTF2Bridge_ConsumeKnockbackOverride(void* npc, float* dirX, float* dirZ, float* multiplier)
+{
+    if (!sPendingKnockbackOverride || sPendingKnockbackTarget != npc)
+        return 0;
+
+    if (dirX != NULL) *dirX = sPendingKnockbackDirX;
+    if (dirZ != NULL) *dirZ = sPendingKnockbackDirZ;
+    if (multiplier != NULL) *multiplier = sPendingKnockbackMultiplier;
+
+    sPendingKnockbackTarget = NULL;
+    sPendingKnockbackOverride = false;
+    return 1;
+}
+
 struct TF2BridgeDebugExplosionTarget
 {
     xVec3 pos;
@@ -1081,6 +1101,8 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     if (in == NULL || !(in->buttons & BRIDGE_IN_ATTACK) || globals.sceneCur == NULL)
         return;
 
+    const bool melee = (in->weaponflags & BRIDGE_WEAPON_MELEE) != 0;
+
     // Use the TF2 eye transform that is already driving BFBB's camera. This
     // means the bullet goes exactly where the player is looking in TF2.
     const xVec3 origin = FromSource(in->ex, in->ey, in->ez, in->scale);
@@ -1127,10 +1149,46 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     if (best == NULL)
         return;
 
-    // BFBB's robot damage code expects the hit vector to describe the incoming
-    // direction, not an absolute world position. Let its normal damage path do
-    // the rest (HP, damage goal, death animation, rewards, etc.).
+    // The first knockback prototype is intentionally melee-only. Preserve
+    // BFBB's damage/death path, but let the native knockback goal consume an
+    // explicit horizontal push direction and a tunable impulse multiplier.
+    // Raw Source force is not directly comparable to BFBB velocity; calibrate
+    // this controlled multiplier before forwarding raw force values.
+    sPendingKnockbackOverride = false;
+    sPendingKnockbackTarget = NULL;
+    if (melee)
+    {
+        float pushLen = sqrtf(dir.x * dir.x + dir.z * dir.z);
+        if (pushLen < 0.001f)
+        {
+            sPendingKnockbackDirX = 0.0f;
+            sPendingKnockbackDirZ = 1.0f;
+        }
+        else
+        {
+            sPendingKnockbackDirX = dir.x / pushLen;
+            sPendingKnockbackDirZ = dir.z / pushLen;
+        }
+
+        sPendingKnockbackMultiplier = 1.0f;
+        const char* forceScale = getenv("BFBB_TF2BRIDGE_MELEE_KNOCKBACK_MULT");
+        if (forceScale != NULL && forceScale[0] != '\0')
+        {
+            const float requested = (float)atof(forceScale);
+            if (requested >= 0.1f && requested <= 5.0f)
+                sPendingKnockbackMultiplier = requested;
+        }
+
+        sPendingKnockbackTarget = best;
+        sPendingKnockbackOverride = true;
+    }
+
+    // BFBB's normal damage path still owns HP, damage goal, death animation,
+    // rewards, and native collision/bounce handling.
     best->Damage(DMGTYP_SIDE, NULL, &dir);
+    if (melee)
+        printf("bfbb: tf2bridge -- melee knockback override target=%p mult=%.2f\n",
+               (void*)best, (double)sPendingKnockbackMultiplier);
     printf("bfbb: tf2bridge -- shot hit NPC type %d at %.2f\n", (int)best->SelfType(),
            (double)bestDist);
 }
