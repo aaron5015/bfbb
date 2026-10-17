@@ -612,7 +612,7 @@ void zNPCBPlankton::Setup()
 
 void zNPCBPlankton::PostSetup()
 {
-    xUpdateCull_SetCB(globals.updateMgr, this, xUpdateCull_AlwaysTrueCB, NULL);
+    xUpdateCull_SetCB(globals.updateMgr, (xEnt*)this, xUpdateCull_AlwaysTrueCB, NULL);
 }
 
 void zNPCBPlankton::Reset()

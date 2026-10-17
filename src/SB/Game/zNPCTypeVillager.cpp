@@ -1488,7 +1488,7 @@ void zNPCNewsFish::Init(xEntAsset* asset)
 
 void zNPCNewsFish::PostSetup()
 {
-    xUpdateCull_SetCB(globals.updateMgr, this, xUpdateCull_AlwaysTrueCB, NULL);
+    xUpdateCull_SetCB(globals.updateMgr, (xEnt*)this, xUpdateCull_AlwaysTrueCB, NULL);
 }
 
 // One more unreferenced all-zero xVec3 template, ahead of the one

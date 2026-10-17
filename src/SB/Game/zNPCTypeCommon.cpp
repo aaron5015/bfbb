@@ -1001,13 +1001,14 @@ S32 zNPCCommon::SysEvent(xBase* from, xBase* to, U32 toEvent, const F32* toParam
         {
             if (toParam[0] <= 0.0f)
             {
-                xUpdateCull_SetCB(globals.updateMgr, npc, xUpdateCull_AlwaysTrueCB, NULL);
+                xUpdateCull_SetCB(globals.updateMgr, (xEnt*)npc, xUpdateCull_AlwaysTrueCB, NULL);
             }
             else
             {
                 FloatAndVoid dist;
                 dist.f = SQR(toParam[0]);
-                xUpdateCull_SetCB(globals.updateMgr, npc, xUpdateCull_DistanceSquaredCB, dist.v);
+                xUpdateCull_SetCB(globals.updateMgr, (xEnt*)npc, xUpdateCull_DistanceSquaredCB,
+                                  dist.v);
             }
         }
         break;
