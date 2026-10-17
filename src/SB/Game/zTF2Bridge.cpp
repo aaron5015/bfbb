@@ -1156,7 +1156,7 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     // this controlled multiplier before forwarding raw force values.
     sPendingKnockbackOverride = false;
     sPendingKnockbackTarget = NULL;
-    if (melee)
+    if (melee && best->SelfType() == NPC_TYPE_FODDER)
     {
         float pushLen = sqrtf(dir.x * dir.x + dir.z * dir.z);
         if (pushLen < 0.001f)
