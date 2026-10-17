@@ -154,12 +154,17 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
 
     iPadShapeStick(host->stick_x, host->stick_y, IPAD_STICK_MAX, IPAD_STICK_XY, &x, &y);
 
-    // Scales the shaped stick rather than the raw axes, so it shrinks the
-    // deflection the game reads and not the octagon.
+    // Holding walk puts the stick in the game's walk bracket, which for
+    // SpongeBob is the tiptoe and its xylophone loop. SB.INI walks below 0.8 of
+    // full, measured past G.AnalogMin's 32 of 127. Each axis is clamped to
+    // iPadConvStick's 40 before the scale, so a push along an axis, which the
+    // octagon takes to 72, reads the same as a diagonal: half of 40 is 64 of
+    // 127, 0.41 of full on every heading.
     if (host->buttons & XPAD_BUTTON_WALK)
     {
-        x *= 0.42f;
-        y *= 0.42f;
+        const F32 kWalk = 0.5f;
+        x = kWalk * (x > 40.0f ? 40.0f : (x < -40.0f ? -40.0f : x));
+        y = kWalk * (y > 40.0f ? 40.0f : (y < -40.0f ? -40.0f : y));
     }
 
     pad->analog1.x = iPadConvStick(x);
