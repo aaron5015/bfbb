@@ -12,6 +12,7 @@
 #include "xMath3.h"
 #include "xMathInlines.h"
 #include "zNPCGoalRobo.h"
+#include "zTF2Bridge.h"
 #include "zBuddy.h"
 #include "zNPCGoals.h"
 #include "zNPCGoalStd.h"
@@ -7168,6 +7169,11 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
     zNPCRobot* npc = (zNPCRobot*)(psyche->clt_owner);
     NPCConfig* cfg = npc->cfg_npc;
     xVec3 dir_aim = { 0.0f, 0.0f, 0.0f };
+    float overrideDirX = 0.0f;
+    float overrideDirZ = 1.0f;
+    float overrideMultiplier = 1.0f;
+    const bool hasBridgeKnockback =
+        zTF2Bridge_ConsumeKnockbackOverride(npc, &overrideDirX, &overrideDirZ, &overrideMultiplier) != 0;
 
     flg_knock = 0;
     floorBounce = 0;
@@ -7195,11 +7201,25 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
 
     flg_info = 0;
 
-    xVec3Inv(&dir_aim, &dir_aim);
-    xVec3Normalize(&dir_aim, &dir_aim);
+    if (hasBridgeKnockback)
+    {
+        // The bridge supplies the horizontal push direction; retain BFBB's
+        // native 30-degree launch arc and mass scaling.
+        dir_aim.x = overrideDirX;
+        dir_aim.y = 0.0f;
+        dir_aim.z = overrideDirZ;
+        xVec3Normalize(&dir_aim, &dir_aim);
+    }
+    else
+    {
+        xVec3Inv(&dir_aim, &dir_aim);
+        xVec3Normalize(&dir_aim, &dir_aim);
+    }
+
     dir_aim.y = isin(DEG2RAD(30));
     xVec3Normalize(&dir_aim, &dir_aim);
-    xVec3SMulBy(&dir_aim, 50.0f * cfg->npcMassInv);
+    xVec3SMulBy(&dir_aim, 50.0f * cfg->npcMassInv *
+        (hasBridgeKnockback ? overrideMultiplier : 1.0f));
     xVec3Add(&npc->frame->vel, &npc->frame->oldvel, &dir_aim);
 
     npc->frame->mode |= 0x4;
