@@ -7223,7 +7223,7 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
         xVec3Normalize(&dir_aim, &dir_aim);
     }
 
-    dir_aim.y = isin(DEG2RAD(30));
+    dir_aim.y = (npc->SelfType() == NPC_TYPE_CHUCK) ? 0.0f : isin(DEG2RAD(30));
     xVec3Normalize(&dir_aim, &dir_aim);
     xVec3SMulBy(&dir_aim, 50.0f * cfg->npcMassInv *
         (hasBridgeKnockback ? overrideMultiplier : 1.0f));

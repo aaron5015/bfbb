@@ -58,6 +58,9 @@ struct BridgeIntentPacket
     uint32_t weaponflags;
     uint32_t flags;
     float scale;
+    // Per-weapon bridge tuning and TF2 base damage estimate.
+    float knockbackMultiplier;
+    float weaponDamage;
     float px, py, pz;
     float vx, vy, vz;
     float ex, ey, ez;

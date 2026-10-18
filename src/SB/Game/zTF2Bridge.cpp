@@ -1159,7 +1159,7 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     // Offer the same calibrated override to every robot the bridge can
     // damage. Only NPCs whose native damage handling enters zNPCGoalKnock
     // will consume it; custom wound/launch goals remain unchanged for now.
-    if (melee && IsTF2BridgeRobot(best))
+    if (IsTF2BridgeRobot(best))
     {
         float pushLen = sqrtf(dir.x * dir.x + dir.z * dir.z);
         if (pushLen < 0.001f)
@@ -1173,13 +1173,20 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
             sPendingKnockbackDirZ = dir.z / pushLen;
         }
 
-        sPendingKnockbackMultiplier = 1.0f;
-        const char* forceScale = getenv("BFBB_TF2BRIDGE_MELEE_KNOCKBACK_MULT");
-        if (forceScale != NULL && forceScale[0] != '\0')
+        float requested = in->knockbackMultiplier;
+        if (!(requested >= 0.1f && requested <= 5.0f))
+            requested = 1.5f;
+        sPendingKnockbackMultiplier = requested;
+
+        // Chuck's launch is horizontal rather than gravity-driven. Normalize
+        // Source damage to approximate BFBB HP units (35 damage ~= one standard
+        // melee hit) and let only overflow extend his launch, with a hard cap.
+        if (best->SelfType() == NPC_TYPE_CHUCK && in->weaponDamage > 0.0f)
         {
-            const float requested = (float)atof(forceScale);
-            if (requested >= 0.1f && requested <= 5.0f)
-                sPendingKnockbackMultiplier = requested;
+            const float equivalentDamage = in->weaponDamage / 35.0f;
+            const float overflowDamage = MAX(0.0f, equivalentDamage - (float)MAX(1, best->hitpoints));
+            const float overflowScale = 1.0f + MIN(2.0f, overflowDamage * 0.5f);
+            sPendingKnockbackMultiplier = MIN(5.0f, requested * overflowScale);
         }
 
         sPendingKnockbackTarget = best;
@@ -1189,8 +1196,15 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     // BFBB's normal damage path still owns HP, damage goal, death animation,
     // rewards, and native collision/bounce handling.
     best->Damage(DMGTYP_SIDE, NULL, &dir);
-    if (melee && IsTF2BridgeRobot(best))
-        printf("bfbb: tf2bridge -- melee knockback offered type=%d target=%p mult=%.2f\n",
+    // Chuck's hover logic doesn't use the normal gravity launch. Apply a direct
+    // horizontal impulse scaled by the active weapon and any estimated overflow.
+    if (best->SelfType() == NPC_TYPE_CHUCK && best->IsAlive() && best->frame != NULL)
+    {
+        best->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
+    }
+    if (IsTF2BridgeRobot(best))
+        printf("bfbb: tf2bridge -- knockback offered type=%d target=%p mult=%.2f\n",
                (int)best->SelfType(), (void*)best,
                (double)sPendingKnockbackMultiplier);
     printf("bfbb: tf2bridge -- shot hit NPC type %d at %.2f\n", (int)best->SelfType(),
