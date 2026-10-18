@@ -860,6 +860,7 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iConfigTable.cpp
   ${PC_DIR}/iConfigEdit.cpp
   ${PC_DIR}/iDrawDist.cpp
+  ${PC_DIR}/iFirstPerson.cpp
   ${PC_DIR}/iFile.cpp
   ${PC_DIR}/iFixes.cpp
   ${PC_DIR}/iFont.cpp
@@ -1095,9 +1096,11 @@ endif()
 # extensions the game's sources use, chaining to the system headers with
 # include_next. It has to come first for that to work.
 # The assets written as code include the game's own headers, and get the game
-# code's warning settings with them.
+# code's warning settings with them. So does the first-person camera, which
+# drives xCamera and reads the player.
 set_source_files_properties(
   ${PC_DIR}/iAssetOverride.cpp
+  ${PC_DIR}/iFirstPerson.cpp
   ${MENU_SOURCES}
   PROPERTIES COMPILE_OPTIONS "${BFBB_NO_WARNINGS}")
 

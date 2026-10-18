@@ -21,6 +21,7 @@
 #include "iAnim.h"
 #include "iAnimSKB.h"
 #include "iCollide.h"
+#include "iFirstPerson.h"
 #include "iMath.h"
 #include "iSnd.h"
 #include "iTRC.h"
@@ -8438,23 +8439,26 @@ void zEntPlayer_Render(zEnt* ent)
         }
     }
 
-    if (gCurrentPlayer == eCurrentPlayerSandy)
+    if (!iFirstPersonHidesPlayer())
     {
-        ent->model->Next->Flags &= ~1;
-    }
+        if (gCurrentPlayer == eCurrentPlayerSandy)
+        {
+            ent->model->Next->Flags &= ~1;
+        }
 
-    xEntRender(&globals.player.ent);
+        xEntRender(&globals.player.ent);
 
-    if (gCurrentPlayer == eCurrentPlayerSandy)
-    {
-        xModelInstance* m = ent->model->Next;
-        m->Flags |= 1;
+        if (gCurrentPlayer == eCurrentPlayerSandy)
+        {
+            xModelInstance* m = ent->model->Next;
+            m->Flags |= 1;
 
-        RwRenderStateSet((RwRenderState)0x14, (void*)3);
-        xModelRenderSingle(m);
-        RwRenderStateSet((RwRenderState)0x14, (void*)2);
-        xModelRenderSingle(m);
-        RwRenderStateSet((RwRenderState)0x14, (void*)1);
+            RwRenderStateSet((RwRenderState)0x14, (void*)3);
+            xModelRenderSingle(m);
+            RwRenderStateSet((RwRenderState)0x14, (void*)2);
+            xModelRenderSingle(m);
+            RwRenderStateSet((RwRenderState)0x14, (void*)1);
+        }
     }
 
     if (dot > 0.0f)

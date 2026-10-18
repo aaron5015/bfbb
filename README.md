@@ -212,6 +212,7 @@ were recovered from the Xbox `.xbe`.
 | Control presets | `[input] preset` | Xbox, PS2 or GameCube layout. `auto` follows the connected controller. |
 | Button prompts | `[input] button_icons` | Xbox, GameCube, PS2 or custom icons from `buttons/`. Icons follow your bindings. |
 | Touch controls | `[input] touch_controls` | On-screen controls. On by default on Android. |
+| First person | `[keyboard] view`, `[pad] view` | C or the right-stick click puts the camera at the character's eyes. Cutscenes, dialogue and the Cruise Bubble keep their own cameras. |
 | Boot into a level | `[game] boot` | Starts in the named scene, skipping the menu. Overrides `SB.INI`. |
 | Skip the logos | `[game] intro_movies` | Goes straight to the title screen. |
 | Save folder | `[game] save_folder` | Where saves go. Empty means the per-user data folder. |

@@ -39,6 +39,10 @@
 // it and no game code reads it.
 #define XPAD_BUTTON_WALK 0x400000
 
+// Toggles the first-person camera (iFirstPerson.h). A bit of its own for the
+// same reason: the consoles have no such view, so no game button means it.
+#define XPAD_BUTTON_VIEW 0x800000
+
 #define IPAD_BIND_ALTS 4
 #define IPAD_BIND_CHORD 3
 

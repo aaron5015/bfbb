@@ -6,6 +6,7 @@
 #include "zEntPlayer.h"
 #include "zGlobals.h"
 #include "zMusic.h"
+#include "iFirstPerson.h"
 #include "iMath.h"
 #include "xMathInlines.h"
 #include "xVec3Inlines.h"
@@ -1024,6 +1025,11 @@ void zCameraUpdate(xCamera* cam, F32 dt)
         {
             iCameraUpdatePos(cam->lo_cam, &cam->mat);
         }
+        return;
+    }
+
+    if (iFirstPersonCamera(cam, dt, ::GetCurrentD(), ::GetCurrentH()))
+    {
         return;
     }
 

@@ -54,8 +54,10 @@ const iPadBindButton kPadBindButtons[] = {
     { "right", XPAD_BUTTON_RIGHT, "dpright", "right", NULL },
 
     // Last so the presets, which line up with this table by position, need no
-    // entry for it. Unbound on a pad, whose stick is already every speed.
+    // entry for them. Walk is unbound on a pad, whose stick is already every
+    // speed.
     { "walk", XPAD_BUTTON_WALK, "", "shift", "hold to sneak" },
+    { "view", XPAD_BUTTON_VIEW, "rs", "c", "first person on or off" },
 };
 
 const S32 kPadBindButtonCount = (S32)(sizeof(kPadBindButtons) / sizeof(kPadBindButtons[0]));

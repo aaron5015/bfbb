@@ -1112,9 +1112,10 @@ namespace
     // are the GameCube's, and what a button does depends on the preset, so the
     // help line carries the table's description instead.
     const char* const kBindLabels[] = {
-        "A button", "B button", "X button", "Y button", "Z (camera close)", "Show HUD",
-        "Cruise bubble", "Talk / bus", "Spare L (L2)", "Spare R (R2)", "Start (pause)", "Select",
-        "D-pad up", "D-pad down", "D-pad left", "D-pad right",
+        "A button",      "B button",      "X button",     "Y button",     "Z (camera close)",
+        "Show HUD",      "Cruise bubble", "Talk / bus",   "Spare L (L2)", "Spare R (R2)",
+        "Start (pause)", "Select",        "D-pad up",     "D-pad down",   "D-pad left",
+        "D-pad right",   "Sneak",         "First person",
     };
     const S32 kBindLabelCount = (S32)(sizeof(kBindLabels) / sizeof(kBindLabels[0]));
 
