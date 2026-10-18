@@ -6789,6 +6789,17 @@ void zNPCGoalLassoThrow::ApplyYank(S32 left)
     xVec3SMulBy(&dir_aim, 75.0f * npc->cfg_npc->npcMassInv);
     xVec3Add(&npc->frame->vel, &npc->frame->oldvel, &dir_aim);
 
+    // Chuck normally hovers. A bridge-driven knockback should launch him
+    // horizontally, not carry any downward velocity into the knockback state.
+    // Clear the vertical components for this initial impact; leave ordinary
+    // Chuck damage and all other robot knockback behavior unchanged.
+    if (hasBridgeKnockback && npc->SelfType() == NPC_TYPE_CHUCK)
+    {
+        npc->frame->vel.y = 0.0f;
+        npc->frame->dvel.y = 0.0f;
+        npc->frame->oldvel.y = 0.0f;
+    }
+
     npc->frame->mode |= 0x4;
 }
 
