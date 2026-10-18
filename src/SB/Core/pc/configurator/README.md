@@ -103,6 +103,21 @@ capture dialog is open, with background events allowed because the focused
 window is wx's. Left and right Shift, Ctrl and Alt are told apart on Windows;
 elsewhere they capture as the either-side name.
 
+## Saves
+
+The `saves` page shows the three games in the save folder the game will use
+with the settings as the window holds them. `../iSaveFile.cpp` holds that
+folder's policy for the game and this program both.
+
+Import Xbox save takes a `GameData.xsv`, with the `SaveMeta.xbx` beside it, or
+a zip of Xbox save folders. A PC save is the same bytes without the Xbox file's
+20-byte signature, so importing checks the save's crc, cuts the signature off
+and writes `SpongeBob0N`. `SaveMeta.xbx` names the game the save was on the
+Xbox, which is the default target. A save it replaces is renamed
+`SpongeBob0N.bak`, and its thumbnail is deleted.
+
+`saves_model.cpp` is the page without a window.
+
 ## Not yet
 
 - Live validation. A value is checked on Save, which reports the first one that

@@ -1,6 +1,7 @@
 #include "iFile.h"
 #include "iConfig.h"
 #include "iHost.h"
+#include "iSaveFile.h"
 
 #include "xFile.h"
 
@@ -108,20 +109,7 @@ const char* iFileModRoot()
 const char* iFileModName()
 {
     static char sName[256];
-
-    size_t n = strlen(sModRoot);
-    while (n > 0 && sModRoot[n - 1] == '/')
-    {
-        n--;
-    }
-
-    size_t start = n;
-    while (start > 0 && sModRoot[start - 1] != '/' && sModRoot[start - 1] != ':')
-    {
-        start--;
-    }
-
-    snprintf(sName, sizeof(sName), "%.*s", (int)(n - start), sModRoot + start);
+    iSaveFileLeaf(sModRoot, sName, sizeof(sName));
     return sName;
 }
 

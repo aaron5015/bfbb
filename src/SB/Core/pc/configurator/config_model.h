@@ -34,6 +34,9 @@ const char* ConfigModelPath();
 S32 ConfigModelSettingCount();
 const iConfigSetting* ConfigModelSetting(S32 i);
 
+// The index of "section"/"name", or -1.
+S32 ConfigModelFind(const char* section, const char* name);
+
 // The distinct sections of the table, in table order.
 S32 ConfigModelSectionCount();
 const char* ConfigModelSectionName(S32 section);

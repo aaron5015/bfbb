@@ -18,6 +18,7 @@
 #include <types.h>
 
 #include "config_model.h"
+#include "saves_model.h"
 #include "iBoot.h"
 #include "iConfig.h"
 #include "iConfigEdit.h"
@@ -35,6 +36,7 @@
 #include "xSnd.h"
 #include "iMath.h"
 #include "iMemMgr.h"
+#include "iSaveFile.h"
 #include "iCameraLook.h"
 #include "iPadKeyboard.h"
 #include "iPadLayout.h"
@@ -2000,6 +2002,186 @@ static bool bind_says(const char* text, U32 held)
 }
 
 #define FAKE(x) (1u << FAKE_##x)
+
+static void put32(U8* p, U32 v)
+{
+    p[0] = (U8)v;
+    p[1] = (U8)(v >> 8);
+    p[2] = (U8)(v >> 16);
+    p[3] = (U8)(v >> 24);
+}
+
+static U32 tagOf(const char* s)
+{
+    return ((U32)s[0] << 24) | ((U32)s[1] << 16) | ((U32)s[2] << 8) | (U32)s[3];
+}
+
+// The bytes of a save as xsavegame writes one: a leader, one more chunk, and
+// the header with its crc. Returns the save's size.
+static size_t make_save(U8* out, size_t room, const char* label, S32 progress)
+{
+    memset(out, 0, room);
+
+    size_t at = 16;
+    put32(out + at, tagOf("LEDR"));
+    put32(out + at + 4, 0x60);
+    put32(out + at + 8, 0x58);
+    snprintf((char*)out + at + 12, 64, "%s", label);
+    put32(out + at + 12 + 64, (U32)progress);
+    at += 12 + 0x60;
+
+    put32(out + at, tagOf("ROOM"));
+    put32(out + at + 4, 4);
+    put32(out + at + 8, 4);
+    memcpy(out + at + 12, "HB01", 4);
+    at += 16;
+
+    put32(out, tagOf("GDAT"));
+    put32(out + 4, 1);
+    put32(out + 8, (U32)at);
+    put32(out + 12, iSaveFileCrc(out + 16, at - 16));
+    return at;
+}
+
+// Save files as bfbb_config reads them, and an Xbox one's signature.
+static void test_save_file()
+{
+    printf("iSaveFile\n");
+
+    U8 save[512];
+    const size_t size = make_save(save, sizeof(save), "Jellyfish Fields", 42);
+
+    char why[256];
+    size_t total = 0;
+    check(iSaveFileCheck(save, size, &total, why, sizeof(why)) && total == size,
+          "a save checks out at its own size");
+
+    // An Xbox file is the same with 20 bytes of signature after it.
+    memset(save + size, 0xAB, 20);
+    total = 0;
+    check(iSaveFileCheck(save, size + 20, &total, why, sizeof(why)) && total == size,
+          "an Xbox save checks out too, its signature left off");
+
+    check(!iSaveFileCheck(save, size - 1, &total, why, sizeof(why)), "a save cut short does not");
+
+    save[size - 1] ^= 1;
+    check(!iSaveFileCheck(save, size, &total, why, sizeof(why)),
+          "nor does one with a byte changed");
+    save[size - 1] ^= 1;
+
+    save[0] ^= 1;
+    check(!iSaveFileCheck(save, size, &total, why, sizeof(why)), "nor anything that is not a save");
+    save[0] ^= 1;
+
+    iSaveFileLeader leader;
+    check(iSaveFileReadLeader(save, size, &leader) &&
+              strcmp(leader.label, "Jellyfish Fields") == 0 && leader.progress == 42,
+          "the leader gives the label and progress the save screen lists");
+
+    // SaveMeta.xbx: UTF-16LE with a byte order mark.
+    static const char kMeta[] = "Name=SpongeBob02\r\n";
+    U8 meta[2 + 2 * sizeof(kMeta)];
+    meta[0] = 0xFF;
+    meta[1] = 0xFE;
+    for (size_t i = 0; i < sizeof(kMeta) - 1; i++)
+    {
+        meta[2 + 2 * i] = (U8)kMeta[i];
+        meta[3 + 2 * i] = 0;
+    }
+    char name[64];
+    check(iSaveFileXboxMetaName(meta, 2 + 2 * (sizeof(kMeta) - 1), name, sizeof(name)) &&
+              strcmp(name, "SpongeBob02") == 0,
+          "SaveMeta.xbx names the file the save had on the Xbox");
+    check(iSaveFileGameOf(name) == 2 && iSaveFileGameOf("spongebob00") == 0 &&
+              iSaveFileGameOf("SpongeBob03") == -1,
+          "and that name is one of the three games, or none");
+
+    char leaf[64];
+    iSaveFileLeaf("D:\\mods\\BFBBMix\\", leaf, sizeof(leaf));
+    check(strcmp(leaf, "BFBBMix") == 0, "a mod's saves are named for its folder");
+}
+
+// Importing an Xbox save into the folder the game would use.
+static void test_saves_model()
+{
+    printf("saves_model\n");
+
+    char dir[512];
+    char saves[512];
+    if (!scratch_dir("savesmodel", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+    snprintf(saves, sizeof(saves), "%s/saves", dir);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/config.ini", dir);
+    write_scratch(dir, "config.ini", "[game]\n", 7);
+
+    char why[512];
+    if (!ConfigModelOpen(path, why, sizeof(why)))
+    {
+        check(false, "the model opens a file");
+        iHostRemoveFile(path);
+        iHostRemoveDir(dir);
+        return;
+    }
+
+    iHostSetEnv("BFBB_SAVE_DIR", saves);
+
+    char folder[512];
+    SavesModelFolder(folder, sizeof(folder));
+    check(strcmp(folder, saves) == 0, "the save folder is the game's, BFBB_SAVE_DIR included");
+
+    iSaveFileLeader leader;
+    check(!SavesModelRead(1, &leader), "an empty game reads as empty");
+
+    U8 xsv[512];
+    const size_t size = make_save(xsv, sizeof(xsv), "Rock Bottom", 7);
+    memset(xsv + size, 0xCD, 20);
+
+    static const U8 kMeta[] = { 'N', 0, 'a', 0, 'm', 0, 'e', 0, '=', 0, 'S', 0, 'p', 0, 'o', 0,
+                                'n', 0, 'g', 0, 'e', 0, 'B', 0, 'o', 0, 'b', 0, '0', 0, '1', 0 };
+
+    SavesModelXbox save;
+    check(SavesModelReadXbox(xsv, size + 20, kMeta, sizeof(kMeta), "test", &save, why, sizeof(why)),
+          "an Xbox save reads");
+    check(save.size == size && save.game == 1, "without its signature, and knowing it was game 2");
+
+    check(SavesModelImport(&save, save.game, why, sizeof(why)), "it imports, making the folder");
+    check(SavesModelRead(1, &leader) && strcmp(leader.label, "Rock Bottom") == 0,
+          "and game 2 now holds it");
+
+    char file[600];
+    snprintf(file, sizeof(file), "%s/SpongeBob01", saves);
+    iHostFileInfo info;
+    check(iHostStat(file, &info) && info.size == size, "as the PC's file, the signature cut off");
+
+    write_scratch(saves, "SpongeBob01.tga", "old", 3);
+    check(SavesModelImport(&save, 1, why, sizeof(why)), "a second import replaces it");
+
+    char bak[600];
+    char tga[600];
+    snprintf(bak, sizeof(bak), "%s/SpongeBob01.bak", saves);
+    snprintf(tga, sizeof(tga), "%s/SpongeBob01.tga", saves);
+    check(iHostPathExists(bak), "keeping the save it replaced beside it");
+    check(!iHostPathExists(tga), "and deleting that save's thumbnail");
+
+    SavesModelFreeXbox(&save);
+
+    xsv[20] ^= 1;
+    check(!SavesModelReadXbox(xsv, size + 20, NULL, 0, "test", &save, why, sizeof(why)),
+          "a damaged Xbox save is refused");
+
+    iHostSetEnv("BFBB_SAVE_DIR", NULL);
+    ConfigModelClose();
+    iHostRemoveFile(file);
+    iHostRemoveFile(bak);
+    iHostRemoveDir(saves);
+    iHostRemoveFile(path);
+    iHostRemoveDir(dir);
+}
 
 static void test_pad_bindings()
 {
@@ -5368,6 +5550,8 @@ int main()
     test_mem();
     test_file();
     test_file_mod();
+    test_save_file();
+    test_saves_model();
     test_idtag();
     test_pad();
     test_savegame();

@@ -220,6 +220,7 @@ were recovered from the Xbox `.xbe`.
 | Save sizes | none | The save screens show KB/MB instead of memory-card blocks. |
 | Custom font | `[font] face`, `sans` | Draws text from TrueType fonts at the render size instead of the 640x480 atlases. `tools/getfont.py` fetches one. The other `[font]` keys tune the fit. |
 | Mod folder | `[assets] mod` | Loads an Xbox mod's files in place of the originals without modifying the asset folder. Modded games use separate saves. |
+| Xbox saves | none | bfbb_config's saves page imports saves from the original Xbox game (`GameData.xsv`, or a zip of save folders). |
 | PC wording | `[assets] platform_wording` | Rewrites Xbox-specific text (dashboard, memory card) as it loads. |
 
 ### Experimental

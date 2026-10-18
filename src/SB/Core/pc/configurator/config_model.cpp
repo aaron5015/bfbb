@@ -307,6 +307,19 @@ const iConfigSetting* ConfigModelSetting(S32 i)
     return &kConfigSettings[i];
 }
 
+S32 ConfigModelFind(const char* section, const char* name)
+{
+    for (S32 i = 0; i < kConfigSettingCount; i++)
+    {
+        if (strcmp(kConfigSettings[i].section, section) == 0 &&
+            strcmp(kConfigSettings[i].name, name) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
 S32 ConfigModelSectionCount()
 {
     return gModel.sectionCount;

@@ -890,6 +890,7 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iTRC.cpp
   ${PC_DIR}/iTime.cpp
   ${PC_DIR}/isavegame.cpp
+  ${PC_DIR}/iSaveFile.cpp
   ${PC_DIR}/iSnd.cpp
   ${PC_DIR}/iSndData.cpp
   ${PC_DIR}/iSoundtrack.cpp
@@ -1487,13 +1488,13 @@ endif()
 # and keeping two windows in step to save one host a dependency was not worth
 # what it cost to look at both every time a setting changed shape.
 #
-# It links three files and no game library. iConfigTable.cpp is the settings
-# and their domains, iConfigEdit.cpp writes one back without disturbing the
-# rest of the file, and the host layer is there for the case-insensitive
-# compare, the exe directory and starting the game. It does NOT link
-# iConfig.cpp, which reaches iPadBind.cpp for the two binding sections and from
-# there into xPad.h and the pad backend -- most of the game, to read a file
-# this program reads itself.
+# It links no game library. iConfigTable.cpp is the settings and their
+# domains, iConfigEdit.cpp writes one back without disturbing the rest of the
+# file, iSaveFile.cpp is the save files the saves page shows, and the host
+# layer is there for the case-insensitive compare, the exe directory and
+# starting the game. It does NOT link iConfig.cpp, which reaches iPadBind.cpp
+# for the two binding sections and from there into xPad.h and the pad backend
+# -- most of the game, to read a file this program reads itself.
 
 # Off on Android. It is a wxWidgets window -- a desktop toolkit with no
 # Android port at all -- and it exists to be run BEFORE the game, which is not
@@ -1623,8 +1624,10 @@ if(BFBB_BUILD_CONFIGURATOR)
   add_executable(bfbb_config WIN32
     ${PC_DIR}/configurator/main_wx.cpp
     ${PC_DIR}/configurator/config_model.cpp
+    ${PC_DIR}/configurator/saves_model.cpp
     ${PC_DIR}/iConfigTable.cpp
     ${PC_DIR}/iConfigEdit.cpp
+    ${PC_DIR}/iSaveFile.cpp
 
     # The binding table, the parser and the input names, for the [keyboard]
     # and [pad] pages. None of it reads config.ini or opens a device; SDL is
@@ -1690,6 +1693,7 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   # bfbb_config because that target is a window and ctest cannot run one --
   # which left the rules about which settings reach the file untested.
   ${PC_DIR}/configurator/config_model.cpp
+  ${PC_DIR}/configurator/saves_model.cpp
 
   ${PC_DIR}/iDrawDist.cpp
   ${PC_DIR}/iFile.cpp
@@ -1700,6 +1704,7 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   ${PC_DIR}/iMemMgr.cpp
   ${PC_DIR}/iTime.cpp
   ${PC_DIR}/isavegame.cpp
+  ${PC_DIR}/iSaveFile.cpp
   ${PC_DIR}/iSnd.cpp
 
   # The sample cache, with test doubles in selftest.cpp standing in for the

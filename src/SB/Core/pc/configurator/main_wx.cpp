@@ -10,6 +10,7 @@
 // this file reads or writes config.ini.
 
 #include "config_model.h"
+#include "saves_model.h"
 
 #include "iConfigTable.h"
 #include "iPadTokens.h"
@@ -19,15 +20,23 @@
 #include <wx/wx.h>
 
 #include <wx/dirdlg.h>
+#include <wx/ffile.h>
 #include <wx/filedlg.h>
+#include <wx/filename.h>
+#include <wx/mstream.h>
 #include <wx/collpane.h>
 #include <wx/gbsizer.h>
 #include <wx/listbox.h>
 #include <wx/scrolwin.h>
 #include <wx/settings.h>
+#include <wx/utils.h>
+#include <wx/wfstream.h>
+#include <wx/zipstrm.h>
 
+#include <memory>
 #include <string.h>
 
+#include <map>
 #include <vector>
 
 namespace
@@ -51,6 +60,8 @@ namespace
         kIdSections = wxID_HIGHEST + 1,
         kIdResetSection,
         kIdStartGame,
+        kIdSaveImport,
+        kIdSaveOpen,
         kIdRowBase
     };
 
@@ -100,16 +111,237 @@ namespace
         }
     };
 
-    // The pages after the settings' sections: one per device.
+    // The pages after the settings' sections: one per device, then saves.
     ConfigModelDevice DeviceOfSection(int section)
     {
         return (ConfigModelDevice)(section - ConfigModelSectionCount());
     }
 
+    int SavesPage()
+    {
+        return ConfigModelSectionCount() + CONFIG_MODEL_DEVICE_COUNT;
+    }
+
+    int PageCount()
+    {
+        return SavesPage() + 1;
+    }
+
     bool IsBindSection(int section)
     {
-        return section >= ConfigModelSectionCount();
+        return section >= ConfigModelSectionCount() && section < SavesPage();
     }
+
+    // One Xbox save, as found in what the player picked: the save file and
+    // the SaveMeta.xbx beside it, when there is one.
+    struct FoundXboxSave
+    {
+        wxString source;
+        wxMemoryBuffer xsv;
+        wxMemoryBuffer meta;
+    };
+
+    bool ReadFileInto(const wxString& path, wxMemoryBuffer& out)
+    {
+        wxFFile file(path, "rb");
+        if (!file.IsOpened())
+        {
+            return false;
+        }
+        const wxFileOffset size = file.Length();
+        if (size <= 0 || size > 16 * 1024 * 1024)
+        {
+            return false;
+        }
+        const size_t got = file.Read(out.GetWriteBuf((size_t)size), (size_t)size);
+        out.UngetWriteBuf(got);
+        return got == (size_t)size;
+    }
+
+    // Every GameData.xsv in a zip, each paired with the SaveMeta.xbx in its
+    // folder. An Xbox save download is usually a zip of save folders.
+    bool FindXboxSavesInZip(const wxString& zipPath, std::vector<FoundXboxSave>& out, wxString& why)
+    {
+        wxFFileInputStream file(zipPath);
+        if (!file.IsOk())
+        {
+            why = "Could not open " + zipPath + ".";
+            return false;
+        }
+
+        std::map<wxString, FoundXboxSave> byFolder;
+        wxZipInputStream zip(file);
+        std::unique_ptr<wxZipEntry> entry;
+        while (entry.reset(zip.GetNextEntry()), entry != NULL)
+        {
+            if (entry->IsDir())
+            {
+                continue;
+            }
+
+            const wxFileName name(entry->GetName(wxPATH_UNIX), wxPATH_UNIX);
+            const bool isSave = name.GetExt().IsSameAs("xsv", false);
+            const bool isMeta = name.GetFullName().IsSameAs("SaveMeta.xbx", false);
+            if (!isSave && !isMeta)
+            {
+                continue;
+            }
+
+            wxMemoryOutputStream bytes;
+            bytes.Write(zip);
+            wxMemoryBuffer& to =
+                isSave ? byFolder[name.GetPath()].xsv : byFolder[name.GetPath()].meta;
+            to.AppendData(bytes.GetOutputStreamBuffer()->GetBufferStart(), bytes.GetSize());
+            if (isSave)
+            {
+                byFolder[name.GetPath()].source = entry->GetName(wxPATH_UNIX);
+            }
+        }
+
+        for (std::map<wxString, FoundXboxSave>::iterator it = byFolder.begin();
+             it != byFolder.end(); ++it)
+        {
+            if (it->second.xsv.GetDataLen() > 0)
+            {
+                out.push_back(it->second);
+            }
+        }
+
+        if (out.empty())
+        {
+            why = "There is no Xbox save (a .xsv file) in " + zipPath + ".";
+            return false;
+        }
+        return true;
+    }
+
+    // Opens a folder in the host's file manager.
+    void OpenFolder(const wxString& folder)
+    {
+        wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        wxLaunchDefaultApplication(folder);
+    }
+
+    wxString DescribeGame(S32 game, bool* full)
+    {
+        iSaveFileLeader leader;
+        wxString text = wxString::Format("Game %d: ", (int)game + 1);
+        const bool have = SavesModelRead(game, &leader);
+        if (full != NULL)
+        {
+            *full = have;
+        }
+        if (!have)
+        {
+            return text + "empty";
+        }
+        return text +
+               wxString::Format("%s, %d%%", wxString::FromUTF8(leader.label), (int)leader.progress);
+    }
+
+    // Choose where each found Xbox save goes. One row per save: whether to
+    // import it, and which of the three games it replaces.
+    class ImportDialog : public wxDialog
+    {
+    public:
+        ImportDialog(wxWindow* parent, const std::vector<SavesModelXbox>& saves)
+            : wxDialog(parent, wxID_ANY, "Import Xbox saves")
+        {
+            wxString folder;
+            {
+                char path[kSavesModelMaxPath];
+                SavesModelFolder(path, sizeof(path));
+                folder = wxString::FromUTF8(path);
+            }
+
+            wxStaticText* intro =
+                new wxStaticText(this, wxID_ANY,
+                                 "Each save goes into one of the three games in\n" + folder +
+                                     "\nA save it replaces is kept beside it as SpongeBob0N.bak.");
+
+            wxArrayString targets;
+            bool full[kSaveFileGames];
+            for (S32 g = 0; g < kSaveFileGames; g++)
+            {
+                targets.Add(DescribeGame(g, &full[g]));
+            }
+
+            wxFlexGridSizer* grid = new wxFlexGridSizer(2, FromDIP(6), FromDIP(12));
+            grid->AddGrowableCol(0, 1);
+
+            for (size_t i = 0; i < saves.size(); i++)
+            {
+                const SavesModelXbox& save = saves[i];
+                wxString label = wxString::Format("%s, %d%%", wxString::FromUTF8(save.leader.label),
+                                                  (int)save.leader.progress);
+                label << "\n" << wxString::FromUTF8(save.source);
+
+                wxCheckBox* use = new wxCheckBox(this, wxID_ANY, label);
+                use->SetValue(true);
+
+                wxChoice* target =
+                    new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, targets);
+
+                // Where it was on the Xbox, else the first empty game, else
+                // the first.
+                int pick = save.game;
+                for (S32 g = 0; pick < 0 && g < kSaveFileGames; g++)
+                {
+                    if (!full[g])
+                    {
+                        pick = g;
+                    }
+                }
+                target->SetSelection(pick >= 0 ? pick : 0);
+
+                grid->Add(use, wxSizerFlags().CenterVertical());
+                grid->Add(target, wxSizerFlags().CenterVertical());
+                mUse.push_back(use);
+                mTarget.push_back(target);
+            }
+
+            wxBoxSizer* outer = new wxBoxSizer(wxVERTICAL);
+            outer->Add(intro, wxSizerFlags().Border(wxALL, FromDIP(kMargin)));
+            outer->Add(grid, wxSizerFlags(1).Expand().Border(wxLEFT | wxRIGHT, FromDIP(kMargin)));
+            outer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL),
+                       wxSizerFlags().Expand().Border(wxALL, FromDIP(kMargin)));
+            SetSizerAndFit(outer);
+            CenterOnParent();
+
+            Bind(wxEVT_BUTTON, &ImportDialog::OnOk, this, wxID_OK);
+        }
+
+        // The game each save goes to, or -1 for one left out.
+        int TargetOf(size_t i) const
+        {
+            return mUse[i]->GetValue() ? mTarget[i]->GetSelection() : -1;
+        }
+
+    private:
+        void OnOk(wxCommandEvent& event)
+        {
+            bool taken[kSaveFileGames] = {};
+            for (size_t i = 0; i < mUse.size(); i++)
+            {
+                const int g = TargetOf(i);
+                if (g < 0)
+                {
+                    continue;
+                }
+                if (taken[g])
+                {
+                    wxMessageBox(wxString::Format("Two saves are going into game %d.", g + 1),
+                                 "Import Xbox saves", wxOK | wxICON_WARNING, this);
+                    return;
+                }
+                taken[g] = true;
+            }
+            event.Skip();
+        }
+
+        std::vector<wxCheckBox*> mUse;
+        std::vector<wxChoice*> mTarget;
+    };
 
     // What a binding row says under its box: what the button does, what an
     // empty box means, and which other rows the same press sets.
@@ -470,6 +702,9 @@ namespace
         void Capture(Row& row, bool add);
         int GroupSize(S32 master) const;
         void BuildRows();
+        void BuildSavesPage();
+        wxStaticText* AddText(int& line, const wxString& text, bool grey);
+        void ImportSaves(std::vector<FoundXboxSave>& found);
         void ShowSection(int which);
         bool RewrapDescriptions();
         int WrapWidthOf(const Row& row) const;
@@ -498,13 +733,19 @@ namespace
         void OnClose(wxCloseEvent& event);
         void OnPaneSize(wxSizeEvent& event);
         void OnGroupToggled(wxCollapsiblePaneEvent& event);
+        void OnSaveImport(wxCommandEvent& event);
+        void OnSaveOpen(wxCommandEvent& event);
 
         wxListBox* mSections;
         wxScrolled<wxPanel>* mPane;
         wxGridBagSizer* mGrid;
+        wxButton* mReset;
         wxButton* mApply;
 
         std::vector<Row> mRows;
+
+        // Text on the saves page, wrapped with the descriptions.
+        std::vector<std::pair<wxStaticText*, wxString> > mTexts;
         int mSection;
 
         // The width the descriptions were last wrapped at. A resize changes
@@ -516,7 +757,8 @@ namespace
 
     ConfigFrame::ConfigFrame()
         : wxFrame(NULL, wxID_ANY, "Battle for Bikini Bottom - Settings"), mSections(NULL),
-          mPane(NULL), mGrid(NULL), mApply(NULL), mSection(0), mWrappedAt(0)
+          mPane(NULL), mGrid(NULL), mReset(NULL), mApply(NULL), mSection(0),
+          mWrappedAt(0)
     {
         wxPanel* root = new wxPanel(this);
 
@@ -529,6 +771,7 @@ namespace
         {
             mSections->Append(ConfigModelDeviceSection((ConfigModelDevice)d));
         }
+        mSections->Append("saves");
         mSections->SetSelection(0);
         mSections->SetMinSize(FromDIP(wxSize(kLabelWidth, 100)));
 
@@ -556,7 +799,7 @@ namespace
                              wxST_ELLIPSIZE_MIDDLE);
         status->SetToolTip(ConfigModelPath());
 
-        wxButton* reset = new wxButton(root, kIdResetSection, "Reset section");
+        wxButton* reset = mReset = new wxButton(root, kIdResetSection, "Reset section");
         wxButton* start = new wxButton(root, kIdStartGame, "Start Game");
         mApply = new wxButton(root, wxID_APPLY, "Apply");
         wxButton* cancel = new wxButton(root, wxID_CANCEL, "Cancel");
@@ -613,6 +856,11 @@ namespace
         Bind(wxEVT_BUTTON, &ConfigFrame::OnSave, this, wxID_SAVE);
         Bind(wxEVT_BUTTON, &ConfigFrame::OnCancel, this, wxID_CANCEL);
         Bind(wxEVT_CLOSE_WINDOW, &ConfigFrame::OnClose, this);
+
+        // The saves page's buttons carry ids below kIdRowBase, so the pane's
+        // handlers pass them up to these.
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnSaveImport, this, kIdSaveImport);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnSaveOpen, this, kIdSaveOpen);
 
         mPane->Bind(wxEVT_SIZE, &ConfigFrame::OnPaneSize, this);
         mPane->Bind(wxEVT_CHECKBOX, &ConfigFrame::OnValueChanged, this);
@@ -843,9 +1091,24 @@ namespace
 
         mGrid->Clear(true);
         mRows.clear();
+        mTexts.clear();
         mWrappedAt = 0;
 
         int line = 0;
+
+        mReset->Enable(mSection < SavesPage());
+
+        if (mSection == SavesPage())
+        {
+            BuildSavesPage();
+
+            mPane->Scroll(0, 0);
+            mPane->Layout();
+            RewrapDescriptions();
+            mPane->FitInside();
+            mPane->Thaw();
+            return;
+        }
 
         if (IsBindSection(mSection))
         {
@@ -957,6 +1220,12 @@ namespace
             mRows[i].description->Wrap(WrapWidthOf(mRows[i]));
         }
 
+        for (size_t i = 0; i < mTexts.size(); i++)
+        {
+            mTexts[i].first->SetLabel(mTexts[i].second);
+            mTexts[i].first->Wrap(width);
+        }
+
         return true;
     }
 
@@ -1059,7 +1328,7 @@ namespace
         // the selection is cleared -- and -1 would index the section table off
         // its front.
         const int which = event.GetSelection();
-        if (which < 0 || which >= ConfigModelSectionCount() + CONFIG_MODEL_DEVICE_COUNT)
+        if (which < 0 || which >= PageCount())
         {
             return;
         }
@@ -1166,6 +1435,11 @@ namespace
 
     void ConfigFrame::OnResetSection(wxCommandEvent&)
     {
+        if (mSection >= SavesPage())
+        {
+            return;
+        }
+
         if (IsBindSection(mSection))
         {
             ConfigModelBindResetAll(DeviceOfSection(mSection));
@@ -1298,6 +1572,178 @@ namespace
         mPane->Layout();
         mPane->FitInside();
         event.Skip();
+    }
+
+    // -----------------------------------------------------------------
+    // Saves
+
+    wxStaticText* ConfigFrame::AddText(int& line, const wxString& text, bool grey)
+    {
+        wxStaticText* label = new wxStaticText(mPane, wxID_ANY, text);
+        if (grey)
+        {
+            label->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+        }
+        mGrid->Add(label, wxGBPosition(line, 0), wxGBSpan(1, 3), wxEXPAND | wxBOTTOM, FromDIP(10));
+        line++;
+        mTexts.push_back(std::make_pair(label, text));
+        return label;
+    }
+
+    void ConfigFrame::BuildSavesPage()
+    {
+        int line = 0;
+
+        char folder[kSavesModelMaxPath];
+        SavesModelFolder(folder, sizeof(folder));
+
+        AddText(line, "The three games in " + wxString::FromUTF8(folder) + ".", false);
+
+        for (S32 g = 0; g < kSaveFileGames; g++)
+        {
+            AddText(line, DescribeGame(g, NULL), false);
+        }
+
+        wxButton* import = new wxButton(mPane, kIdSaveImport, "Import Xbox save...");
+        wxButton* open = new wxButton(mPane, kIdSaveOpen, "Open folder");
+        import->SetToolTip("Copy a save from the original Xbox game into one of these games");
+
+        wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
+        buttons->Add(import, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(open);
+        mGrid->Add(buttons, wxGBPosition(line, 0), wxGBSpan(1, 3), wxBOTTOM, FromDIP(12));
+        line++;
+
+        AddText(line,
+                "An Xbox save is a folder holding GameData.xsv and SaveMeta.xbx, copied off the "
+                "console's hard disk or out of an emulator's. Pick the GameData.xsv, or a zip "
+                "holding one or more save folders. Importing writes the save at once; it does not "
+                "wait for Apply.",
+                true);
+    }
+
+    void ConfigFrame::ImportSaves(std::vector<FoundXboxSave>& found)
+    {
+        std::vector<SavesModelXbox> saves;
+        wxString rejected;
+        for (size_t i = 0; i < found.size(); i++)
+        {
+            SavesModelXbox save;
+            char why[256];
+            const bool hasMeta = found[i].meta.GetDataLen() > 0;
+            if (SavesModelReadXbox((const U8*)found[i].xsv.GetData(), found[i].xsv.GetDataLen(),
+                                   hasMeta ? (const U8*)found[i].meta.GetData() : NULL,
+                                   found[i].meta.GetDataLen(), found[i].source.utf8_str(), &save,
+                                   why, sizeof(why)))
+            {
+                saves.push_back(save);
+            }
+            else
+            {
+                rejected << "\n" << found[i].source << ": " << wxString::FromUTF8(why);
+            }
+        }
+
+        if (saves.empty())
+        {
+            wxMessageBox("No save could be imported." + rejected, "Import Xbox saves",
+                         wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        ImportDialog dialog(this, saves);
+        if (dialog.ShowModal() == wxID_OK)
+        {
+            wxString report;
+            for (size_t i = 0; i < saves.size(); i++)
+            {
+                const int game = dialog.TargetOf(i);
+                if (game < 0)
+                {
+                    continue;
+                }
+
+                char why[kSavesModelMaxPath + 128];
+                if (SavesModelImport(&saves[i], game, why, sizeof(why)))
+                {
+                    report << wxString::Format("\nGame %d: ", game + 1)
+                           << wxString::FromUTF8(saves[i].leader.label);
+                }
+                else
+                {
+                    report << wxString::Format("\nGame %d: ", game + 1) << wxString::FromUTF8(why);
+                }
+            }
+
+            if (!rejected.empty())
+            {
+                report << "\n\nNot imported:" << rejected;
+            }
+            if (!report.empty())
+            {
+                wxMessageBox("Imported:" + report, "Import Xbox saves", wxOK | wxICON_INFORMATION,
+                             this);
+            }
+        }
+
+        for (size_t i = 0; i < saves.size(); i++)
+        {
+            SavesModelFreeXbox(&saves[i]);
+        }
+
+        // Deferred: the button clicked is in the pane BuildRows rebuilds.
+        CallAfter(&ConfigFrame::BuildRows);
+    }
+
+    void ConfigFrame::OnSaveImport(wxCommandEvent&)
+    {
+        wxFileDialog dialog(this, "Import an Xbox save", wxEmptyString, wxEmptyString,
+                            "Xbox saves (*.xsv;*.zip)|*.xsv;*.zip|All files (*.*)|*.*",
+                            wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (dialog.ShowModal() != wxID_OK)
+        {
+            return;
+        }
+
+        const wxString path = dialog.GetPath();
+        std::vector<FoundXboxSave> found;
+        wxString why;
+
+        if (wxFileName(path).GetExt().IsSameAs("zip", false))
+        {
+            if (!FindXboxSavesInZip(path, found, why))
+            {
+                wxMessageBox(why, "Import Xbox saves", wxOK | wxICON_ERROR, this);
+                return;
+            }
+        }
+        else
+        {
+            FoundXboxSave save;
+            save.source = path;
+            if (!ReadFileInto(path, save.xsv))
+            {
+                wxMessageBox("Could not read " + path + ".", "Import Xbox saves",
+                             wxOK | wxICON_ERROR, this);
+                return;
+            }
+
+            const wxString meta = wxFileName(path).GetPathWithSep() + "SaveMeta.xbx";
+            if (wxFileName::FileExists(meta))
+            {
+                ReadFileInto(meta, save.meta);
+            }
+            found.push_back(save);
+        }
+
+        ImportSaves(found);
+    }
+
+    void ConfigFrame::OnSaveOpen(wxCommandEvent&)
+    {
+        char folder[kSavesModelMaxPath];
+        SavesModelFolder(folder, sizeof(folder));
+        OpenFolder(wxString::FromUTF8(folder));
     }
 
 } // namespace
