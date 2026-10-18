@@ -19,5 +19,6 @@ cd bin
 set BFBB_TF2BRIDGE=1
 set BFBB_TF2BRIDGE_SPLASH_WRAP=1
 set BFBB_TF2BRIDGE_DIR=D:\bfbbpc\bfbb\bin\here
+set BFBB_TF2BRIDGE_MELEE_KNOCKBACK_MULT=1.5
 bfbb.exe
 @pause

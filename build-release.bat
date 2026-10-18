@@ -15,4 +15,7 @@ rem Puts bfbb.exe, the DLLs it needs and bfbb_config.exe in bin\.
 rem
 rem The first build of a fresh directory also compiles wxWidgets, which the
 rem settings program is drawn in. See tools\pcbuild.bat.
+set VCPKG_ROOT=D:\vcpkg
+set VCPKG_INSTALLED_DIR=D:\vcpkg\installed
+set BFBB_VCPKG=D:\vcpkg\installed\x86-windows
 call "%~dp0tools\pcbuild.bat" Release %1 %2
