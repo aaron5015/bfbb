@@ -356,6 +356,25 @@ static float TF2Bridge_GetBoundRadius(const xBound& bound)
 
 static bool IsTF2BridgeRobot(const zNPCCommon* npc);
 
+// Convert TF2 weapon damage into a rough BFBB HP scale. Chuck's horizontal
+// launch gets a capped bonus only for damage beyond his remaining HP. This is
+// intentionally a tuning estimate: TF2 damage and BFBB HP are not identical.
+static float TF2Bridge_ImpactKnockbackMultiplier(zNPCCommon* npc, float requested, float sourceDamage)
+{
+    if (!(requested >= 0.1f && requested <= 5.0f))
+        requested = 1.5f;
+
+    if (npc == NULL || npc->SelfType() != NPC_TYPE_CHUCK || sourceDamage <= 0.0f)
+        return requested;
+
+    const float damageInBfbbHp = sourceDamage / 35.0f;
+    const float remainingHp = (float)MAX(1, npc->hitpoints);
+    const float overflowDamage = MAX(0.0f, damageInBfbbHp - remainingHp);
+    const float overflowScale = 1.0f + MIN(2.0f, overflowDamage * 0.5f);
+    return MIN(5.0f, requested * overflowScale);
+}
+
+
 // ---------------------------------------------------------------------------
 // Rocket explosion, TF2 rules (see zTF2Splash.h for the rules and what is added).
 //
@@ -673,14 +692,8 @@ static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEn
                 const float pushLen = sqrtf(push.x * push.x + push.z * push.z);
                 sPendingKnockbackDirX = pushLen > 0.001f ? push.x / pushLen : 0.0f;
                 sPendingKnockbackDirZ = pushLen > 0.001f ? push.z / pushLen : 1.0f;
-                float requested = rocket->knockbackMultiplier;
-                if (!(requested >= 0.1f && requested <= 5.0f)) requested = 1.5f;
-                sPendingKnockbackMultiplier = requested;
-                if (npc->SelfType() == NPC_TYPE_CHUCK)
-                {
-                    const float overflowDamage = MAX(0.0f, damage / 35.0f - (float)MAX(1, npc->hitpoints));
-                    sPendingKnockbackMultiplier = MIN(5.0f, requested * (1.0f + MIN(2.0f, overflowDamage * 0.5f)));
-                }
+                sPendingKnockbackMultiplier =
+                    TF2Bridge_ImpactKnockbackMultiplier(npc, rocket->knockbackMultiplier, damage);
                 sPendingKnockbackTarget = npc;
                 sPendingKnockbackOverride = true;
             }
@@ -743,7 +756,7 @@ static void TF2Bridge_ProcessRockets(const BridgeIntentPacket* in)
                                      in->rocketPos[i][2], in->scale);
         rocket->radius = in->rocketRadius[i] / in->scale;
         rocket->damage = in->rocketDamage[i];
-        rocket->knockbackMultiplier = in->knockbackMultiplier;
+        rocket->knockbackMultiplier = in->rocketKnockbackMultiplier[i];
         rocket->debugTime = debugTime;
 
         // Already exploded in BFBB. TF2 may not have removed the entity yet (or the
@@ -1229,21 +1242,10 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
             sPendingKnockbackDirZ = dir.z / pushLen;
         }
 
-        float requested = in->knockbackMultiplier;
-        if (!(requested >= 0.1f && requested <= 5.0f))
-            requested = 1.5f;
-        sPendingKnockbackMultiplier = requested;
-
-        // Chuck's launch is horizontal rather than gravity-driven. Normalize
-        // Source damage to approximate BFBB HP units (35 damage ~= one standard
-        // melee hit) and let only overflow extend his launch, with a hard cap.
-        if (best->SelfType() == NPC_TYPE_CHUCK && in->weaponDamage > 0.0f)
-        {
-            const float equivalentDamage = in->weaponDamage / 35.0f;
-            const float overflowDamage = MAX(0.0f, equivalentDamage - (float)MAX(1, best->hitpoints));
-            const float overflowScale = 1.0f + MIN(2.0f, overflowDamage * 0.5f);
-            sPendingKnockbackMultiplier = MIN(5.0f, requested * overflowScale);
-        }
+        // Use the item's resolved attribute, then apply Chuck's capped
+        // overflow bonus using the estimated damage and his pre-hit HP.
+        sPendingKnockbackMultiplier =
+            TF2Bridge_ImpactKnockbackMultiplier(best, in->knockbackMultiplier, in->weaponDamage);
 
         sPendingKnockbackTarget = best;
         sPendingKnockbackOverride = true;

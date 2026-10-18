@@ -76,6 +76,7 @@ struct BridgeIntentPacket
     float rocketPos[BRIDGE_MAX_ROCKETS][3];
     float rocketRadius[BRIDGE_MAX_ROCKETS];
     float rocketDamage[BRIDGE_MAX_ROCKETS];
+    float rocketKnockbackMultiplier[BRIDGE_MAX_ROCKETS];
     float rocketDebugLifetime;
 };
 

@@ -7178,7 +7178,7 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
 
     if (hasBridgeKnockback)
     {
-        printf("bfbb: tf2bridge -- melee knockback consumed type=%d target=%p mult=%.2f\n",
+        printf("bfbb: tf2bridge -- impact knockback consumed type=%d target=%p mult=%.2f\n",
             (int)npc->SelfType(), (void*)npc, (double)overrideMultiplier);
     }
 
