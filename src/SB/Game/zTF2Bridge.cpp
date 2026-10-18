@@ -1198,10 +1198,15 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     best->Damage(DMGTYP_SIDE, NULL, &dir);
     // Chuck's hover logic doesn't use the normal gravity launch. Apply a direct
     // horizontal impulse scaled by the active weapon and any estimated overflow.
-    if (best->SelfType() == NPC_TYPE_CHUCK && best->IsAlive() && best->frame != NULL)
+    if (best->SelfType() == NPC_TYPE_CHUCK && best->IsAlive() && best->frame != NULL &&
+        sPendingKnockbackOverride && sPendingKnockbackTarget == best)
     {
+        // Only take this path if Chuck's custom goal did not consume the normal
+        // override during Damage(); avoid applying the same impulse twice.
         best->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
         best->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
+        sPendingKnockbackTarget = NULL;
+        sPendingKnockbackOverride = false;
     }
     if (IsTF2BridgeRobot(best))
         printf("bfbb: tf2bridge -- knockback offered type=%d target=%p mult=%.2f\n",
