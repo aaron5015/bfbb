@@ -16,6 +16,7 @@
 #include "zScene.h"
 #include "zNPCMgr.h"
 #include "zNPCTypeCommon.h"
+#include "zNPCTypeRobot.h"
 #include "xBound.h"
 #include "xScene.h"
 
@@ -368,7 +369,7 @@ static float TF2Bridge_ImpactKnockbackMultiplier(zNPCCommon* npc, float requeste
         return requested;
 
     const float damageInBfbbHp = sourceDamage / 35.0f;
-    const float remainingHp = (float)MAX(1, npc->hitpoints);
+    const float remainingHp = (float)MAX(1, ((zNPCRobot*)npc)->hitpoints);
     const float overflowDamage = MAX(0.0f, damageInBfbbHp - remainingHp);
     const float overflowScale = 1.0f + MIN(2.0f, overflowDamage * 0.5f);
     return MIN(5.0f, requested * overflowScale);
@@ -1145,7 +1146,7 @@ static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float s
         sPendingKnockbackMultiplier = requested;
         if (best->SelfType() == NPC_TYPE_CHUCK && in->weaponDamage > 0.0f)
         {
-            const float overflowDamage = MAX(0.0f, in->weaponDamage / 35.0f - (float)MAX(1, best->hitpoints));
+            const float overflowDamage = MAX(0.0f, in->weaponDamage / 35.0f - (float)MAX(1, ((zNPCRobot*)best)->hitpoints));
             sPendingKnockbackMultiplier = MIN(5.0f, requested * (1.0f + MIN(2.0f, overflowDamage * 0.5f)));
         }
         sPendingKnockbackTarget = best;
