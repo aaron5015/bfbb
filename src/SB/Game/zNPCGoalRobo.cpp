@@ -30,6 +30,7 @@
 #include "zNPCSupplement.h"
 #include "zParPTank.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 enum en_copcntr
 {
@@ -7174,6 +7175,12 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
     float overrideMultiplier = 1.0f;
     const bool hasBridgeKnockback =
         zTF2Bridge_ConsumeKnockbackOverride(npc, &overrideDirX, &overrideDirZ, &overrideMultiplier) != 0;
+
+    if (hasBridgeKnockback)
+    {
+        printf("bfbb: tf2bridge -- melee knockback consumed type=%d target=%p mult=%.2f\n",
+            (int)npc->SelfType(), (void*)npc, (double)overrideMultiplier);
+    }
 
     flg_knock = 0;
     floorBounce = 0;
