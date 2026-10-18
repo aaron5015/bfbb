@@ -44,6 +44,12 @@ void iConfigEditClose(iConfigEditFile* file);
 // unless it was changed.
 const char* iConfigEditGet(const iConfigEditFile* file, const char* section, const char* name);
 
+// The section and name of the index'th setting line in the file, in file
+// order, or false past the last. Comments, headers and blank lines are not
+// counted. Both strings point into the file and last until it changes.
+bool iConfigEditKeyAt(const iConfigEditFile* file, S32 index, const char** section,
+                      const char** name);
+
 // Set it, inserting the line if the file does not have it. Returns false only
 // when the file has no room left for a new line.
 bool iConfigEditSet(iConfigEditFile* file, const char* section, const char* name,

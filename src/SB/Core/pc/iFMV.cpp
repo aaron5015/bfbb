@@ -3,6 +3,7 @@
 #include "iFile.h"
 #include "iFMVAudio.h"
 #include "iFMVDecoder.h"
+#include "iModFolder.h"
 #include "iRasterFill.h"
 #include "iPadHost.h"
 #include "iTime.h"
@@ -270,12 +271,10 @@ U32 iFMVPlay(char* filename, U32 buttons, F32 time, bool skippable, bool lockCon
     iFMVDecoderInfo info;
     iFMVDecoder* dec = NULL;
 
-    const char* mod = iFileModRoot();
-    if (mod[0] != 0)
+    char modbuf[512];
+    if (iModFolderResolve(iFileModRoot(), modbuf, sizeof(modbuf) - 1))
     {
-        char modbuf[512];
-        size_t n = strlen(mod);
-        snprintf(modbuf, sizeof(modbuf), "%s%s", mod, mod[n - 1] == '/' ? "" : "/");
+        strcat(modbuf, "/");
         dec = openAnyCase(path, sizeof(path), modbuf, filename, &info);
     }
 

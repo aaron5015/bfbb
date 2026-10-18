@@ -50,7 +50,7 @@ const char* iFileAssetRoot();
 // PC-only. The mod folder: `[assets] mod` from config.ini, or BFBB_MOD when
 // that is set. "" when there is none. A file under it is read in place of the
 // asset root's file at the same relative path; the asset root is never
-// written to.
+// written to. A relative path is found as iModFolderResolve finds it.
 const char* iFileModRoot();
 
 // PC-only. The last component of the mod folder iFileInit accepted, like

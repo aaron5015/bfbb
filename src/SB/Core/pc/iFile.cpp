@@ -1,6 +1,7 @@
 #include "iFile.h"
 #include "iConfig.h"
 #include "iHost.h"
+#include "iModFolder.h"
 #include "iSaveFile.h"
 
 #include "xFile.h"
@@ -168,16 +169,16 @@ void iFileInit()
     const char* mod = iFileModRoot();
     if (mod[0] != 0)
     {
-        if (!iHostPathExists(mod))
+        char folder[512];
+        if (!iModFolderResolve(mod, folder, sizeof(folder) - 1))
         {
             printf("bfbb: mod folder not found, ignored: %s\n", mod);
             fflush(stdout);
         }
         else
         {
-            size_t n = strlen(mod);
-            snprintf(sModRoot, sizeof(sModRoot), "%s%s", mod, mod[n - 1] == '/' ? "" : "/");
-            printf("bfbb: mod folder: %s\n", mod);
+            snprintf(sModRoot, sizeof(sModRoot), "%s/", folder);
+            printf("bfbb: mod folder: %s\n", folder);
             fflush(stdout);
         }
     }

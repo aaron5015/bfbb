@@ -42,6 +42,12 @@ at load rather than ignored.
                         whose PLAT is not the Xbox's is skipped with a message
                         and the original is read. Each replaced file is logged
                         once. `BFBB_MOD` overrides it. iModOverride in iFile.cpp.
+                        A relative path is tried in the working directory,
+                        then beside the executable; bfbb_config installs mods
+                        to `mods/` there and writes `mods/<name>`. A mod.ini
+                        in the mod's root describes it in [mod] and sets
+                        config.ini settings in its other sections, without
+                        writing them to config.ini. iModFolder.h.
                         Saves go to bfbb/mods/<folder name>/saves under the
                         per-user data folder instead of bfbb/saves, unless
                         `save_folder` or `BFBB_SAVE_DIR` names one.

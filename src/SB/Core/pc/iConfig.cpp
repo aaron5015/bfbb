@@ -5,6 +5,7 @@
 #include "iConfigEdit.h"
 #include "iConfigTable.h"
 #include "iHost.h"
+#include "iModFolder.h"
 #include "iPadBind.h"
 
 #include <stdio.h>
@@ -35,6 +36,12 @@ namespace
     Entry sEntries[kMaxEntries];
     S32 sCount;
     S32 sLoaded;
+
+    // The mod's mod.ini settings (iModFolder.h). They answer ahead of the file
+    // and are never written to it.
+    const S32 kMaxModEntries = 64;
+    Entry sModEntries[kMaxModEntries];
+    S32 sModCount;
     char sPath[kMaxPath];
     S32 sHavePath;
 
@@ -202,11 +209,30 @@ namespace
         return NULL;
     }
 
-    // What a query should read, in order: the file, then the table's default,
-    // then the caller's fallback for a key that is in neither. The middle step
-    // is what keeps the written defaults and the running defaults the same.
+    S32 findModEntry(const char* key)
+    {
+        for (S32 i = 0; i < sModCount; i++)
+        {
+            if (iHostStrCaseCmp(sModEntries[i].key, key) == 0)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // What a query should read, in order: the mod's mod.ini, the file, then
+    // the table's default, then the caller's fallback for a key that is in
+    // none of them. The table step is what keeps the written defaults and the
+    // running defaults the same.
     const char* valueOf(const char* key)
     {
+        const S32 mod = findModEntry(key);
+        if (mod >= 0)
+        {
+            return sModEntries[mod].value;
+        }
+
         const Entry* e = findEntry(key);
         if (e != NULL)
         {
@@ -480,6 +506,113 @@ bool iConfigWriteDefaults(const char* path)
     return true;
 }
 
+namespace
+{
+    void addModSetting(const char* key, const char* value, void* path)
+    {
+        // The mod folder is chosen by these two; a mod cannot move itself.
+        if (iHostStrCaseCmp(key, "assets.mod") == 0 || iHostStrCaseCmp(key, "assets.path") == 0)
+        {
+            printf("bfbb: %s: %s cannot be set by a mod, ignored\n", (const char*)path, key);
+            return;
+        }
+
+        if (iConfigTableFind(key) == NULL && bindingDefault(key) == NULL)
+        {
+            printf("bfbb: %s: unknown setting '%s', ignored\n", (const char*)path, key);
+            return;
+        }
+
+        S32 at = findModEntry(key);
+        if (at < 0)
+        {
+            if (sModCount == kMaxModEntries)
+            {
+                printf("bfbb: %s: more than %d settings, the rest are ignored\n", (const char*)path,
+                       (int)kMaxModEntries);
+                return;
+            }
+            at = sModCount++;
+        }
+
+        snprintf(sModEntries[at].key, sizeof(sModEntries[at].key), "%s", key);
+        snprintf(sModEntries[at].value, sizeof(sModEntries[at].value), "%s", value);
+        printf("bfbb: the mod sets %s = %s\n", key, value);
+    }
+
+    // The settings the mod in use replaces, from its mod.ini. Read after the
+    // file, because the file is what names the mod.
+    void loadModSettings()
+    {
+        sModCount = 0;
+
+        const char* setting = getenv("BFBB_MOD");
+        if (setting == NULL || setting[0] == '\0')
+        {
+            setting = valueOf("assets.mod");
+        }
+
+        char folder[kMaxPath];
+        if (!iModFolderResolve(setting, folder, sizeof(folder)))
+        {
+            return;
+        }
+
+        char path[kMaxPath + 16];
+        snprintf(path, sizeof(path), "%s/mod.ini", folder);
+        iModFolderSettings(folder, addModSetting, path);
+        fflush(stdout);
+    }
+
+    void loadFile()
+    {
+        const char* explicitPath = getenv("BFBB_CONFIG");
+        if (explicitPath != NULL && explicitPath[0] != '\0')
+        {
+            if (!readFile(explicitPath))
+            {
+                // Named explicitly and not there: create it where it was asked
+                // for. A path someone typed is a stronger statement about where
+                // the file belongs than the search order is.
+                if (iConfigWriteDefaults(explicitPath))
+                {
+                    snprintf(sPath, sizeof(sPath), "%s", explicitPath);
+                    sHavePath = 1;
+                    printf("bfbb: BFBB_CONFIG names '%s', which did not exist; wrote the defaults "
+                           "there\n",
+                           explicitPath);
+                }
+                else
+                {
+                    printf("bfbb: BFBB_CONFIG names '%s', which could not be opened or created; "
+                           "using defaults\n",
+                           explicitPath);
+                }
+                fflush(stdout);
+            }
+            return;
+        }
+
+        if (readFile("config.ini"))
+        {
+            return;
+        }
+
+        char beside[kMaxPath];
+        if (iHostExeDir(beside, sizeof(beside)))
+        {
+            char path[kMaxPath];
+            snprintf(path, sizeof(path), "%s/config.ini", beside);
+            if (readFile(path))
+            {
+                return;
+            }
+        }
+
+        createDefaultFile();
+    }
+} // namespace
+
 void iConfigLoad()
 {
     if (sLoaded)
@@ -492,50 +625,8 @@ void iConfigLoad()
     // otherwise recurse.
     sLoaded = 1;
 
-    const char* explicitPath = getenv("BFBB_CONFIG");
-    if (explicitPath != NULL && explicitPath[0] != '\0')
-    {
-        if (!readFile(explicitPath))
-        {
-            // Named explicitly and not there: create it where it was asked
-            // for. A path someone typed is a stronger statement about where
-            // the file belongs than the search order is.
-            if (iConfigWriteDefaults(explicitPath))
-            {
-                snprintf(sPath, sizeof(sPath), "%s", explicitPath);
-                sHavePath = 1;
-                printf("bfbb: BFBB_CONFIG names '%s', which did not exist; wrote the defaults "
-                       "there\n",
-                       explicitPath);
-            }
-            else
-            {
-                printf("bfbb: BFBB_CONFIG names '%s', which could not be opened or created; "
-                       "using defaults\n",
-                       explicitPath);
-            }
-            fflush(stdout);
-        }
-        return;
-    }
-
-    if (readFile("config.ini"))
-    {
-        return;
-    }
-
-    char beside[kMaxPath];
-    if (iHostExeDir(beside, sizeof(beside)))
-    {
-        char path[kMaxPath];
-        snprintf(path, sizeof(path), "%s/config.ini", beside);
-        if (readFile(path))
-        {
-            return;
-        }
-    }
-
-    createDefaultFile();
+    loadFile();
+    loadModSettings();
 }
 
 const char* iConfigPath()
@@ -565,6 +656,19 @@ namespace
                 sRemovedCount--;
                 return;
             }
+        }
+    }
+
+    // A setting the player changes in the game is theirs from then on, even
+    // where the mod's mod.ini named it.
+    void forgetModSetting(const char* key)
+    {
+        const S32 at = findModEntry(key);
+        if (at >= 0)
+        {
+            memmove(&sModEntries[at], &sModEntries[at + 1],
+                    (size_t)(sModCount - at - 1) * sizeof(Entry));
+            sModCount--;
         }
     }
 
@@ -601,6 +705,7 @@ void iConfigUnset(const char* key)
         }
     }
 
+    forgetModSetting(lower);
     forgetRemoved(lower);
     if (sRemovedCount < kMaxRemoved)
     {
@@ -616,6 +721,7 @@ void iConfigSet(const char* key, const char* value)
     snprintf(lower, sizeof(lower), "%s", key);
     lowerInPlace(lower);
     forgetRemoved(lower);
+    forgetModSetting(lower);
 
     for (S32 i = 0; i < sCount; i++)
     {

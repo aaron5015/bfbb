@@ -4,6 +4,7 @@
 
 #include "config_model.h"
 #include "iHost.h"
+#include "iModFolder.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,14 +82,12 @@ namespace
 
 void SavesModelFolder(char* out, size_t outSize)
 {
-    // The game names a mod's saves after its folder, and only for a folder
-    // that is there.
-    const char* modFolder = textOf("assets", "mod");
+    char folder[kSavesModelMaxPath];
     char mod[kSavesModelMaxPath];
     mod[0] = '\0';
-    if (modFolder[0] != '\0' && iHostPathExists(modFolder))
+    if (iModFolderResolve(textOf("assets", "mod"), folder, sizeof(folder)))
     {
-        iSaveFileLeaf(modFolder, mod, sizeof(mod));
+        iSaveFileLeaf(folder, mod, sizeof(mod));
     }
 
     iSaveFileRoot(textOf("game", "save_folder"), mod, out, outSize);

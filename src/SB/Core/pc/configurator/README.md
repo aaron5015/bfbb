@@ -103,11 +103,30 @@ capture dialog is open, with background events allowed because the focused
 window is wx's. Left and right Shift, Ctrl and Alt are told apart on Windows;
 elsewhere they capture as the either-side name.
 
+## Mods
+
+The `mods` page lists the folders in `mods/` beside the executable, plus the
+folder `[assets] mod` names if it is elsewhere. Selecting one sets
+`[assets] mod`, saved with every other setting; "Original game" clears it.
+The `assets` page does not draw a row for `mod`; this page is its control.
+A mod's name, version, author and description come from the `[mod]` section of
+its `mod.ini`, and the page lists the settings its other sections set. The
+format is in `../iModFolder.h`.
+
+Install from zip unpacks into a dot folder in `mods/`, finds the asset root in
+it from where the `.HIP` and `.HOP` files are (`iModFolderFindAssets`), and
+moves that folder to `mods/<name>`. Add a folder copies one in, or picks it
+where it is. Remove deletes a folder in `mods/` and leaves its saves. Those
+three change the disk at once.
+
+`mods_model.cpp` is the page without a window.
+
 ## Saves
 
 The `saves` page shows the three games in the save folder the game will use
-with the settings as the window holds them. `../iSaveFile.cpp` holds that
-folder's policy for the game and this program both.
+with the settings as the window holds them, which follows the mod picked on
+the `mods` page. `../iSaveFile.cpp` holds that folder's policy for the game and
+this program both.
 
 Import Xbox save takes a `GameData.xsv`, with the `SaveMeta.xbx` beside it, or
 a zip of Xbox save folders. A PC save is the same bytes without the Xbox file's

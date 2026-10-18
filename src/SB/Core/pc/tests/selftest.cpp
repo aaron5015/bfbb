@@ -18,6 +18,7 @@
 #include <types.h>
 
 #include "config_model.h"
+#include "mods_model.h"
 #include "saves_model.h"
 #include "iBoot.h"
 #include "iConfig.h"
@@ -36,6 +37,7 @@
 #include "xSnd.h"
 #include "iMath.h"
 #include "iMemMgr.h"
+#include "iModFolder.h"
 #include "iSaveFile.h"
 #include "iCameraLook.h"
 #include "iPadKeyboard.h"
@@ -274,9 +276,39 @@ static void test_config()
     fwrite(kFile, 1, sizeof(kFile) - 1, f);
     fclose(f);
 
+    // A mod whose mod.ini replaces one setting, tries to move the asset root,
+    // and names a setting that does not exist. Loaded with the file, so it is
+    // set up here.
+    char modDir[512];
+    char modIni[512];
+    snprintf(modDir, sizeof(modDir), "%s/testmod", dir);
+    snprintf(modIni, sizeof(modIni), "%s/mod.ini", modDir);
+    iHostMakeDir(modDir);
+    {
+        static const char kModIni[] = "[mod]\n"
+                                      "name = Test Mod\n"
+                                      "[video]\n"
+                                      "fov = 75\n"
+                                      "nosuch = 1\n"
+                                      "[assets]\n"
+                                      "path = elsewhere\n";
+        FILE* m = fopen(modIni, "wb");
+        if (m != NULL)
+        {
+            fwrite(kModIni, 1, sizeof(kModIni) - 1, m);
+            fclose(m);
+        }
+    }
+    iHostSetEnv("BFBB_MOD", modDir);
+
     check(iHostSetEnv("BFBB_CONFIG", path), "BFBB_CONFIG can be set");
 
     iConfigLoad();
+
+    iHostSetEnv("BFBB_MOD", NULL);
+
+    check(iConfigGetFloat("video.fov", 0.0f) == 75.0f, "a setting the mod's mod.ini gives wins");
+    check(iConfigGetBool("video.nosuch", TRUE) == TRUE, "an unknown setting in mod.ini is dropped");
 
     check(iConfigPath() != NULL && strcmp(iConfigPath(), path) == 0,
           "iConfigPath is the file BFBB_CONFIG named");
@@ -307,7 +339,7 @@ static void test_config()
     // or split at the space, and the value has to be longer than a word --
     // this is the setting that decides how much room an entry gets.
     check(strcmp(iConfigGetString("assets.path", ""), "D:\\my games\\bfbb xbox") == 0,
-          "the asset path survives spaces and backslashes");
+          "the asset path survives spaces and backslashes, and a mod cannot move it");
 
     // An unknown key is rejected at load, so it cannot be read back even under
     // its own name. That is what makes the report at load a guarantee rather
@@ -433,7 +465,8 @@ static void test_config()
     iConfigSet("XBOX.glow", "on");
     iConfigSet("video.fov", "90");
     check(iConfigGetBool("xbox.glow", FALSE) == TRUE, "a set value is answered at once");
-    check(iConfigGetFloat("video.fov", 0.0f) == 90.0f, "and so is one the file never had");
+    check(iConfigGetFloat("video.fov", 0.0f) == 90.0f,
+          "and so is one the file never had, over the mod's");
     check(iConfigSave(), "the changed settings save");
     {
         char saved[8192];
@@ -448,6 +481,7 @@ static void test_config()
         check(strstr(saved, "Glow   =   on") != NULL, "the set value replaces the line's own");
         check(strstr(saved, "OFF") == NULL, "and the old value is gone");
         check(strstr(saved, "fov = 90") != NULL, "a setting the file lacked is added");
+        check(strstr(saved, "fov = 75") == NULL, "and the mod's value is never written");
         check(strstr(saved, "; the port's settings") != NULL && strstr(saved, "glwo = off") != NULL,
               "the comment and the unknown line survive the save");
     }
@@ -529,6 +563,8 @@ static void test_config()
     }
 
     iHostRemoveFile(written);
+    iHostRemoveFile(modIni);
+    iHostRemoveDir(modDir);
     iHostRemoveDir(dir);
 }
 
@@ -2003,6 +2039,214 @@ static bool bind_says(const char* text, U32 held)
 
 #define FAKE(x) (1u << FAKE_##x)
 
+// Mod folders as the game and bfbb_config both find them: the setting, the
+// mod.ini, and the asset root inside an unpacked archive.
+static void test_mod_folder()
+{
+    printf("iModFolder\n");
+
+    char dir[512];
+    if (!scratch_dir("modfolder", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+
+    char got[512];
+    char typed[512];
+    snprintf(typed, sizeof(typed), "%s/", dir);
+    check(iModFolderResolve(typed, got, sizeof(got)) && strcmp(got, dir) == 0,
+          "a folder resolves to itself, without its trailing slash");
+
+    snprintf(typed, sizeof(typed), "%s", dir);
+    for (char* c = typed; *c != '\0'; c++)
+    {
+        if (*c == '/')
+        {
+            *c = '\\';
+        }
+    }
+    check(iModFolderResolve(typed, got, sizeof(got)) && strcmp(got, dir) == 0,
+          "and so does the same folder typed with backslashes");
+
+    snprintf(typed, sizeof(typed), "%s/nosuch", dir);
+    check(!iModFolderResolve(typed, got, sizeof(got)), "a folder that is not there does not");
+    check(!iModFolderResolve("", got, sizeof(got)), "nor does an empty setting");
+
+    char mod[512];
+    snprintf(mod, sizeof(mod), "%s/Cool Mod", dir);
+    iHostMakeDir(mod);
+
+    iModInfo info;
+    iModFolderInfo(mod, &info);
+    check(!info.hasIni && strcmp(info.name, "Cool Mod") == 0,
+          "a mod without a mod.ini is named for its folder");
+
+    static const char kIni[] = "[mod]\n"
+                               "name = The Cool Mod\n"
+                               "version = 1.2\n"
+                               "author = someone ; a comment\n"
+                               "[Video]\n"
+                               "FOV = 75\n"
+                               "[xbox]\n"
+                               "glow = off\n";
+    write_scratch(mod, "mod.ini", kIni, sizeof(kIni) - 1);
+
+    iModFolderInfo(mod, &info);
+    check(info.hasIni && strcmp(info.name, "The Cool Mod") == 0 && strcmp(info.version, "1.2") == 0,
+          "mod.ini's [mod] section names it and gives its version");
+    check(strcmp(info.author, "someone") == 0, "and its author, without the comment");
+
+    struct Seen
+    {
+        char keys[4][64];
+        char values[4][64];
+        S32 count;
+    } seen = {};
+    struct Collect
+    {
+        static void fn(const char* key, const char* value, void* context)
+        {
+            Seen* s = (Seen*)context;
+            if (s->count < 4)
+            {
+                snprintf(s->keys[s->count], sizeof(s->keys[0]), "%s", key);
+                snprintf(s->values[s->count], sizeof(s->values[0]), "%s", value);
+                s->count++;
+            }
+        }
+    };
+    const S32 n = iModFolderSettings(mod, Collect::fn, &seen);
+    check(n == 2 && seen.count == 2, "every other section is settings, [mod] not among them");
+    check(strcmp(seen.keys[0], "video.fov") == 0 && strcmp(seen.values[0], "75") == 0,
+          "named section.name, folded to lower case");
+    check(strcmp(seen.keys[1], "xbox.glow") == 0 && strcmp(seen.values[1], "off") == 0,
+          "in file order");
+
+    // An archive's own folder around the mod, and a readme beside it.
+    char pack[512];
+    char packRoot[512];
+    char packHb[512];
+    snprintf(pack, sizeof(pack), "%s/pack", dir);
+    snprintf(packRoot, sizeof(packRoot), "%s/BFBBMix", pack);
+    snprintf(packHb, sizeof(packHb), "%s/hb", packRoot);
+    iHostMakeDir(pack);
+    iHostMakeDir(packRoot);
+    iHostMakeDir(packHb);
+    write_scratch(pack, "readme.txt", "x", 1);
+    write_scratch(packRoot, "boot.HIP", "x", 1);
+    write_scratch(packHb, "hb01.HIP", "x", 1);
+    check(iModFolderFindAssets(pack, got, sizeof(got)) && strcmp(got, packRoot) == 0,
+          "an archive's asset root is the folder holding its packages");
+
+    // Only level packages: the root is above their level folder.
+    char levels[512];
+    char levelsHb[512];
+    snprintf(levels, sizeof(levels), "%s/levels", dir);
+    snprintf(levelsHb, sizeof(levelsHb), "%s/HB", levels);
+    iHostMakeDir(levels);
+    iHostMakeDir(levelsHb);
+    write_scratch(levelsHb, "hb01.hip", "x", 1);
+    check(iModFolderFindAssets(levels, got, sizeof(got)) && strcmp(got, levels) == 0,
+          "a package in its level folder puts the root above that folder");
+
+    char empty[512];
+    snprintf(empty, sizeof(empty), "%s/empty", dir);
+    iHostMakeDir(empty);
+    write_scratch(empty, "notes.txt", "x", 1);
+    check(!iModFolderFindAssets(empty, got, sizeof(got)), "a folder with no packages is no mod");
+
+    check(ModsModelRemoveTree(dir) && !iHostPathExists(dir),
+          "a folder and everything under it can be deleted");
+}
+
+// Installing, picking and removing a mod in the library beside the
+// executable. Under a name nobody would give a mod, and the library folder is
+// removed afterwards only if this left it empty.
+static void test_mods_model()
+{
+    printf("mods_model\n");
+
+    char dir[512];
+    if (!scratch_dir("modsmodel", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/config.ini", dir);
+    write_scratch(dir, "config.ini", "[assets]\nmod =\n", 15);
+
+    char why[512];
+    if (!ConfigModelOpen(path, why, sizeof(why)))
+    {
+        check(false, "the model opens a file");
+        ModsModelRemoveTree(dir);
+        return;
+    }
+
+    const bool hadLibrary = iHostPathExists(ModsModelLibrary());
+
+    char staged[512];
+    check(ModsModelStage(staged, sizeof(staged), why, sizeof(why)), "a staging folder is made");
+
+    // An archive's own folder around the mod, as a zip unpacks.
+    char inner[600];
+    char innerHb[600];
+    snprintf(inner, sizeof(inner), "%s/Selftest Mod 5.0", staged);
+    snprintf(innerHb, sizeof(innerHb), "%s/hb", inner);
+    iHostMakeDir(inner);
+    iHostMakeDir(innerHb);
+    write_scratch(inner, "boot.HIP", "x", 1);
+    write_scratch(innerHb, "hb01.HIP", "x", 1);
+    write_scratch(staged, "readme.txt", "x", 1);
+
+    char name[256];
+    ModsModelSuggestName(staged, "C:/Downloads/thing.zip", name, sizeof(name));
+    check(strcmp(name, "Selftest Mod 5.0") == 0, "the suggested name is the mod's own folder");
+
+    check(!ModsModelNameOk("a/b", why, sizeof(why)) && !ModsModelNameOk(".x", why, sizeof(why)),
+          "a name with a separator or a leading dot is refused");
+
+    char unique[64];
+    snprintf(unique, sizeof(unique), "bfbb selftest %llu",
+             (unsigned long long)(iHostMonotonicNs() % 1000000000ULL));
+
+    S32 index = -1;
+    check(ModsModelInstall(staged, unique, &index, why, sizeof(why)) && index >= 0,
+          "it installs into the library under the name given");
+    check(!iHostPathExists(staged), "and the staging folder is gone, readme and all");
+
+    if (index >= 0)
+    {
+        const ModsModelEntry* e = ModsModelAt(index);
+        char boot[700];
+        snprintf(boot, sizeof(boot), "%s/boot.HIP", e->folder);
+        check(e->inLibrary && iHostPathExists(boot), "the asset root is the mod's folder");
+
+        char want[300];
+        snprintf(want, sizeof(want), "mods/%s", unique);
+        check(strcmp(e->setting, want) == 0,
+              "and [assets] mod names it relative to the executable");
+
+        check(ModsModelActive() == -1, "nothing is picked until it is chosen");
+        ModsModelUse(index);
+        check(ModsModelActive() == index && ConfigModelDirty(), "choosing it sets [assets] mod");
+
+        check(ModsModelRemove(index, why, sizeof(why)), "it can be removed");
+        check(ModsModelActive() == -1, "which puts the original game back");
+    }
+
+    if (!hadLibrary)
+    {
+        iHostRemoveDir(ModsModelLibrary());
+    }
+
+    ConfigModelClose();
+    ModsModelRemoveTree(dir);
+}
+
 static void put32(U8* p, U32 v)
 {
     p[0] = (U8)v;
@@ -2123,8 +2367,7 @@ static void test_saves_model()
     if (!ConfigModelOpen(path, why, sizeof(why)))
     {
         check(false, "the model opens a file");
-        iHostRemoveFile(path);
-        iHostRemoveDir(dir);
+        ModsModelRemoveTree(dir);
         return;
     }
 
@@ -2176,11 +2419,7 @@ static void test_saves_model()
 
     iHostSetEnv("BFBB_SAVE_DIR", NULL);
     ConfigModelClose();
-    iHostRemoveFile(file);
-    iHostRemoveFile(bak);
-    iHostRemoveDir(saves);
-    iHostRemoveFile(path);
-    iHostRemoveDir(dir);
+    ModsModelRemoveTree(dir);
 }
 
 static void test_pad_bindings()
@@ -5550,6 +5789,8 @@ int main()
     test_mem();
     test_file();
     test_file_mod();
+    test_mod_folder();
+    test_mods_model();
     test_save_file();
     test_saves_model();
     test_idtag();
