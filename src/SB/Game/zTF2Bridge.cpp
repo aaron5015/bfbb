@@ -1262,8 +1262,8 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     {
         // Only take this path if Chuck's custom goal did not consume the normal
         // override during Damage(); avoid applying the same impulse twice.
-        best->frame->vel.x -= dir.x * 2.5f * sPendingKnockbackMultiplier;
-        best->frame->vel.z -= dir.z * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
         sPendingKnockbackTarget = NULL;
         sPendingKnockbackOverride = false;
     }
