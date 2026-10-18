@@ -1139,8 +1139,10 @@ static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float s
     if (IsTF2BridgeRobot(best))
     {
         const float pushLen = sqrtf(dir.x * dir.x + dir.z * dir.z);
-        sPendingKnockbackDirX = pushLen > 0.001f ? dir.x / pushLen : 0.0f;
-        sPendingKnockbackDirZ = pushLen > 0.001f ? dir.z / pushLen : 1.0f;
+        // The ray points from the TF2 player toward the target. Knockback must
+        // send the robot away from the attacker, opposite the ray direction.
+        sPendingKnockbackDirX = pushLen > 0.001f ? -dir.x / pushLen : 0.0f;
+        sPendingKnockbackDirZ = pushLen > 0.001f ? -dir.z / pushLen : -1.0f;
         float requested = in->knockbackMultiplier;
         if (!(requested >= 0.1f && requested <= 5.0f)) requested = 1.5f;
         sPendingKnockbackMultiplier = requested;
@@ -1156,8 +1158,8 @@ static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float s
     if (best->SelfType() == NPC_TYPE_CHUCK && best->IsAlive() && best->frame != NULL &&
         sPendingKnockbackOverride && sPendingKnockbackTarget == best)
     {
-        best->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
-        best->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.x -= dir.x * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.z -= dir.z * 2.5f * sPendingKnockbackMultiplier;
         sPendingKnockbackTarget = NULL;
         sPendingKnockbackOverride = false;
     }
@@ -1235,12 +1237,13 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
         if (pushLen < 0.001f)
         {
             sPendingKnockbackDirX = 0.0f;
-            sPendingKnockbackDirZ = 1.0f;
+            sPendingKnockbackDirZ = -1.0f;
         }
         else
         {
-            sPendingKnockbackDirX = dir.x / pushLen;
-            sPendingKnockbackDirZ = dir.z / pushLen;
+            // dir is the attack ray (player -> target), so reverse it for impact push.
+            sPendingKnockbackDirX = -dir.x / pushLen;
+            sPendingKnockbackDirZ = -dir.z / pushLen;
         }
 
         // Use the item's resolved attribute, then apply Chuck's capped
@@ -1262,8 +1265,8 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     {
         // Only take this path if Chuck's custom goal did not consume the normal
         // override during Damage(); avoid applying the same impulse twice.
-        best->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
-        best->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.x -= dir.x * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.z -= dir.z * 2.5f * sPendingKnockbackMultiplier;
         sPendingKnockbackTarget = NULL;
         sPendingKnockbackOverride = false;
     }
