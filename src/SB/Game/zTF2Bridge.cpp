@@ -88,6 +88,7 @@ struct TF2BridgeDebugRocket
     xVec3 impactNormal;
     float radius;
     float damage;
+    float knockbackMultiplier;
     float impactTime;
     xVec3 sweepStart;
     xVec3 sweepEnd;
@@ -664,7 +665,35 @@ static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEn
         push.z /= pl;
 
         if (damage > 0.0f && applyDamage)
+        {
+            sPendingKnockbackOverride = false;
+            sPendingKnockbackTarget = NULL;
+            if (IsTF2BridgeRobot(npc))
+            {
+                const float pushLen = sqrtf(push.x * push.x + push.z * push.z);
+                sPendingKnockbackDirX = pushLen > 0.001f ? push.x / pushLen : 0.0f;
+                sPendingKnockbackDirZ = pushLen > 0.001f ? push.z / pushLen : 1.0f;
+                float requested = rocket->knockbackMultiplier;
+                if (!(requested >= 0.1f && requested <= 5.0f)) requested = 1.5f;
+                sPendingKnockbackMultiplier = requested;
+                if (npc->SelfType() == NPC_TYPE_CHUCK)
+                {
+                    const float overflowDamage = MAX(0.0f, damage / 35.0f - (float)MAX(1, npc->hitpoints));
+                    sPendingKnockbackMultiplier = MIN(5.0f, requested * (1.0f + MIN(2.0f, overflowDamage * 0.5f)));
+                }
+                sPendingKnockbackTarget = npc;
+                sPendingKnockbackOverride = true;
+            }
             npc->Damage(DMGTYP_SIDE, NULL, &push);
+            if (npc->SelfType() == NPC_TYPE_CHUCK && npc->IsAlive() && npc->frame != NULL &&
+                sPendingKnockbackOverride && sPendingKnockbackTarget == npc)
+            {
+                npc->frame->vel.x += push.x * 2.5f * sPendingKnockbackMultiplier;
+                npc->frame->vel.z += push.z * 2.5f * sPendingKnockbackMultiplier;
+                sPendingKnockbackTarget = NULL;
+                sPendingKnockbackOverride = false;
+            }
+        }
 
         printf("bfbb: tf2bridge -- rocket splash type %d %s dist=%.2f/%.2f scale=%.2f damage=%.1f "
                "applyDamage=%d\n",
@@ -714,6 +743,7 @@ static void TF2Bridge_ProcessRockets(const BridgeIntentPacket* in)
                                      in->rocketPos[i][2], in->scale);
         rocket->radius = in->rocketRadius[i] / in->scale;
         rocket->damage = in->rocketDamage[i];
+        rocket->knockbackMultiplier = in->knockbackMultiplier;
         rocket->debugTime = debugTime;
 
         // Already exploded in BFBB. TF2 may not have removed the entity yet (or the
@@ -1090,7 +1120,33 @@ static void TF2Bridge_FireHitscanRay(const BridgeIntentPacket* in, const float s
         return;
     }
 
+    sPendingKnockbackOverride = false;
+    sPendingKnockbackTarget = NULL;
+    if (IsTF2BridgeRobot(best))
+    {
+        const float pushLen = sqrtf(dir.x * dir.x + dir.z * dir.z);
+        sPendingKnockbackDirX = pushLen > 0.001f ? dir.x / pushLen : 0.0f;
+        sPendingKnockbackDirZ = pushLen > 0.001f ? dir.z / pushLen : 1.0f;
+        float requested = in->knockbackMultiplier;
+        if (!(requested >= 0.1f && requested <= 5.0f)) requested = 1.5f;
+        sPendingKnockbackMultiplier = requested;
+        if (best->SelfType() == NPC_TYPE_CHUCK && in->weaponDamage > 0.0f)
+        {
+            const float overflowDamage = MAX(0.0f, in->weaponDamage / 35.0f - (float)MAX(1, best->hitpoints));
+            sPendingKnockbackMultiplier = MIN(5.0f, requested * (1.0f + MIN(2.0f, overflowDamage * 0.5f)));
+        }
+        sPendingKnockbackTarget = best;
+        sPendingKnockbackOverride = true;
+    }
     best->Damage(DMGTYP_SIDE, NULL, &dir);
+    if (best->SelfType() == NPC_TYPE_CHUCK && best->IsAlive() && best->frame != NULL &&
+        sPendingKnockbackOverride && sPendingKnockbackTarget == best)
+    {
+        best->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
+        best->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
+        sPendingKnockbackTarget = NULL;
+        sPendingKnockbackOverride = false;
+    }
     printf("bfbb: tf2bridge -- hitscan ray hit NPC type %d at %.2f dir %.3f %.3f %.3f\n",
         (int)best->SelfType(), (double)bestDist,
         (double)dir.x, (double)dir.y, (double)dir.z);
