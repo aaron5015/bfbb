@@ -402,6 +402,8 @@ void NPCGlyph::Render()
         return;
     }
 
+    iPadGlyphModelBegin(model, typ_glyph == NPC_GLYPH_TALK || typ_glyph == NPC_GLYPH_TALKOTHER);
+
 #ifdef PLATFORM_PC
     // A floating sign, not a surface. Marked on the model rather than bracketed
     // around this call, because xModelRender only queues it and the draw itself
@@ -419,6 +421,8 @@ void NPCGlyph::Render()
     {
         xModelRender(model);
     }
+
+    iPadGlyphModelEnd(model);
 }
 
 void NPCGlyph::Enable(S32 ison)

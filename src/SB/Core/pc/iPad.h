@@ -10,6 +10,7 @@ struct _tagiPad
 
 struct _tagxPad;
 struct _tagxRumble;
+struct xModelInstance;
 
 S32 iPadInit();
 _tagxPad* iPadEnable(_tagxPad* pad, S16 port);
@@ -29,6 +30,13 @@ void iPadKill();
 // The pad bits a talk box's links were authored against, from the bits the pad
 // reads. The Xbox archives transpose O and TRIANGLE. See iPad.cpp.
 U32 iPadTalkBoxButtons(U32 pressed);
+
+// Draws the talk prompt over an NPC as the button that talks on the player's
+// own controller or keyboard. Begin points `model` at that model for one draw
+// and End points it back; `talk` is whether the glyph is a talk prompt at all.
+// Defined in iPadGlyph.cpp.
+void iPadGlyphModelBegin(xModelInstance* model, S32 talk);
+void iPadGlyphModelEnd(xModelInstance* model);
 
 // Whether vibration starts on: config.ini's input.vibration, which on PC is
 // one setting for the install rather than a value in each save file.

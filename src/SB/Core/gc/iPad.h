@@ -27,6 +27,10 @@ void iPadKill();
 // inline function still changes CodeWarrior's code for the caller.
 #define iPadTalkBoxButtons(pressed) (pressed)
 
+// The talk prompt over an NPC draws the disc's own model.
+#define iPadGlyphModelBegin(model, talk)
+#define iPadGlyphModelEnd(model)
+
 // Whether vibration starts on. Always, on a console; the PC reads config.ini.
 #define iPadVibrationDefault() 1
 

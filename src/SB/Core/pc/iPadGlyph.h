@@ -15,11 +15,20 @@
 // Sixteen TEXT assets named button_picture_01..16 each hold one line --
 // `{tex:pad_button1;scale=size;dst=...}` -- and everything that wants a prompt
 // includes one of those by name: button_jump_text is `{i:button_picture_01}`.
-// Twelve 32x32 textures in font.HIP are the glyphs. Nothing draws a button any
-// other way: no models, no HUD sprites, no font pages.
+// Twelve 32x32 textures in font.HIP are the glyphs. One prompt is a model
+// instead: fx_glyph_talk, the button that floats over an NPC you can talk to.
+// Nothing else draws a button: no HUD sprites, no font pages.
 //
-// So xFont.cpp's `{tex:...}` handler is the only place a prompt resolves, and
-// one lookup in front of it retargets every prompt in the game.
+// So xFont.cpp's `{tex:...}` handler is where every text prompt resolves, and
+// one lookup in front of it retargets them all. iPadGlyphModelBegin, in iPad.h,
+// does the same for the model.
+//
+// **The talk model follows the binding too.** A set may hold a model of an
+// input as `<input>.dff` beside its picture, with that model's textures as
+// PNGs named for them; tools/glyphmodels.py writes gamecube/rt.dff off the
+// GameCube disc. An input the set has no model of is drawn as its glyph made
+// solid, except the R1 slot's own picture, which is the button the disc
+// modelled: the Xbox and PS2 sets keep the disc's trigger.
 //
 // **The glyph follows the BINDING, not the console.** A set could be twelve
 // files named after the retail textures, swapped as a unit. That is wrong the
