@@ -1156,7 +1156,10 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     // this controlled multiplier before forwarding raw force values.
     sPendingKnockbackOverride = false;
     sPendingKnockbackTarget = NULL;
-    if (melee && best->SelfType() == NPC_TYPE_FODDER)
+    // Offer the same calibrated override to every robot the bridge can
+    // damage. Only NPCs whose native damage handling enters zNPCGoalKnock
+    // will consume it; custom wound/launch goals remain unchanged for now.
+    if (melee && IsTF2BridgeRobot(best))
     {
         float pushLen = sqrtf(dir.x * dir.x + dir.z * dir.z);
         if (pushLen < 0.001f)
@@ -1186,9 +1189,10 @@ static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in)
     // BFBB's normal damage path still owns HP, damage goal, death animation,
     // rewards, and native collision/bounce handling.
     best->Damage(DMGTYP_SIDE, NULL, &dir);
-    if (melee && best->SelfType() == NPC_TYPE_FODDER)
-        printf("bfbb: tf2bridge -- melee knockback override target=%p mult=%.2f\n",
-               (void*)best, (double)sPendingKnockbackMultiplier);
+    if (melee && IsTF2BridgeRobot(best))
+        printf("bfbb: tf2bridge -- melee knockback offered type=%d target=%p mult=%.2f\n",
+               (int)best->SelfType(), (void*)best,
+               (double)sPendingKnockbackMultiplier);
     printf("bfbb: tf2bridge -- shot hit NPC type %d at %.2f\n", (int)best->SelfType(),
            (double)bestDist);
 }
