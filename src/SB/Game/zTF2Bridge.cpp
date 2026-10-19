@@ -53,15 +53,17 @@ static float sHitscanDebugTime = 0.0f;
 static void* sPendingKnockbackTarget = NULL;
 static float sPendingKnockbackDirX = 0.0f;
 static float sPendingKnockbackDirZ = 1.0f;
+static float sPendingKnockbackDirY = 0.0f;
 static float sPendingKnockbackMultiplier = 1.0f;
 static bool sPendingKnockbackOverride = false;
 
-int zTF2Bridge_ConsumeKnockbackOverride(void* npc, float* dirX, float* dirZ, float* multiplier)
+int zTF2Bridge_ConsumeKnockbackOverride(void* npc, float* dirX, float* dirY, float* dirZ, float* multiplier)
 {
     if (!sPendingKnockbackOverride || sPendingKnockbackTarget != npc)
         return 0;
 
     if (dirX != NULL) *dirX = sPendingKnockbackDirX;
+    if (dirY != NULL) *dirY = sPendingKnockbackDirY;
     if (dirZ != NULL) *dirZ = sPendingKnockbackDirZ;
     if (multiplier != NULL) *multiplier = sPendingKnockbackMultiplier;
 
@@ -692,6 +694,7 @@ static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEn
             {
                 const float pushLen = sqrtf(push.x * push.x + push.z * push.z);
                 sPendingKnockbackDirX = pushLen > 0.001f ? push.x / pushLen : 0.0f;
+                sPendingKnockbackDirY = push.y;
                 sPendingKnockbackDirZ = pushLen > 0.001f ? push.z / pushLen : 1.0f;
                 sPendingKnockbackMultiplier =
                     TF2Bridge_ImpactKnockbackMultiplier(npc, rocket->knockbackMultiplier, damage);
