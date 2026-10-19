@@ -289,6 +289,14 @@ static void test_config()
         return;
     }
     fwrite(kFile, 1, sizeof(kFile) - 1, f);
+    // More entries than the parser once held, then one more. A key past the
+    // cap read as missing, so the load appended it again on every launch.
+    fprintf(f, "[fixes]\n");
+    for (int i = 0; i < 130; i++)
+    {
+        fprintf(f, "melee_once = on\n");
+    }
+    fprintf(f, "[cheats]\npanhandle = on\n");
     fclose(f);
 
     // A mod whose mod.ini replaces one setting, tries to move the asset root,
@@ -421,6 +429,8 @@ static void test_config()
           "a binding for a button that does not exist is dropped, like any unknown key");
 
     check(iConfigGetInt("input.controller", 0) == 3, "input.controller comes off the file");
+    check(iConfigGetBool("cheats.panhandle", FALSE) == TRUE,
+          "a setting past the 128th entry comes off the file");
     // The frame rate. The file does not mention it, so this is the table's
     // default reaching a caller whose fallback is the wrong answer -- and it is
     // the one setting where the wrong answer is not visible on screen but in
@@ -462,6 +472,9 @@ static void test_config()
             // iPadBind.cpp -- and are NOT appended. An appended line would be a
             // value, and a value pins that key past any later change to the
             // defaults; an omitted one is answered by the build's default.
+            check(countLinesStartingWith(grown, "panhandle") == 1,
+                  "a setting past the 128th entry is not appended again");
+
             check(countLinesStartingWith(grown, "view ") == 0,
                   "a keyboard binding the file omits is left to the default");
 
