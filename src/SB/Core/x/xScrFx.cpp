@@ -133,6 +133,7 @@ struct zGlowScene
     F32 strength;
 };
 
+// clang-format off
 static const zGlowScene sGlowScenes[] = {
     { 'SM02', 0.00f },  { 'SM03', 0.00f },  { 'PG01', 0.00f },  { 'PG10', 0.00f },
     { 'PG55', 0.00f },
@@ -155,10 +156,22 @@ static const zGlowScene sGlowScenes[] = {
     { 'KF01', 0.80f },  { 'KF02', 0.80f },  { 'KF04', 0.80f },  { 'KF05', 0.80f },
 
     { 'DB06', 1.00f },
-};
 
-// One for anything not in the table, which is what the Xbox's switch falls
-// through to.
+    // The shipped scenes the Xbox's switch does not name: it falls through to
+    // one for these.
+    { 'BB03', 1.00f },  { 'DB02', 1.00f },  { 'DB03', 1.00f },  { 'DB05', 1.00f },
+    { 'GY02', 1.00f },  { 'GY03', 1.00f },  { 'HB02', 1.00f },  { 'HB03', 1.00f },
+    { 'HB04', 1.00f },  { 'HB05', 1.00f },  { 'HB06', 1.00f },  { 'HB07', 1.00f },
+    { 'HB10', 1.00f },  { 'JF02', 1.00f },  { 'MNU4', 1.00f },  { 'MNU5', 1.00f },
+    { 'SPPA', 1.00f },  { 'SPSB', 1.00f },  { 'SPSC', 1.00f },
+};
+// clang-format on
+
+// A scene the game never shipped, which is a mod's own level. The mean over the
+// 54 shipped levels, so a new level glows like a typical one rather than at the
+// Xbox's fall-through of one.
+static const F32 kGlowModScene = 0.58f;
+
 static F32 xScrFxGlowStrength()
 {
     if (globals.sceneCur == NULL)
@@ -176,7 +189,7 @@ static F32 xScrFxGlowStrength()
         }
     }
 
-    return 1.0f;
+    return kGlowModScene;
 }
 #endif
 
