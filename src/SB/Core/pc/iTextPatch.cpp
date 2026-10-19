@@ -9,6 +9,7 @@
 #include "xPad.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace
@@ -775,4 +776,50 @@ S32 iTextPatchAsset(U32 assetID, char* text, U32 capacity)
 
     S32 phrased = applyPhrases(text);
     return applyRules(text) || phrased || fixed;
+}
+
+void* iTextPatchGrown(U32 assetID, const void* asset, U32 headerSize, U32 size, U32* outsize)
+{
+    static void* sGrown[kOverrideCount];
+
+    if (!sEnabled || asset == NULL || size < headerSize)
+    {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < kOverrideCount; i++)
+    {
+        if (iTextPatchAssetID(kOverrides[i].name) != assetID)
+        {
+            continue;
+        }
+
+        U32 need = (U32)strlen(kOverrides[i].text) + 1;
+        if (need <= size - headerSize)
+        {
+            return NULL;
+        }
+
+        if (sGrown[i] == NULL)
+        {
+            U8* block = (U8*)malloc(headerSize + need);
+            if (block == NULL)
+            {
+                return NULL;
+            }
+            memcpy(block, asset, headerSize);
+            memcpy(block + headerSize, kOverrides[i].text, need);
+            if (headerSize >= sizeof(U32))
+            {
+                U32 len = need - 1;
+                memcpy(block, &len, sizeof(len));
+            }
+            sGrown[i] = block;
+        }
+
+        *outsize = headerSize + need;
+        return sGrown[i];
+    }
+
+    return NULL;
 }

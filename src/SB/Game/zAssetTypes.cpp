@@ -564,11 +564,11 @@ static void* Curve_Read(void* param_1, U32 param_2, void* indata, U32 insize, U3
 // src/SB/Core/pc/iTextPatch.h; off in config.ini this is a no-op and the asset
 // arrives exactly as the disc shipped it.
 //
-// The asset is transformed IN PLACE and handed straight back. Every other
-// readXForm here returns a new object, and the packer supports both -- but a
-// TEXT asset's payload is a string, the rewrite only ever shortens it, and
-// returning the same bytes means there is nothing to free and so no unload
-// handler to keep in step with this one.
+// The asset is transformed IN PLACE and handed straight back, so there is
+// nothing to free and no unload handler to keep in step with this one. The
+// exception is an override longer than the asset, which happens on the
+// GameCube's shorter strings: iTextPatchGrown hands back a copy it owns for
+// the life of the process, and the packer takes that instead.
 static void* TEXT_Read(void*, U32 assetID, void* indata, U32 insize, U32* outsize)
 {
     *outsize = insize;
@@ -581,6 +581,12 @@ static void* TEXT_Read(void*, U32 assetID, void* indata, U32 insize, U32* outsiz
     // zTalkBox.h declares a second xTextAsset of its own inside an anonymous
     // namespace, and it reaches this file through the include chain, so the
     // bare name is ambiguous here and the macro's cast is too.
+    void* grown = iTextPatchGrown(assetID, indata, sizeof(::xTextAsset), insize, outsize);
+    if (grown != NULL)
+    {
+        return grown;
+    }
+
     if (indata != NULL && insize > sizeof(::xTextAsset))
     {
         char* text = (char*)((::xTextAsset*)indata + 1);

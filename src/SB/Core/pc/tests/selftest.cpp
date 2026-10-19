@@ -1714,6 +1714,38 @@ static void test_textpatch()
     patch_run(&p, "text_menu_reboot");
     check(strcmp(p.buf, "Reboot to Desktop") == 0, "an override too big for its asset is refused");
 
+    // An override too long for its asset is grown into a copy instead: the
+    // GameCube's strings are shorter than the Xbox's.
+    {
+        patch_setup(&p, "Reboot to Xbox Dashboard", 64);
+        patch_run(&p, "text_menu_reboot");
+
+        U8 asset[8] = { 2, 0, 0, 0, 'H', 'i', 0, 0 };
+        U32 grownSize = 0;
+        U8* grown = (U8*)iTextPatchGrown(iTextPatchAssetID("text_menu_reboot"), asset, 4,
+                                         sizeof(asset), &grownSize);
+        U32 len = 0;
+        if (grown != NULL)
+        {
+            memcpy(&len, grown, sizeof(len));
+        }
+        check(grown != NULL && strcmp((const char*)grown + 4, p.buf) == 0 &&
+                  grownSize == 4 + strlen(p.buf) + 1 && len == strlen(p.buf),
+              "an override too long for its asset is written into a copy");
+        U32 again = 0;
+        check(iTextPatchGrown(iTextPatchAssetID("text_menu_reboot"), asset, 4, sizeof(asset),
+                              &again) == grown,
+              "and the copy is reused on the next load");
+
+        U8 roomy[64] = { 0 };
+        check(iTextPatchGrown(iTextPatchAssetID("text_menu_reboot"), roomy, 4, sizeof(roomy),
+                              &again) == NULL,
+              "an override that fits is left to iTextPatchAsset");
+        check(iTextPatchGrown(iTextPatchAssetID("some other asset"), asset, 4, sizeof(asset),
+                              &again) == NULL,
+              "and an asset with no override gets no copy");
+    }
+
     // Nothing is written past the capacity, whatever happens above.
     patch_setup(&p, "Your Xbox console", 18);
     patch_run(&p, "some other asset");
