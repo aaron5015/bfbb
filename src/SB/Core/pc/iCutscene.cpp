@@ -167,7 +167,13 @@ U32 iCSFileOpen(xCutscene* csn)
     U32 headerskip;
     st_PKR_ASSET_TOCINFO ainfo;
 
-    headerskip = ALIGN(csn->Info->HeaderSize, 2048);
+    // The header as the CSN asset has it. CutsceneTOC_Read widens each
+    // xCutsceneData in the table where a pointer is wider than the 4-byte
+    // file offset, and grows HeaderSize to match; the asset on disc is not.
+    headerskip =
+        ALIGN(csn->Info->HeaderSize -
+                  csn->Info->NumData * (U32)(sizeof(xCutsceneData) - XCUTSCENE_STREAM_RECORD_SIZE),
+              2048);
 
     if (!xSTGetAssetInfo(csn->Info->AssetID, &ainfo))
     {
