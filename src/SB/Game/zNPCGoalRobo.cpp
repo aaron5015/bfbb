@@ -7266,6 +7266,17 @@ S32 zNPCGoalKnock::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene*
 {
     S32 nextgoal = 0;
     zNPCRobot* npc = (zNPCRobot*)(psyche->clt_owner);
+
+    // Chuck's knockback is intended to be a horizontal shove. Keep gravity
+    // from bending the trajectory downward while his knockback animation runs.
+    // Other robot types retain their native airborne knockback arc.
+    if (npc->SelfType() == NPC_TYPE_CHUCK)
+    {
+        npc->frame->vel.y = 0.0f;
+        npc->frame->dvel.y = 0.0f;
+        npc->frame->oldvel.y = 0.0f;
+    }
+
     if (this->flg_knock & 1)
     {
         this->floorBounce++;
