@@ -103,6 +103,7 @@ TYPES = {
     "CTOC": [("words",)],
 
     "ANIM": [("custom", "iGCSwapAnim")],
+    "JAW ": [("custom", "iGCSwapJaw")],
 }
 
 EITHER = {

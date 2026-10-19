@@ -38,6 +38,8 @@ CRDT (2), SHRP (5), SURF (1), TEXT (2) and PARS (1).
 ANIM: 840 of 1,031 match exactly; the other 191 differ only in keyframe values
 off by one, which the two builds quantized differently.
 
-No rule yet: JAW (lip sync) and SNDI (the sound table, which belongs with the
-GameCube audio decoder). RenderWare streams (MODL, RWTX, JSP) and audio are not
-byte-swapped at all.
+JAW: 48 of 49 match exactly; the other is a different table.
+
+No rule yet: SNDI (the sound table, which belongs with the GameCube audio
+decoder). RenderWare streams (MODL, RWTX, JSP) and audio are not byte-swapped
+at all.

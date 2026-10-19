@@ -116,6 +116,7 @@ static bool gcsSwapLinks(U8* p, U32 size, U32* end)
 static S32 iGCSwapAnim(U8* p, U32 size);
 static S32 iGCSwapDisco(U8* p, U32 size);
 static S32 iGCSwapModelInfo(U8* p, U32 size);
+static S32 iGCSwapJaw(U8* p, U32 size);
 
 #include "iGCSwapTable.inc"
 
@@ -233,6 +234,36 @@ static S32 iGCSwapModelInfo(U8* p, U32 size)
         gcsSwap32(p + c);
         c += p[c + 4] * 4 + 8;
     }
+    return 1;
+}
+
+// Every aligned u32 in [from, to).
+static void gcsSwapWords(U8* p, U32 from, U32 to)
+{
+    for (U32 c = from; c + 4 <= to; c += 4)
+    {
+        gcsSwap32(p + c);
+    }
+}
+
+// JAW, the lip-sync table xJaw_FindData walks: a count, then that many
+// xJawDataTables of three u32s. The curves after them are left alone: each
+// starts with a count the GameCube disc already ships little-endian, and
+// xJaw_EvalData turns one around itself when it reads as over 0xFFFF.
+static S32 iGCSwapJaw(U8* p, U32 size)
+{
+    if (size < 4)
+    {
+        return 0;
+    }
+    gcsSwap32(p);
+
+    U32 n = gcsRead32(p);
+    if (n > (size - 4) / 12)
+    {
+        return 0;
+    }
+    gcsSwapWords(p, 4, 4 + n * 12);
     return 1;
 }
 
