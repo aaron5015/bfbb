@@ -499,6 +499,13 @@ static bool iHipPlatform(const char* path, char* id, size_t idsize, char* name, 
     return false;
 }
 
+bool iFileIsGameCubePackage(const char* path)
+{
+    char id[8];
+    char name[32];
+    return iHipPlatform(path, id, sizeof(id), name, sizeof(name)) && strcmp(name, "GameCube") == 0;
+}
+
 const char* iFileAssetPlatform(const char** longName)
 {
     static char sId[8];

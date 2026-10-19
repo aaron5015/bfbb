@@ -116,6 +116,7 @@ static bool gcsSwapLinks(U8* p, U32 size, U32* end)
 static S32 iGCSwapAnim(U8* p, U32 size);
 static S32 iGCSwapDisco(U8* p, U32 size);
 static S32 iGCSwapModelInfo(U8* p, U32 size);
+static S32 iGCSwapCutsceneToc(U8* p, U32 size);
 static S32 iGCSwapJaw(U8* p, U32 size);
 
 #include "iGCSwapTable.inc"
@@ -246,6 +247,43 @@ static void gcsSwapWords(U8* p, U32 from, U32 to)
     }
 }
 
+// CTOC, the cutscene table xCutscene_Init takes: a count, then that many
+// cutscene headers, each HeaderSize bytes. A header is an xCutsceneInfo --
+// twelve u32s and the two 16-character sound names -- then the xCutsceneData
+// list, the time chunk offsets, the visibility words and the xCutsceneBreaks,
+// all 32-bit.
+static S32 iGCSwapCutsceneToc(U8* p, U32 size)
+{
+    const U32 kInfoWords = 0x30;
+    const U32 kInfo = 0x50;
+
+    if (size < 4)
+    {
+        return 0;
+    }
+    gcsSwap32(p);
+
+    U32 n = gcsRead32(p);
+    U32 c = 4;
+    for (U32 i = 0; i < n; i++)
+    {
+        if (c > size || size - c < kInfo)
+        {
+            return 0;
+        }
+        gcsSwapWords(p, c, c + kInfoWords);
+
+        U32 header = gcsRead32(p + c + 0x1C);
+        if (header < kInfo || header > size - c)
+        {
+            return 0;
+        }
+        gcsSwapWords(p, c + kInfo, c + header);
+        c += header;
+    }
+    return 1;
+}
+
 // JAW, the lip-sync table xJaw_FindData walks: a count, then that many
 // xJawDataTables of three u32s. The curves after them are left alone: each
 // starts with a count the GameCube disc already ships little-endian, and
@@ -265,6 +303,130 @@ static S32 iGCSwapJaw(U8* p, U32 size)
     }
     gcsSwapWords(p, 4, 4 + n * 12);
     return 1;
+}
+
+// A cutscene's time chunk, laid out as xCutscene.cpp reads it: an
+// xCutsceneTime, then NumData records of a 16-byte xCutsceneData header and a
+// payload padded to 16. The payloads:
+//
+//   ANIMATION    an xCutsceneAnimHdr, then an SKB1 animation, as ANIM
+//   CAMERA       a key count, then zFlyKeys: all 32-bit
+//   JDELTAANIM   the four characters JDTA, then counts and floats
+//   SOUND        DSP ADPCM, which the sound layer decodes; left alone
+bool iGCSwapCutsceneTime(void* chunk, U32 size)
+{
+    const U32 kTime = 0x10;
+    const U32 kRecord = 0x10;
+    const U32 kAnimHdr = 0x10;
+    U8* p = (U8*)chunk;
+
+    if (size < kTime)
+    {
+        return false;
+    }
+    gcsSwapWords(p, 0, kTime);
+
+    U32 n = gcsRead32(p + 0x8);
+    U32 c = kTime;
+    for (U32 i = 0; i < n; i++)
+    {
+        if (c > size || size - c < kRecord)
+        {
+            return false;
+        }
+        gcsSwapWords(p, c, c + kRecord);
+
+        U32 type = gcsRead32(p + c);
+        U32 len = gcsRead32(p + c + 0x8);
+        U32 body = c + kRecord;
+        if (len > size - body)
+        {
+            return false;
+        }
+
+        switch (type)
+        {
+        case 2:
+            if (len >= kAnimHdr)
+            {
+                gcsSwapWords(p, body, body + kAnimHdr);
+                iGCSwapAnim(p + body + kAnimHdr, len - kAnimHdr);
+            }
+            break;
+        case 3:
+            gcsSwapWords(p, body, body + len);
+            break;
+        case 7:
+            gcsSwapWords(p, body + 4, body + len);
+            break;
+        default:
+            break;
+        }
+
+        c = body + ((len + 15) & ~15u);
+    }
+    return true;
+}
+
+// A cutscene's JDELTAMODEL, as JDeltaEval reads it: the four characters JDTM
+// and a count, then JDeltaTargets, each skipSize bytes long -- skipSize,
+// numRuns, numVerts and scale, numRuns JDeltaRuns, and at the next 16 bytes
+// numVerts positions: three S16s each when scale is nonzero, three floats
+// otherwise.
+bool iGCSwapCutsceneDeltaModel(void* data, U32 size)
+{
+    const U32 kHeader = 0x8;
+    const U32 kTarget = 0x10;
+    U8* p = (U8*)data;
+
+    if (size < kHeader)
+    {
+        return false;
+    }
+    gcsSwap32(p + 0x4);
+
+    U32 c = kHeader;
+    while (c + kTarget <= size)
+    {
+        gcsSwapWords(p, c, c + kTarget);
+
+        U32 skip = gcsRead32(p + c);
+        U32 runs = gcsRead32(p + c + 0x4);
+        U32 verts = gcsRead32(p + c + 0x8);
+        bool packed = gcsRead32(p + c + 0xC) != 0;
+
+        U32 r = c + kTarget;
+        if (runs > (size - r) / 8)
+        {
+            return false;
+        }
+        gcsSwapWords(p, r, r + runs * 8);
+
+        U32 v = (r + runs * 8 + 15) & ~15u;
+        U32 vsize = packed ? 6 : 12;
+        if (v > size || verts > (size - v) / vsize)
+        {
+            return false;
+        }
+        if (packed)
+        {
+            for (U32 k = 0; k < verts * 3; k++)
+            {
+                gcsSwap16(p + v + k * 2);
+            }
+        }
+        else
+        {
+            gcsSwapWords(p, v, v + verts * 12);
+        }
+
+        if (skip == 0)
+        {
+            break;
+        }
+        c += skip;
+    }
+    return true;
 }
 
 iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size)

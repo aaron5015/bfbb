@@ -100,7 +100,7 @@ TYPES = {
     "SHRP": [("words",)],
     "LODT": [("words",)],
     "CRDT": [("words",)],
-    "CTOC": [("words",)],
+    "CTOC": [("custom", "iGCSwapCutsceneToc")],
 
     "ANIM": [("custom", "iGCSwapAnim")],
     "JAW ": [("custom", "iGCSwapJaw")],

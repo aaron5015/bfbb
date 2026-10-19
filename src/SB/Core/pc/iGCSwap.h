@@ -28,6 +28,14 @@ enum iGCSwapResult
 // Swaps one asset of packer type `type` ('SIMP' and so on) in place.
 iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size);
 
+// A cutscene streams most of itself from its CSN asset rather than loading it
+// through the packer, so iCutscene.cpp swaps the pieces as they arrive: each
+// time chunk, and each JDELTAMODEL. The models are RenderWare streams and the
+// sound is DSP ADPCM; neither is touched. False when the data is shorter than
+// it says it is; what was swapped by then stays swapped.
+bool iGCSwapCutsceneTime(void* chunk, U32 size);
+bool iGCSwapCutsceneDeltaModel(void* data, U32 size);
+
 // Whether iGCSwapAsset has a rule for `type`. Types without one are either
 // the same on both platforms or not handled yet.
 bool iGCSwapKnowsType(U32 type);

@@ -106,6 +106,11 @@ struct st_PACKER_READ_DATA;
 void iFilePackagePlatform(st_PACKER_READ_DATA* pr, const char* platname);
 void iFileAssetRead(st_PACKER_READ_DATA* pr, U32 type, void* data, S32 size);
 
+// PC-only. Whether the package at `path`, a resolved host path such as an
+// open tag_iFile's, is from the GameCube release. For data read straight from
+// a package rather than through the packer: a cutscene's stream.
+bool iFileIsGameCubePackage(const char* path);
+
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);
 U32 iFileRead(tag_xFile* file, void* buf, U32 size);
 S32 iFileReadAsync(tag_xFile* file, void* buf, U32 aSize, void (*callback)(tag_xFile*),
