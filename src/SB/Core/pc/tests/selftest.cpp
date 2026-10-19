@@ -26,6 +26,8 @@
 #include "iConfigTable.h"
 #include "iDrawDist.h"
 #include "iFile.h"
+#include "iGCMem.h"
+#include "iModPatch.h"
 #include "iGCSwap.h"
 #include "iHost.h"
 #include "iSnd.h"
@@ -57,6 +59,9 @@
 
 // Only for zFlyKey, whose layout test_flykey checks against the shipping asset.
 #include "zCamera.h"
+#include "zGlobals.h"
+#include "xEvent.h"
+#include "xLinkAsset.h"
 
 // iMemInit fills this in. It lives in xMemMgr.cpp, which needs the renderer to
 // build, so the harness supplies the one object under test rather than linking
@@ -1978,6 +1983,73 @@ static U32 getLE32(const U8* p)
 static U32 getLE16(const U8* p)
 {
     return (U32)p[0] | ((U32)p[1] << 8);
+}
+
+// GameCube writes through eEventGivePowerUp's unchecked index. The addresses
+// are the retail GameCube's: globals is at 0x803C0558, its camera.mat.right.x
+// at 0x803C056C, and player.g.PowerUp at 0x803C0F15. zMain.cpp defines globals
+// in the game.
+zGlobals globals;
+
+static void test_gcmem()
+{
+    printf("iGCMem\n");
+
+    const U32 kPowerUp = 0x803C0F15;
+    const U32 kRightX = 0x803C056C;
+    U8* rightx = (U8*)&globals.camera.mat.right.x;
+
+    check(iGCMemAddress(kPowerUp) == &globals.player.g.PowerUp[0] &&
+              iGCMemAddress(kPowerUp + 1) == &globals.player.g.PowerUp[1],
+          "PowerUp is where the GameCube has it");
+    check(iGCMemAddress(kRightX) == rightx + 3 && iGCMemAddress(kRightX + 3) == rightx,
+          "a float's bytes come back in the PC's order");
+    check(iGCMemAddress(0x803C0560) == NULL, "a pointer is not mapped");
+    check(iGCMemAddress(0x80000000) == NULL && iGCMemAddress(0x803C0558 + 0x1FC8) == NULL,
+          "nor is anything outside globals");
+
+    xLinkAsset link;
+    memset(&link, 0, sizeof(link));
+    link.dstEvent = eEventGivePowerUp;
+    link.param[0] = 1.0f;
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventGivePowerUp && link.param[0] == 1.0f,
+          "a link that gives a power-up is kept as it is");
+
+    link.param[0] = (F32)(S32)(kRightX - kPowerUp);
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventGivePowerUp &&
+              &globals.player.g.PowerUp[(S32)link.param[0]] == rightx + 3,
+          "a link that writes a float's first byte writes the PC's last byte of it");
+
+    link.param[0] = (F32)(S32)(0x803C0560 - kPowerUp);
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventUnknown, "a link that writes a pointer is dropped");
+
+    link.dstEvent = eEventGivePowerUp;
+    link.param[0] = -1e9f;
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventUnknown, "and so is one that writes outside globals");
+
+    // BFBB Deluxe's DOL patch reads two bytes of .sbss padding, which its hb00
+    // sets with indices 43487 and 43488.
+    check(!iModPatchSpinHover() && !iModPatchBowlFullTurn(), "the Deluxe patch starts off");
+    check(iGCMemAddress(0x803CB8F4) != NULL && iGCMemAddress(0x803CB8F8) == NULL,
+          "its four bytes of padding are mapped, and nothing past them");
+
+    link.dstEvent = eEventGivePowerUp;
+    link.param[0] = 43487.0f;
+    iGCMemLink(&link);
+    globals.player.g.PowerUp[(S32)link.param[0]] = 1;
+    check(link.dstEvent == eEventGivePowerUp && iModPatchSpinHover() && !iModPatchBowlFullTurn(),
+          "Deluxe's first write turns on the spin hover");
+
+    link.param[0] = 43488.0f;
+    iGCMemLink(&link);
+    globals.player.g.PowerUp[(S32)link.param[0]] = 1;
+    check(iModPatchBowlFullTurn(), "and its second the full bowl turn");
+    *iGCMemAddress(0x803CB8F4) = 0;
+    *iGCMemAddress(0x803CB8F5) = 0;
 }
 
 // GameCube assets turned around in place. The whole-disc check is
@@ -4158,6 +4230,12 @@ void xSndInternalUpdateVoicePos(xSndVoiceInfo*)
 {
 }
 
+// zEnt.h's weak xSndPlay3D overload, which zGlobals.h brings in, calls this one.
+U32 xSndPlay3D(U32, F32, F32, U32, U32, const xVec3*, F32, F32, sound_category, F32)
+{
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // A fake package, for the sample cache
 //
@@ -6321,6 +6399,7 @@ int main()
     test_save_file();
     test_saves_model();
     test_gcswap();
+    test_gcmem();
     test_idtag();
     test_pad();
     test_savegame();

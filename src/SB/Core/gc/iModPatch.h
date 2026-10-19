@@ -1,0 +1,10 @@
+#ifndef IMODPATCH_H
+#define IMODPATCH_H
+
+// What GameCube mods change in the game's code. Retail has none of it; the PC
+// port's pc/iModPatch.h does it in C++. Macros rather than inline functions, so
+// the code around them compiles as it did.
+#define iModPatchSpinHover() 0
+#define iModPatchBowlFullTurn() 0
+
+#endif

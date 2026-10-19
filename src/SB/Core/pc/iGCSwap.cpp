@@ -89,6 +89,18 @@ static inline void gcsSwap32EitherInt(U8* p)
 // to where the links begin -- the end of the type's own data.
 static void gcs_xLinkAsset(U8* p);
 
+// iGCSwapAsset's onLink, for the asset being swapped.
+static void (*sOnLink)(void* link);
+
+static void gcsSwapLink(U8* p)
+{
+    gcs_xLinkAsset(p);
+    if (sOnLink != NULL)
+    {
+        sOnLink(p);
+    }
+}
+
 static bool gcsSwapLinks(U8* p, U32 size, U32* end)
 {
     const U32 kLinkSize = 0x20;
@@ -107,7 +119,7 @@ static bool gcsSwapLinks(U8* p, U32 size, U32* end)
     *end = size - links;
     for (U32 at = *end; at < size; at += kLinkSize)
     {
-        gcs_xLinkAsset(p + at);
+        gcsSwapLink(p + at);
     }
     return true;
 }
@@ -194,7 +206,7 @@ static S32 iGCSwapDisco(U8* p, U32 size)
     }
     for (U32 at = kHeader; at < kHeader + links; at += 0x20)
     {
-        gcs_xLinkAsset(p + at);
+        gcsSwapLink(p + at);
     }
 
     U32 table = kDataBase + gcsRead32(p + 0x24);
@@ -662,9 +674,11 @@ static S32 iGCSwapShrapnel(U8* p, U32 size)
     return 1;
 }
 
-iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size)
+iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size, void (*onLink)(void* link))
 {
+    sOnLink = onLink;
     S32 r = iGCSwapGenerated(type, (U8*)data, size);
+    sOnLink = NULL;
     if (r < 0)
     {
         return IGCSWAP_UNKNOWN;

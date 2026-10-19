@@ -23,6 +23,7 @@
 #include "iCollide.h"
 #include "iFirstPerson.h"
 #include "iMath.h"
+#include "iModPatch.h"
 #include "iSnd.h"
 #include "iTRC.h"
 
@@ -935,7 +936,10 @@ static void PlayerAbsControl(xEnt* ent, F32 x, F32 z, F32 dt)
 
                         if (globals.player.IsBubbleBowling)
                         {
-                            angle *= 0.1f;
+                            if (!iModPatchBowlFullTurn())
+                            {
+                                angle *= 0.1f;
+                            }
                             rot = icos(angle);
                             ent->frame->drot.angle = dt * (angle * turnfactor);
                             xMat3x3 rotY;
@@ -14453,7 +14457,7 @@ static void dampen_velocity(xVec3& v1, const xVec3& v2, F32 f)
     oldV1Neg = (v1_old.y < 0.0f) ? 1 : 0;
     newV1Neg = (v1.y < 0.0f) ? 1 : 0;
 
-    if (newV1Neg != oldV1Neg)
+    if (newV1Neg != oldV1Neg || iModPatchSpinHover())
     {
         v1.y = 0.0f;
     }

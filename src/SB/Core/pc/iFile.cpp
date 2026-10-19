@@ -1,5 +1,6 @@
 #include "iFile.h"
 #include "iConfig.h"
+#include "iGCMem.h"
 #include "iGCSwap.h"
 #include "iHost.h"
 #include "iModFolder.h"
@@ -882,7 +883,7 @@ void iFileAssetRead(st_PACKER_READ_DATA* pr, U32 type, void* data, S32 size)
         return;
     }
 
-    switch (iGCSwapAsset(type, data, (U32)size))
+    switch (iGCSwapAsset(type, data, (U32)size, iGCMemLink))
     {
     case IGCSWAP_DONE:
         break;

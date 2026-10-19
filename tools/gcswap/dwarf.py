@@ -60,11 +60,11 @@ def parse_block(lines, i):
                 members.append(("union", inner))
             else:
                 # An anonymous class's members are relative to it, and its
-                # closing line says where it sits.
+                # closing line says where it sits and what the member is called.
                 m = ANON_END.match(close)
                 if m:
                     members.append(("anon", inner, int(m.group("off"), 16),
-                                    int(m.group("size"), 16)))
+                                    int(m.group("size"), 16), m.group("name"), m.group("dims")))
             i += 1
             continue
         mm = MEMBER.match(line)
@@ -147,7 +147,7 @@ class Layouts:
 
     def member(self, m, base, path):
         if m[0] == "anon":
-            _, inner, off, size = m
+            inner, off, size = m[1:4]
             leaves = []
             for sub in inner:
                 leaves += self.member(sub, base + off, path)

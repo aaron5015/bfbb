@@ -30,8 +30,9 @@ enum iGCSwapResult
     IGCSWAP_MALFORMED // shorter than its layout says; partly swapped
 };
 
-// Swaps one asset of packer type `type` ('SIMP' and so on) in place.
-iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size);
+// Swaps one asset of packer type `type` ('SIMP' and so on) in place. onLink,
+// when given, is called with each of the asset's xLinkAssets once it is swapped.
+iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size, void (*onLink)(void* link) = NULL);
 
 // A cutscene streams most of itself from its CSN asset rather than loading it
 // through the packer, so iCutscene.cpp swaps the pieces as they arrive: each
