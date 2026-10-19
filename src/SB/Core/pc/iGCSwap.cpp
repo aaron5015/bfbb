@@ -122,6 +122,7 @@ static S32 iGCSwapJaw(U8* p, U32 size);
 static S32 iGCSwapSoundTable(U8* p, U32 size);
 static S32 iGCSwapJspInfo(U8* p, U32 size);
 static S32 iGCSwapCredits(U8* p, U32 size);
+static S32 iGCSwapShrapnel(U8* p, U32 size);
 
 #include "iGCSwapTable.inc"
 
@@ -610,6 +611,54 @@ static S32 iGCSwapCredits(U8* p, U32 size)
             c += hunkSize;
         }
     }
+    return 1;
+}
+
+// SHRP, a zShrapnelAsset and fassetCount frag assets, each sized by its
+// zFragType, all 32-bit fields. A projectile's gravity, its last field, is one
+// the GameCube packer left little-endian in some assets (see EITHER in
+// tools/gcswap/spec.py). A frag type with no known size ends the walk, and the
+// rest is swapped as words.
+static S32 iGCSwapShrapnel(U8* p, U32 size)
+{
+    const U32 kHeader = 0xC;
+    const U32 kProjectile = 4;
+    const U32 kGravity = 0x8C;
+    // zFragParticleAsset, zFragProjectileAsset, zFragLightningAsset,
+    // zFragSoundAsset and zFragShockwaveAsset, by zFragType from 3.
+    static const U32 kSizes[] = { 0x1D4, 0x90, 0x68, 0x4C, 0x54 };
+
+    if (size < kHeader)
+    {
+        return 0;
+    }
+    gcsSwapWords(p, 0, kHeader);
+
+    U32 n = gcsRead32(p);
+    U32 c = kHeader;
+    for (U32 i = 0; i < n && c + 4 <= size; i++)
+    {
+        U32 type = gcsReadBE32(p + c);
+        if (type < 3 || type - 3 >= sizeof(kSizes) / sizeof(kSizes[0]) ||
+            kSizes[type - 3] > size - c)
+        {
+            break;
+        }
+
+        U32 end = c + kSizes[type - 3];
+        if (type == kProjectile)
+        {
+            gcsSwapWords(p, c, c + kGravity);
+            gcsSwap32EitherFloat(p + c + kGravity);
+        }
+        else
+        {
+            gcsSwapWords(p, c, end);
+        }
+        c = end;
+    }
+
+    gcsSwapWords(p, c, size);
     return 1;
 }
 

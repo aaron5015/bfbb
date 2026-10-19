@@ -97,7 +97,7 @@ TYPES = {
     "FLY ": [("bytes",)],
     "MAPR": [("words",)],
     "VILP": [("words",)],
-    "SHRP": [("words",)],
+    "SHRP": [("custom", "iGCSwapShrapnel")],
     "LODT": [("words",)],
     "CRDT": [("custom", "iGCSwapCredits")],
     "CTOC": [("custom", "iGCSwapCutsceneToc")],
