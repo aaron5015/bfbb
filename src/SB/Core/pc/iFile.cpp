@@ -408,13 +408,10 @@ const char* iFileMissingAssetPath()
 
 // Which console's packer wrote the assets, out of boot.HIP's own header.
 //
-// The port reads the Xbox release. A GameCube or PS2 set does not announce
+// The port reads the Xbox and GameCube releases. A PS2 set does not announce
 // itself -- it loads, and then fails somewhere far from the cause, because the
 // packer's container is the same on every platform and only what is inside it
-// differs. A GameCube boot.HIP gets as far as the animation tables before
-// zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a big-endian count of 74
-// as 1,241,513,984 and walks off the end of memory. That crash says nothing
-// about what is actually wrong.
+// differs.
 //
 // HIPA holds PACK, PACK holds PLAT, and PLAT is a run of NUL-terminated
 // strings: a two-letter id, then the long name, then the video standard, the
@@ -580,10 +577,9 @@ static bool iHasPackageExtension(const char* path)
 // to the base path applies to both. A path outside the asset root is left
 // alone. The mods are asked in priority order.
 //
-// A package from another console's release is refused and the next mod, or
-// the original, is read: the port only understands the Xbox layout, and a
-// GameCube HIP loads and then crashes far from the cause. See
-// iFileAssetPlatform.
+// A package from a release other than the Xbox's or the GameCube's is refused
+// and the next mod, or the original, is read: it would load and then crash far
+// from the cause. See iFileAssetPlatform.
 static bool iModOverride(char* path, size_t pathsize)
 {
     if (sModCount == 0)
@@ -636,18 +632,13 @@ static bool iModOverride(char* path, size_t pathsize)
         {
             char id[8];
             char longName[32];
-            // A GameCube .HIP is game data, which iGCSwap turns around as it
-            // loads. A GameCube .HOP carries the models, world geometry and
-            // sound, which it does not.
-            size_t n = strlen(candidate);
-            bool hip = n >= 4 && iHostStrCaseCmp(candidate + n - 4, ".HIP") == 0;
             if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
-                strcmp(id, "XB") != 0 && !(hip && strcmp(longName, "GameCube") == 0))
+                strcmp(id, "XB") != 0 && strcmp(id, "GC") != 0)
             {
                 if (iModFirstReport(rel))
                 {
-                    printf("bfbb: mod: %s in %s is from the %s release, not the Xbox one; "
-                           "passed over\n",
+                    printf("bfbb: mod: %s in %s is from the %s release, not the Xbox or "
+                           "GameCube one; passed over\n",
                            rel, leaf, longName[0] != '\0' ? longName : id);
                     fflush(stdout);
                 }

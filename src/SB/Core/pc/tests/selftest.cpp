@@ -2129,14 +2129,20 @@ static void test_file_mod()
     static const U8 gcHip[] = { 'H', 'I', 'P', 'A', 0, 0, 0, 0,  'P', 'A', 'C', 'K', 0, 0, 0, 20,
                                 'P', 'L', 'A', 'T', 0, 0, 0, 12, 'G', 'C', 0,   'G', 'a', 'm',
                                 'e', 'C', 'u', 'b', 'e', 0 };
+    // The same with PLAT "P2\0PS2\0", a release the port does not read.
+    static const U8 ps2Hip[] = { 'H', 'I', 'P', 'A', 0,   0,   0, 0,  'P', 'A', 'C', 'K',
+                                 0,   0,   0,   16,  'P', 'L', 'A', 'T', 0,   0,   0, 8,
+                                 'P', '2', 0,   'P', 'S', '2', 0, 0 };
 
     bool made = write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
                 write_scratch(base, "ONLY.HIP", "BASE", 4) &&
                 write_scratch(base, "GC.HIP", "BASE", 4) &&
                 write_scratch(base, "GC.HOP", "BASE", 4) &&
+                write_scratch(base, "P2.HOP", "BASE", 4) &&
                 write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
                 write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip)) &&
-                write_scratch(mod, "gc.hop", gcHip, sizeof(gcHip));
+                write_scratch(mod, "gc.hop", gcHip, sizeof(gcHip)) &&
+                write_scratch(mod, "p2.hop", ps2Hip, sizeof(ps2Hip));
     check(made, "the scratch asset and mod folders can be written");
 
     iHostSetEnv("BFBB_ASSETS", base);
@@ -2153,12 +2159,13 @@ static void test_file_mod()
     read_through_ifile("ONLY.HIP", got, sizeof(got));
     check(strcmp(got, "BASE") == 0, "a file the mod does not have comes from the asset root");
 
-    // A GameCube .HIP is game data, which iGCSwap turns around as it loads; a
-    // .HOP carries models, worlds and sound, which it does not.
+    // GameCube packages are read; a PS2 one would load and then crash.
     read_through_ifile("GC.HIP", got, sizeof(got));
     check(memcmp(got, "HIPA", 4) == 0, "a GameCube .HIP in the mod folder is read");
     read_through_ifile("GC.HOP", got, sizeof(got));
-    check(strcmp(got, "BASE") == 0, "and a GameCube .HOP is passed over");
+    check(memcmp(got, "HIPA", 4) == 0, "and a GameCube .HOP");
+    read_through_ifile("P2.HOP", got, sizeof(got));
+    check(strcmp(got, "BASE") == 0, "but a PS2 package is passed over");
 
     char loaded[16];
     char path[512];
@@ -2169,7 +2176,7 @@ static void test_file_mod()
     check(strcmp(loaded, "MODDED") == 0, "iFileLoad's absolute path is overridden too");
 
     // Two mods, the first listed wins. The top one's copy of TWO.HOP is a
-    // GameCube .HOP, so the one below supplies it.
+    // PS2 package, so the one below supplies it.
     char top[512];
     char topGl[512];
     if (scratch_dir("modtop", top, sizeof(top)))
@@ -2177,7 +2184,7 @@ static void test_file_mod()
         snprintf(topGl, sizeof(topGl), "%s/gl", top);
         iHostMakeDir(topGl);
         write_scratch(topGl, "gl01.HIP", "TOP", 3);
-        write_scratch(top, "two.hop", gcHip, sizeof(gcHip));
+        write_scratch(top, "two.hop", ps2Hip, sizeof(ps2Hip));
         write_scratch(mod, "TWO.HOP", "SECOND", 6);
 
         snprintf(path, sizeof(path), "%s | %s", top, mod);
@@ -2188,7 +2195,7 @@ static void test_file_mod()
         read_through_ifile("GL/GL01.HIP", got, sizeof(got));
         check(strcmp(got, "TOP") == 0, "with two mods, the first listed supplies a file both have");
         read_through_ifile("TWO.HOP", got, sizeof(got));
-        check(strcmp(got, "SECOND") == 0, "and a GameCube .HOP in it falls to the next mod");
+        check(strcmp(got, "SECOND") == 0, "and a PS2 package in it falls to the next mod");
         read_through_ifile("ONLY.HIP", got, sizeof(got));
         check(strcmp(got, "BASE") == 0, "and a file neither has comes from the asset root");
         check(iFileModCount() == 2 && strncmp(iFileModName(), "bfbb_pc_modtop_", 15) == 0 &&
@@ -2219,8 +2226,9 @@ static void test_file_mod()
     iFileExit();
 
     const char* files[][2] = { { baseGl, "gl01.HIP" }, { base, "ONLY.HIP" }, { base, "GC.HIP" },
-                               { base, "GC.HOP" },     { modGl, "GL01.hip" },
-                               { mod, "gc.hip" },      { mod, "gc.hop" } };
+                               { base, "GC.HOP" },     { base, "P2.HOP" },
+                               { modGl, "GL01.hip" },  { mod, "gc.hip" },
+                               { mod, "gc.hop" },      { mod, "p2.hop" } };
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
     {
         snprintf(path, sizeof(path), "%s/%s", files[i][0], files[i][1]);
