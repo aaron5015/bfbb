@@ -1,9 +1,11 @@
 #include "iSnd.h"
 #include "iSndData.h"
+#include "iSndDsp.h"
 #include "iSndHost.h"
 #include "iSoundtrack.h"
 
 #include "iConfig.h"
+#include "iGCSwap.h"
 #include "iHost.h"
 
 #include "xSnd.h"
@@ -11,6 +13,7 @@
 #include "xstransvc.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,14 +31,13 @@
 // shape would be reproducing hardware that is not there.
 //
 // Asset data is read through the same direct casts the GameCube code uses.
-// That is only correct because the port's assets are little-endian (see
-// docs/PCPORT.md, "Asset caveats"); against GameCube-native assets every field read
-// in this file would be byte-swapped.
+// The Xbox assets are little-endian; a GameCube SNDI reaches this file already
+// byte-swapped by iGCSwap (see docs/PCPORT.md, "Asset caveats").
 
 // ---------------------------------------------------------------------------
 // Asset layout
 //
-// Two different shapes meet in this file.
+// Three different shapes meet in this file.
 //
 // `sndhdr` is what iSndLookup HANDS BACK: the GC DSPADPCM header with the asset
 // ID appended, exactly as src/SB/Core/gc/iSnd.cpp describes it. Three fields are
@@ -44,17 +46,21 @@
 // sample_rate at 0x08 and the internal id at 0x64 -- so this layout is
 // load-bearing and must not be rearranged.
 //
-// `xbox_sndhdr` is what the SNDI assets on disc ACTUALLY CONTAIN. The port
-// reads the Xbox asset set, and the Xbox SNDI is not the GameCube one: it is a
-// 12-byte count header followed by fixed 44-byte entries built around a
-// WAVEFORMATEX, little-endian, with no DSP coefficients and no total_size field.
-// Reading it as a GC table walks entry[] with the wrong stride off counts taken
-// from the wrong words, which is a wild pointer within a few iterations.
+// `xbox_sndhdr` is what an Xbox SNDI asset contains. It is not the GameCube
+// table: it is a 12-byte count header followed by fixed 44-byte entries built
+// around a WAVEFORMATEX, little-endian, with no DSP coefficients and no
+// total_size field. Reading it as a GC table walks entry[] with the wrong
+// stride off counts taken from the wrong words, which is a wild pointer within
+// a few iterations.
 //
 // The layout below is confirmed against every HIP and HOP in the retail Xbox
 // tree: each SNDI asset is exactly 12 + 44 * (num_sfx + num_streams +
 // num_cutscene) bytes, and each entry's data_size matches the byte length of
 // the SND asset its asset_id names.
+//
+// `gc_sndhdr` is what a GameCube SNDI asset contains: a 16-byte count header,
+// then 0x64-byte entries that are `sndhdr` itself. Every GameCube SNDI is
+// exactly 16 + 0x64 * entries bytes.
 
 struct sndhdr
 {
@@ -111,6 +117,26 @@ struct sndinfo
     xbox_sndhdr entry[1]; // 0x0C
 };
 
+// One entry of a GameCube SNDI table, as iGCSwap leaves it: the DSPADPCM
+// header that `sndhdr` begins with, in host byte order, and the asset id.
+// src/SB/Core/gc/iSnd.cpp reads the same table at the same offsets.
+struct gc_sndhdr
+{
+    iSndDspHeader dsp; // 0x00
+    U32 assetID; // 0x60
+};
+
+// The header of a loaded GameCube SNDI asset. `tag` is the GameCube's
+// total_size, which iGCSwap stamps with IGCSWAP_SNDI_GAMECUBE.
+struct gc_sndinfo
+{
+    U32 num_sfx; // 0x00
+    U32 tag; // 0x04
+    U32 num_streams; // 0x08
+    U32 num_cutscene; // 0x0C
+    gc_sndhdr entry[1]; // 0x10
+};
+
 // What iSndLookup hands back. The id has to land at 0x64, immediately after the
 // header, because that is where xSnd.cpp reads it.
 struct sndlookup
@@ -127,11 +153,29 @@ struct sndlookup
 // the very first lookup walks off the asset.
 static_assert(sizeof(xbox_sndhdr) == 44, "xbox_sndhdr must be the 44-byte on-disc entry");
 static_assert(sizeof(sndinfo) == 12 + 44, "the Xbox SNDI count header must be 12 bytes");
+static_assert(sizeof(gc_sndhdr) == 0x64, "gc_sndhdr must be the 0x64-byte on-disc entry");
+static_assert(sizeof(gc_sndinfo) == 16 + 0x64, "the GameCube SNDI count header must be 16 bytes");
+static_assert(offsetof(sndhdr, assetID) == offsetof(gc_sndhdr, assetID),
+              "sndhdr is the GameCube entry");
 
 #define ISND_MAX_TABLES 12
 
-static sndinfo* sinfo_array[ISND_MAX_TABLES];
+// A loaded table: an Xbox one, a GameCube one, or neither for an empty slot.
+struct sndtable
+{
+    const sndinfo* xbox;
+    const gc_sndinfo* gc;
+};
+
+static sndtable sinfo_array[ISND_MAX_TABLES];
 static S32 sinfo_array_max;
+
+// One table entry, of either layout.
+struct sndref
+{
+    const xbox_sndhdr* xbox;
+    const gc_sndhdr* gc;
+};
 
 // iSndLookup returns a pointer to this, refilled on every call, as retail does.
 // Callers read it immediately; nothing holds it across a second lookup.
@@ -256,10 +300,7 @@ void iSndInit()
         sVoices[i].holds_data = false;
     }
 
-    for (S32 i = 0; i < ISND_MAX_TABLES; i++)
-    {
-        sinfo_array[i] = NULL;
-    }
+    memset(sinfo_array, 0, sizeof(sinfo_array));
 
     sinfo_array_max = 0;
     sExternalCallback = NULL;
@@ -465,12 +506,7 @@ bool iSndIsPlayingByHandle(U32 handle)
     return false;
 }
 
-// Translate one Xbox table entry into the DSP-shaped record iSndLookup hands
-// back. Only three of those fields are read anywhere: sample_rate and the id by
-// xSnd.cpp, num_samples by iStartVoice to time the voice out. The rest are
-// zeroed rather than invented -- there are no DSP coefficients on this platform
-// and nothing reads them.
-// How many sample frames an entry's asset holds.
+// How many sample frames an Xbox entry's asset holds.
 //
 // For PCM that is bytes over the frame size, which is what block_align means
 // there. For ADPCM block_align is the size of a compressed BLOCK instead,
@@ -498,10 +534,108 @@ static U32 entry_frames(const xbox_sndhdr& e)
     return e.data_size / e.block_align;
 }
 
-static void fill_lookup(const xbox_sndhdr& e)
+static U32 ref_id(const sndref& r)
+{
+    return r.gc != NULL ? r.gc->assetID : r.xbox->assetID;
+}
+
+static U32 ref_frames(const sndref& r)
+{
+    return r.gc != NULL ? r.gc->dsp.num_samples : entry_frames(*r.xbox);
+}
+
+static U32 ref_rate(const sndref& r)
+{
+    return r.gc != NULL ? r.gc->dsp.sample_rate : r.xbox->samples_per_sec;
+}
+
+// The table's own loop flag. On the GameCube, a looping sound's loop end is
+// the end of its data: iSndLoadSounds rewrites loop_end from num_samples
+// (src/SB/Core/gc/iSnd.cpp, iSndMessWithEA).
+static bool ref_loops(const sndref& r)
+{
+    return r.gc != NULL ? r.gc->dsp.loop_flag != 0 : r.xbox->loop_flag != 0;
+}
+
+// The sample a loop restarts at. The Xbox table carries no loop points, so a
+// loop restarts at the beginning there.
+static U32 ref_loop_start(const sndref& r)
+{
+    if (r.gc == NULL || r.gc->dsp.loop_flag == 0)
+    {
+        return 0;
+    }
+
+    U32 s = iSndDspNibbleToSample(r.gc->dsp.loop_start);
+    return s < r.gc->dsp.num_samples ? s : 0;
+}
+
+static void ref_format(const sndref& r, iSndDataFormat* fmt)
+{
+    if (r.gc != NULL)
+    {
+        fmt->format_tag = ISNDDATA_FORMAT_GC_DSPADPCM;
+        fmt->channels = 1;
+        fmt->block_align = ISNDDSP_FRAME_BYTES;
+        fmt->dsp = &r.gc->dsp;
+        return;
+    }
+
+    fmt->format_tag = r.xbox->format_tag;
+    fmt->channels = r.xbox->channels != 0 ? r.xbox->channels : 1;
+    fmt->block_align = r.xbox->block_align;
+    fmt->dsp = NULL;
+}
+
+static U32 table_sfx(const sndtable& t)
+{
+    return t.gc != NULL ? t.gc->num_sfx : t.xbox->num_sfx;
+}
+
+static U32 table_streams(const sndtable& t)
+{
+    return t.gc != NULL ? t.gc->num_streams : t.xbox->num_streams;
+}
+
+static U32 table_entries(const sndtable& t)
+{
+    if (t.gc != NULL)
+    {
+        return t.gc->num_sfx + t.gc->num_streams + t.gc->num_cutscene;
+    }
+
+    if (t.xbox != NULL)
+    {
+        return t.xbox->num_sfx + t.xbox->num_streams + t.xbox->num_cutscene;
+    }
+
+    return 0;
+}
+
+static sndref table_entry(const sndtable& t, U32 j)
+{
+    sndref r;
+    r.xbox = t.gc == NULL ? &t.xbox->entry[j] : NULL;
+    r.gc = t.gc != NULL ? &t.gc->entry[j] : NULL;
+    return r;
+}
+
+// Translate one table entry into the DSP-shaped record iSndLookup hands back.
+// Only three of those fields are read anywhere: sample_rate and the id by
+// xSnd.cpp, num_samples by iStartVoice to time the voice out. A GameCube entry
+// is that record already, as retail copies it. An Xbox entry fills those three
+// and the format; the rest are zeroed rather than invented.
+static void fill_lookup(const sndref& r)
 {
     memset(&snd.hdr, 0, sizeof(snd.hdr));
 
+    if (r.gc != NULL)
+    {
+        memcpy(&snd.hdr, r.gc, sizeof(snd.hdr));
+        return;
+    }
+
+    const xbox_sndhdr& e = *r.xbox;
     snd.hdr.sample_rate = e.samples_per_sec;
     snd.hdr.format = e.format_tag;
     snd.hdr.assetID = e.assetID;
@@ -516,32 +650,28 @@ static void fill_lookup(const xbox_sndhdr& e)
 // still holding. This walks the same tables and reads nothing but the entry,
 // so iStartVoice can ask about the voice it is starting rather than trusting
 // that a lookup happened immediately before.
-static const xbox_sndhdr* find_entry(U32 assetID)
+static bool find_entry(U32 assetID, sndref* out)
 {
     if (assetID == 0)
     {
-        return NULL;
+        return false;
     }
 
     for (S32 i = sinfo_array_max - 1; i >= 0; i--)
     {
-        sndinfo* info = sinfo_array[i];
-        if (info == NULL)
-        {
-            continue;
-        }
-
-        U32 n = info->num_sfx + info->num_streams + info->num_cutscene;
+        U32 n = table_entries(sinfo_array[i]);
         for (U32 j = 0; j < n; j++)
         {
-            if (info->entry[j].assetID == assetID)
+            sndref r = table_entry(sinfo_array[i], j);
+            if (ref_id(r) == assetID)
             {
-                return &info->entry[j];
+                *out = r;
+                return true;
             }
         }
     }
 
-    return NULL;
+    return false;
 }
 
 iSndFileInfo* iSndLookup(U32 id)
@@ -562,21 +692,23 @@ iSndFileInfo* iSndLookup(U32 id)
 
     for (S32 i = sinfo_array_max - 1; i >= 0; i--)
     {
-        sndinfo* info = sinfo_array[i];
-        if (info == NULL)
-        {
-            continue;
-        }
+        const sndtable& t = sinfo_array[i];
+        U32 sfx = table_sfx(t);
+        U32 streams = sfx + table_streams(t);
+        U32 n = table_entries(t);
 
-        xbox_sndhdr* entry = info->entry;
-        U32 n = info->num_sfx;
-        U32 j = 0;
-
-        for (; j < n; j++)
+        for (U32 j = 0; j < n; j++)
         {
-            if (id == entry[j].assetID)
+            sndref r = table_entry(t, j);
+            if (id != ref_id(r))
             {
-                fill_lookup(entry[j]);
+                continue;
+            }
+
+            fill_lookup(r);
+
+            if (j < sfx)
+            {
                 snd.id = snd_id++;
                 if (snd_id >= 0x7ffa)
                 {
@@ -584,44 +716,20 @@ iSndFileInfo* iSndLookup(U32 id)
                 }
                 return (iSndFileInfo*)&snd;
             }
-        }
 
-        n = info->num_streams + n;
-        for (; j < n; j++)
-        {
-            if (id == entry[j].assetID)
+            snd.id = strm_id++;
+            if (strm_id >= 0xffe)
             {
-                fill_lookup(entry[j]);
-                snd.id = strm_id++;
-                if (strm_id >= 0xffe)
-                {
-                    strm_id = 1;
-                }
-
-                // The GameCube table tags a memory-resident stream with
-                // pad[0] == 0x63 and hands it a sound-range id so the play path
-                // treats it as one. The Xbox entry has no such field -- every
-                // entry is the same 44 bytes with nothing spare -- so a stream
-                // here is always a stream.
-                sound_stream = 1;
-                return (iSndFileInfo*)&snd;
+                strm_id = 1;
             }
-        }
 
-        n = info->num_cutscene + n;
-        for (; j < n; j++)
-        {
-            if (id == entry[j].assetID)
-            {
-                fill_lookup(entry[j]);
-                snd.id = strm_id++;
-                if (strm_id >= 0xffe)
-                {
-                    strm_id = 1;
-                }
-                sound_stream = 2;
-                return (iSndFileInfo*)&snd;
-            }
+            // The GameCube tags a memory-resident stream with pad[0] == 0x63
+            // at load and hands it a sound-range id so the play path treats it
+            // as one. That tag is written by retail's iSndLoadSounds, not
+            // stored on the disc, and the Xbox entry has no such field -- so a
+            // stream here is always a stream.
+            sound_stream = j < streams ? 1 : 2;
+            return (iSndFileInfo*)&snd;
         }
     }
 
@@ -1159,15 +1267,15 @@ static void iReportMix()
     printf("iSnd:   tables %d:", sinfo_array_max);
     for (S32 t = 0; t < sinfo_array_max; t++)
     {
-        if (sinfo_array[t] == NULL)
+        if (sinfo_array[t].xbox == NULL && sinfo_array[t].gc == NULL)
         {
             printf(" [%d empty]", t);
             continue;
         }
 
-        U32 n = sinfo_array[t]->num_sfx + sinfo_array[t]->num_streams +
-                sinfo_array[t]->num_cutscene;
-        const char* pkg = n != 0 ? xST_xAssetID_HIPFullPath(sinfo_array[t]->entry[0].assetID) : NULL;
+        U32 n = table_entries(sinfo_array[t]);
+        const char* pkg =
+            n != 0 ? xST_xAssetID_HIPFullPath(ref_id(table_entry(sinfo_array[t], 0))) : NULL;
         printf(" [%d %u in %s]", t, n, pkg != NULL ? pkg : "NO PACKAGE");
     }
     printf("\n");
@@ -1209,7 +1317,8 @@ static S32 iStartVoice(xSndVoiceInfo* vp)
 
     sVoices[i].aid = vp->assetID;
 
-    const xbox_sndhdr* e = find_entry(vp->assetID);
+    sndref r;
+    bool found = find_entry(vp->assetID, &r);
 
     iSndHostSample sample;
     memset(&sample, 0, sizeof(sample));
@@ -1219,9 +1328,14 @@ static S32 iStartVoice(xSndVoiceInfo* vp)
     // inaudible and finishes when it would have, which is what everything in
     // the game that waits on a sound needs it to do.
     iSndDataFormat fmt;
-    fmt.format_tag = e != NULL ? e->format_tag : 1;
-    fmt.channels = (e != NULL && e->channels != 0) ? e->channels : 1;
-    fmt.block_align = e != NULL ? e->block_align : 2;
+    fmt.format_tag = ISNDDATA_FORMAT_PCM;
+    fmt.channels = 1;
+    fmt.block_align = 2;
+    fmt.dsp = NULL;
+    if (found)
+    {
+        ref_format(r, &fmt);
+    }
 
     U32 bytes = 0;
     iSndDataPcm pcm;
@@ -1243,9 +1357,8 @@ static S32 iStartVoice(xSndVoiceInfo* vp)
     // vp->sample_rate is the rate xSnd read out of the same table on its way
     // here, so the two agree; it is preferred only because a caller is free to
     // have changed it.
-    sample.sample_rate = vp->sample_rate != 0
-                             ? vp->sample_rate
-                             : (e != NULL ? e->samples_per_sec : snd.hdr.sample_rate);
+    sample.sample_rate =
+        vp->sample_rate != 0 ? vp->sample_rate : (found ? ref_rate(r) : snd.hdr.sample_rate);
 
     if (pcm.overridden && pcm.sample_rate != 0)
     {
@@ -1259,10 +1372,10 @@ static S32 iStartVoice(xSndVoiceInfo* vp)
     // looping flag themselves, because on hardware they never needed one. That
     // is the waterfall that fades out after a few seconds.
     //
-    // The Xbox table carries no loop POINTS, so a loop restarts at the
-    // beginning; there is no other point to restart at.
-    sample.looping = (vp->flags & 0x8000) != 0 || (e != NULL && e->loop_flag != 0);
-    sample.loop_start = 0;
+    // A loop restarts where the table says: the GameCube's loop start, or the
+    // beginning for an Xbox entry, which carries no loop points.
+    sample.looping = (vp->flags & 0x8000) != 0 || (found && ref_loops(r));
+    sample.loop_start = found && !pcm.overridden ? ref_loop_start(r) : 0;
     sample.loop_end = 0;
 
     U32 frame_bytes = sample.channels * (sample.bits / 8);
@@ -1273,10 +1386,10 @@ static S32 iStartVoice(xSndVoiceInfo* vp)
     // it, and the game loops its music forever, so looping the file whole would
     // drag that ending round every time. The retail length is in the table, in
     // the table's own rate, so it is carried across to the file's.
-    if (pcm.overridden && e != NULL && sample.looping)
+    if (pcm.overridden && found && sample.looping)
     {
-        U32 retail_frames = entry_frames(*e);
-        U32 retail_rate = e->samples_per_sec;
+        U32 retail_frames = ref_frames(r);
+        U32 retail_rate = ref_rate(r);
 
         if (retail_frames != 0 && retail_rate != 0 && sample.sample_rate != 0)
         {
@@ -1293,7 +1406,7 @@ static S32 iStartVoice(xSndVoiceInfo* vp)
     {
         // Nothing was read. Fall back to the length the table implies so the
         // voice still times out correctly rather than ending instantly.
-        sample.num_samples = e != NULL ? entry_frames(*e) : snd.hdr.num_samples;
+        sample.num_samples = found ? ref_frames(r) : snd.hdr.num_samples;
     }
 
     // BFBB_SND reports what actually reaches the mixer. A sound that is
@@ -1518,15 +1631,14 @@ void iSndSceneExit()
     if (sinfo_array_max > 0)
     {
         sinfo_array_max--;
-        sinfo_array[sinfo_array_max] = NULL;
+        sinfo_array[sinfo_array_max].xbox = NULL;
+        sinfo_array[sinfo_array_max].gc = NULL;
     }
 }
 
 S32 iSndLoadSounds(void* data)
 {
-    sndinfo* p = (sndinfo*)data;
-
-    if (p == NULL)
+    if (data == NULL)
     {
         return 0;
     }
@@ -1539,23 +1651,37 @@ S32 iSndLoadSounds(void* data)
         return 0;
     }
 
+    // A GameCube table is told from an Xbox one by the tag iGCSwap writes into
+    // its second word.
+    sndtable t;
+    t.xbox = NULL;
+    t.gc = NULL;
+    if (((const U32*)data)[1] == IGCSWAP_SNDI_GAMECUBE)
+    {
+        t.gc = (const gc_sndinfo*)data;
+    }
+    else
+    {
+        t.xbox = (const sndinfo*)data;
+    }
+
     // An empty table still takes a slot: iSndLookup walks the array backwards
     // by index, and retail records the gap rather than closing it.
-    if (p->num_sfx == 0 && p->num_streams == 0 && p->num_cutscene == 0)
+    if (table_entries(t) == 0)
     {
-        sinfo_array[sinfo_array_max++] = NULL;
+        sinfo_array[sinfo_array_max].xbox = NULL;
+        sinfo_array[sinfo_array_max].gc = NULL;
+        sinfo_array_max++;
         return 0;
     }
 
-    sinfo_array[sinfo_array_max++] = p;
+    sinfo_array[sinfo_array_max++] = t;
 
-    // What is NOT done here, and what a real backend has to add: retail also
-    // opens the HIP holding the sample data, converts each entry's loop points
-    // to nibble addresses relative to where the asset landed, and uploads the
-    // ADPCM to ARAM. Lookup and timing need none of that -- num_samples and
-    // sample_rate are in the table already -- but playing an actual sample
-    // does. The offsets it would need are reachable through
-    // xSTGetAssetInfoInHxP, as src/SB/Core/gc/iSnd.cpp shows.
+    // Retail also opens the package holding the samples, converts each
+    // entry's loop points to nibble addresses relative to where the asset
+    // landed, and uploads the ADPCM to ARAM. Here the samples are read and
+    // decoded the first time they play (iSndData.cpp), and the loop points
+    // stay relative to the start of the sound.
 
     return 1;
 }

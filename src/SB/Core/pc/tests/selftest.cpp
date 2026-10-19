@@ -4506,6 +4506,68 @@ static void test_snd_data()
 
     iSndDataRelease(sFakePkgAsset);
     iSndDataReset();
+
+    // GameCube DSP ADPCM. Coefficient pair 1 is (1.0, 0), so each sample is
+    // the last plus nibble * scale. The frames are the ones test_snd_dsp
+    // decodes; here they come through the cache, once bare and once behind the
+    // big-endian header copy a cutscene sound carries.
+    iSndDspHeader dsp;
+    memset(&dsp, 0, sizeof(dsp));
+    dsp.num_samples = 16;
+    dsp.num_nibbles = 2 * 16 + 2;
+    dsp.sample_rate = 22050;
+    dsp.coef[2] = 2048;
+
+    const U8 frames[16] = { 0x11, 0x12, 0x34, 0x5F, 0, 0, 0, 0, 0x00, 0x7F, 0, 0, 0, 0, 0, 0 };
+
+    for (S32 headed = 0; headed < 2; headed++)
+    {
+        snprintf(path, sizeof(path), "%s/dsp.HOP", dir);
+        f = fopen(path, "wb");
+        check(f != NULL, "the DSP ADPCM package could be created");
+        if (f == NULL)
+        {
+            return;
+        }
+
+        U8 head[ISNDDSP_HEADER_SIZE];
+        memset(head, 0, sizeof(head));
+        putBE32(head + 0x0, dsp.num_samples);
+        putBE32(head + 0x4, dsp.num_nibbles);
+        putBE32(head + 0x8, dsp.sample_rate);
+        if (headed)
+        {
+            fwrite(head, 1, sizeof(head), f);
+        }
+        fwrite(frames, 1, sizeof(frames), f);
+        fclose(f);
+
+        snprintf(sFakePkgName, sizeof(sFakePkgName), "dsp.HOP");
+        sFakePkgAsset = 0x0D5B0000 + headed;
+        sFakePkgOffset = 0;
+        sFakePkgSize = (U32)sizeof(frames) + (headed ? ISNDDSP_HEADER_SIZE : 0);
+
+        iSndDataFormat gc;
+        gc.format_tag = ISNDDATA_FORMAT_GC_DSPADPCM;
+        gc.channels = 1;
+        gc.block_align = ISNDDSP_FRAME_BYTES;
+        gc.dsp = &dsp;
+
+        U32 gbytes = 0;
+        const S16* g = (const S16*)iSndDataAcquire(sFakePkgAsset, &gc, &gbytes, NULL);
+
+        check(g != NULL,
+              headed ? "a cutscene's DSP ADPCM sound decodes" : "a DSP ADPCM sound decodes");
+        check(gbytes == 16 * sizeof(S16), "to num_samples 16-bit samples");
+        if (g != NULL)
+        {
+            check(g[0] == 2 && g[4] == 30 && g[5] == 28 && g[13] == 28 && g[14] == 7 && g[15] == -1,
+                  headed ? "from past its header copy" : "with the table's coefficients");
+        }
+
+        iSndDataRelease(sFakePkgAsset);
+        iSndDataReset();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5450,6 +5512,45 @@ static void test_snd()
 
         iSndStop(0x4400 + pass);
     }
+
+    // A GameCube table, as iGCSwap leaves it: host byte order, total_size
+    // stamped, 0x64-byte entries that are the DSPADPCM header and an id. One
+    // sound, one stream, one cutscene sound.
+    static U32 gcTable[(0x10 + 3 * 0x64) / 4];
+    memset(gcTable, 0, sizeof(gcTable));
+    gcTable[0] = 1;
+    gcTable[1] = IGCSWAP_SNDI_GAMECUBE;
+    gcTable[2] = 1;
+    gcTable[3] = 1;
+    const U32 gcIds[3] = { 0x33333333, 0x44444444, 0x55555555 };
+    for (U32 i = 0; i < 3; i++)
+    {
+        iSndDspHeader h;
+        memset(&h, 0, sizeof(h));
+        h.num_samples = 3200 * (i + 1);
+        h.sample_rate = 16000 * (i + 1);
+        h.loop_start = 2;
+        memcpy((U8*)gcTable + 0x10 + i * 0x64, &h, sizeof(h));
+        memcpy((U8*)gcTable + 0x10 + i * 0x64 + 0x60, &gcIds[i], 4);
+    }
+
+    check(iSndLoadSounds(gcTable) == 1, "iSndLoadSounds accepts a GameCube table");
+
+    test_lookup* g0 = (test_lookup*)iSndLookup(gcIds[0]);
+    check(g0 != NULL && g0->num_samples == 3200 && g0->sample_rate == 16000 && g0->ID >= 0x1000,
+          "a GameCube sound looks up with its own length and rate, as a sound");
+    test_lookup* g1 = (test_lookup*)iSndLookup(gcIds[1]);
+    check(g1 != NULL && g1->num_samples == 6400 && g1->sample_rate == 32000 && g1->ID > 0 &&
+              g1->ID < 0x1000,
+          "a GameCube stream looks up as a stream");
+    test_lookup* g2 = (test_lookup*)iSndLookup(gcIds[2]);
+    check(g2 != NULL && g2->num_samples == 9600 && g2->ID < 0x1000,
+          "and a cutscene sound past both, also in the stream range");
+    check(iSndLookup(SND_ASSET) != NULL, "the Xbox table below it still answers");
+
+    iSndSceneExit();
+    check(iSndLookup(gcIds[0]) == NULL && iSndLookup(SND_ASSET) != NULL,
+          "a scene ending pops the GameCube table and leaves the one below");
 
     iSndExit();
     iHostSetEnv("BFBB_AUDIO", NULL);

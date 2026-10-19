@@ -1,4 +1,5 @@
 #include "iSndData.h"
+#include "iSndDsp.h"
 
 #include "iFile.h"
 #include "iSoundtrack.h"
@@ -392,8 +393,29 @@ static void* iReadAsset(U32 aid, U32* out_bytes)
     return mem;
 }
 
-#define ISND_FORMAT_PCM 1
-#define ISND_FORMAT_XBOX_ADPCM 0x69
+// GameCube DSP ADPCM: mono, num_samples long, decoded with the coefficients in
+// the sound's table entry. A cutscene's sound carries a copy of that entry in
+// front of its frames, which iSndDspDataOffset steps over.
+static void* iDecodeDsp(const U8* src, U32 srcBytes, const iSndDspHeader* h, U32* outBytes)
+{
+    if (h == NULL || h->num_samples == 0)
+    {
+        return NULL;
+    }
+
+    U32 offset = iSndDspDataOffset(src, srcBytes, h);
+
+    S16* out = (S16*)malloc((size_t)h->num_samples * sizeof(S16));
+    if (out == NULL)
+    {
+        return NULL;
+    }
+
+    iSndDspDecode(src + offset, srcBytes - offset, h, out);
+
+    *outBytes = h->num_samples * sizeof(S16);
+    return out;
+}
 
 // Turn what was read off disc into the 16-bit PCM the cache promises. Takes
 // ownership of `raw` either way: it is returned unchanged for an asset that was
@@ -402,12 +424,27 @@ static void* iDecodeToPcm(void* raw, U32 rawBytes, const iSndDataFormat* fmt, U3
 {
     *outBytes = rawBytes;
 
-    if (fmt == NULL || fmt->format_tag == ISND_FORMAT_PCM || fmt->format_tag == 0)
+    if (fmt == NULL || fmt->format_tag == ISNDDATA_FORMAT_PCM || fmt->format_tag == 0)
     {
         return raw;
     }
 
-    if (fmt->format_tag == ISND_FORMAT_XBOX_ADPCM)
+    if (fmt->format_tag == ISNDDATA_FORMAT_GC_DSPADPCM)
+    {
+        U32 got = 0;
+        void* pcm = iDecodeDsp((const U8*)raw, rawBytes, fmt->dsp, &got);
+        free(raw);
+
+        if (pcm == NULL)
+        {
+            return NULL;
+        }
+
+        *outBytes = got;
+        return pcm;
+    }
+
+    if (fmt->format_tag == ISNDDATA_FORMAT_XBOX_ADPCM)
     {
         U32 got = 0;
         void* pcm = iDecodeAdpcm((const U8*)raw, rawBytes, fmt->block_align,

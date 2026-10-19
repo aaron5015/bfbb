@@ -13,12 +13,23 @@
 //
 // See iSndData.cpp for why they are not already there.
 
+struct iSndDspHeader;
+
+#define ISNDDATA_FORMAT_PCM 1
+#define ISNDDATA_FORMAT_XBOX_ADPCM 0x69
+// Not a WAVE format tag; those are 16-bit.
+#define ISNDDATA_FORMAT_GC_DSPADPCM 0x10000
+
 // How the asset is encoded, straight out of its sound-table entry.
 struct iSndDataFormat
 {
-    U32 format_tag; // 1 = PCM, 0x69 = Xbox ADPCM
+    U32 format_tag; // one of ISNDDATA_FORMAT_*
     U32 channels;
     U32 block_align;
+
+    // The GameCube table entry, for ISNDDATA_FORMAT_GC_DSPADPCM: the length,
+    // coefficients and starting history. Read only during the call.
+    const iSndDspHeader* dsp;
 };
 
 // What actually came back, which is not always what the table asked for. The
