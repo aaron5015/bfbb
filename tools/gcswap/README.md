@@ -40,6 +40,6 @@ off by one, which the two builds quantized differently.
 
 JAW: 48 of 49 match exactly; the other is a different table.
 
-No rule yet: SNDI (the sound table, which belongs with the GameCube audio
-decoder). RenderWare streams (MODL, RWTX, JSP) and audio are not byte-swapped
-at all.
+SNDI keeps the GameCube layout (`iGCSwapSoundTable`); `iSnd.cpp` reads both.
+RenderWare streams (MODL, RWTX, JSP) and the samples in SND and SNDS are not
+byte-swapped at all.

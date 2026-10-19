@@ -16,7 +16,12 @@
 // a GameCube disc and compares each result with the Xbox asset of the same id.
 //
 // RenderWare streams (models, textures, worlds) are little-endian on every
-// platform and are not touched here; neither is audio.
+// platform and are not touched here; neither are the samples in SND and SNDS,
+// which are byte streams.
+
+// The second word of a GameCube SNDI after the swap. On the Xbox that word is
+// num_streams. iSnd.cpp tells the two table layouts apart by it.
+#define IGCSWAP_SNDI_GAMECUBE 0x47435349u // "GCSI"
 
 enum iGCSwapResult
 {

@@ -1,9 +1,10 @@
 #include "iGCSwap.h"
+#include "iSndDsp.h"
 
 #include <string.h>
 
-// Only <types.h> and the C library, so tools/gcswap/check.py can compile this
-// file on its own and run it over a whole disc.
+// Only <types.h>, the C library and iSndDsp.cpp, so tools/gcswap/check.py can
+// compile this file on its own and run it over a whole disc.
 
 static inline void gcsSwap16(U8* p)
 {
@@ -118,6 +119,7 @@ static S32 iGCSwapDisco(U8* p, U32 size);
 static S32 iGCSwapModelInfo(U8* p, U32 size);
 static S32 iGCSwapCutsceneToc(U8* p, U32 size);
 static S32 iGCSwapJaw(U8* p, U32 size);
+static S32 iGCSwapSoundTable(U8* p, U32 size);
 
 #include "iGCSwapTable.inc"
 
@@ -427,6 +429,43 @@ bool iGCSwapCutsceneDeltaModel(void* data, U32 size)
         c += skip;
     }
     return true;
+}
+
+// SNDI, the GameCube sound table, as src/SB/Core/gc/iSnd.cpp reads it: num_sfx,
+// total_size, num_streams and num_cutscene, then one entry per sound -- its
+// 0x60-byte DSPADPCM header and its asset id. total_size is scratch the
+// GameCube fills in at load; on the disc it is 0xCDCDCDCD. It is stamped with
+// IGCSWAP_SNDI_GAMECUBE, which no Xbox table can hold in that word.
+static S32 iGCSwapSoundTable(U8* p, U32 size)
+{
+    const U32 kHeader = 0x10;
+    const U32 kEntry = 0x64;
+
+    if (size < kHeader)
+    {
+        return 0;
+    }
+    for (U32 c = 0; c < kHeader; c += 4)
+    {
+        gcsSwap32(p + c);
+    }
+
+    U32 n = gcsRead32(p + 0x0) + gcsRead32(p + 0x8) + gcsRead32(p + 0xC);
+    if (n > (size - kHeader) / kEntry)
+    {
+        return 0;
+    }
+
+    U32 tag = IGCSWAP_SNDI_GAMECUBE;
+    memcpy(p + 0x4, &tag, 4);
+
+    for (U32 i = 0; i < n; i++)
+    {
+        U8* e = p + kHeader + i * kEntry;
+        iSndDspSwapHeader(e);
+        gcsSwap32(e + ISNDDSP_HEADER_SIZE);
+    }
+    return 1;
 }
 
 iGCSwapResult iGCSwapAsset(U32 type, void* data, U32 size)

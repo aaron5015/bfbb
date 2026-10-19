@@ -3981,6 +3981,11 @@ static S32 gcs_type_JAW(U8* p, U32 size)
     return iGCSwapJaw(p, size);
 }
 
+static S32 gcs_type_SNDI(U8* p, U32 size)
+{
+    return iGCSwapSoundTable(p, size);
+}
+
 static S32 gcs_type_DYNA(U8* p, U32 size)
 {
     U32 end;
@@ -4210,6 +4215,7 @@ static S32 iGCSwapGenerated(U32 type, U8* p, U32 size)
     case 0x53484457: return gcs_type_SHDW(p, size); // 'SHDW'
     case 0x53485250: return gcs_type_SHRP(p, size); // 'SHRP'
     case 0x53494D50: return gcs_type_SIMP(p, size); // 'SIMP'
+    case 0x534E4449: return gcs_type_SNDI(p, size); // 'SNDI'
     case 0x53555246: return gcs_type_SURF(p, size); // 'SURF'
     case 0x54455854: return gcs_type_TEXT(p, size); // 'TEXT'
     case 0x54494D52: return gcs_type_TIMR(p, size); // 'TIMR'
@@ -4267,6 +4273,7 @@ static bool iGCSwapGeneratedKnows(U32 type)
     case 0x53484457:
     case 0x53485250:
     case 0x53494D50:
+    case 0x534E4449:
     case 0x53555246:
     case 0x54455854:
     case 0x54494D52:

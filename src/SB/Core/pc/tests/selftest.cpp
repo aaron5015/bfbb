@@ -2063,6 +2063,46 @@ static void test_gcswap()
           "a type with no rule is left as it was");
     check(iGCSwapAsset('ANIM', junk, sizeof(junk)) == IGCSWAP_MALFORMED,
           "and an animation too short for its header says so");
+
+    // SNDI, the GameCube sound table: num_sfx, total_size, num_streams and
+    // num_cutscene, then 0x64-byte entries -- a DSPADPCM header and an id.
+    U8 sndi[0x10 + 2 * 0x64];
+    memset(sndi, 0, sizeof(sndi));
+    putBE32(sndi + 0x0, 1);
+    putBE32(sndi + 0x4, 0xCDCDCDCD);
+    putBE32(sndi + 0x8, 1);
+    putBE32(sndi + 0xC, 0);
+    U8* e = sndi + 0x10;
+    putBE32(e + 0x00, 3200); // num_samples
+    putBE32(e + 0x04, 3660); // num_nibbles
+    putBE32(e + 0x08, 22050); // sample_rate
+    putBE16(e + 0x0C, 1); // loop_flag
+    putBE32(e + 0x10, 2); // loop_start
+    putBE16(e + 0x1C, 0x0800); // coef[0]
+    putBE16(e + 0x3A, 0xFF00); // coef[15]
+    putBE16(e + 0x3E, 0x0011); // pred_scale
+    putBE16(e + 0x40, 0x1234); // yn1
+    putBE32(e + 0x60, 0xAABBCCDD);
+    putBE32(e + 0x64 + 0x60, 0x01020304);
+
+    check(iGCSwapKnowsType('SNDI'), "iGCSwap has a rule for SNDI");
+    check(iGCSwapAsset('SNDI', sndi, sizeof(sndi)) == IGCSWAP_DONE, "a GameCube SNDI swaps");
+    check(getLE32(sndi + 0x0) == 1 && getLE32(sndi + 0x8) == 1 && getLE32(sndi + 0xC) == 0,
+          "its counts come out little-endian");
+    check(getLE32(sndi + 0x4) == IGCSWAP_SNDI_GAMECUBE, "and total_size is stamped as GameCube");
+    check(getLE32(e + 0x00) == 3200 && getLE32(e + 0x04) == 3660 && getLE32(e + 0x08) == 22050 &&
+              getLE16(e + 0x0C) == 1 && getLE32(e + 0x10) == 2,
+          "an entry's lengths, rate and loop fields swap at their widths");
+    check(getLE16(e + 0x1C) == 0x0800 && getLE16(e + 0x3A) == 0xFF00 && getLE16(e + 0x3E) == 0x11 &&
+              getLE16(e + 0x40) == 0x1234,
+          "and its coefficients and context as 16-bit");
+    check(getLE32(e + 0x60) == 0xAABBCCDD && getLE32(e + 0x64 + 0x60) == 0x01020304,
+          "and every entry's asset id");
+
+    memset(sndi, 0, sizeof(sndi));
+    putBE32(sndi + 0x0, 3);
+    check(iGCSwapAsset('SNDI', sndi, sizeof(sndi)) == IGCSWAP_MALFORMED,
+          "a table counting more entries than it holds says so");
 }
 
 static void test_file_mod()

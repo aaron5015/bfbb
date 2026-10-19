@@ -24,7 +24,7 @@ def main():
     os.makedirs(os.path.dirname(exe), exist_ok=True)
     subprocess.check_call(["clang++", "-std=c++17", "-O2", "-I", PC, "-idirafter", os.path.join(ROOT, "include"),
                            "-DPLATFORM_PC", "-D_CRT_SECURE_NO_WARNINGS", os.path.join(HERE, "check.cpp"),
-                           os.path.join(PC, "iGCSwap.cpp"), "-o", exe])
+                           os.path.join(PC, "iGCSwap.cpp"), os.path.join(PC, "iSndDsp.cpp"), "-o", exe])
     subprocess.check_call([exe] + sys.argv[1:])
 
 
