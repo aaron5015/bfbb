@@ -1155,17 +1155,13 @@ void iSystemInit(U32 options)
 
     // **Whose assets these are.**
     //
-    // The port reads the Xbox release, and a set from another console does not
-    // announce itself: the packer's container is the same everywhere and only
-    // what is inside it differs, so a GameCube set opens, reads, and then
-    // fails a long way from the cause. It gets as far as boot.HIP's animation
-    // tables, where zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a
-    // big-endian count of 74 as 1,241,513,984 and walks off the end of memory.
+    // The port reads the Xbox and GameCube releases. A set from another console
+    // does not announce itself: the packer's container is the same everywhere
+    // and only what is inside it differs, so a PS2 set opens, reads, and then
+    // fails a long way from the cause. Say what it is instead.
     //
-    // Nothing about that crash says "these are the wrong assets", and it is
-    // the first thing anyone will try: the GameCube release is the one this
-    // code was decompiled from, so reaching for its files is the obvious move.
-    // Say what they are and what is missing instead.
+    // A GameCube package is turned around as it loads: game data by iGCSwap,
+    // textures and geometry by librw's GameCube readers, sound by iSnd.
     //
     // Only when the header actually names a platform. An unreadable or absent
     // PLAT chunk is not an accusation, and the check above has already settled
@@ -1174,31 +1170,32 @@ void iSystemInit(U32 options)
         const char* longName = NULL;
         const char* plat = iFileAssetPlatform(&longName);
 
-        if (plat != NULL && strcmp(plat, "XB") != 0)
+        if (plat != NULL && strcmp(plat, "XB") != 0 && strcmp(plat, "GC") != 0)
         {
             const char* who = (longName != NULL) ? longName : plat;
 
             char message[1536];
             snprintf(message, sizeof(message),
-                     "These are %s assets, and the port reads the Xbox release's.\n\n"
-                     "The two differ in more than byte order. The %s packs store their "
-                     "textures in the console's own formats, their models and level "
-                     "geometry as display lists for its graphics hardware, and every "
-                     "number in an entity or animation asset the other way round from "
-                     "the way this build reads one.\n\n"
-                     "Extract the Xbox disc instead, and point [assets] path at the "
-                     "folder holding boot.HIP.",
+                     "These are %s assets, and the port reads the Xbox and GameCube "
+                     "releases'.\n\n"
+                     "The %s packs store their textures, models and level geometry in "
+                     "that console's own formats, which this build does not read.\n\n"
+                     "Extract the Xbox or GameCube disc instead, and point [assets] path "
+                     "at the folder holding boot.HIP.",
                      who, who);
 
-            printf("bfbb: FATAL -- these are %s assets; the port reads the Xbox release's.\n", who);
-            printf("bfbb:   textures, models and level geometry are in that console's own\n");
-            printf("bfbb:   formats, and the entity and animation assets are byte-swapped\n");
-            printf("bfbb:   against what this build reads.\n");
-            printf("bfbb:   [assets] path has to name an extracted Xbox disc.\n");
+            printf("bfbb: FATAL -- these are %s assets; the port reads the Xbox and\n", who);
+            printf("bfbb:   GameCube releases'. [assets] path has to name one of those.\n");
             fflush(stdout);
 
             iHostErrorBox("SpongeBob SquarePants: Battle for Bikini Bottom", message);
             exit(1);
+        }
+
+        if (plat != NULL && strcmp(plat, "GC") == 0)
+        {
+            printf("bfbb: reading the GameCube release\n");
+            fflush(stdout);
         }
     }
 
