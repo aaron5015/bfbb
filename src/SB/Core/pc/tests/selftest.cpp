@@ -2095,8 +2095,8 @@ static void test_file_mod()
     free(buf);
     check(strcmp(loaded, "MODDED") == 0, "iFileLoad's absolute path is overridden too");
 
-    // Two mods, the first listed wins. The top one's copy of TWO.HIP is a
-    // GameCube package, so the one below supplies it.
+    // Two mods, the first listed wins. The top one's copy of TWO.HOP is a
+    // GameCube .HOP, so the one below supplies it.
     char top[512];
     char topGl[512];
     if (scratch_dir("modtop", top, sizeof(top)))
@@ -2104,8 +2104,8 @@ static void test_file_mod()
         snprintf(topGl, sizeof(topGl), "%s/gl", top);
         iHostMakeDir(topGl);
         write_scratch(topGl, "gl01.HIP", "TOP", 3);
-        write_scratch(top, "two.hip", gcHip, sizeof(gcHip));
-        write_scratch(mod, "TWO.HIP", "SECOND", 6);
+        write_scratch(top, "two.hop", gcHip, sizeof(gcHip));
+        write_scratch(mod, "TWO.HOP", "SECOND", 6);
 
         snprintf(path, sizeof(path), "%s | %s", top, mod);
         iHostSetEnv("BFBB_MOD", path);
@@ -2114,8 +2114,8 @@ static void test_file_mod()
 
         read_through_ifile("GL/GL01.HIP", got, sizeof(got));
         check(strcmp(got, "TOP") == 0, "with two mods, the first listed supplies a file both have");
-        read_through_ifile("TWO.HIP", got, sizeof(got));
-        check(strcmp(got, "SECOND") == 0, "and a GameCube package in it falls to the next mod");
+        read_through_ifile("TWO.HOP", got, sizeof(got));
+        check(strcmp(got, "SECOND") == 0, "and a GameCube .HOP in it falls to the next mod");
         read_through_ifile("ONLY.HIP", got, sizeof(got));
         check(strcmp(got, "BASE") == 0, "and a file neither has comes from the asset root");
         check(iFileModCount() == 2 && strncmp(iFileModName(), "bfbb_pc_modtop_", 15) == 0 &&
@@ -2124,9 +2124,9 @@ static void test_file_mod()
 
         snprintf(path, sizeof(path), "%s/gl01.HIP", topGl);
         iHostRemoveFile(path);
-        snprintf(path, sizeof(path), "%s/two.hip", top);
+        snprintf(path, sizeof(path), "%s/two.hop", top);
         iHostRemoveFile(path);
-        snprintf(path, sizeof(path), "%s/TWO.HIP", mod);
+        snprintf(path, sizeof(path), "%s/TWO.HOP", mod);
         iHostRemoveFile(path);
         iHostRemoveDir(topGl);
         iHostRemoveDir(top);
