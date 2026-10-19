@@ -895,6 +895,7 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iModFolder.cpp
   ${PC_DIR}/iSnd.cpp
   ${PC_DIR}/iSndData.cpp
+  ${PC_DIR}/iSndDsp.cpp
   ${PC_DIR}/iSoundtrack.cpp
 
   # Copied unchanged from gc/ -- pure geometry and collision, nothing
@@ -1720,6 +1721,7 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   # is what makes its eviction and pinning rules testable at all; the real
   # xstransvc closure is far too large for this target.
   ${PC_DIR}/iSndData.cpp
+  ${PC_DIR}/iSndDsp.cpp
 
   # The soundtrack override, which iSndData asks before it reads an archive.
   # Deliberately built here WITHOUT BFBB_HAVE_FFMPEG: the WAVE reader is the

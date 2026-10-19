@@ -30,6 +30,7 @@
 #include "iHost.h"
 #include "iSnd.h"
 #include "iSndData.h"
+#include "iSndDsp.h"
 #include "iSoundtrack.h"
 #include "xpkrsvc.h"
 #include "xhipio.h"
@@ -4468,6 +4469,85 @@ static void test_snd_data()
 }
 
 // ---------------------------------------------------------------------------
+// GameCube DSP ADPCM
+
+static void test_snd_dsp()
+{
+    printf("iSndDsp\n");
+
+    check(iSndDspNibbleToSample(2) == 0 && iSndDspNibbleToSample(15) == 13 &&
+              iSndDspNibbleToSample(18) == 14 && iSndDspNibbleToSample(34) == 28,
+          "a nibble address skips each frame's two header nibbles");
+    check(iSndDspBytesFor(0) == 0 && iSndDspBytesFor(14) == 8 && iSndDspBytesFor(15) == 16,
+          "fourteen samples to an eight-byte frame");
+
+    iSndDspHeader h;
+    memset(&h, 0, sizeof(h));
+    h.num_samples = 16;
+    h.coef[2] = 2048; // pair 1: hist1 * 1.0
+    h.coef[3] = 0;
+
+    // Frame 0: pair 1, scale 2, nibbles 1 2 3 4 5 -1 then zeros, high nibble
+    // first. Frame 1: pair 0 (both coefficients 0), scale 1, nibbles 7 -1.
+    const U8 frames[16] = { 0x11, 0x12, 0x34, 0x5F, 0, 0, 0, 0, 0x00, 0x7F, 0, 0, 0, 0, 0, 0 };
+    S16 out[24];
+
+    check(iSndDspDecode(frames, sizeof(frames), &h, out) == 16, "two frames give 16 samples");
+    check(out[0] == 2 && out[1] == 6 && out[2] == 12 && out[3] == 20 && out[4] == 30,
+          "each sample is the last plus nibble * scale under (1.0, 0)");
+    check(out[5] == 28 && out[13] == 28, "a negative nibble steps down; zeros hold");
+    check(out[14] == 7 && out[15] == -1, "pair 0 ignores the history, and rounds toward -inf");
+
+    h.yn1 = 100;
+    iSndDspDecode(frames, sizeof(frames), &h, out);
+    check(out[0] == 102, "the header's yn1 seeds the history");
+    h.yn1 = 0;
+
+    // A frame cut short decodes as far as its bytes go, and the rest of
+    // num_samples is silence.
+    h.num_samples = 20;
+    memset(out, 0x55, sizeof(out));
+    check(iSndDspDecode(frames, 10, &h, out) == 16, "a two-byte last frame gives two samples");
+    check(out[14] == 7 && out[15] == -1 && out[16] == 0 && out[19] == 0,
+          "and what the data does not reach is silence");
+
+    // Scale 2^12, nibble 7, twice: 28672 then 57344, which clamps.
+    const U8 loud[8] = { 0x1C, 0x77, 0, 0, 0, 0, 0, 0 };
+    h.num_samples = 2;
+    iSndDspDecode(loud, sizeof(loud), &h, out);
+    check(out[0] == 28672 && out[1] == 32767, "a sample past 16 bits clamps");
+
+    U8 asset[ISNDDSP_HEADER_SIZE + 8];
+    memset(asset, 0, sizeof(asset));
+    h.num_samples = 14;
+    h.num_nibbles = 16;
+    h.sample_rate = 32000;
+    putBE32(asset + 0x0, 14);
+    putBE32(asset + 0x4, 16);
+    putBE32(asset + 0x8, 32000);
+    check(iSndDspDataOffset(asset, sizeof(asset), &h) == ISNDDSP_HEADER_SIZE,
+          "a sound that starts with its own header is read past it");
+    putBE32(asset + 0x8, 22050);
+    check(iSndDspDataOffset(asset, sizeof(asset), &h) == 0, "and one that does not, from byte 0");
+
+    // iSndDspSwapHeader: the u32s, the u16s and the coefficients.
+    U8 be[ISNDDSP_HEADER_SIZE];
+    memset(be, 0, sizeof(be));
+    putBE32(be + 0x00, 0x00123456);
+    putBE16(be + 0x0C, 1);
+    putBE32(be + 0x10, 2);
+    putBE16(be + 0x1C, 0xF800);
+    putBE16(be + 0x3E, 0x0047);
+    putBE16(be + 0x48, 0xFFFE);
+    iSndDspSwapHeader(be);
+    iSndDspHeader sw;
+    memcpy(&sw, be, sizeof(sw));
+    check(sw.num_samples == 0x00123456 && sw.loop_flag == 1 && sw.loop_start == 2 &&
+              sw.coef[0] == -2048 && sw.pred_scale == 0x47 && sw.loop_yn2 == -2,
+          "a big-endian header swaps field by field");
+}
+
+// ---------------------------------------------------------------------------
 // The soundtrack override
 //
 // Built here WITHOUT BFBB_HAVE_FFMPEG, so what runs is the WAVE reader and the
@@ -6097,6 +6177,7 @@ int main()
     test_idtag();
     test_pad();
     test_savegame();
+    test_snd_dsp();
     test_snd_data();
     test_soundtrack();
 #ifdef BFBB_AUDIO_BACKEND_SDL
