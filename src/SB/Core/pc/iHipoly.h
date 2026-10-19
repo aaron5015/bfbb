@@ -21,7 +21,14 @@ S32 iHipolyEnabled();
 // the new triangles comes back in a buffer of `*outSize` bytes, or NULL when
 // the setting is off or the world is left as shipped. Each new triangle keeps
 // the flags of the one it was cut from, so what was ground is still ground.
-void* iHipolyWorld(RpClump* clump, const void* coll, U32 collSize, U32* outSize);
+//
+// `strips` is the level's precomputed strip vertices (the 0xBEEF03 payload,
+// `stripCount` of them) when it ships them, which the GameCube's levels do, or
+// NULL. The shipped tree indexes them; with them in hand its triangles are
+// found by position, so geometry whose strips were rebuilt -- a GameCube
+// world, read from display lists -- still maps onto the tree.
+void* iHipolyWorld(RpClump* clump, const void* coll, U32 collSize, const RwV3d* strips,
+                   U32 stripCount, U32* outSize);
 
 // The buffer lives as long as the tree built over it. xJSP.cpp says which
 // tree that is, and says when it goes.

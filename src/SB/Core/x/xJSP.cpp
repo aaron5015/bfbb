@@ -93,8 +93,27 @@ void xJSP_MultiStreamRead(void* data, U32 size, xJSPHeader** jsp)
             iEnvFitShippedRig(hdr->clump);
         }
 
+        // The strip vertices the shipped tree indexes, two marks on, when the
+        // level has them.
+        const RwV3d* stripVecs = NULL;
+        U32 stripVecCount = 0;
+        for (U8* p = (U8*)mp; p + sizeof(__rwMark) <= (U8*)mp + size;)
+        {
+            __rwMark m;
+            memmove(&m, p, sizeof(__rwMark));
+            RwMemNative32(&m, sizeof(__rwMark));
+            if (m.type == 0xBEEF03 && m.length >= sizeof(U32))
+            {
+                stripVecCount = *(U32*)(p + sizeof(__rwMark));
+                stripVecs = (const RwV3d*)(p + sizeof(__rwMark) + sizeof(U32));
+                break;
+            }
+            p += sizeof(__rwMark) + m.length;
+        }
+
         U32 hipolySize = 0;
-        void* hipolyTree = iHipolyWorld(hdr->clump, data, mark.length, &hipolySize);
+        void* hipolyTree =
+            iHipolyWorld(hdr->clump, data, mark.length, stripVecs, stripVecCount, &hipolySize);
         colltree = xClumpColl_StaticBufferInit(hipolyTree ? hipolyTree : data,
                                                hipolyTree ? hipolySize : mark.length);
         if (hipolyTree)

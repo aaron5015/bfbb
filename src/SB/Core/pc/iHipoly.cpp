@@ -28,6 +28,7 @@
 #include "iConfig.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -976,6 +977,101 @@ namespace
         }
     }
 
+    // An atomic's vertices by position: each vertex's lowest-numbered twin at
+    // the same position, and the vertices sorted by position for a lookup.
+    // Two vertices at one position differ only in what the collision tree
+    // cannot see -- UVs, colour -- so a triangle named by its twins is the
+    // triangle the tree means.
+    struct ByPosition
+    {
+        const rw::V3d* P;
+        iHipolyArray<U32> order;
+        iHipolyArray<U32> twin;
+    };
+
+    inline bool posLess(const rw::V3d& a, const rw::V3d& b)
+    {
+        if (a.x != b.x)
+        {
+            return a.x < b.x;
+        }
+        if (a.y != b.y)
+        {
+            return a.y < b.y;
+        }
+        return a.z < b.z;
+    }
+
+    inline bool posEqual(const rw::V3d& a, const rw::V3d& b)
+    {
+        return a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+
+    // qsort has no context argument; byPosition is the only caller and does
+    // not reenter.
+    const rw::V3d* sSortP;
+
+    int comparePosition(const void* l, const void* r)
+    {
+        U32 a = *(const U32*)l, b = *(const U32*)r;
+        if (posLess(sSortP[a], sSortP[b]))
+        {
+            return -1;
+        }
+        if (posLess(sSortP[b], sSortP[a]))
+        {
+            return 1;
+        }
+        return a < b ? -1 : (a > b ? 1 : 0);
+    }
+
+    void byPosition(const rw::Geometry* geo, ByPosition& out)
+    {
+        U32 nv = (U32)geo->numVertices;
+        out.P = geo->morphTargets[0].vertices;
+        out.order.resize(nv);
+        out.twin.resize(nv);
+        for (U32 v = 0; v < nv; v++)
+        {
+            out.order[v] = v;
+        }
+        sSortP = out.P;
+        qsort(out.order.p, nv, sizeof(U32), comparePosition);
+        // Equal positions are adjacent, lowest index first.
+        U32 first = 0;
+        for (U32 i = 0; i < nv; i++)
+        {
+            if (i > 0 && !posEqual(out.P[out.order[i - 1]], out.P[out.order[i]]))
+            {
+                first = i;
+            }
+            out.twin[out.order[i]] = out.order[first];
+        }
+    }
+
+    // The lowest-numbered vertex at `p`, or ~0u.
+    U32 findPosition(const ByPosition& bp, const rw::V3d& p)
+    {
+        U32 lo = 0, hi = bp.order.n;
+        while (lo < hi)
+        {
+            U32 mid = (lo + hi) / 2;
+            if (posLess(bp.P[bp.order[mid]], p))
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+        if (lo < bp.order.n && posEqual(bp.P[bp.order[lo]], p))
+        {
+            return bp.order[lo];
+        }
+        return ~0u;
+    }
+
     // Which (atomic, struct triangle) carried which collision flags. The
     // flags come back with the run bit cleared and the flip bit MEANING what
     // it should for the rebuilt triangles: set when the shipped collision
@@ -983,8 +1079,16 @@ namespace
     // the struct triangle's winding, which is the winding the children
     // inherit. Some levels ship walls and floors drawn one way and collided
     // the other; dropping the bit turned those inside out.
+    //
+    // The tree names a triangle by an atomic and an index into that atomic's
+    // strip vertices. Without `strips` those are read out of the geometry's
+    // own meshes, as xJSP does for a level that ships none. With them, the
+    // corners are the shipped positions and the triangle is found by them:
+    // geometry rebuilt from GameCube display lists has the same triangles in
+    // strips joined differently, so its mesh indices are not the ones the tree
+    // counts.
     void parentFlags(rw::Atomic** atoms, U32 numAtoms, const U8* coll, U32 collSize,
-                     ParentFlags* out)
+                     const rw::V3d* strips, U32 stripCount, ParentFlags* out)
     {
         if (collSize < 12 || memcmp(coll, "CCOL", 4) != 0)
         {
@@ -1008,10 +1112,21 @@ namespace
             iHipolyArray<U32> order;
         };
         Map3* maps = new Map3[numAtoms];
+        ByPosition* pos = strips != NULL ? new ByPosition[numAtoms] : NULL;
+        // Where each atomic's strip vertices start: xJSP lays them out in the
+        // clump's order, each atomic totalIndices long.
+        iHipolyArray<U32> start;
+        start.resize(numAtoms + 1);
+        start[0] = 0;
         for (U32 k = 0; k < numAtoms; k++)
         {
             const rw::Geometry* geo = atoms[k]->geometry;
             expandedIndices(geo, expanded[k]);
+            start[k + 1] = start[k] + expanded[k].n;
+            if (pos != NULL)
+            {
+                byPosition(geo, pos[k]);
+            }
             U32 nt = (U32)geo->numTriangles;
             out[k].flags.resize(nt);
             out[k].plat.resizeZero(nt);
@@ -1023,6 +1138,12 @@ namespace
                 out[k].flags[t] = -1;
                 U32 a = geo->triangles[t].v[0], b = geo->triangles[t].v[1],
                     c = geo->triangles[t].v[2];
+                if (pos != NULL)
+                {
+                    a = pos[k].twin[a];
+                    b = pos[k].twin[b];
+                    c = pos[k].twin[c];
+                }
                 sort3(a, b, c);
                 maps[k].key[t] = ((U64)a << 42) | ((U64)b << 21) | (U64)c;
                 maps[k].order[t] = t;
@@ -1046,7 +1167,28 @@ namespace
             {
                 continue;
             }
-            U32 a = ex[vert], b = ex[vert + 1], c = ex[vert + 2];
+            U32 a, b, c;
+            if (pos != NULL)
+            {
+                U32 at = start[k] + vert;
+                if (at + 2 >= stripCount)
+                {
+                    continue;
+                }
+                a = findPosition(pos[k], strips[at]);
+                b = findPosition(pos[k], strips[at + 1]);
+                c = findPosition(pos[k], strips[at + 2]);
+                if (a == ~0u || b == ~0u || c == ~0u)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                a = ex[vert];
+                b = ex[vert + 1];
+                c = ex[vert + 2];
+            }
             if (flags & kFlagFlip)
             {
                 U32 t = b;
@@ -1095,6 +1237,7 @@ namespace
                 out[k].mat[t] = mat;
             }
         }
+        delete[] pos;
         delete[] maps;
         delete[] expanded;
     }
@@ -1171,7 +1314,8 @@ private:
     iHipolyBuilt& operator=(const iHipolyBuilt&);
 };
 
-static void* hipolyWorldBody(RpClump* rpclump, const void* coll, U32 collSize, U32* outSize)
+static void* hipolyWorldBody(RpClump* rpclump, const void* coll, U32 collSize, const RwV3d* strips,
+                             U32 stripCount, U32* outSize)
 {
     const Settings& cfg = settings();
     rw::Clump* clump = reinterpret_cast<rw::Clump*>(rpclump);
@@ -1356,7 +1500,8 @@ static void* hipolyWorldBody(RpClump* rpclump, const void* coll, U32 collSize, U
     // The shipped tree's flags, before the geometries go.
     iHipolyOwn<ParentFlags> pfOwn(n);
     ParentFlags* pf = pfOwn.p;
-    parentFlags(atoms.p, n, (const U8*)coll, collSize, pf);
+    parentFlags(atoms.p, n, (const U8*)coll, collSize, reinterpret_cast<const rw::V3d*>(strips),
+                stripCount, pf);
 
     // The fillet, over the tessellation: which triangles are landscape and
     // which the shipped tree lets the player stand on come from the parents.
@@ -1504,7 +1649,8 @@ static void* hipolyWorldBody(RpClump* rpclump, const void* coll, U32 collSize, U
 //
 // Nothing leaks on the way out. Every buffer the pass holds is an
 // iHipolyArray or an iHipolyOwn, and both free in their destructors.
-void* iHipolyWorld(RpClump* rpclump, const void* coll, U32 collSize, U32* outSize)
+void* iHipolyWorld(RpClump* rpclump, const void* coll, U32 collSize, const RwV3d* strips,
+                   U32 stripCount, U32* outSize)
 {
     *outSize = 0;
 
@@ -1515,7 +1661,7 @@ void* iHipolyWorld(RpClump* rpclump, const void* coll, U32 collSize, U32* outSiz
 
     try
     {
-        return hipolyWorldBody(rpclump, coll, collSize, outSize);
+        return hipolyWorldBody(rpclump, coll, collSize, strips, stripCount, outSize);
     }
     catch (const iHipolyOutOfMemory& oom)
     {
