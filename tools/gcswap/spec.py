@@ -99,7 +99,7 @@ TYPES = {
     "VILP": [("words",)],
     "SHRP": [("words",)],
     "LODT": [("words",)],
-    "CRDT": [("words",)],
+    "CRDT": [("custom", "iGCSwapCredits")],
     "CTOC": [("custom", "iGCSwapCutsceneToc")],
 
     "ANIM": [("custom", "iGCSwapAnim")],

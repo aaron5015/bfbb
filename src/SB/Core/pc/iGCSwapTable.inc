@@ -3959,11 +3959,7 @@ static S32 gcs_type_LODT(U8* p, U32 size)
 
 static S32 gcs_type_CRDT(U8* p, U32 size)
 {
-    U32 end = size;
-    U32 c = 0;
-    for (; c + 4 <= end; c += 4)
-        gcsSwap32(p + c);
-    return 1;
+    return iGCSwapCredits(p, size);
 }
 
 static S32 gcs_type_CTOC(U8* p, U32 size)

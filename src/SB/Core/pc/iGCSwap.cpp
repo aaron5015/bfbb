@@ -121,6 +121,7 @@ static S32 iGCSwapCutsceneToc(U8* p, U32 size);
 static S32 iGCSwapJaw(U8* p, U32 size);
 static S32 iGCSwapSoundTable(U8* p, U32 size);
 static S32 iGCSwapJspInfo(U8* p, U32 size);
+static S32 iGCSwapCredits(U8* p, U32 size);
 
 #include "iGCSwapTable.inc"
 
@@ -540,6 +541,74 @@ static S32 iGCSwapJspInfo(U8* p, U32 size)
         }
 
         c = body + len;
+    }
+    return 1;
+}
+
+// CRDT, the credits, as zAssetTypes.cpp's Credits_Read walks them: an
+// xCMheader, then blocks to its total_size -- an xCMcredits, num_presets
+// xCMpresets, and hunks to the block's credits_size. A preset is two U16s and
+// then 32-bit fields; the packer wrote each textbox's iColor_tag as one u32,
+// so it turns around with them. A hunk is six 32-bit fields and then its text.
+static S32 iGCSwapCredits(U8* p, U32 size)
+{
+    const U32 kHeader = 0x18;
+    const U32 kCredits = 0x38;
+    const U32 kPreset = 0x4C;
+    const U32 kHunk = 0x18;
+
+    if (size < kHeader)
+    {
+        return 0;
+    }
+    gcsSwapWords(p, 0, kHeader);
+
+    U32 total = gcsRead32(p + 0x14);
+    if (total > size)
+    {
+        return 0;
+    }
+
+    U32 c = kHeader;
+    while (c < total)
+    {
+        if (total - c < kCredits)
+        {
+            return 0;
+        }
+        gcsSwapWords(p, c, c + kCredits);
+
+        U32 block = c;
+        U32 blockSize = gcsRead32(p + c);
+        U32 presets = gcsRead32(p + c + 0x34);
+        if (blockSize > total - block || presets > (blockSize - kCredits) / kPreset)
+        {
+            return 0;
+        }
+
+        c += kCredits;
+        for (U32 i = 0; i < presets; i++, c += kPreset)
+        {
+            gcsSwap16(p + c);
+            gcsSwap16(p + c + 2);
+            gcsSwapWords(p, c + 4, c + kPreset);
+        }
+
+        while (c - block < blockSize)
+        {
+            if (block + blockSize - c < kHunk)
+            {
+                return 0;
+            }
+            gcsSwapWords(p, c, c + kHunk);
+
+            U32 hunkSize = gcsRead32(p + c);
+            if (hunkSize < kHunk || hunkSize > block + blockSize - c)
+            {
+                return 0;
+            }
+            c += hunkSize;
+        }
     }
     return 1;
 }
