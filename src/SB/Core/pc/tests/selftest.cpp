@@ -265,7 +265,22 @@ static void test_config()
                                 "select = ls\n"
                                 "nonsense = a\n"
                                 "[keyboard]\n"
-                                "start = f1\n";
+                                "a      = space     ; jump, confirm\n"
+                                "b      = mouse2,lctrl\n"
+                                "x      = mouse1, e\n"
+                                "y      = q\n"
+                                "z      = f\n"
+                                "hud    = g\n"
+                                "l1     = z\n"
+                                "r1     = c\n"
+                                "l2     = x\n"
+                                "r2     = v\n"
+                                "start = f1\n"
+                                "select = backspace\n"
+                                "up     = up\n"
+                                "down   = down\n"
+                                "left   = left\n"
+                                "right  = right\n";
 
     FILE* f = fopen(path, "wb");
     if (f == NULL)
@@ -384,6 +399,8 @@ static void test_config()
     check(strcmp(iConfigGetString("pad.select", "!"), "ls") == 0,
           "a [pad] binding comes off the file");
     check(strcmp(iConfigGetString("keyboard.start", "!"), "f1") == 0, "and a [keyboard] one");
+    check(strcmp(iConfigGetString("keyboard.r1", "!"), iPadBindFind("r1")->key) == 0,
+          "a [keyboard] line at an old build's default answers with this build's");
 
     // Answered from the ACTIVE PRESET, not from the row's own column: the
     // generated file and a missing key have to agree, and under a preset the
@@ -404,7 +421,6 @@ static void test_config()
           "a binding for a button that does not exist is dropped, like any unknown key");
 
     check(iConfigGetInt("input.controller", 0) == 3, "input.controller comes off the file");
-
     // The frame rate. The file does not mention it, so this is the table's
     // default reaching a caller whose fallback is the wrong answer -- and it is
     // the one setting where the wrong answer is not visible on screen but in
@@ -446,8 +462,16 @@ static void test_config()
             // iPadBind.cpp -- and are NOT appended. An appended line would be a
             // value, and a value pins that key past any later change to the
             // defaults; an omitted one is answered by the build's default.
-            check(countLinesStartingWith(grown, "y ") == 0,
+            check(countLinesStartingWith(grown, "view ") == 0,
                   "a keyboard binding the file omits is left to the default");
+
+            // The file's [keyboard] block is an old build's: every row live.
+            // The rows at that build's defaults come out so the keys follow
+            // this build's; the one the player changed stays.
+            check(countLinesStartingWith(grown, "r1 ") == 0 &&
+                      countLinesStartingWith(grown, "b ") == 0,
+                  "a keyboard line at an old build's default is taken out");
+            check(strstr(grown, "start = f1") != NULL, "and one the player changed is kept");
 
             // The pad's does NOT arrive. A generated file lists those commented
             // so input.preset stays in charge, and a comment is not an entry --

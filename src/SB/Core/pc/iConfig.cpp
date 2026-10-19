@@ -119,6 +119,139 @@ namespace
         return NULL;
     }
 
+    // [keyboard] as builds before the PC layout wrote it: every line live, so
+    // each one pins its key to that build's default. The later of the two
+    // layouts put a mouse button on b and x and added walk.
+    struct OldKeyboardDefault
+    {
+        const char* name;
+        const char* key;
+    };
+
+    const OldKeyboardDefault kOldKeyboardDefaults[] = {
+        { "a", "space" },
+        { "b", "lctrl" },
+        { "b", "mouse2, lctrl" },
+        { "x", "e" },
+        { "x", "mouse1, e" },
+        { "y", "q" },
+        { "z", "f" },
+        { "hud", "g" },
+        { "l1", "z" },
+        { "r1", "c" },
+        { "l2", "x" },
+        { "r2", "v" },
+        { "start", "enter" },
+        { "select", "backspace" },
+        { "up", "up" },
+        { "down", "down" },
+        { "left", "left" },
+        { "right", "right" },
+        { "walk", "shift" },
+    };
+
+    // A file an old build wrote has a live line for every one of these, since
+    // its appender put back any that went missing. One with fewer has been
+    // edited since and is left alone.
+    const char* const kOldKeyboardRows[] = {
+        "a",  "b",     "x",      "y",  "z",    "l1",   "r1",    "l2",
+        "r2", "start", "select", "up", "down", "left", "right",
+    };
+
+    // Equal ignoring case and spaces: "mouse2,lctrl" is "mouse2, lctrl".
+    bool sameBinding(const char* a, const char* b)
+    {
+        for (;;)
+        {
+            while (*a == ' ' || *a == '\t')
+            {
+                a++;
+            }
+            while (*b == ' ' || *b == '\t')
+            {
+                b++;
+            }
+
+            char ca = (*a >= 'A' && *a <= 'Z') ? (char)(*a + ('a' - 'A')) : *a;
+            char cb = (*b >= 'A' && *b <= 'Z') ? (char)(*b + ('a' - 'A')) : *b;
+            if (ca != cb)
+            {
+                return false;
+            }
+            if (ca == '\0')
+            {
+                return true;
+            }
+            a++;
+            b++;
+        }
+    }
+
+    bool isOldKeyboardDefault(const char* name, const char* value)
+    {
+        for (size_t i = 0; i < sizeof(kOldKeyboardDefaults) / sizeof(kOldKeyboardDefaults[0]); i++)
+        {
+            if (strcmp(kOldKeyboardDefaults[i].name, name) == 0 &&
+                sameBinding(kOldKeyboardDefaults[i].key, value))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Take out the [keyboard] lines an old build wrote at its own defaults, so
+    // those keys follow this build's. A line the player changed is kept. Runs
+    // before the parse, through the same editor iConfigSave uses.
+    void dropOldKeyboardDefaults(const char* path)
+    {
+        iConfigEditFile* file = iConfigEditOpen(path);
+        if (file == NULL)
+        {
+            return;
+        }
+
+        for (size_t i = 0; i < sizeof(kOldKeyboardRows) / sizeof(kOldKeyboardRows[0]); i++)
+        {
+            if (iConfigEditGet(file, kKeyboardSection, kOldKeyboardRows[i]) == NULL)
+            {
+                iConfigEditClose(file);
+                return;
+            }
+        }
+
+        S32 dropped = 0;
+        for (size_t i = 0; i < sizeof(kOldKeyboardDefaults) / sizeof(kOldKeyboardDefaults[0]); i++)
+        {
+            const char* name = kOldKeyboardDefaults[i].name;
+            const char* value;
+            while ((value = iConfigEditGet(file, kKeyboardSection, name)) != NULL &&
+                   isOldKeyboardDefault(name, value))
+            {
+                iConfigEditUnset(file, kKeyboardSection, name);
+                dropped++;
+            }
+        }
+
+        if (dropped > 0)
+        {
+            if (iConfigEditSave(file, path))
+            {
+                printf("bfbb: %s: took out %d [keyboard] line%s holding an old build's "
+                       "default; those keys now follow this build's\n",
+                       path, (int)dropped, dropped == 1 ? "" : "s");
+            }
+            else
+            {
+                printf("bfbb: %s: could not take out the [keyboard] lines holding an old "
+                       "build's defaults\n",
+                       path);
+            }
+            fflush(stdout);
+        }
+        iConfigEditClose(file);
+    }
+
     // [pad] and [keyboard]. One line per game button, and the grammar spelled
     // out once at the top of each -- a comment per binding would be thirty
     // paragraphs all saying the same thing.
@@ -335,6 +468,8 @@ namespace
 
     bool readFile(const char* path)
     {
+        dropOldKeyboardDefaults(path);
+
         FILE* f = fopen(path, "rb");
         if (f == NULL)
         {

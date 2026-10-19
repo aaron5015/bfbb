@@ -9,9 +9,10 @@
 // anything else in it.
 //
 // The configurator uses it, and so does iConfigSave, which writes back what the
-// in-game settings screen changed. Those are the only two writers of an
-// existing file; iConfig.cpp's own writes are an exclusive create of the
-// defaults and an append of settings a newer build added.
+// in-game settings screen changed, and so does the load, to take out the
+// [keyboard] lines an old build pinned at its defaults. iConfig.cpp's other
+// writes are an exclusive create of the defaults and an append of settings a
+// newer build added.
 //
 // The file is held as its own LINES, not as a set of key/value pairs that get
 // written back out. Setting a value rewrites the text between the '=' and any
