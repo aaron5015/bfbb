@@ -7171,10 +7171,11 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
     NPCConfig* cfg = npc->cfg_npc;
     xVec3 dir_aim = { 0.0f, 0.0f, 0.0f };
     float overrideDirX = 0.0f;
+    float overrideDirY = 0.0f;
     float overrideDirZ = 1.0f;
     float overrideMultiplier = 1.0f;
     const bool hasBridgeKnockback =
-        zTF2Bridge_ConsumeKnockbackOverride(npc, &overrideDirX, &overrideDirZ, &overrideMultiplier) != 0;
+        zTF2Bridge_ConsumeKnockbackOverride(npc, &overrideDirX, &overrideDirY, &overrideDirZ, &overrideMultiplier) != 0;
 
     if (hasBridgeKnockback)
     {
@@ -7213,7 +7214,7 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
         // The bridge supplies the horizontal push direction; retain BFBB's
         // native 30-degree launch arc and mass scaling.
         dir_aim.x = overrideDirX;
-        dir_aim.y = 0.0f;
+        dir_aim.y = (npc->SelfType() == NPC_TYPE_CHUCK) ? overrideDirY : 0.0f;
         dir_aim.z = overrideDirZ;
         xVec3Normalize(&dir_aim, &dir_aim);
     }
@@ -7223,7 +7224,8 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
         xVec3Normalize(&dir_aim, &dir_aim);
     }
 
-    dir_aim.y = (npc->SelfType() == NPC_TYPE_CHUCK) ? 0.0f : isin(DEG2RAD(30));
+    if (!hasBridgeKnockback || npc->SelfType() != NPC_TYPE_CHUCK)
+        dir_aim.y = isin(DEG2RAD(30));
     xVec3Normalize(&dir_aim, &dir_aim);
     xVec3SMulBy(&dir_aim, 50.0f * cfg->npcMassInv *
         (hasBridgeKnockback ? overrideMultiplier : 1.0f));
@@ -7235,9 +7237,9 @@ S32 zNPCGoalKnock::Enter(F32 dt, void* updCtxt)
     // Chuck damage and all other robot knockback behavior unchanged.
     if (hasBridgeKnockback && npc->SelfType() == NPC_TYPE_CHUCK)
     {
-        npc->frame->vel.y = 0.0f;
-        npc->frame->dvel.y = 0.0f;
-        npc->frame->oldvel.y = 0.0f;
+        if (npc->frame->vel.y < 0.0f) npc->frame->vel.y = 0.0f;
+        if (npc->frame->dvel.y < 0.0f) npc->frame->dvel.y = 0.0f;
+        if (npc->frame->oldvel.y < 0.0f) npc->frame->oldvel.y = 0.0f;
     }
 
     npc->frame->mode |= 0x4;
