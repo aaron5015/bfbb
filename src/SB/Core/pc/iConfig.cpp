@@ -523,25 +523,30 @@ namespace
             return;
         }
 
-        S32 at = findModEntry(key);
-        if (at < 0)
+        // The mods are read highest priority first, so a key one of them
+        // already set stays as it set it.
+        if (findModEntry(key) >= 0)
         {
-            if (sModCount == kMaxModEntries)
-            {
-                printf("bfbb: %s: more than %d settings, the rest are ignored\n", (const char*)path,
-                       (int)kMaxModEntries);
-                return;
-            }
-            at = sModCount++;
+            printf("bfbb: %s: %s is already set by a mod above it, ignored\n", (const char*)path,
+                   key);
+            return;
         }
 
-        snprintf(sModEntries[at].key, sizeof(sModEntries[at].key), "%s", key);
-        snprintf(sModEntries[at].value, sizeof(sModEntries[at].value), "%s", value);
-        printf("bfbb: the mod sets %s = %s\n", key, value);
+        if (sModCount == kMaxModEntries)
+        {
+            printf("bfbb: %s: more than %d settings, the rest are ignored\n", (const char*)path,
+                   (int)kMaxModEntries);
+            return;
+        }
+
+        Entry* e = &sModEntries[sModCount++];
+        snprintf(e->key, sizeof(e->key), "%s", key);
+        snprintf(e->value, sizeof(e->value), "%s", value);
+        printf("bfbb: a mod sets %s = %s\n", key, value);
     }
 
-    // The settings the mod in use replaces, from its mod.ini. Read after the
-    // file, because the file is what names the mod.
+    // The settings the mods in use replace, from their mod.ini files. Read
+    // after the file, because the file is what names the mods.
     void loadModSettings()
     {
         sModCount = 0;
@@ -552,15 +557,20 @@ namespace
             setting = valueOf("assets.mod");
         }
 
-        char folder[kMaxPath];
-        if (!iModFolderResolve(setting, folder, sizeof(folder)))
+        iModFolderPath listed[kModFolderMax];
+        const S32 count = iModFolderSplit(setting, listed, kModFolderMax);
+        for (S32 i = 0; i < count; i++)
         {
-            return;
-        }
+            char folder[kMaxPath];
+            if (!iModFolderResolve(listed[i], folder, sizeof(folder)))
+            {
+                continue;
+            }
 
-        char path[kMaxPath + 16];
-        snprintf(path, sizeof(path), "%s/mod.ini", folder);
-        iModFolderSettings(folder, addModSetting, path);
+            char path[kMaxPath + 16];
+            snprintf(path, sizeof(path), "%s/mod.ini", folder);
+            iModFolderSettings(folder, addModSetting, path);
+        }
         fflush(stdout);
     }
 

@@ -299,7 +299,25 @@ static void test_config()
             fclose(m);
         }
     }
-    iHostSetEnv("BFBB_MOD", modDir);
+    // A second mod, below the first, setting the same key.
+    char modDir2[512];
+    char modIni2[512];
+    snprintf(modDir2, sizeof(modDir2), "%s/testmod2", dir);
+    snprintf(modIni2, sizeof(modIni2), "%s/mod.ini", modDir2);
+    iHostMakeDir(modDir2);
+    {
+        static const char kModIni2[] = "[video]\nfov = 60\n";
+        FILE* m = fopen(modIni2, "wb");
+        if (m != NULL)
+        {
+            fwrite(kModIni2, 1, sizeof(kModIni2) - 1, m);
+            fclose(m);
+        }
+    }
+
+    char mods[1100];
+    snprintf(mods, sizeof(mods), "%s | %s", modDir, modDir2);
+    iHostSetEnv("BFBB_MOD", mods);
 
     check(iHostSetEnv("BFBB_CONFIG", path), "BFBB_CONFIG can be set");
 
@@ -307,7 +325,8 @@ static void test_config()
 
     iHostSetEnv("BFBB_MOD", NULL);
 
-    check(iConfigGetFloat("video.fov", 0.0f) == 75.0f, "a setting the mod's mod.ini gives wins");
+    check(iConfigGetFloat("video.fov", 0.0f) == 75.0f,
+          "a setting the mod's mod.ini gives wins, the first mod's over the second's");
     check(iConfigGetBool("video.nosuch", TRUE) == TRUE, "an unknown setting in mod.ini is dropped");
 
     check(iConfigPath() != NULL && strcmp(iConfigPath(), path) == 0,
@@ -565,6 +584,8 @@ static void test_config()
     iHostRemoveFile(written);
     iHostRemoveFile(modIni);
     iHostRemoveDir(modDir);
+    iHostRemoveFile(modIni2);
+    iHostRemoveDir(modDir2);
     iHostRemoveDir(dir);
 }
 
@@ -953,8 +974,8 @@ static void test_config_model()
     check(ConfigModelSave(why, sizeof(why), NULL, NULL) == CONFIG_MODEL_OK, "it saves");
     check(!ConfigModelDirty(), "and is clean afterwards");
 
-    // The mod folder: a folder picker in [assets], beside the asset path, and a
-    // Windows path with spaces in it saves as typed.
+    // The mod folders: a list the mods page writes, and a Windows path with
+    // spaces in it saves as typed.
     S32 mod = -1;
     for (S32 i = 0; i < ConfigModelSettingCount(); i++)
     {
@@ -968,7 +989,8 @@ static void test_config_model()
     check(mod >= 0, "assets.mod is in the table");
     if (mod >= 0)
     {
-        check(ConfigModelWantsBrowse(ConfigModelSetting(mod)), "and gets a Browse button");
+        check(!ConfigModelWantsBrowse(ConfigModelSetting(mod)),
+              "and is a list, not one folder with a Browse button");
         check(strcmp(ConfigModelSectionName(ConfigModelSectionOf(mod)), "assets") == 0,
               "in the assets section");
 
@@ -1920,6 +1942,43 @@ static void test_file_mod()
     free(buf);
     check(strcmp(loaded, "MODDED") == 0, "iFileLoad's absolute path is overridden too");
 
+    // Two mods, the first listed wins. The top one's copy of TWO.HIP is a
+    // GameCube package, so the one below supplies it.
+    char top[512];
+    char topGl[512];
+    if (scratch_dir("modtop", top, sizeof(top)))
+    {
+        snprintf(topGl, sizeof(topGl), "%s/gl", top);
+        iHostMakeDir(topGl);
+        write_scratch(topGl, "gl01.HIP", "TOP", 3);
+        write_scratch(top, "two.hip", gcHip, sizeof(gcHip));
+        write_scratch(mod, "TWO.HIP", "SECOND", 6);
+
+        snprintf(path, sizeof(path), "%s | %s", top, mod);
+        iHostSetEnv("BFBB_MOD", path);
+        iFileInit();
+        iFileSetPath((char*)".");
+
+        read_through_ifile("GL/GL01.HIP", got, sizeof(got));
+        check(strcmp(got, "TOP") == 0, "with two mods, the first listed supplies a file both have");
+        read_through_ifile("TWO.HIP", got, sizeof(got));
+        check(strcmp(got, "SECOND") == 0, "and a GameCube package in it falls to the next mod");
+        read_through_ifile("ONLY.HIP", got, sizeof(got));
+        check(strcmp(got, "BASE") == 0, "and a file neither has comes from the asset root");
+        check(iFileModCount() == 2 && strncmp(iFileModName(), "bfbb_pc_modtop_", 15) == 0 &&
+                  strstr(iFileModName(), "+bfbb_pc_modover_") != NULL,
+              "their saves are named for both, in order");
+
+        snprintf(path, sizeof(path), "%s/gl01.HIP", topGl);
+        iHostRemoveFile(path);
+        snprintf(path, sizeof(path), "%s/two.hip", top);
+        iHostRemoveFile(path);
+        snprintf(path, sizeof(path), "%s/TWO.HIP", mod);
+        iHostRemoveFile(path);
+        iHostRemoveDir(topGl);
+        iHostRemoveDir(top);
+    }
+
     // A mod folder that is not there is ignored rather than breaking the root.
     snprintf(path, sizeof(path), "%s/nosuch", mod);
     iHostSetEnv("BFBB_MOD", path);
@@ -2072,6 +2131,19 @@ static void test_mod_folder()
     snprintf(typed, sizeof(typed), "%s/nosuch", dir);
     check(!iModFolderResolve(typed, got, sizeof(got)), "a folder that is not there does not");
     check(!iModFolderResolve("", got, sizeof(got)), "nor does an empty setting");
+
+    iModFolderPath listed[kModFolderMax];
+    check(iModFolderSplit(" mods/A |mods/B|| C:\\x y ", listed, kModFolderMax) == 3 &&
+              strcmp(listed[0], "mods/A") == 0 && strcmp(listed[1], "mods/B") == 0 &&
+              strcmp(listed[2], "C:\\x y") == 0,
+          "a list of mods splits on '|', trimmed, empty entries dropped");
+    check(iModFolderSplit("", listed, kModFolderMax) == 0, "and an empty setting is no mods");
+
+    char saveName[256];
+    iModFolderSaveName(listed, 2, saveName, sizeof(saveName));
+    check(strcmp(saveName, "A+B") == 0, "several mods keep their saves under their names joined");
+    iModFolderSaveName(listed, 1, saveName, sizeof(saveName));
+    check(strcmp(saveName, "A") == 0, "and one mod's saves keep the folder they always had");
 
     char mod[512];
     snprintf(mod, sizeof(mod), "%s/Cool Mod", dir);
@@ -2230,12 +2302,54 @@ static void test_mods_model()
         check(strcmp(e->setting, want) == 0,
               "and [assets] mod names it relative to the executable");
 
-        check(ModsModelActive() == -1, "nothing is picked until it is chosen");
-        ModsModelUse(index);
-        check(ModsModelActive() == index && ConfigModelDirty(), "choosing it sets [assets] mod");
+        const S32 setting = ConfigModelFind("assets", "mod");
+
+        check(ModsModelRankOf(index) == -1 && ModsModelEnabledCount() == 0,
+              "nothing is on until it is turned on");
+        ModsModelSetEnabled(index, true);
+        check(ModsModelRankOf(index) == 0 && ConfigModelDirty() &&
+                  strcmp(ConfigModelText(setting), want) == 0,
+              "turning it on sets [assets] mod");
+
+        // A second mod, outside the library, with one file the first also has.
+        char other[600];
+        snprintf(other, sizeof(other), "%s/other", dir);
+        iHostMakeDir(other);
+        write_scratch(other, "BOOT.hip", "y", 1);
+        write_scratch(other, "font.HIP", "y", 1);
+
+        ModsModelUseFolder(other);
+        check(ModsModelEnabledCount() == 2 && ModsModelRankOf(index) == 1,
+              "a folder turned on goes to the top of the load order");
+
+        char list[700];
+        snprintf(list, sizeof(list), "%s | %s", other, want);
+        check(strcmp(ConfigModelText(setting), list) == 0,
+              "and [assets] mod lists both, top first");
+
+        const S32 top = ModsModelEnabledAt(0);
+        char examples[256];
+        check(ModsModelOverlap(index, top, examples, sizeof(examples)) == 1 &&
+                  strcmp(examples, "boot.hip") == 0,
+              "the files two mods share are found whatever their case");
+
+        ModsModelMove(index, -1);
+        check(ModsModelRankOf(index) == 0 && ModsModelRankOf(top) == 1, "a mod can be moved up");
+
+        // A folder the setting names that is not there is listed, and can be
+        // turned off to take it out.
+        char withMissing[800];
+        snprintf(withMissing, sizeof(withMissing), "%s | nowhere/at all", ConfigModelText(setting));
+        ConfigModelSetText(setting, withMissing);
+        ModsModelScan();
+        const S32 missing = ModsModelEnabledAt(2);
+        check(ModsModelEnabledCount() == 3 && ModsModelAt(missing)->missing,
+              "a mod folder that is not there is listed as missing");
+        ModsModelSetEnabled(missing, false);
+        check(strstr(ConfigModelText(setting), "nowhere") == NULL, "and turning it off drops it");
 
         check(ModsModelRemove(index, why, sizeof(why)), "it can be removed");
-        check(ModsModelActive() == -1, "which puts the original game back");
+        check(strcmp(ConfigModelText(setting), other) == 0, "which takes it out of the load order");
     }
 
     if (!hadLibrary)

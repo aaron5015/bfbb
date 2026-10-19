@@ -12,7 +12,7 @@
 // why an Xbox one needs only its signature cut off, is in iSaveFile.h.
 //
 // The folder follows the settings as config_model.h holds them, unsaved edits
-// included, so picking a mod moves the page to that mod's saves.
+// included, so checking mods moves the page to their saves.
 
 const S32 kSavesModelMaxPath = 512;
 

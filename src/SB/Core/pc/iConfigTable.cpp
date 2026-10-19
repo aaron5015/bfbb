@@ -42,9 +42,10 @@ const iConfigSetting kConfigSettings[] = {
       "; starts in. BFBB_ASSETS overrides this.",
       ICONFIG_FOLDER, NULL, kNone, kNone },
     { "assets", "mod", "",
-      "Mod folder with the same layout as the asset folder. Its files replace the\n"
-      "; originals. Empty: none. BFBB_MOD overrides this.",
-      ICONFIG_FOLDER, NULL, kNone, kNone },
+      "Mod folders with the same layout as the asset folder, separated by |, first\n"
+      "; one wins. Their files replace the originals. Empty: none. BFBB_MOD\n"
+      "; overrides this. bfbb_config's mods page sets it.",
+      ICONFIG_STRING, NULL, kNone, kNone },
     { "assets", "platform_wording", "on",
       "Replace Xbox wording (dashboard, memory cards) in the game's text. Files on\n"
       "; disk are not changed.",

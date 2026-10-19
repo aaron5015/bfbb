@@ -82,13 +82,21 @@ namespace
 
 void SavesModelFolder(char* out, size_t outSize)
 {
-    char folder[kSavesModelMaxPath];
-    char mod[kSavesModelMaxPath];
-    mod[0] = '\0';
-    if (iModFolderResolve(textOf("assets", "mod"), folder, sizeof(folder)))
+    // Named as iFileModName names them: the folders that are there, in order.
+    iModFolderPath listed[kModFolderMax];
+    iModFolderPath found[kModFolderMax];
+    const S32 count = iModFolderSplit(textOf("assets", "mod"), listed, kModFolderMax);
+    S32 have = 0;
+    for (S32 i = 0; i < count; i++)
     {
-        iSaveFileLeaf(folder, mod, sizeof(mod));
+        if (iModFolderResolve(listed[i], found[have], sizeof(found[have])))
+        {
+            have++;
+        }
     }
+
+    char mod[kSavesModelMaxPath];
+    iModFolderSaveName(found, have, mod, sizeof(mod));
 
     iSaveFileRoot(textOf("game", "save_folder"), mod, out, outSize);
 }

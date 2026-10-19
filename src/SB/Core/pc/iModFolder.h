@@ -8,7 +8,7 @@
 // PC-only: mod folders, for the game and for bfbb_config.
 //
 // A mod is a folder laid out like the asset folder; `[assets] mod` names the
-// one in use (iFile.h). Mods installed by bfbb_config go in `mods` beside the
+// ones in use (iFile.h). Mods installed by bfbb_config go in `mods` beside the
 // executable, and the setting names them relative to it, as "mods/BFBBMix".
 //
 // A mod may carry a `mod.ini` in its root:
@@ -23,8 +23,24 @@
 //   profile = vanilla
 //
 // [mod] describes it. Every other section holds config.ini settings that the
-// mod's values replace while it is in use. The player's config.ini is not
-// changed.
+// mod's values replace while it is in use; with several mods, the first that
+// sets a key wins. The player's config.ini is not changed.
+
+// `[assets] mod` may list several mods, separated by '|', highest priority
+// first: for each file, the first mod in the list that has it is read. '|'
+// because ';' and '#' start a comment in config.ini and no Windows path can
+// hold one.
+const S32 kModFolderMax = 8;
+const S32 kModFolderMaxPath = 512;
+typedef char iModFolderPath[kModFolderMaxPath];
+
+// The entries of `setting`, trimmed, empty ones dropped, at most `max`.
+// Returns how many.
+S32 iModFolderSplit(const char* setting, iModFolderPath* out, S32 max);
+
+// The name a set of mods keeps its saves under: each folder's last component,
+// joined with '+', so one mod's saves keep the folder name they always had.
+void iModFolderSaveName(const iModFolderPath* folders, S32 count, char* out, size_t outSize);
 
 // `setting` as a folder that exists, with '/' separators and no trailing
 // slash. A relative path is tried against the working directory, then against

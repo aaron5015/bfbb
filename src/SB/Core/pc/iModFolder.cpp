@@ -131,6 +131,61 @@ namespace
     }
 } // namespace
 
+S32 iModFolderSplit(const char* setting, iModFolderPath* out, S32 max)
+{
+    S32 count = 0;
+    const char* p = setting != NULL ? setting : "";
+
+    while (*p != '\0' && count < max)
+    {
+        const char* bar = strchr(p, '|');
+        const char* end = bar != NULL ? bar : p + strlen(p);
+
+        const char* a = p;
+        const char* b = end;
+        while (a < b && (*a == ' ' || *a == '\t'))
+        {
+            a++;
+        }
+        while (b > a && (b[-1] == ' ' || b[-1] == '\t'))
+        {
+            b--;
+        }
+
+        if (b > a)
+        {
+            snprintf(out[count++], kModFolderMaxPath, "%.*s", (int)(b - a), a);
+        }
+
+        if (bar == NULL)
+        {
+            break;
+        }
+        p = bar + 1;
+    }
+
+    return count;
+}
+
+void iModFolderSaveName(const iModFolderPath* folders, S32 count, char* out, size_t outSize)
+{
+    out[0] = '\0';
+    size_t have = 0;
+
+    for (S32 i = 0; i < count; i++)
+    {
+        char leaf[256];
+        iSaveFileLeaf(folders[i], leaf, sizeof(leaf));
+
+        const int n = snprintf(out + have, outSize - have, "%s%s", i == 0 ? "" : "+", leaf);
+        if (n < 0 || (size_t)n >= outSize - have)
+        {
+            break;
+        }
+        have += (size_t)n;
+    }
+}
+
 bool iModFolderResolve(const char* setting, char* out, size_t outSize)
 {
     if (setting == NULL || setting[0] == '\0')

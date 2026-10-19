@@ -219,7 +219,7 @@ were recovered from the Xbox `.xbe`.
 | Six save slots | none | The unused second memory-card slot is now a second folder with three more slots. |
 | Save sizes | none | The save screens show KB/MB instead of memory-card blocks. |
 | Custom font | `[font] face`, `sans` | Draws text from TrueType fonts at the render size instead of the 640x480 atlases. `tools/getfont.py` fetches one. The other `[font]` keys tune the fit. |
-| Mod folder | `[assets] mod` | Loads an Xbox mod's files in place of the originals without modifying the asset folder. Modded games use separate saves. bfbb_config's mods page installs mods from a zip into `mods/` and picks one. A `mod.ini` in the mod can set config.ini settings while it is in use. |
+| Mod folder | `[assets] mod` | Loads an Xbox mod's files in place of the originals without modifying the asset folder. Modded games use separate saves. bfbb_config's mods page installs mods from a zip into `mods/`, turns them on and orders them; where two mods have the same file, the higher one's is read. A `mod.ini` in a mod can set config.ini settings while it is in use. |
 | Xbox saves | none | bfbb_config's saves page imports saves from the original Xbox game (`GameData.xsv`, or a zip of save folders). |
 | PC wording | `[assets] platform_wording` | Rewrites Xbox-specific text (dashboard, memory card) as it loads. |
 

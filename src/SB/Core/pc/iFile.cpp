@@ -47,10 +47,11 @@ static S32 sOpenedAny;
 // what it means on the console, and an absolute one is honoured as given.
 static char sAssetRoot[512];
 
-// The mod folder, with a trailing slash, or "" when there is none. A file here
-// is read in place of the asset root's file of the same relative name. See
-// iModOverride.
-static char sModRoot[512];
+// The mod folders that were found, highest priority first, each with a
+// trailing slash. A file in one is read in place of the asset root's file of
+// the same relative name. See iModOverride.
+static iModFolderPath sModRoots[kModFolderMax];
+static S32 sModCount;
 
 // Where the game's files are. No trailing slash is added -- the callers that
 // print it want the folder someone named and not a decorated version of it,
@@ -109,9 +110,19 @@ const char* iFileModRoot()
 
 const char* iFileModName()
 {
-    static char sName[256];
-    iSaveFileLeaf(sModRoot, sName, sizeof(sName));
+    static char sName[512];
+    iModFolderSaveName(sModRoots, sModCount, sName, sizeof(sName));
     return sName;
+}
+
+S32 iFileModCount()
+{
+    return sModCount;
+}
+
+const char* iFileModFolder(S32 i)
+{
+    return sModRoots[i];
 }
 
 static bool iPathIsAbsolute(const char* path)
@@ -164,24 +175,24 @@ void iFileInit()
         iFileSetPath((char*)assets);
     }
 
-    sModRoot[0] = 0;
+    sModCount = 0;
 
-    const char* mod = iFileModRoot();
-    if (mod[0] != 0)
+    iModFolderPath listed[kModFolderMax];
+    const S32 count = iModFolderSplit(iFileModRoot(), listed, kModFolderMax);
+    for (S32 i = 0; i < count; i++)
     {
-        char folder[512];
-        if (!iModFolderResolve(mod, folder, sizeof(folder) - 1))
+        char folder[kModFolderMaxPath];
+        if (!iModFolderResolve(listed[i], folder, sizeof(folder) - 1))
         {
-            printf("bfbb: mod folder not found, ignored: %s\n", mod);
-            fflush(stdout);
+            printf("bfbb: mod folder not found, ignored: %s\n", listed[i]);
         }
         else
         {
-            snprintf(sModRoot, sizeof(sModRoot), "%s/", folder);
+            snprintf(sModRoots[sModCount++], kModFolderMaxPath, "%s/", folder);
             printf("bfbb: mod folder: %s\n", folder);
-            fflush(stdout);
         }
     }
+    fflush(stdout);
 
     for (S32 i = 0; i < 4; i++)
     {
@@ -553,20 +564,21 @@ static bool iHasPackageExtension(const char* path)
            (iHostStrCaseCmp(path + n - 4, ".HIP") == 0 || iHostStrCaseCmp(path + n - 4, ".HOP") == 0);
 }
 
-// The mod folder's copy of a file under the asset root. When the mod has one,
-// its path is written over `path` and the result is true.
+// The first mod folder's copy of a file under the asset root. When a mod has
+// one, its path is written over `path` and the result is true.
 //
-// Matched on the path relative to the asset root, so `gl/gl01.HIP` in the mod
+// Matched on the path relative to the asset root, so `gl/gl01.HIP` in a mod
 // folder replaces `gl/gl01.HIP` in the assets, and whatever SB.INI's PATH= did
 // to the base path applies to both. A path outside the asset root is left
-// alone.
+// alone. The mods are asked in priority order.
 //
-// A package from another console's release is refused and the original is
-// read: the port only understands the Xbox layout, and a GameCube HIP loads
-// and then crashes far from the cause. See iFileAssetPlatform.
+// A package from another console's release is refused and the next mod, or
+// the original, is read: the port only understands the Xbox layout, and a
+// GameCube HIP loads and then crashes far from the cause. See
+// iFileAssetPlatform.
 static bool iModOverride(char* path, size_t pathsize)
 {
-    if (sModRoot[0] == 0)
+    if (sModCount == 0)
     {
         return false;
     }
@@ -595,50 +607,59 @@ static bool iModOverride(char* path, size_t pathsize)
         rel += 2;
     }
 
-    char candidate[512];
-    if (snprintf(candidate, sizeof(candidate), "%s%s", sModRoot, rel) >= (int)sizeof(candidate))
+    for (S32 m = 0; m < sModCount; m++)
     {
-        return false;
-    }
-
-    if (!iResolveCaseInsensitive(candidate, sizeof(candidate)))
-    {
-        return false;
-    }
-
-    if (iHasPackageExtension(candidate))
-    {
-        char id[8];
-        char longName[32];
-        if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
-            strcmp(id, "XB") != 0)
+        char candidate[512];
+        if (snprintf(candidate, sizeof(candidate), "%s%s", sModRoots[m], rel) >=
+            (int)sizeof(candidate))
         {
-            if (iModFirstReport(rel))
+            continue;
+        }
+
+        if (!iResolveCaseInsensitive(candidate, sizeof(candidate)))
+        {
+            continue;
+        }
+
+        char leaf[256];
+        iSaveFileLeaf(sModRoots[m], leaf, sizeof(leaf));
+
+        if (iHasPackageExtension(candidate))
+        {
+            char id[8];
+            char longName[32];
+            if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
+                strcmp(id, "XB") != 0)
             {
-                printf("bfbb: mod: %s is from the %s release, not the Xbox one; using the "
-                       "original\n",
-                       rel, longName[0] != '\0' ? longName : id);
-                fflush(stdout);
+                if (iModFirstReport(rel))
+                {
+                    printf("bfbb: mod: %s in %s is from the %s release, not the Xbox one; "
+                           "passed over\n",
+                           rel, leaf, longName[0] != '\0' ? longName : id);
+                    fflush(stdout);
+                }
+                continue;
             }
+        }
+
+        // `rel` points into `path`, so it is reported before path is overwritten.
+        size_t len = strlen(candidate);
+        if (len >= pathsize)
+        {
             return false;
         }
+
+        if (iModFirstReport(rel))
+        {
+            printf("bfbb: mod: %s from %s\n", rel, leaf);
+            fflush(stdout);
+        }
+
+        memcpy(path, candidate, len + 1);
+        return true;
     }
 
-    // `rel` points into `path`, so it is reported before path is overwritten.
-    size_t len = strlen(candidate);
-    if (len >= pathsize)
-    {
-        return false;
-    }
-
-    if (iModFirstReport(rel))
-    {
-        printf("bfbb: mod: %s\n", rel);
-        fflush(stdout);
-    }
-
-    memcpy(path, candidate, len + 1);
-    return true;
+    return false;
 }
 
 bool iFileModReplaces(const char* rel)

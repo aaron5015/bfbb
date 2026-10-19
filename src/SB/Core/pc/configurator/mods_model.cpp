@@ -6,6 +6,7 @@
 #include "iHost.h"
 #include "iSaveFile.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,10 @@ namespace
     ModsModelEntry gMods[kMaxMods];
     S32 gModCount;
     char gLibrary[kModsModelMaxPath];
+
+    // The entries the setting turns on, highest priority first.
+    S32 gEnabled[kModFolderMax];
+    S32 gEnabledCount;
 
     // The prefix a library entry's setting carries, relative to the exe dir.
     const char* const kLibraryPrefix = "mods/";
@@ -95,19 +100,113 @@ namespace
         return ConfigModelFind("assets", "mod");
     }
 
-    void addEntry(const char* folder, const char* setting, bool inLibrary)
+    S32 addEntry(const char* folder, const char* setting, bool inLibrary, bool missing)
     {
         if (gModCount == kMaxMods)
         {
-            return;
+            return -1;
         }
 
-        ModsModelEntry* e = &gMods[gModCount++];
+        ModsModelEntry* e = &gMods[gModCount];
         memset(e, 0, sizeof(*e));
         snprintf(e->folder, sizeof(e->folder), "%s", folder);
         snprintf(e->setting, sizeof(e->setting), "%s", setting);
         e->inLibrary = inLibrary;
-        iModFolderInfo(folder, &e->info);
+        e->missing = missing;
+        if (missing)
+        {
+            iSaveFileLeaf(folder, e->info.name, sizeof(e->info.name));
+        }
+        else
+        {
+            iModFolderInfo(folder, &e->info);
+        }
+        return gModCount++;
+    }
+
+    // Write the order in gEnabled back to the setting.
+    void writeSetting()
+    {
+        const S32 s = modSetting();
+        if (s < 0)
+        {
+            return;
+        }
+
+        char text[kModFolderMax * (kModsModelMaxPath + 3)];
+        size_t have = 0;
+        text[0] = '\0';
+        for (S32 r = 0; r < gEnabledCount; r++)
+        {
+            const int n = snprintf(text + have, sizeof(text) - have, "%s%s", r == 0 ? "" : " | ",
+                                   gMods[gEnabled[r]].setting);
+            if (n < 0 || (size_t)n >= sizeof(text) - have)
+            {
+                break;
+            }
+            have += (size_t)n;
+        }
+
+        ConfigModelSetText(s, text);
+    }
+
+    // Every file under `dir`, as paths relative to `root` in lower case.
+    struct FileList
+    {
+        char (*paths)[kMaxName];
+        S32 count;
+        S32 room;
+    };
+
+    void collectFiles(const char* dir, size_t rootLength, FileList* out, S32 depth)
+    {
+        NameList list;
+        if (depth > 8 || !listDir(dir, &list))
+        {
+            return;
+        }
+
+        for (S32 i = 0; i < list.count; i++)
+        {
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/%s", dir, list.names[i]);
+            if (isDir(path))
+            {
+                collectFiles(path, rootLength, out, depth + 1);
+                continue;
+            }
+
+            const char* rel = path + rootLength + 1;
+            if (iHostStrCaseCmp(rel, "mod.ini") == 0)
+            {
+                continue;
+            }
+
+            if (out->count == out->room)
+            {
+                out->room = out->room == 0 ? 256 : out->room * 2;
+                void* grown = realloc(out->paths, (size_t)out->room * kMaxName);
+                if (grown == NULL)
+                {
+                    break;
+                }
+                out->paths = (char(*)[kMaxName])grown;
+            }
+
+            char* to = out->paths[out->count++];
+            snprintf(to, kMaxName, "%s", rel);
+            for (char* c = to; *c != '\0'; c++)
+            {
+                *c = (char)tolower((unsigned char)*c);
+            }
+        }
+
+        freeList(&list);
+    }
+
+    int comparePaths(const void* a, const void* b)
+    {
+        return strcmp((const char*)a, (const char*)b);
     }
 
     bool copyFile(const char* from, const char* to)
@@ -220,20 +319,39 @@ S32 ModsModelScan()
             snprintf(setting, sizeof(setting), "%s%s", kLibraryPrefix, list.names[i]);
             if (isDir(folder))
             {
-                addEntry(folder, setting, true);
+                addEntry(folder, setting, true, false);
             }
         }
         freeList(&list);
     }
 
-    // The setting may name a folder somewhere else; it is listed too, so the
-    // page shows what the game will run.
+    // Each folder the setting names, in its order. One somewhere else, or not
+    // there at all, is listed too, so the page shows what the game will run.
+    gEnabledCount = 0;
     const S32 s = modSetting();
-    char folder[kModsModelMaxPath];
-    if (s >= 0 && iModFolderResolve(ConfigModelText(s), folder, sizeof(folder)) &&
-        findFolder(folder) < 0)
+    iModFolderPath listed[kModFolderMax];
+    const S32 count = s >= 0 ? iModFolderSplit(ConfigModelText(s), listed, kModFolderMax) : 0;
+    for (S32 i = 0; i < count; i++)
     {
-        addEntry(folder, ConfigModelText(s), false);
+        char folder[kModsModelMaxPath];
+        S32 at;
+        if (iModFolderResolve(listed[i], folder, sizeof(folder)))
+        {
+            at = findFolder(folder);
+            if (at < 0)
+            {
+                at = addEntry(folder, listed[i], false, false);
+            }
+        }
+        else
+        {
+            at = addEntry(listed[i], listed[i], false, true);
+        }
+
+        if (at >= 0 && ModsModelRankOf(at) < 0)
+        {
+            gEnabled[gEnabledCount++] = at;
+        }
     }
 
     return gModCount;
@@ -249,41 +367,132 @@ const ModsModelEntry* ModsModelAt(S32 i)
     return &gMods[i];
 }
 
-S32 ModsModelActive()
+S32 ModsModelEnabledCount()
 {
-    const S32 s = modSetting();
-    if (s < 0 || ConfigModelText(s)[0] == '\0')
-    {
-        return -1;
-    }
-
-    char folder[kModsModelMaxPath];
-    if (!iModFolderResolve(ConfigModelText(s), folder, sizeof(folder)))
-    {
-        return -2;
-    }
-
-    const S32 at = findFolder(folder);
-    return at >= 0 ? at : -2;
+    return gEnabledCount;
 }
 
-void ModsModelUse(S32 i)
+S32 ModsModelEnabledAt(S32 rank)
 {
-    const S32 s = modSetting();
-    if (s >= 0)
+    return gEnabled[rank];
+}
+
+S32 ModsModelRankOf(S32 i)
+{
+    for (S32 r = 0; r < gEnabledCount; r++)
     {
-        ConfigModelSetText(s, i < 0 ? "" : gMods[i].setting);
+        if (gEnabled[r] == i)
+        {
+            return r;
+        }
     }
+    return -1;
+}
+
+void ModsModelSetEnabled(S32 i, bool on)
+{
+    const S32 rank = ModsModelRankOf(i);
+    if (on == (rank >= 0))
+    {
+        return;
+    }
+
+    if (on)
+    {
+        if (gEnabledCount == kModFolderMax)
+        {
+            return;
+        }
+        memmove(&gEnabled[1], &gEnabled[0], (size_t)gEnabledCount * sizeof(gEnabled[0]));
+        gEnabled[0] = i;
+        gEnabledCount++;
+    }
+    else
+    {
+        memmove(&gEnabled[rank], &gEnabled[rank + 1],
+                (size_t)(gEnabledCount - rank - 1) * sizeof(gEnabled[0]));
+        gEnabledCount--;
+    }
+
+    writeSetting();
+}
+
+void ModsModelMove(S32 i, S32 delta)
+{
+    const S32 rank = ModsModelRankOf(i);
+    const S32 to = rank + delta;
+    if (rank < 0 || to < 0 || to >= gEnabledCount)
+    {
+        return;
+    }
+
+    gEnabled[rank] = gEnabled[to];
+    gEnabled[to] = i;
+    writeSetting();
 }
 
 void ModsModelUseFolder(const char* folder)
 {
-    const S32 s = modSetting();
-    if (s >= 0)
+    S32 at = findFolder(folder);
+    if (at < 0)
     {
-        ConfigModelSetText(s, folder);
+        at = addEntry(folder, folder, false, false);
+    }
+    if (at >= 0)
+    {
+        ModsModelSetEnabled(at, true);
     }
     ModsModelScan();
+}
+
+S32 ModsModelOverlap(S32 a, S32 b, char* examples, size_t examplesSize)
+{
+    examples[0] = '\0';
+    if (gMods[a].missing || gMods[b].missing)
+    {
+        return 0;
+    }
+
+    FileList fa = {};
+    FileList fb = {};
+    collectFiles(gMods[a].folder, strlen(gMods[a].folder), &fa, 0);
+    collectFiles(gMods[b].folder, strlen(gMods[b].folder), &fb, 0);
+    qsort(fa.paths, (size_t)fa.count, kMaxName, comparePaths);
+    qsort(fb.paths, (size_t)fb.count, kMaxName, comparePaths);
+
+    S32 shared = 0;
+    size_t have = 0;
+    for (S32 i = 0, j = 0; i < fa.count && j < fb.count;)
+    {
+        const int order = strcmp(fa.paths[i], fb.paths[j]);
+        if (order < 0)
+        {
+            i++;
+            continue;
+        }
+        if (order > 0)
+        {
+            j++;
+            continue;
+        }
+
+        if (shared < 5)
+        {
+            const int n = snprintf(examples + have, examplesSize - have, "%s%s",
+                                   shared == 0 ? "" : ", ", fa.paths[i]);
+            if (n > 0 && (size_t)n < examplesSize - have)
+            {
+                have += (size_t)n;
+            }
+        }
+        shared++;
+        i++;
+        j++;
+    }
+
+    free(fa.paths);
+    free(fb.paths);
+    return shared;
 }
 
 void ModsModelSuggestName(const char* staged, const char* archive, char* out, size_t outSize)
@@ -428,10 +637,7 @@ bool ModsModelRemove(S32 i, char* why, size_t whySize)
     char folder[kModsModelMaxPath];
     snprintf(folder, sizeof(folder), "%s", gMods[i].folder);
 
-    if (ModsModelActive() == i)
-    {
-        ModsModelUse(-1);
-    }
+    ModsModelSetEnabled(i, false);
 
     if (!ModsModelRemoveTree(folder))
     {

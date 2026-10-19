@@ -27,6 +27,7 @@
 #include <wx/mstream.h>
 #include <wx/collpane.h>
 #include <wx/gbsizer.h>
+#include <wx/checklst.h>
 #include <wx/listbox.h>
 #include <wx/progdlg.h>
 #include <wx/scrolwin.h>
@@ -67,6 +68,8 @@ namespace
         kIdModInstall,
         kIdModAddFolder,
         kIdModOpen,
+        kIdModUp,
+        kIdModDown,
         kIdModRemove,
         kIdSaveImport,
         kIdSaveOpen,
@@ -807,7 +810,10 @@ namespace
         void BuildModsPage();
         void BuildSavesPage();
         wxStaticText* AddText(int& line, const wxString& text, bool grey);
+        void FillModList(S32 select);
+        S32 SelectedMod() const;
         void ShowModDetail();
+        void MoveMod(S32 delta);
         void InstallZip(const wxString& path);
         void ImportSaves(std::vector<FoundXboxSave>& found);
         void ShowSection(int which);
@@ -839,6 +845,9 @@ namespace
         void OnPaneSize(wxSizeEvent& event);
         void OnGroupToggled(wxCollapsiblePaneEvent& event);
         void OnModPicked(wxCommandEvent& event);
+        void OnModChecked(wxCommandEvent& event);
+        void OnModUp(wxCommandEvent& event);
+        void OnModDown(wxCommandEvent& event);
         void OnModInstall(wxCommandEvent& event);
         void OnModAddFolder(wxCommandEvent& event);
         void OnModOpen(wxCommandEvent& event);
@@ -853,9 +862,14 @@ namespace
         wxButton* mApply;
 
         // The mods page's controls, NULL on every other page.
-        wxListBox* mModList;
+        wxCheckListBox* mModList;
         wxStaticText* mModDetail;
+        wxButton* mModUp;
+        wxButton* mModDown;
         wxButton* mModRemove;
+
+        // The mods page's rows, as mods_model entries.
+        std::vector<S32> mModRows;
 
         std::vector<Row> mRows;
 
@@ -873,7 +887,7 @@ namespace
     ConfigFrame::ConfigFrame()
         : wxFrame(NULL, wxID_ANY, "Battle for Bikini Bottom - Settings"), mSections(NULL),
           mPane(NULL), mGrid(NULL), mReset(NULL), mApply(NULL), mModList(NULL), mModDetail(NULL),
-          mModRemove(NULL), mSection(0), mWrappedAt(0)
+          mModUp(NULL), mModDown(NULL), mModRemove(NULL), mSection(0), mWrappedAt(0)
     {
         wxPanel* root = new wxPanel(this);
 
@@ -976,6 +990,9 @@ namespace
         // The mods and saves pages' controls carry ids below kIdRowBase, so
         // the pane's handlers pass them up to these.
         Bind(wxEVT_LISTBOX, &ConfigFrame::OnModPicked, this, kIdModList);
+        Bind(wxEVT_CHECKLISTBOX, &ConfigFrame::OnModChecked, this, kIdModList);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModUp, this, kIdModUp);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModDown, this, kIdModDown);
         Bind(wxEVT_BUTTON, &ConfigFrame::OnModInstall, this, kIdModInstall);
         Bind(wxEVT_BUTTON, &ConfigFrame::OnModAddFolder, this, kIdModAddFolder);
         Bind(wxEVT_BUTTON, &ConfigFrame::OnModOpen, this, kIdModOpen);
@@ -1215,7 +1232,10 @@ namespace
         mTexts.clear();
         mModList = NULL;
         mModDetail = NULL;
+        mModUp = NULL;
+        mModDown = NULL;
         mModRemove = NULL;
+        mModRows.clear();
         mWrappedAt = 0;
 
         int line = 0;
@@ -1733,36 +1753,17 @@ namespace
         ModsModelScan();
 
         AddText(line,
-                "The mod the game starts with. A mod is a folder laid out like the game's own "
-                "files, and its files are read in place of the originals. Each mod keeps its own "
-                "saves. Installed mods are in " +
+                "The mods the game starts with. A mod is a folder laid out like the game's own "
+                "files, and its files are read in place of the originals. Checked mods are used "
+                "from the top down: where two have the same file, the higher one's is read. "
+                "None checked is the original game. Each set of mods keeps its own saves.\n\n"
+                "Installed mods are in " +
                     wxString::FromUTF8(ModsModelLibrary()) +
-                    ". The choice is saved as [assets] mod in config.ini.",
+                    ". The list is saved as [assets] mod in config.ini.",
                 false);
 
-        mModList = new wxListBox(mPane, kIdModList, wxDefaultPosition, FromDIP(wxSize(-1, 160)));
-        mModList->Append("Original game");
-        for (S32 i = 0; i < ModsModelCount(); i++)
-        {
-            const ModsModelEntry* e = ModsModelAt(i);
-            wxString label = wxString::FromUTF8(e->info.name);
-            if (e->info.version[0] != '\0')
-            {
-                label << "  " << wxString::FromUTF8(e->info.version);
-            }
-            if (!e->inLibrary)
-            {
-                label << "  (" << wxString::FromUTF8(e->folder) << ")";
-            }
-            mModList->Append(label);
-        }
-
-        const S32 active = ModsModelActive();
-        if (active >= -1)
-        {
-            mModList->SetSelection(active + 1);
-        }
-
+        mModList =
+            new wxCheckListBox(mPane, kIdModList, wxDefaultPosition, FromDIP(wxSize(-1, 160)));
         mGrid->Add(mModList, wxGBPosition(line, 0), wxGBSpan(1, 3), wxEXPAND | wxBOTTOM,
                    FromDIP(8));
         line++;
@@ -1770,54 +1771,154 @@ namespace
         wxButton* install = new wxButton(mPane, kIdModInstall, "Install from zip...");
         wxButton* folder = new wxButton(mPane, kIdModAddFolder, "Add a folder...");
         wxButton* open = new wxButton(mPane, kIdModOpen, "Open folder");
+        mModUp = new wxButton(mPane, kIdModUp, "Move up");
+        mModDown = new wxButton(mPane, kIdModDown, "Move down");
         mModRemove = new wxButton(mPane, kIdModRemove, "Remove...");
         install->SetToolTip("Unpack a mod's zip into the mods folder");
         folder->SetToolTip("Copy a mod's folder into the mods folder, or use it where it is");
         open->SetToolTip("Show the selected mod's folder, or the mods folder");
+        mModUp->SetToolTip("Read this mod's files before the ones below it");
+        mModDown->SetToolTip("Read this mod's files after the ones above it");
         mModRemove->SetToolTip("Delete the selected mod from the mods folder");
 
         wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
         buttons->Add(install, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
         buttons->Add(folder, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
-        buttons->Add(open, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(open, wxSizerFlags().Border(wxRIGHT, FromDIP(12)));
+        buttons->Add(mModUp, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(mModDown, wxSizerFlags().Border(wxRIGHT, FromDIP(12)));
         buttons->Add(mModRemove);
         mGrid->Add(buttons, wxGBPosition(line, 0), wxGBSpan(1, 3), wxBOTTOM, FromDIP(12));
         line++;
 
         mModDetail = AddText(line, "", false);
+        FillModList(-1);
+    }
+
+    // The checked mods in load order, then the rest. `select` is the entry to
+    // leave selected, or -1 for none.
+    void ConfigFrame::FillModList(S32 select)
+    {
+        mModRows.clear();
+        for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+        {
+            mModRows.push_back(ModsModelEnabledAt(r));
+        }
+        for (S32 i = 0; i < ModsModelCount(); i++)
+        {
+            if (ModsModelRankOf(i) < 0)
+            {
+                mModRows.push_back(i);
+            }
+        }
+
+        mModList->Clear();
+        for (size_t row = 0; row < mModRows.size(); row++)
+        {
+            const ModsModelEntry* e = ModsModelAt(mModRows[row]);
+            wxString label = wxString::FromUTF8(e->info.name);
+            if (e->info.version[0] != '\0')
+            {
+                label << "  " << wxString::FromUTF8(e->info.version);
+            }
+            if (e->missing)
+            {
+                label << "  (not found: " << wxString::FromUTF8(e->setting) << ")";
+            }
+            else if (!e->inLibrary)
+            {
+                label << "  (" << wxString::FromUTF8(e->folder) << ")";
+            }
+
+            mModList->Append(label);
+            mModList->Check((unsigned int)row, ModsModelRankOf(mModRows[row]) >= 0);
+            if (mModRows[row] == select)
+            {
+                mModList->SetSelection((int)row);
+            }
+        }
+
         ShowModDetail();
     }
 
-    void AppendSetting(const char* key, const char* value, void* context)
+    S32 ConfigFrame::SelectedMod() const
     {
-        wxString* text = (wxString*)context;
-        *text << "\n    " << key << " = " << wxString::FromUTF8(value);
+        const int row = mModList != NULL ? mModList->GetSelection() : wxNOT_FOUND;
+        return row == wxNOT_FOUND ? -1 : mModRows[(size_t)row];
     }
 
-    // What the list's selection is: who made it, what it says about itself,
-    // the settings it replaces, and where its saves are.
+    namespace
+    {
+        // A mod.ini's settings, each marked when a mod higher in the load
+        // order sets the same key, since that one's value is used.
+        struct SettingsText
+        {
+            wxString text;
+            const std::map<wxString, wxString>* above;
+        };
+
+        void AppendSetting(const char* key, const char* value, void* context)
+        {
+            SettingsText* s = (SettingsText*)context;
+            s->text << "\n    " << key << " = " << wxString::FromUTF8(value);
+
+            std::map<wxString, wxString>::const_iterator it = s->above->find(key);
+            if (it != s->above->end())
+            {
+                s->text << "  (" << it->second << "'s value is used)";
+            }
+        }
+
+        struct OwnerOfSettings
+        {
+            std::map<wxString, wxString>* into;
+            wxString name;
+        };
+
+        void NoteSetting(const char* key, const char*, void* context)
+        {
+            OwnerOfSettings* o = (OwnerOfSettings*)context;
+            if (o->into->find(key) == o->into->end())
+            {
+                (*o->into)[key] = o->name;
+            }
+        }
+    } // namespace
+
+    // What the selection is: who made it, where it sits in the load order,
+    // which files it shares with the other checked mods and which of them
+    // wins, the settings it sets, and where the saves are. With nothing
+    // selected, the load order as a whole.
     void ConfigFrame::ShowModDetail()
     {
-        const int pick = mModList->GetSelection() - 1;
+        const S32 pick = SelectedMod();
         wxString text;
 
         char saves[kSavesModelMaxPath];
         SavesModelFolder(saves, sizeof(saves));
 
-        if (mModList->GetSelection() == wxNOT_FOUND)
+        if (pick < 0)
         {
-            const S32 s = ConfigModelFind("assets", "mod");
-            text << "[assets] mod names " << wxString::FromUTF8(ConfigModelText(s))
-                 << ", which is not there. The game ignores it and starts the original game.";
-        }
-        else if (pick < 0)
-        {
-            text << "The game as it shipped, from the assets folder.\n\nSaves: "
-                 << wxString::FromUTF8(saves);
+            if (ModsModelEnabledCount() == 0)
+            {
+                text << "No mods are checked: the game runs as it shipped.";
+            }
+            else
+            {
+                text << "Load order:";
+                for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+                {
+                    text << "\n    " << r + 1 << ". "
+                         << wxString::FromUTF8(ModsModelAt(ModsModelEnabledAt(r))->info.name);
+                }
+            }
+            text << "\n\nSaves: " << wxString::FromUTF8(saves);
         }
         else
         {
             const ModsModelEntry* e = ModsModelAt(pick);
+            const S32 rank = ModsModelRankOf(pick);
+
             text << wxString::FromUTF8(e->info.name);
             if (e->info.version[0] != '\0')
             {
@@ -1832,16 +1933,78 @@ namespace
                 text << "\n\n" << wxString::FromUTF8(e->info.description);
             }
 
-            wxString settings;
-            if (iModFolderSettings(e->folder, AppendSetting, &settings) > 0)
+            if (e->missing)
             {
-                text << "\n\nWhile it is in use, it sets:" << settings;
+                text << "\n\n"
+                     << wxString::FromUTF8(e->setting)
+                     << " is not there, so the game skips it. Uncheck it to take it out of "
+                        "[assets] mod.";
+            }
+            else if (rank < 0)
+            {
+                text << "\n\nOff.";
+            }
+            else
+            {
+                text << wxString::Format("\n\nOn, %d of %d in the load order.", (int)rank + 1,
+                                         (int)ModsModelEnabledCount());
+
+                wxBusyCursor busy;
+                for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+                {
+                    const S32 other = ModsModelEnabledAt(r);
+                    if (other == pick)
+                    {
+                        continue;
+                    }
+
+                    char examples[512];
+                    const S32 n = ModsModelOverlap(pick, other, examples, sizeof(examples));
+                    if (n == 0)
+                    {
+                        continue;
+                    }
+
+                    const wxString name = wxString::FromUTF8(ModsModelAt(other)->info.name);
+                    if (r < rank)
+                    {
+                        text << wxString::Format("\n%d of its files are read from ", (int)n) << name
+                             << " instead: ";
+                    }
+                    else
+                    {
+                        text << wxString::Format("\nIts copy of %d file%s is read instead of ",
+                                                 (int)n, n == 1 ? "" : "s")
+                             << name << "'s: ";
+                    }
+                    text << wxString::FromUTF8(examples) << (n > 5 ? ", ..." : "");
+                }
             }
 
-            text << "\n\nFolder: " << wxString::FromUTF8(e->folder);
-            text << "\nSaves: " << wxString::FromUTF8(saves);
+            if (!e->missing)
+            {
+                std::map<wxString, wxString> above;
+                for (S32 r = 0; rank > 0 && r < rank; r++)
+                {
+                    const ModsModelEntry* o = ModsModelAt(ModsModelEnabledAt(r));
+                    OwnerOfSettings owner = { &above, wxString::FromUTF8(o->info.name) };
+                    iModFolderSettings(o->folder, NoteSetting, &owner);
+                }
+
+                SettingsText settings = { wxString(), &above };
+                if (iModFolderSettings(e->folder, AppendSetting, &settings) > 0)
+                {
+                    text << "\n\nWhile it is on, it sets:" << settings.text;
+                }
+
+                text << "\n\nFolder: " << wxString::FromUTF8(e->folder);
+            }
+            text << "\nSaves for the checked mods: " << wxString::FromUTF8(saves);
         }
 
+        const S32 rank = pick >= 0 ? ModsModelRankOf(pick) : -1;
+        mModUp->Enable(rank > 0);
+        mModDown->Enable(rank >= 0 && rank + 1 < ModsModelEnabledCount());
         mModRemove->Enable(pick >= 0 && ModsModelAt(pick)->inLibrary);
 
         for (size_t i = 0; i < mTexts.size(); i++)
@@ -1862,15 +2025,58 @@ namespace
 
     void ConfigFrame::OnModPicked(wxCommandEvent&)
     {
-        const int pick = mModList->GetSelection();
-        if (pick == wxNOT_FOUND)
+        ShowModDetail();
+    }
+
+    void ConfigFrame::OnModChecked(wxCommandEvent& event)
+    {
+        const int row = event.GetInt();
+        if (row < 0 || (size_t)row >= mModRows.size())
         {
             return;
         }
 
-        ModsModelUse(pick - 1);
+        const S32 entry = mModRows[(size_t)row];
+        const wxString folder = wxString::FromUTF8(ModsModelAt(entry)->folder);
+        ModsModelSetEnabled(entry, mModList->IsChecked((unsigned int)row));
+
+        // The scan drops a missing folder taken out of the setting, which can
+        // move the entries after it; the selection follows the folder.
+        ModsModelScan();
+        S32 select = -1;
+        for (S32 i = 0; i < ModsModelCount(); i++)
+        {
+            if (folder == wxString::FromUTF8(ModsModelAt(i)->folder))
+            {
+                select = i;
+            }
+        }
+
         RefreshApply();
-        ShowModDetail();
+        FillModList(select);
+    }
+
+    void ConfigFrame::MoveMod(S32 delta)
+    {
+        const S32 entry = SelectedMod();
+        if (entry < 0)
+        {
+            return;
+        }
+
+        ModsModelMove(entry, delta);
+        RefreshApply();
+        FillModList(entry);
+    }
+
+    void ConfigFrame::OnModUp(wxCommandEvent&)
+    {
+        MoveMod(-1);
+    }
+
+    void ConfigFrame::OnModDown(wxCommandEvent&)
+    {
+        MoveMod(1);
     }
 
     void ConfigFrame::InstallZip(const wxString& path)
@@ -1933,7 +2139,7 @@ namespace
             }
         }
 
-        ModsModelUse(index);
+        ModsModelSetEnabled(index, true);
         RefreshApply();
         // Deferred: the button clicked is in the pane BuildRows rebuilds.
         CallAfter(&ConfigFrame::BuildRows);
@@ -2018,7 +2224,7 @@ namespace
             }
         }
 
-        ModsModelUse(index);
+        ModsModelSetEnabled(index, true);
         RefreshApply();
         // Deferred: the button clicked is in the pane BuildRows rebuilds.
         CallAfter(&ConfigFrame::BuildRows);
@@ -2026,13 +2232,14 @@ namespace
 
     void ConfigFrame::OnModOpen(wxCommandEvent&)
     {
-        const int pick = mModList != NULL ? mModList->GetSelection() - 1 : -1;
-        OpenFolder(wxString::FromUTF8(pick >= 0 ? ModsModelAt(pick)->folder : ModsModelLibrary()));
+        const S32 pick = SelectedMod();
+        const bool there = pick >= 0 && !ModsModelAt(pick)->missing;
+        OpenFolder(wxString::FromUTF8(there ? ModsModelAt(pick)->folder : ModsModelLibrary()));
     }
 
     void ConfigFrame::OnModRemove(wxCommandEvent&)
     {
-        const int pick = mModList != NULL ? mModList->GetSelection() - 1 : -1;
+        const S32 pick = SelectedMod();
         if (pick < 0)
         {
             return;
@@ -2072,9 +2279,19 @@ namespace
         SavesModelFolder(folder, sizeof(folder));
 
         ModsModelScan();
-        const S32 active = ModsModelActive();
-        const wxString whose =
-            active >= 0 ? wxString::FromUTF8(ModsModelAt(active)->info.name) : "the original game";
+        wxString whose;
+        for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+        {
+            const ModsModelEntry* e = ModsModelAt(ModsModelEnabledAt(r));
+            if (!e->missing)
+            {
+                whose << (whose.empty() ? "" : " + ") << wxString::FromUTF8(e->info.name);
+            }
+        }
+        if (whose.empty())
+        {
+            whose = "the original game";
+        }
 
         AddText(line,
                 "The three games for " + whose + ", in " + wxString::FromUTF8(folder) +
