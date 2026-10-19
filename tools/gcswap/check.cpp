@@ -27,9 +27,8 @@
 
 struct Stats
 {
-    int pairs = 0, sameSize = 0, match = 0, differ = 0, contentOnly = 0, unknown = 0,
-        malformed = 0;
-    std::map<unsigned, std::array<int, 4>> words; // offset -> keep, swap32, swap16x2, content
+    int pairs = 0, sameSize = 0, match = 0, differ = 0, contentOnly = 0, unknown = 0, malformed = 0;
+    std::map<unsigned, std::array<int, 4> > words; // offset -> keep, swap32, swap16x2, content
     unsigned example = 0;
 };
 
@@ -187,13 +186,13 @@ int main(int argc, char** argv)
         if (s.differ > s.contentOnly)
         {
             // The words a different byte order would fix, commonest first.
-            std::vector<std::pair<int, unsigned>> top;
+            std::vector<std::pair<int, unsigned> > top;
             for (auto& w : s.words)
             {
                 int fixable = w.second[0] + w.second[1] + w.second[2];
                 if (fixable)
                 {
-                    top.push_back({-fixable, w.first});
+                    top.push_back({ -fixable, w.first });
                 }
             }
             std::sort(top.begin(), top.end());

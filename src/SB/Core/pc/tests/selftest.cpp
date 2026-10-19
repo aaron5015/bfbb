@@ -1992,14 +1992,14 @@ static void test_gcswap()
     // numbers are 16-bit too.
     U8 timr[0x10 + 0x20];
     memset(timr, 0, sizeof(timr));
-    putBE32(timr + 0x0, 0x11223344);  // id
-    timr[4] = 0x0D;                   // baseType
-    timr[5] = 1;                      // linkCount
-    putBE16(timr + 0x6, 0x0102);      // baseFlags
-    putBE32(timr + 0x8, 0x41100000);  // seconds, 9.0
-    putBE32(timr + 0xC, 0x3F000000);  // randomRange, 0.5
-    putBE16(timr + 0x10, 0x0203);     // srcEvent
-    putBE16(timr + 0x12, 0x0405);     // dstEvent
+    putBE32(timr + 0x0, 0x11223344); // id
+    timr[4] = 0x0D; // baseType
+    timr[5] = 1; // linkCount
+    putBE16(timr + 0x6, 0x0102); // baseFlags
+    putBE32(timr + 0x8, 0x41100000); // seconds, 9.0
+    putBE32(timr + 0xC, 0x3F000000); // randomRange, 0.5
+    putBE16(timr + 0x10, 0x0203); // srcEvent
+    putBE16(timr + 0x12, 0x0405); // dstEvent
     putBE32(timr + 0x14, 0xAABBCCDD); // dstAssetID
 
     check(iGCSwapKnowsType('TIMR'), "iGCSwap has a rule for TIMR");
@@ -2035,9 +2035,9 @@ static void test_gcswap()
     U8 anim[0x1C + 0x10 + 8 + 4];
     memset(anim, 0, sizeof(anim));
     putBE32(anim + 0x0, 0x534B4231); // 'SKB1'
-    putBE16(anim + 0x8, 1);          // BoneCount
-    putBE16(anim + 0xA, 2);          // TimeCount
-    putBE32(anim + 0xC, 1);          // KeyCount
+    putBE16(anim + 0x8, 1); // BoneCount
+    putBE16(anim + 0xA, 2); // TimeCount
+    putBE32(anim + 0xC, 1); // KeyCount
     putBE32(anim + 0x10, 0x3F800000);
     for (U32 k = 0; k < 8; k++)
     {
@@ -2130,19 +2130,18 @@ static void test_file_mod()
                                 'P', 'L', 'A', 'T', 0, 0, 0, 12, 'G', 'C', 0,   'G', 'a', 'm',
                                 'e', 'C', 'u', 'b', 'e', 0 };
     // The same with PLAT "P2\0PS2\0", a release the port does not read.
-    static const U8 ps2Hip[] = { 'H', 'I', 'P', 'A', 0,   0,   0, 0,  'P', 'A', 'C', 'K',
-                                 0,   0,   0,   16,  'P', 'L', 'A', 'T', 0,   0,   0, 8,
-                                 'P', '2', 0,   'P', 'S', '2', 0, 0 };
+    static const U8 ps2Hip[] = { 'H', 'I', 'P', 'A', 0,  0,   0,   0,   'P', 'A', 'C',
+                                 'K', 0,   0,   0,   16, 'P', 'L', 'A', 'T', 0,   0,
+                                 0,   8,   'P', '2', 0,  'P', 'S', '2', 0,   0 };
 
-    bool made = write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
-                write_scratch(base, "ONLY.HIP", "BASE", 4) &&
-                write_scratch(base, "GC.HIP", "BASE", 4) &&
-                write_scratch(base, "GC.HOP", "BASE", 4) &&
-                write_scratch(base, "P2.HOP", "BASE", 4) &&
-                write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
-                write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip)) &&
-                write_scratch(mod, "gc.hop", gcHip, sizeof(gcHip)) &&
-                write_scratch(mod, "p2.hop", ps2Hip, sizeof(ps2Hip));
+    bool made =
+        write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
+        write_scratch(base, "ONLY.HIP", "BASE", 4) && write_scratch(base, "GC.HIP", "BASE", 4) &&
+        write_scratch(base, "GC.HOP", "BASE", 4) && write_scratch(base, "P2.HOP", "BASE", 4) &&
+        write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
+        write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip)) &&
+        write_scratch(mod, "gc.hop", gcHip, sizeof(gcHip)) &&
+        write_scratch(mod, "p2.hop", ps2Hip, sizeof(ps2Hip));
     check(made, "the scratch asset and mod folders can be written");
 
     iHostSetEnv("BFBB_ASSETS", base);
@@ -2226,9 +2225,8 @@ static void test_file_mod()
     iFileExit();
 
     const char* files[][2] = { { baseGl, "gl01.HIP" }, { base, "ONLY.HIP" }, { base, "GC.HIP" },
-                               { base, "GC.HOP" },     { base, "P2.HOP" },
-                               { modGl, "GL01.hip" },  { mod, "gc.hip" },
-                               { mod, "gc.hop" },      { mod, "p2.hop" } };
+                               { base, "GC.HOP" },     { base, "P2.HOP" },   { modGl, "GL01.hip" },
+                               { mod, "gc.hip" },      { mod, "gc.hop" },    { mod, "p2.hop" } };
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
     {
         snprintf(path, sizeof(path), "%s/%s", files[i][0], files[i][1]);

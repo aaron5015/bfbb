@@ -25,9 +25,9 @@
 
 enum iGCSwapResult
 {
-    IGCSWAP_DONE,      // swapped
-    IGCSWAP_UNKNOWN,   // a type with no rule; left as it was
-    IGCSWAP_MALFORMED  // shorter than its layout says; partly swapped
+    IGCSWAP_DONE, // swapped
+    IGCSWAP_UNKNOWN, // a type with no rule; left as it was
+    IGCSWAP_MALFORMED // shorter than its layout says; partly swapped
 };
 
 // Swaps one asset of packer type `type` ('SIMP' and so on) in place.
