@@ -104,6 +104,7 @@ TYPES = {
 
     "ANIM": [("custom", "iGCSwapAnim")],
     "JAW ": [("custom", "iGCSwapJaw")],
+    "JSP ": [("custom", "iGCSwapJspInfo")],
     # The sound table. Its layout is the GameCube's own, not the Xbox's, so
     # there is no twin to check it against; iSnd.cpp reads both.
     "SNDI": [("custom", "iGCSwapSoundTable")],

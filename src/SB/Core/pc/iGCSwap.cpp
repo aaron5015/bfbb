@@ -120,6 +120,7 @@ static S32 iGCSwapModelInfo(U8* p, U32 size);
 static S32 iGCSwapCutsceneToc(U8* p, U32 size);
 static S32 iGCSwapJaw(U8* p, U32 size);
 static S32 iGCSwapSoundTable(U8* p, U32 size);
+static S32 iGCSwapJspInfo(U8* p, U32 size);
 
 #include "iGCSwapTable.inc"
 
@@ -464,6 +465,81 @@ static S32 iGCSwapSoundTable(U8* p, U32 size)
         U8* e = p + kHeader + i * kEntry;
         iSndDspSwapHeader(e);
         gcsSwap32(e + ISNDDSP_HEADER_SIZE);
+    }
+    return 1;
+}
+
+// JSP. Most are RenderWare clump streams, little-endian everywhere, and are
+// left alone. The JSPINFO one is a run of blocks xJSP_MultiStreamRead walks,
+// each behind a 12-byte little-endian mark -- type, length, library version --
+// whose bodies the GameCube ships big-endian:
+//
+//   0xBEEF01  the collision tree: magic, branch count, triangle count, the
+//             branch nodes (four 32-bit fields), then 8-byte triangles of a
+//             U16 atomIndex, U16 meshVertIndex, two bytes and a U16 matIndex
+//   0xBEEF02  an xJSPHeader -- four characters, then 32-bit fields -- and its
+//             xJSPNodeInfos
+//   0xBEEF03  a count and that many strip vertices (GameCube only)
+static S32 iGCSwapJspInfo(U8* p, U32 size)
+{
+    const U32 kMark = 12;
+    const U32 kTree = 12;
+    const U32 kBranch = 16;
+    const U32 kTriangle = 8;
+
+    if (size < kMark || gcsRead32(p) != 0xBEEF01)
+    {
+        return 1;
+    }
+
+    U32 c = 0;
+    while (c + kMark <= size)
+    {
+        U32 type = gcsRead32(p + c);
+        U32 len = gcsRead32(p + c + 4);
+        U32 body = c + kMark;
+        if (len > size - body)
+        {
+            return 0;
+        }
+
+        switch (type)
+        {
+        case 0xBEEF01:
+        {
+            if (len < kTree)
+            {
+                return 0;
+            }
+            gcsSwapWords(p, body, body + kTree);
+            U32 branches = gcsRead32(p + body + 4);
+            U32 tris = gcsRead32(p + body + 8);
+            if (branches > (len - kTree) / kBranch ||
+                tris > (len - kTree - branches * kBranch) / kTriangle)
+            {
+                return 0;
+            }
+            U32 t = body + kTree;
+            gcsSwapWords(p, t, t + branches * kBranch);
+            for (t += branches * kBranch; tris > 0; tris--, t += kTriangle)
+            {
+                gcsSwap16(p + t + 0);
+                gcsSwap16(p + t + 2);
+                gcsSwap16(p + t + 6);
+            }
+            break;
+        }
+        case 0xBEEF02:
+            gcsSwapWords(p, body + 4, body + len);
+            break;
+        case 0xBEEF03:
+            gcsSwapWords(p, body, body + len);
+            break;
+        default:
+            break;
+        }
+
+        c = body + len;
     }
     return 1;
 }

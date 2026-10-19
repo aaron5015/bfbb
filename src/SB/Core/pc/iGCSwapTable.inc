@@ -3981,6 +3981,11 @@ static S32 gcs_type_JAW(U8* p, U32 size)
     return iGCSwapJaw(p, size);
 }
 
+static S32 gcs_type_JSP(U8* p, U32 size)
+{
+    return iGCSwapJspInfo(p, size);
+}
+
 static S32 gcs_type_SNDI(U8* p, U32 size)
 {
     return iGCSwapSoundTable(p, size);
@@ -4196,6 +4201,7 @@ static S32 iGCSwapGenerated(U32 type, U8* p, U32 size)
     case 0x464F4720: return gcs_type_FOG(p, size); // 'FOG '
     case 0x47525550: return gcs_type_GRUP(p, size); // 'GRUP'
     case 0x4A415720: return gcs_type_JAW(p, size); // 'JAW '
+    case 0x4A535020: return gcs_type_JSP(p, size); // 'JSP '
     case 0x4C4B4954: return gcs_type_LKIT(p, size); // 'LKIT'
     case 0x4C4F4454: return gcs_type_LODT(p, size); // 'LODT'
     case 0x4D415052: return gcs_type_MAPR(p, size); // 'MAPR'
@@ -4254,6 +4260,7 @@ static bool iGCSwapGeneratedKnows(U32 type)
     case 0x464F4720:
     case 0x47525550:
     case 0x4A415720:
+    case 0x4A535020:
     case 0x4C4B4954:
     case 0x4C4F4454:
     case 0x4D415052:
