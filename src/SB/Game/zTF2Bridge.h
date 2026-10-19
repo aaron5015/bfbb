@@ -17,6 +17,6 @@ void zTF2Bridge_DebugRenderRockets(); // temporary rocket/radius visualization
 // One-shot melee knockback override, consumed by the matching robot's native
 // knockback goal. Direction is horizontal in BFBB axes; multiplier scales the
 // stock launch impulse. Returns nonzero only for the matching target.
-int zTF2Bridge_ConsumeKnockbackOverride(void* npc, float* dirX, float* dirZ, float* multiplier);
+int zTF2Bridge_ConsumeKnockbackOverride(void* npc, float* dirX, float* dirY, float* dirZ, float* multiplier);
 
 #endif
