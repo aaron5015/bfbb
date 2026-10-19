@@ -32,9 +32,9 @@ layout.
 
 ## State
 
-Against the retail GameCube and Xbox discs: 33,896 pairs, 32,769 the same size.
-All but 11 of those either match exactly or differ only in content. The 11 are
-CRDT (2), SHRP (5), SURF (1), TEXT (2) and PARS (1).
+Against the retail GameCube and Xbox discs: 33,896 pairs, 32,817 the same size.
+30,927 match exactly and the rest differ only in content. The report still
+flags two TEXT assets whose wording changed ("slot A" against "slot 1").
 
 ANIM: 840 of 1,031 match exactly; the other 191 differ only in keyframe values
 off by one, which the two builds quantized differently.
@@ -42,8 +42,14 @@ off by one, which the two builds quantized differently.
 JAW: 48 of 49 match exactly; the other is a different table.
 
 SNDI keeps the GameCube layout (`iGCSwapSoundTable`); `iSnd.cpp` reads both.
-RenderWare streams (MODL, RWTX, JSP) and the samples in SND and SNDS are not
-byte-swapped at all.
+The JSPINFO asset's collision blocks are swapped (`iGCSwapJspInfo`); corpus.py
+leaves JSP out with the other RenderWare streams, which are not byte-swapped.
+Nor are the samples in SND and SNDS. librw reads GameCube-native textures and
+geometry itself.
+
+Cutscenes stream from their CSN asset outside the packer, so
+`iGCSwapCutsceneTime` and `iGCSwapCutsceneDeltaModel` are called from
+`iCutscene.cpp` as each piece is read.
 
 ## Sound
 

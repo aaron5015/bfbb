@@ -2643,8 +2643,8 @@ static void gcs_zSurfAssetBase(U8* p) // zSurfAssetBase, 0x12C bytes
     gcsSwap32(p + 0x118);
     gcsSwap32(p + 0x11C);
     gcsSwap32(p + 0x120);
-    gcsSwap32(p + 0x124);
-    gcsSwap32(p + 0x128);
+    gcsSwap32EitherFloat(p + 0x124); // zSurfAssetBase.damage_timer: see spec.EITHER
+    gcsSwap32EitherFloat(p + 0x128); // zSurfAssetBase.damage_bounce: see spec.EITHER
 }
 
 static void gcs_zSurfAssetBase_upto(U8* p, U32 n) // zSurfAssetBase, 0x12C bytes
@@ -2796,9 +2796,9 @@ static void gcs_zSurfAssetBase_upto(U8* p, U32 n) // zSurfAssetBase, 0x12C bytes
     if (n >= 0x124)
         gcsSwap32(p + 0x120);
     if (n >= 0x128)
-        gcsSwap32(p + 0x124);
+        gcsSwap32EitherFloat(p + 0x124); // zSurfAssetBase.damage_timer: see spec.EITHER
     if (n >= 0x12C)
-        gcsSwap32(p + 0x128);
+        gcsSwap32EitherFloat(p + 0x128); // zSurfAssetBase.damage_bounce: see spec.EITHER
 }
 
 static void gcs_zUIAsset(U8* p) // zUIAsset, 0x80 bytes
@@ -3690,6 +3690,13 @@ static S32 gcs_type_PARS(U8* p, U32 size)
                 if (c + 0x14 > end) return 0;
                 gcs_xParCmdRandomVelocityPar(p + c);
                 c += 0x14;
+                break;
+            case 16: // header and words
+                if (c + 0x1C > end) return 0;
+                gcsSwap32(p + c);
+                for (U32 w = 8; w < 0x1C; w += 4)
+                    gcsSwap32(p + c + w);
+                c += 0x1C;
                 break;
             case 18: // header and words
                 if (c + 0xC > end) return 0;

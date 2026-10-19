@@ -114,6 +114,8 @@ EITHER = {
     "xTimerAsset.randomRange": "float",
     "xEnvAsset.loldHeight": "float",
     "xParEmitterAsset.cull_mode": "int",
+    "zSurfAssetBase.damage_timer": "float",
+    "zSurfAssetBase.damage_bounce": "float",
 }
 
 EXTRA_STRUCTS = ["xModelAssetInfo", "xModelAssetInst", "z_disco_floor_asset"]
@@ -125,7 +127,11 @@ PARCMDS = {
     0: "xParCmdMove", 1: "xParCmdMove", 2: "xParCmdAccelerate", 3: "xParCmdAsset",
     5: 0xC, 6: "xParCmdKillSlow", 7: "xParCmdFollow", 8: "xParCmdOrbitPoint",
     9: "xParCmdOrbitLine", 10: "xParCmdMoveRandomPar", 11: 0x18, 12: "xParCmdTex",
-    13: "xParCmdTexAnim", 15: "xParCmdRandomVelocityPar", 18: 0xC, 19: 0x18, 20: 0xC,
+    13: "xParCmdTexAnim", 15: "xParCmdRandomVelocityPar",
+    # CUSTOM: unregistered too; boot.HIP's one entry is the header and five
+    # words.
+    16: 0x1C,
+    18: 0xC, 19: 0x18, 20: 0xC,
     21: "xParCmdRotPar", 23: "xParCmdRotateAround", 24: 0xC, 25: 0xC,
     # DAMAGEPLAYER: unregistered, so the game gives it no size, but the assets
     # carry one -- the header and two words.
