@@ -32,16 +32,19 @@ Upstream decomp: [bfbbdecomp/bfbb](https://github.com/bfbbdecomp/bfbb) ·
    [latest build](https://github.com/joeyballentine/bfbb/releases/tag/latest)
    and extract it.
 2. Run `bfbb.exe` once. It writes `config.ini` beside itself and stops.
-3. Set `[assets] path` in `config.ini` to your extracted Xbox files. Run it again.
+3. Set `[assets] path` in `config.ini` to your extracted Xbox or GameCube files.
+   Run it again.
 
 The macOS download has no libusb, so Switch 2 controllers and the GameCube
 adapter do not work on it.
 
 ## Getting the assets
 
-No assets are included. Extract the Xbox disc image yourself, for example with
-[extract-xiso](https://github.com/XboxDev/extract-xiso). Point `[assets] path`
-at the folder that directly contains `boot.HIP`, `font.HIP`, `fmv/` and `hb/`:
+No assets are included. Extract the Xbox or GameCube disc image yourself. For
+the Xbox, use [extract-xiso](https://github.com/XboxDev/extract-xiso). For the
+GameCube, use Dolphin: right-click the game, Properties, Filesystem, right-click
+the disc, Extract Entire Disc. Point `[assets] path` at the folder that directly
+contains `boot.HIP`, `font.HIP`, `fmv/` and `hb/` (the GameCube's is `files/`):
 
 ```ini
 [assets]
