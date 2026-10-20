@@ -1492,15 +1492,9 @@ def generate_objdiff_config(
         "GC/1.3.2r": "mwcc_242_81r",
         "GC/2.0": "mwcc_247_92",
         "GC/2.0p1": "mwcc_247_92p1",
-        # Locally patched 2.0p1 (tools/patch_compiler.py); decomp.me only has
-        # the stock build, so scratches fall back to it.
-        "GC/2.0p1a": "mwcc_247_92p1",
-        "GC/2.0p1b": "mwcc_247_92p1",  # 2.0p1a + tools/patch_compiler_rw.py
-        "GC/2.0p1c": "mwcc_247_92p1",  # 2.0p1b + R3 (tools/patch_compiler_rw.py --r3)
-        "GC/2.0p1d": "mwcc_247_92p1",  # 2.0p1c + R4 + address-taken gate (--p1d)
-        "GC/2.0p1e": "mwcc_247_92p1",  # 2.0p1d + 2.5 const-pointee alias (--p1e)
-        "GC/2.0p1f": "mwcc_247_92p1",  # 2.0p1e + 3.0a no-propagate into address-taken local (--p1f)
-        "GC/2.0p1g": "mwcc_247_92p1",  # 2.0p1f + stock store/store order for indirect stores (--p1g)
+        # doldecomp/mweppc's BFBB compiler (tools/mweppc.py); decomp.me does
+        # not have it, so scratches fall back to 2.0p1.
+        "GC/2.0p2": "mwcc_247_92p1",
         "GC/2.5": "mwcc_247_105",
         "GC/2.6": "mwcc_247_107",
         "GC/2.7": "mwcc_247_108",

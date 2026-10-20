@@ -29,7 +29,7 @@ import dwarf  # noqa: E402
 OUT = os.path.join(ROOT, "src", "SB", "Core", "pc", "iGCMemTable.inc")
 SYMBOLS_TXT = os.path.join(ROOT, "config", "GQPE78", "symbols.txt")
 BUILD = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(ROOT, "build")
-MWCC = os.path.join(BUILD, "compilers", "GC", "2.0p1g", "mwcceppc.exe")
+MWCC = os.path.join(BUILD, "compilers", "GC", "2.0p2", "mwcceppc.exe")
 DTK = os.path.join(BUILD, "tools", "dtk.exe")
 
 # The globals the table covers: (symbol, type, header).

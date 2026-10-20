@@ -12,13 +12,6 @@ tagiRenderInput gRenderBuffer;
 static S32 gColorTableInit;
 static F32 gColorTable[256];
 
-// mwcceppc 2.0p1/2.0p1a ceiling: retail reloads the int-to-float bias constant
-// and 255.0f from .sdata2 inside every one of the eight unrolled copies,
-// because its CSE treats the stfs to gColorTable as possibly aliasing the
-// literal pool. Both the stock and the patched compiler here hoist those two
-// loads out of the loop body instead, which is the only difference in the
-// function. Not reachable from the source: verified against a pointer walk,
-// a while loop, an unsigned induction variable and a volatile table.
 void iParMgrInit()
 {
     iRenderInit();

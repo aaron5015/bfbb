@@ -1,6 +1,6 @@
 # CodeWarrior source shapes
 
-The compiler is `mwcceppc` 2.0p1a targeting Gekko. These are shapes that produce
+The compiler is `mwcceppc` 2.0p2 targeting Gekko. These are shapes that produce
 different code from an equivalent-looking alternative. When instructions match
 but registers or scheduling do not, the source form is usually the reason.
 

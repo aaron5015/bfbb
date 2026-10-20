@@ -13,11 +13,11 @@ GameCube build, and the design facts a change is likely to run into.
 ## Branches
 
 `treedome` is the port. It is rebased on `duplotron` and inherits its
-CodeWarrior patch. The PC build never invokes CodeWarrior; the patch matters
-only for the GameCube gate below.
+CodeWarrior, `GC/2.0p2`. The PC build never invokes CodeWarrior; the compiler
+matters only for the GameCube gate below.
 
-- `duplotron`: decomp work, the compiler patch, `tools/gcgate.py`. Anything both
-  branches need goes here.
+- `duplotron`: decomp work, the compiler choice, `tools/gcgate.py`. Anything
+  both branches need goes here.
 - `treedome`: `src/SB/Core/pc/`, `CMakeLists.txt`, the port's tools and docs.
 
 ## Building
@@ -25,7 +25,6 @@ only for the GameCube gate below.
 GameCube:
 
 ```sh
-python tools/patch_compiler.py build/compilers
 python configure.py
 ninja > /tmp/gc.log 2>&1; echo "exit: $?"
 python tools/gcgate.py
@@ -167,7 +166,7 @@ include path decides which layer it gets.
 | | GameCube | PC |
 |---|---|---|
 | driver | `configure.py` -> `build.ninja` -> decomp-toolkit | `CMakeLists.txt` |
-| compiler | CodeWarrior `GC/2.0p1a` (patched) | host clang or g++ |
+| compiler | CodeWarrior `GC/2.0p2` (doldecomp/mweppc) | host clang or g++ |
 | platform layer | `-i src/SB/Core/gc` | `-I src/SB/Core/pc` |
 | define | `GAMECUBE` | `PLATFORM_PC` |
 

@@ -2,20 +2,41 @@
 
 Experimental branch. **Not intended to be merged into `main`.**
 
-Goal: drive the decompilation to 100% matching, using a scheduler-patched
-CodeWarrior (`GC/2.0p1a`, derived at build time by `tools/patch_compiler.py`)
-and whatever else it takes. Upstream is not interested in the patched
-toolchain, so this branch tracks `main` one-way and never flows back. Library
-code (MSL, Dolphin SDK, rwsdk, bink, MetroTRK) is in scope here even though it
-is off-limits for upstream PRs.
+Goal: drive the decompilation to 100% matching, using a model of the patched
+CodeWarrior retail was built with, and whatever else it takes. This branch
+tracks `main` one-way and never flows back. Library code (MSL, Dolphin SDK,
+rwsdk, bink, MetroTRK) is in scope here even though it is off-limits for
+upstream PRs.
 
 ## Ground rules
 
 - `main.dol` sha1 must stay `306526d90b48e99894c3138f5fc8f2716d9fecf6`.
 - `report.json` is the only metric. No change lands without a real build.
 - No regressions: `matched_functions` never goes down.
-- When a function is blocked purely on instruction scheduling, extending the
-  compiler patch is fair game.
+
+## Compiler
+
+Game code and RenderWare build with `GC/2.0p2` from
+[doldecomp/mweppc](https://github.com/doldecomp/mweppc), a decompilation of
+mwcceppc. 2.0p2 is GC/2.0 built from source with rules for small-data globals
+that model the patch BFBB's developers used; its README lists them.
+`tools/mweppc.py` downloads the release and checks it against pinned hashes.
+
+It replaced this branch's own byte patches (`GC/2.0p1a` for RenderWare,
+`GC/2.0p1g` for game code) on 2026-10-20. Game code went 7579 -> 7594. Two
+functions stopped matching, both where 2.0p2's rules are broader than
+retail's:
+
+- `zMainFirstScreen`: retail hoists the `color` aggregate template load from
+  `.sdata2` above the last byte store of the `text` copy; 2.0p2 orders a
+  small-data load behind a store through a pointer. `zMain` is `NonMatching`
+  until this is resolved.
+- `xBoxFromCircle`: retail keeps the 1.0f literal hoisted above the stores to
+  the address-taken `ext`; 2.0p2 lets those stores kill the literal.
+
+The sections below that describe clauses, caves, `patch_compiler.py`,
+`patchcost.py`, `variant.py` and the frida tools are history. The tools were
+deleted with the switch; they are in git before it.
 
 ## Status
 
