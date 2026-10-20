@@ -111,8 +111,8 @@ def compile_unit(unit):
     # the wrong tree, and those numbers look perfectly ordinary.
     shadow = opt_arg("--shadow")
     # --mw <version> compiles with a different CodeWarrior under build/compilers,
-    # which is how you tell a patch cost from a source problem. `--mw GC/2.0p1`
-    # is the stock compiler this branch's GC/2.0p1a is derived from.
+    # which is how you tell a compiler difference from a source problem.
+    # `--mw GC/2.0` is the stock compiler GC/2.0p2 is built from.
     mw = opt_arg("--mw") or info["mw"]
     cmd = cwexec.compile_prefix(NINJA, info["rule"], mw) + \
         (["-i", shadow] if shadow else []) + \

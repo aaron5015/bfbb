@@ -55,11 +55,10 @@ Differences from upstream:
 - **Game code first.** Almost all work went into the game code in `src/SB`,
   not the SDK and libraries. That is what the PC port on the `treedome` branch
   needed.
-- **Patched compiler.** The build uses `GC/2.0p1a`, a scheduler-patched
-  CodeWarrior that `tools/patch_compiler.py` derives from the stock compiler at
-  build time. It matches functions that differed only in instruction
-  scheduling. Several Fable instances found the patches, and they were
-  checked against a decompilation of mwcc.
+- **Compiler.** Game code and RenderWare build with `GC/2.0p2` from
+  [doldecomp/mweppc](https://github.com/doldecomp/mweppc), a CodeWarrior
+  rebuilt from decompiled source with rules that model the patched 2.0 retail
+  was built with. `tools/mweppc.py` downloads it at build time.
 - **Playable build.** The matching build still gates on the retail sha1.
   `python configure.py --non-matching` links every `src/SB` unit from source
   into a `main.dol` that runs, with some bugs.

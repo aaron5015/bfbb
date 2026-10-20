@@ -41,8 +41,8 @@ def compile_prefix(ninja, rule, mw_version):
     command = _rule_command(ninja, rule)
     head = command.split("$cflags")[0]
     # shlex's POSIX mode reads a backslash as an escape character, so on Windows
-    # it silently EATS the separators in `build\compilers\GC.0p1a\mwcceppc.exe`
-    # and hands back `buildcompilersGC2.0p1amwcceppc.exe`, which cannot be
+    # it silently EATS the separators in `build\compilers\GC\2.0p2\mwcceppc.exe`
+    # and hands back `buildcompilersGC2.0p2mwcceppc.exe`, which cannot be
     # spawned. That broke solo.py -- the tool used to VERIFY that a change is
     # byte-neutral -- on the platform this is developed on.
     parts = shlex.split(head.replace("$mw_version", mw_version),

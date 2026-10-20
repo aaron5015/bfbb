@@ -178,8 +178,8 @@ jobs:
 
       # No --binutils / --compilers: configure.py downloads binutils, the
       # CodeWarrior compilers, dtk, objdiff-cli and wibo itself. That also means
-      # build/compilers is ours and writable, which patch_compiler.py needs --
-      # it writes GC/2.0p1a next to the stock GC/2.0p1.
+      # build/compilers is ours and writable, which tools/mweppc.py needs --
+      # it writes GC/2.0p2 next to the stock compilers.
       - name: Build
         run: |
           python configure.py --map --version GQPE78

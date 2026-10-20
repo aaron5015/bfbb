@@ -7,7 +7,7 @@ Build plumbing plus the analysis tools used to work the decompilation.
 | | |
 |---|---|
 | `project.py`, `ninja_syntax.py` | decomp-toolkit build generation, driven by `configure.py` |
-| `patch_compiler.py` | derives the scheduler-patched CodeWarrior at build time |
+| `mweppc.py` | installs `GC/2.0p2` from doldecomp/mweppc's release at build time |
 | `decompctx.py` | flattens a translation unit and its includes into one file |
 | `download_tool.py`, `transform_dep.py` | fetch pinned tools, rewrite depfiles |
 | `cwexec.py` | reads the CodeWarrior launch command out of `build.ninja`, so the analysis tools compile the way ninja does |
@@ -116,7 +116,7 @@ hashes to `306526d9…`, since assets and code have to come from the same build.
 
 ```
 solo.py <unit-frag> --shadow <dir>       prepend a private include directory
-solo.py <unit-frag> --mw GC/2.0p1        compile with a different CodeWarrior
+solo.py <unit-frag> --mw GC/2.0          compile with a different CodeWarrior
 ```
 
 `--shadow` is how a shared-header change gets measured. Copy the header into a
@@ -134,26 +134,11 @@ function is never measured under the change. Declaring
 100.000 -> 85.588, because the conversion moved inside. Measure the defining
 unit explicitly, with the real edit, before believing a signature change.
 
-`--mw` picks any compiler under `build/compilers`. `GC/2.0p1` is the stock
-compiler this branch's patched `GC/2.0p1a` is derived from, and it answers the
-cheapest question in the project: *is this function my problem or the patch's?*
-A function that is exact under stock is source-correct by construction and has
-nothing left to recover.
-
-### `patchcost.py` — what the compiler patch buys, and what it costs
-
-```
-patchcost.py [unit-frag ...]             functions the patch BREAKS
-patchcost.py [unit-frag ...] --gains     functions the patch FIXES
-```
-
-Compiles every unit twice, once with each compiler, and diffs the two
-non-matching sets. The default direction is the cost — exact under stock and not
-under ours — and tree-wide that is seven functions. `--gains` is the other
-direction, and together they are the only honest price for a change to
-`patch_compiler.py`: a narrowing that does not recover one of the seven is
-buying nothing, and one that drops a name from the `--gains` list is paying for
-it.
+`--mw` picks any compiler under `build/compilers`. `GC/2.0` is the stock
+compiler `GC/2.0p2` adds its rules to, and it answers the cheapest question in
+the project: *is this function my problem or the compiler's?* A function that
+is exact under stock is source-correct by construction and has nothing left to
+recover.
 
 ### `rodatalayout.py` — the two `.rodata` object layouts, side by side
 
@@ -247,8 +232,8 @@ objsnap.py save <out.json>     hash every built object, the DOL and the compiler
 objsnap.py cmp  <before.json>  compare the tree against a snapshot; exit 1 on any change
 ```
 
-A change to `patch_compiler.py` changes the derived compiler's sha1, and then
-every measurement either side of it is incomparable. So the acceptance test for
+A new compiler build changes the compiler's sha1, and then every measurement
+either side of it is incomparable. So the acceptance test for
 a refactor meant to change **no** behaviour is not the match percentage -- it is
 that all 542 objects come out byte-for-byte as they did, and the DOL still
 hashes to retail.

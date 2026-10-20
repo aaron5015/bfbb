@@ -17,9 +17,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-sys.path.append(str(Path(__file__).parent / "tools"))
-import aliaspatch_link  # noqa: E402  -- for the AliasPatch.c dependency path
-
 from tools.project import (
     Object,
     ProgressCategory,
@@ -342,25 +339,9 @@ if config.non_matching:
 
 config.linker_version = "GC/2.0p1"
 
-# The SB library is built with a patched CodeWarrior that narrows an
-# over-aggressive may-alias inference in the instruction scheduler; see
-# tools/patch_compiler.py. Derived from the stock compiler during the build.
-PATCHED_COMPILER = "GC/2.0p1a"
-
-# The RenderWare SDK's compiler, modelling the unarchived compiler retail RW
-# was built with (see docs/RW_RESIDUE.md): GC/2.0p1a plus (1) clause V's
-# literal-kill walk does not fire on stores to compiler temporaries (2.0p1b),
-# and (2) GC/2.5's loop-invariant hoisting of loads through pointer-to-const
-# and its large-loop FP-load veto (2.0p1c), and (3) 2.5's alias for two-register
-# loads plus clauses E3n/A/W/V firing on a frame object only when its address
-# escapes (2.0p1d), and (4) 2.5's plain alias for a const/restrict pointee,
-# which also keeps unrolled const-pointer loops' per-copy addi (2.0p1e), and
-# (5) GC/3.0a's refusal to copy-propagate a variable into an address-taken
-# local, so a read of it stays a (forwarded, F32-rounded) load (2.0p1f), and
-# (6) stock 2.0p1's freedom to reorder two indirect stores to different
-# objects, which 2.0p1a's clause C+ had pinned (2.0p1g).
-# Derived from GC/2.0p1a during the build by tools/patch_compiler_rw.py.
-RW_COMPILER = "GC/2.0p1g"
+# Game code and RenderWare build with GC/2.0p2, doldecomp/mweppc's model of the
+# patched 2.0 retail was built with. tools/mweppc.py installs it.
+BFBB_COMPILER = "GC/2.0p2"
 
 
 # Helper function for Dolphin libraries
@@ -407,7 +388,7 @@ def RenderWareLib(lib_name: str, objects: List[Object]) -> Dict[str, Any]:
         # units that have real source, 2.0p1 wins or ties every one of them and
         # beats 1.3.2 by ten functions overall - bacamera 9 -> 14, baworobj
         # 35 -> 37, baframe/baclump/bageomet +1 each.
-        "mw_version": PATCHED_COMPILER,
+        "mw_version": BFBB_COMPILER,
         "cflags": cflags_renderware,
         "progress_category": "RW",
         "objects": objects,
@@ -440,9 +421,7 @@ config.warn_missing_source = False
 config.libs = [
     {
         "lib": "SB",
-        # Game code also builds with the retail-compiler model; see
-        # docs/COMPILER_VARIANTS.md (2.0p1a -> 2.0p1g: +18 functions, -0).
-        "mw_version": RW_COMPILER,
+        "mw_version": BFBB_COMPILER,
         "cflags": cflags_bfbb,
         "progress_category": "game",
         "objects": [
@@ -538,7 +517,7 @@ config.libs = [
             Object(Matching, "SB/Game/zLightEffect.cpp"),
             Object(Matching, "SB/Game/zLightning.cpp", extra_cflags=["-sym on"]),
             Object(Matching, "SB/Game/zLOD.cpp"),
-            Object(Matching, "SB/Game/zMain.cpp"),
+            Object(NonMatching, "SB/Game/zMain.cpp"),  # zMainFirstScreen; see docs/DUPLOTRON.md "Compiler"
             Object(Matching, "SB/Game/zMenu.cpp"),
             Object(Matching, "SB/Game/zMovePoint.cpp", extra_cflags=["-sym on"]),
             Object(Matching, "SB/Game/zMusic.cpp"),
@@ -1215,70 +1194,34 @@ config.progress_categories = [
 ]
 config.progress_each_module = args.verbose
 
-# Compilers are fetched by a ninja rule, so the patched variant has to be
-# derived as a build step rather than at configure time. Objects already carry
+# Compilers are fetched by a ninja rule, so GC/2.0p2 has to be installed as a
+# build step rather than at configure time. Objects already carry
 # order_only="pre-compile".
 compilers_dir = (
     Path(config.compilers_path)
     if config.compilers_path
     else config.build_dir / "compilers"
 )
-# AliasPatch.c lives in the (local, unpublished) compiler decomp, so it is an
-# absolute path outside this tree and is absent on any machine that has only
-# the bfbb repo -- CI included. Treat it as a dependency when it is there; when
-# it is not, patch_compiler.py must derive from the checked-in blob instead.
-ALIASPATCH_SRC = aliaspatch_link.SRC
 
-# Hash-valid compilers retain their timestamps. Restat records revalidation
-# and prunes dependent rebuilds when a patch script leaves the bytes unchanged.
+# Hash-valid compilers retain their timestamps. Restat prunes dependent
+# rebuilds when the script leaves the installed files unchanged.
 config.custom_build_rules = [
     {
-        "name": "patch_compiler",
-        "command": "$python tools/patch_compiler.py $out",
-        "description": "PATCH $out",
-        "restat": True,
-    },
-    {
-        "name": "patch_compiler_rw",
-        "command": "$python tools/patch_compiler_rw.py $out",
-        "description": "PATCH $out",
+        "name": "mweppc",
+        "command": "$python tools/mweppc.py $out",
+        "description": "MWEPPC $out",
         "restat": True,
     },
 ]
 config.custom_build_steps = {
     "pre-compile": [
         {
-            "outputs": [compilers_dir / PATCHED_COMPILER / "mwcceppc.exe"],
-            "rule": "patch_compiler",
-            # The script is a real input: editing the payload must re-derive the
-            # compiler, which in turn rebuilds every object (see project.py).
+            "outputs": [compilers_dir / BFBB_COMPILER / "mwcceppc.exe"],
+            "rule": "mweppc",
             # When the compilers are downloaded that directory is a ninja
             # target; wait for it. With --compilers it already exists on disk.
-            # The compiler is now derived from C (AliasPatch.c in the
-            # mwcc-gc repo) rather than from hand-assembled cave bytes, so all
-            # four of these are real inputs. Listing only patch_compiler.py
-            # meant editing the payload left a stale compiler behind and every
-            # object silently kept its old bytes.
-            "implicit": [
-                Path("tools") / "patch_compiler.py",
-                Path("tools") / "aliaspatch_link.py",
-                Path("tools") / "aliaspatch_asm.py",
-            ]
-            + ([Path(ALIASPATCH_SRC)] if Path(ALIASPATCH_SRC).exists() else [])
+            "implicit": [Path("tools") / "mweppc.py"]
             + ([compilers_dir] if config.compilers_path is None else []),
-        },
-        {
-            # GC/2.0p1b is derived from the GC/2.0p1a above, so that exe is an
-            # input (it orders the two steps, and a re-derived 2.0p1a re-derives
-            # 2.0p1b). patch_compiler.py holds the 2.0p1a hash and layout
-            # constants patch_compiler_rw.py checks against.
-            "outputs": [compilers_dir / RW_COMPILER / "mwcceppc.exe"],
-            "rule": "patch_compiler_rw",
-            "implicit": [
-                compilers_dir / PATCHED_COMPILER / "mwcceppc.exe",
-                Path("tools") / "patch_compiler_rw.py",
-                Path("tools") / "patch_compiler.py",
-            ],
         },
     ]
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Byte-identity snapshot of every built object, for compiler-patch work.
+"""Byte-identity snapshot of every built object, for compiler changes.
 
-A change to tools/patch_compiler.py changes the derived compiler's sha1, and
-then every measurement either side of it is incomparable. The acceptance test
+A new compiler build changes the compiler's sha1, and then every measurement
+either side of it is incomparable. The acceptance test
 for a refactor that is supposed to change NO behaviour is therefore not the
 match percentage -- it is that every object comes out byte-for-byte as it did
 before, and that the DOL still hashes to retail.
@@ -27,7 +27,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "build/GQPE78/src")
 DOL = os.path.join(ROOT, "build/GQPE78/main.dol")
-COMPILER = os.path.join(ROOT, "build/compilers/GC/2.0p1a/mwcceppc.exe")
+COMPILER = os.path.join(ROOT, "build/compilers/GC/2.0p2/mwcceppc.exe")
 
 
 def sha1(path):
