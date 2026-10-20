@@ -98,6 +98,31 @@ inline float RocketFalloffScale(float distance, float radius)
     return 1.0f - 0.5f * t;
 }
 
+// Mirrors TF2's normal rocket distance modifier from CTFGameRules::ApplyDamage
+// (tf_damage_range=0.5, tf_damage_disablespread=1): rocket damage ramps up to
+// 125% inside 512 Source units, is unchanged around 512, and reaches 52.8% by
+// 1024. This is separate from the explosion-radius half-falloff above.
+inline float RocketRangeDamageScale(float attackerDistanceSourceUnits)
+{
+    float center = 1.0f - attackerDistanceSourceUnits / 1024.0f;
+    if (center < 0.0f)
+        center = 0.0f;
+    if (center > 1.0f)
+        center = 1.0f;
+
+    float rangeValue = center - 0.1f;
+    if (rangeValue < 0.0f)
+        rangeValue = 0.0f;
+    rangeValue += 0.1f; // TF2's disabled-spread path selects flMin + 0.1.
+
+    const float spline = rangeValue * rangeValue * (3.0f - 2.0f * rangeValue);
+    float damageRange = 0.5f; // tf_damage_range default
+    if (rangeValue > 0.5f)
+        damageRange *= 0.5f; // rocket launchers get half of the close-range bonus
+
+    return 1.0f + (2.0f * spline - 1.0f) * damageRange;
+}
+
 class Explosion
 {
 public:

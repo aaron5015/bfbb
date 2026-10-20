@@ -64,6 +64,9 @@ namespace
     BridgeIntentPacket sIntent;
     double sIntentAt = -1000.0;
     uint32_t sLastSeq = 0;
+    uint32_t sSessionId = 0;
+    uint32_t sTf2SessionId = 0;
+    bool sHaveTf2SessionId = false;
 
     // Fire events must not be coalesced away with the "newest intent wins" rule.
     const int kEventCap = 32;
@@ -75,6 +78,13 @@ namespace
     EventSlot sEvents[kEventCap];
     int sEventHead = 0;
     int sEventCount = 0;
+
+    const int kNpcHitCap = 64;
+    BridgeNpcHitPacket sNpcHits[kNpcHitCap];
+    int sNpcHitHead = 0;
+    int sNpcHitCount = 0;
+    uint32_t sLastNpcHitSeq = 0;
+    bool sHaveNpcHitSeq = false;
 
     bool IsEvent(const BridgeIntentPacket& p)
     {
@@ -134,6 +144,17 @@ void iTF2BridgeInit()
     inet_pton(AF_INET, "127.0.0.1", &sTf2Addr.sin_addr);
 
     sActive = true;
+    sNpcHitHead = 0;
+    sNpcHitCount = 0;
+    sLastNpcHitSeq = 0;
+    sHaveNpcHitSeq = false;
+    sHaveTf2SessionId = false;
+    sTf2SessionId = 0;
+    const uint64_t sessionClock = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    sSessionId = (uint32_t)(sessionClock ^ (sessionClock >> 32) ^ (uintptr_t)&sIntent);
+    if (sSessionId == 0)
+        sSessionId = 1;
     printf("bfbb: tf2bridge up -- listening 127.0.0.1:%d, sending to :%d\n", BRIDGE_PORT_BFBB,
            BRIDGE_PORT_TF2);
 }
@@ -162,21 +183,68 @@ void iTF2BridgePoll()
 
     for (;;)
     {
-        BridgeIntentPacket p;
-        int n = (int)recv(sSock, (char*)&p, sizeof(p), 0);
-        if (n != (int)sizeof(p))
+        uint8_t buf[sizeof(BridgeIntentPacket)];
+        int n = (int)recv(sSock, (char*)buf, sizeof(buf), 0);
+        if (n < 0)
+            break;
+
+        if (n == (int)sizeof(BridgeNpcHitPacket))
         {
-            // Nothing waiting (or a malformed datagram, which is dropped).
-            if (n < 0)
+            BridgeNpcHitPacket hit;
+            memcpy(&hit, buf, sizeof(hit));
+            if (hit.magic == BRIDGE_MAGIC_NPC_HIT)
             {
-                break;
+                if (!sHaveTf2SessionId || hit.sessionId != sTf2SessionId)
+                {
+                    sTf2SessionId = hit.sessionId;
+                    sHaveTf2SessionId = true;
+                    sHaveIntent = false;
+                    sLastSeq = 0;
+                    sEventHead = 0;
+                    sEventCount = 0;
+                    sNpcHitHead = 0;
+                    sNpcHitCount = 0;
+                    sHaveNpcHitSeq = false;
+                }
+                if (sHaveNpcHitSeq && (int32_t)(hit.seq - sLastNpcHitSeq) <= 0)
+                    continue;
+                sLastNpcHitSeq = hit.seq;
+                sHaveNpcHitSeq = true;
+                if (sNpcHitCount == kNpcHitCap)
+                {
+                    sNpcHitHead = (sNpcHitHead + 1) % kNpcHitCap;
+                    --sNpcHitCount;
+                }
+                sNpcHits[(sNpcHitHead + sNpcHitCount) % kNpcHitCap] = hit;
+                ++sNpcHitCount;
             }
             continue;
         }
 
+        if (n != (int)sizeof(BridgeIntentPacket))
+        {
+            continue;
+        }
+
+        BridgeIntentPacket p;
+        memcpy(&p, buf, sizeof(p));
+
         if (p.magic != BRIDGE_MAGIC_INTENT)
         {
             continue;
+        }
+
+        if (!sHaveTf2SessionId || p.sessionId != sTf2SessionId)
+        {
+            sTf2SessionId = p.sessionId;
+            sHaveTf2SessionId = true;
+            sHaveIntent = false;
+            sLastSeq = 0;
+            sEventHead = 0;
+            sEventCount = 0;
+            sNpcHitHead = 0;
+            sNpcHitCount = 0;
+            sHaveNpcHitSeq = false;
         }
 
         // UDP may reorder; keep only newer packets. Wraparound-safe compare.
@@ -232,6 +300,7 @@ void iTF2BridgeSendState(const BridgeStatePacket* state)
     BridgeStatePacket p = *state;
     p.magic = BRIDGE_MAGIC_STATE;
     p.seq = ++sSendSeq;
+    p.sessionId = sSessionId;
 
     sGameplay = (p.flags & BRIDGE_STATE_GAMEPLAY) != 0;
     sGameplayAt = Now();
@@ -264,6 +333,16 @@ bool iTF2BridgePopEvent(BridgeIntentPacket* out)
         }
     }
     return false;
+}
+
+bool iTF2BridgePopNpcHit(BridgeNpcHitPacket* out)
+{
+    if (sNpcHitCount <= 0 || out == NULL)
+        return false;
+    *out = sNpcHits[sNpcHitHead];
+    sNpcHitHead = (sNpcHitHead + 1) % kNpcHitCap;
+    --sNpcHitCount;
+    return true;
 }
 
 const BridgeIntentPacket* iTF2BridgeGetIntent()

@@ -13,6 +13,7 @@
 #define BRIDGE_MAGIC_INTENT 0x32494642u
 #define BRIDGE_MAGIC_STATE 0x31534642u
 #define BRIDGE_MAGIC_ROCKET_IMPACT 0x31524942u
+#define BRIDGE_MAGIC_NPC_HIT 0x31504842u
 
 #define BRIDGE_IN_ATTACK (1 << 0)
 #define BRIDGE_IN_JUMP (1 << 1)
@@ -23,6 +24,9 @@
 
 #define BRIDGE_STATE_GAMEPLAY 0x1u
 #define BRIDGE_STATE_CONTROL_OFF 0x2u
+#define BRIDGE_STATE_NPC_TARGETS 0x4u
+#define BRIDGE_HIT_CRITICAL 0x1u
+#define BRIDGE_HIT_ROCKET 0x2u
 
 #define BRIDGE_INTENT_OWNS_MOVE 0x1u
 
@@ -34,6 +38,7 @@
 
 #define BRIDGE_MAX_HITSCAN_RAYS 32
 #define BRIDGE_MAX_ROCKETS 32
+#define BRIDGE_MAX_NPC_TARGETS 32
 
 #pragma pack(push, 1)
 
@@ -44,10 +49,36 @@ struct BridgeRocketImpactPacket
     float x, y, z;
 };
 
+// A hit reported by a TF2-side NPC proxy. npcId is the BFBB xBase id.
+// Damage values are retained separately so BFBB can tune knockback and later
+// health-pool behavior without deriving either from the proxy's health.
+struct BridgeNpcHitPacket
+{
+    uint32_t magic;
+    uint32_t seq;
+    uint32_t sessionId;
+    uint32_t sceneId;
+    uint32_t npcId;
+    uint32_t damageType;
+    uint32_t hitFlags;
+    float damage;
+    float baseDamage;
+    float knockbackMultiplier;
+    float dirX, dirY, dirZ;
+};
+
+struct BridgeNpcTarget
+{
+    uint32_t id;
+    int32_t type;
+    float x, y, z;
+};
+
 struct BridgeIntentPacket
 {
     uint32_t magic;
     uint32_t seq;
+    uint32_t sessionId;
     float forward;
     float side;
     float pitch;
@@ -74,6 +105,7 @@ struct BridgeIntentPacket
     uint32_t rocketCount;
     int32_t rocketEntIndex[BRIDGE_MAX_ROCKETS];
     float rocketPos[BRIDGE_MAX_ROCKETS][3];
+    float rocketAttackerPos[BRIDGE_MAX_ROCKETS][3];
     float rocketRadius[BRIDGE_MAX_ROCKETS];
     float rocketDamage[BRIDGE_MAX_ROCKETS];
     float rocketKnockbackMultiplier[BRIDGE_MAX_ROCKETS];
@@ -84,11 +116,14 @@ struct BridgeStatePacket
 {
     uint32_t magic;
     uint32_t seq;
+    uint32_t sessionId;
     float x, y, z;
     float yaw;
     int32_t health;
     uint32_t sceneId;
     uint32_t flags;
+    uint32_t npcCount;
+    BridgeNpcTarget npcs[BRIDGE_MAX_NPC_TARGETS];
 };
 
 #pragma pack(pop)

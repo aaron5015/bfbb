@@ -43,6 +43,8 @@ void iTF2BridgeSetStick(S32 valid, F32 x, F32 y);
 // frame. Returns false when none are waiting; events older than a quarter second
 // are discarded.
 bool iTF2BridgePopEvent(BridgeIntentPacket* out);
+// Proxy damage notifications from TF2, matched to the BFBB scene asset id.
+bool iTF2BridgePopNpcHit(BridgeNpcHitPacket* out);
 
 // The newest intent, or NULL when none has arrived in the last quarter second.
 const BridgeIntentPacket* iTF2BridgeGetIntent();

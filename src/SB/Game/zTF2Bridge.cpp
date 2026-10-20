@@ -39,6 +39,7 @@ static const float kDegToRad = 3.14159265f / 180.0f;
 
 // Forward declaration: the bridge frame runs before the implementation below.
 static void TF2Bridge_FireAtNPCs(const BridgeIntentPacket* in);
+static void TF2Bridge_ProcessNpcHits();
 
 struct TF2BridgeDebugRay
 {
@@ -86,6 +87,8 @@ struct TF2BridgeDebugRocket
 
     int32_t entIndex;
     xVec3 pos;
+    xVec3 attackerPos;
+    float sourceUnitScale;
     xVec3 prevPos;
     xVec3 impact;
     xVec3 impactNormal;
@@ -668,8 +671,19 @@ static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEn
         target.visible = true;
         target.distance = reach;
 
-        const F32 scale = tf2splash::RocketFalloffScale(reach, radius);
-        const F32 damage = baseDamage * scale;
+        const F32 splashScale = tf2splash::RocketFalloffScale(reach, radius);
+        const F32 attackerDx = (center->x - rocket->attackerPos.x) * rocket->sourceUnitScale;
+        const F32 attackerDy = (center->y - rocket->attackerPos.y) * rocket->sourceUnitScale;
+        const F32 attackerDz = (center->z - rocket->attackerPos.z) * rocket->sourceUnitScale;
+        const F32 attackerDistance = sqrtf(attackerDx * attackerDx + attackerDy * attackerDy + attackerDz * attackerDz);
+        const F32 rangeScale = tf2splash::RocketRangeDamageScale(attackerDistance);
+        const F32 damage = baseDamage * rangeScale * splashScale;
+        const F32 maxOutputDamage = baseDamage * 1.25f;
+        const F32 damageKnockbackScale = damage > 0.0f
+            ? MIN(2.0f, MAX(1.0f, maxOutputDamage / damage)) : 1.0f;
+        const F32 weaponKnockbackScale = TF2Bridge_ImpactKnockbackMultiplier(
+            npc, rocket->knockbackMultiplier, damage);
+        const F32 finalKnockbackScale = MIN(5.0f, weaponKnockbackScale * damageKnockbackScale);
 
         // BFBB reads the vector as the direction the hit travelled; the knock goal
         // sends the robot along it (horizontally). Blast direction = origin -> robot.
@@ -696,8 +710,7 @@ static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEn
                 sPendingKnockbackDirX = pushLen > 0.001f ? push.x / pushLen : 0.0f;
                 sPendingKnockbackDirY = push.y;
                 sPendingKnockbackDirZ = pushLen > 0.001f ? push.z / pushLen : 1.0f;
-                sPendingKnockbackMultiplier =
-                    TF2Bridge_ImpactKnockbackMultiplier(npc, rocket->knockbackMultiplier, damage);
+                sPendingKnockbackMultiplier = finalKnockbackScale;
                 sPendingKnockbackTarget = npc;
                 sPendingKnockbackOverride = true;
             }
@@ -712,10 +725,11 @@ static void TF2Bridge_RocketExplode(TF2BridgeDebugRocket* rocket, void* directEn
             }
         }
 
-        printf("bfbb: tf2bridge -- rocket splash type %d %s dist=%.2f/%.2f scale=%.2f damage=%.1f "
+        printf("bfbb: tf2bridge -- rocket splash type %d %s dist=%.2f/%.2f attackerDist=%.1f range=%.3f splash=%.3f damage=%.1f kb=%.2f "
                "applyDamage=%d\n",
                (int)target.npcType, direct ? "DIRECT" : (wrapped ? "VISIBLE(wrapped)" : "VISIBLE"),
-               (double)reach, (double)radius, (double)scale, (double)damage, applyDamage ? 1 : 0);
+               (double)reach, (double)radius, (double)attackerDistance, (double)rangeScale, (double)splashScale,
+               (double)damage, (double)finalKnockbackScale, applyDamage ? 1 : 0);
     }
 
     printf("bfbb: tf2bridge -- rocket explosion radius=%.2f baseDamage=%.2f wrap=%.2f applyDamage=%d "
@@ -758,6 +772,9 @@ static void TF2Bridge_ProcessRockets(const BridgeIntentPacket* in)
 
         const xVec3 pos = FromSource(in->rocketPos[i][0], in->rocketPos[i][1],
                                      in->rocketPos[i][2], in->scale);
+        rocket->attackerPos = FromSource(in->rocketAttackerPos[i][0], in->rocketAttackerPos[i][1],
+                                         in->rocketAttackerPos[i][2], in->scale);
+        rocket->sourceUnitScale = in->scale;
         rocket->radius = in->rocketRadius[i] / in->scale;
         rocket->damage = in->rocketDamage[i];
         rocket->knockbackMultiplier = in->rocketKnockbackMultiplier[i];
@@ -938,20 +955,29 @@ void zTF2Bridge_Frame()
     iTF2BridgePoll();
 
     const bool playing = zGameModeGet() == eGameMode_Game;
+    const bool legacyNpcTrace = TF2Bridge_EnvFlag("BFBB_TF2BRIDGE_LEGACY_NPC_TRACE");
 
-    // Temporary combat bridge: prefer the real TF2 weapon-fire event when
-    // present, but retain the old attack-edge path as a fallback for weapons
-    // that do not yet report through the common weapon bases. A packet with
-    // BRIDGE_WEAPON_FIRED is consumed instead of the attack edge, so one TF2
-    // attack cannot produce two BFBB hits.
-    // Weapon events first, oldest to newest.
+    // Proxy hits are the authoritative combat events once NPC placeholders are
+    // mirrored into TF2. Keep BFBB's damage/death path, but no longer synthesize
+    // a second hit from the same fire command on BFBB's side.
+    if (playing)
+        TF2Bridge_ProcessNpcHits();
+    else
+    {
+        BridgeNpcHitPacket discardedHit;
+        while (iTF2BridgePopNpcHit(&discardedHit))
+        {
+        }
+    }
+
+    // Weapon events still carry ray and projectile state for BFBB's existing
+    // rocket sweep. Direct hits now arrive separately from the matching TF2
+    // NPC proxy so each shot has its real damage and crit metadata.
     BridgeIntentPacket ev;
     while (iTF2BridgePopEvent(&ev))
     {
-        if (playing)
-        {
+        if (playing && legacyNpcTrace)
             TF2Bridge_ProcessWeaponEvent(&ev);
-        }
     }
 
     static uint32_t sLastIntentSeq = 0;
@@ -967,10 +993,8 @@ void zTF2Bridge_Frame()
 
         // Fallback for weapons that never report a fire event: the attack edge.
         // (Events, including this packet if it is one, were handled above.)
-        if (!event && !rocketGun && attack && !sLastAttack)
-        {
+        if (legacyNpcTrace && !event && !rocketGun && attack && !sLastAttack)
             TF2Bridge_FireAtNPCs(attackIn);
-        }
         if (!event)
         {
             sLastAttack = attack;
@@ -1002,6 +1026,7 @@ void zTF2Bridge_Frame()
         st.health = (int32_t)globals.player.Health;
         st.sceneId = globals.sceneCur != NULL ? globals.sceneCur->sceneID : 0;
         st.flags |= BRIDGE_STATE_GAMEPLAY;
+        st.flags |= BRIDGE_STATE_NPC_TARGETS;
         if (BfbbOwnsPlayerNow())
         {
             st.flags |= BRIDGE_STATE_CONTROL_OFF;
@@ -1013,6 +1038,27 @@ void zTF2Bridge_Frame()
         {
             sDumpedScene = st.sceneId;
             DumpSceneCollision(st.sceneId);
+        }
+
+        // Mirror live BFBB robots as hittable TF2-side target proxies. The
+        // scene asset id is stable across frames and is returned with damage.
+        st.npcCount = 0;
+        st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+        if (npclist != NULL)
+        {
+            for (S32 i = 0; i < npclist->cnt && st.npcCount < BRIDGE_MAX_NPC_TARGETS; ++i)
+            {
+                zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+                if (npc == NULL || npc->frame == NULL || !npc->IsAlive() || !IsTF2BridgeRobot(npc))
+                    continue;
+
+                BridgeNpcTarget& target = st.npcs[st.npcCount++];
+                target.id = npc->id;
+                target.type = (int32_t)npc->SelfType();
+                target.x = npc->frame->mat.pos.x;
+                target.y = npc->frame->mat.pos.y;
+                target.z = npc->frame->mat.pos.z;
+            }
         }
     }
 
@@ -1059,6 +1105,74 @@ static bool IsTF2BridgeRobot(const zNPCCommon* npc)
         return true;
     default:
         return false;
+    }
+}
+
+static void TF2Bridge_ProcessNpcHits()
+{
+    BridgeNpcHitPacket hit;
+    while (iTF2BridgePopNpcHit(&hit))
+    {
+        // BFBB's existing rocket sweep already owns blast damage/falloff. Keep
+        // its result for rockets while proxy-reported direct hits cover other
+        // TF2 weapon damage events.
+        if (hit.npcId == 0 ||
+            hit.sceneId != (globals.sceneCur != NULL ? globals.sceneCur->sceneID : 0) ||
+            !(hit.damage > 0.0f) || globals.sceneCur == NULL)
+            continue;
+
+        st_XORDEREDARRAY* npclist = zNPCMgr_GetNPCList();
+        if (npclist == NULL)
+            continue;
+
+        zNPCCommon* target = NULL;
+        for (S32 i = 0; i < npclist->cnt; ++i)
+        {
+            zNPCCommon* npc = (zNPCCommon*)npclist->list[i];
+            if (npc != NULL && npc->id == hit.npcId && IsTF2BridgeRobot(npc))
+            {
+                target = npc;
+                break;
+            }
+        }
+        if (target == NULL || !target->IsAlive() || target->frame == NULL)
+            continue;
+
+        xVec3 dir = { hit.dirX, hit.dirY, hit.dirZ };
+        if (xVec3Length2(&dir) < 0.0001f)
+        {
+            dir.x = 0.0f; dir.y = 0.0f; dir.z = 1.0f;
+        }
+        xVec3Normalize(&dir, &dir);
+
+        float requested = hit.knockbackMultiplier;
+        if (!(requested >= 0.1f && requested <= 5.0f))
+            requested = 1.5f;
+        const float referenceDamage = hit.baseDamage > 0.0f ? hit.baseDamage : hit.damage;
+        const bool critical = (hit.hitFlags & BRIDGE_HIT_CRITICAL) != 0;
+        const float nonCritDamage = critical ? hit.damage / 3.0f : hit.damage;
+        const float falloffScale = MIN(2.0f, MAX(1.0f, referenceDamage / nonCritDamage));
+        const float critScale = critical ? 3.0f : 1.0f;
+        const float chuckScale = TF2Bridge_ImpactKnockbackMultiplier(target, 1.0f, nonCritDamage);
+        sPendingKnockbackDirX = dir.x;
+        sPendingKnockbackDirY = dir.y;
+        sPendingKnockbackDirZ = dir.z;
+        sPendingKnockbackMultiplier = MIN(5.0f, requested * falloffScale * critScale * chuckScale);
+        sPendingKnockbackTarget = target;
+        sPendingKnockbackOverride = true;
+
+        target->Damage(DMGTYP_SIDE, NULL, &dir);
+        if (target->SelfType() == NPC_TYPE_CHUCK && target->IsAlive() && target->frame != NULL &&
+            sPendingKnockbackOverride && sPendingKnockbackTarget == target)
+        {
+            target->frame->vel.x += dir.x * 2.5f * sPendingKnockbackMultiplier;
+            target->frame->vel.z += dir.z * 2.5f * sPendingKnockbackMultiplier;
+            sPendingKnockbackTarget = NULL;
+            sPendingKnockbackOverride = false;
+        }
+        printf("bfbb: tf2bridge -- proxy hit id=%u type=%d damage=%.2f base=%.2f typebits=0x%08x kb=%.2f\n",
+            (unsigned)hit.npcId, (int)target->SelfType(), (double)hit.damage,
+            (double)referenceDamage, (unsigned)hit.damageType, (double)sPendingKnockbackMultiplier);
     }
 }
 
