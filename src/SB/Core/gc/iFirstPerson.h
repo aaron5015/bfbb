@@ -6,5 +6,7 @@
 // changes CodeWarrior's code for the caller.
 #define iFirstPersonCamera(cam, dt, d, h) 0
 #define iFirstPersonHidesPlayer() 0
+#define iFirstPersonHideCarried()
+#define iFirstPersonShowCarried()
 
 #endif

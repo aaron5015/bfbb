@@ -24,4 +24,10 @@ S32 iFirstPersonCamera(xCamera* cam, F32 dt, F32 d, F32 h);
 // drawn. False whenever anything else placed the camera.
 S32 iFirstPersonHidesPlayer();
 
+// Hides what Patrick holds over his head for the scene's model passes while
+// the camera is in his head, and shows it again after. The eye sits inside it
+// otherwise. Render-time only: game logic never sees it hidden.
+void iFirstPersonHideCarried();
+void iFirstPersonShowCarried();
+
 #endif

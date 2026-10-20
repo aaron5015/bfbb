@@ -15,6 +15,8 @@
 #include "iToon.h"
 #endif
 
+#include "iFirstPerson.h"
+
 #include "zEntTrigger.h"
 #include "zMovePoint.h"
 #include "zEntPickup.h"
@@ -3834,6 +3836,8 @@ static void zSceneRenderPreFX()
 
     zLightRemoveLocalEnv();
 
+    iFirstPersonHideCarried();
+
     zRenderState(SDRS_OpaqueModels);
     z_disco_floor::render_all();
 
@@ -3983,6 +3987,8 @@ static void zSceneRenderPreFX()
 #ifdef PLATFORM_PC
     iToonPause(FALSE);
 #endif
+
+    iFirstPersonShowCarried();
 }
 
 #ifdef PLATFORM_PC

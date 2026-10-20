@@ -26,6 +26,9 @@ namespace
     xVec3 sPlaced;
     S32 sPlacedValid;
 
+    // What iFirstPersonHideCarried hid, for iFirstPersonShowCarried.
+    xEnt* sHidCarried;
+
     // The walk bob: its phase, in radians, and how much of it shows, 0..1.
     F32 sBobPhase;
     F32 sBobWeight;
@@ -264,4 +267,27 @@ S32 iFirstPersonHidesPlayer()
 
     const xVec3& pos = globals.camera.mat.pos;
     return pos.x == sPlaced.x && pos.y == sPlaced.y && pos.z == sPlaced.z;
+}
+
+void iFirstPersonHideCarried()
+{
+    sHidCarried = NULL;
+
+    xEnt* held = globals.player.carry.grabbed;
+    if (held == NULL || !(held->flags & 0x1) || !iFirstPersonHidesPlayer())
+    {
+        return;
+    }
+
+    xEntHide(held);
+    sHidCarried = held;
+}
+
+void iFirstPersonShowCarried()
+{
+    if (sHidCarried != NULL)
+    {
+        xEntShow(sHidCarried);
+        sHidCarried = NULL;
+    }
 }
