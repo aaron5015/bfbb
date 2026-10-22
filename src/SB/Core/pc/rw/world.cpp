@@ -379,11 +379,13 @@ RpWorld* RpWorldRemoveLight(RpWorld* world, RpLight* light)
 //
 // The struct chunk is 64 bytes, or 76 in older streams that put a
 // surface-properties block after the origin; the bounding box is its last 24
-// bytes in both.
+// bytes in both. RenderWare 3.1 streams, which GameCube mods' placeholder BSPs
+// are, have a 52-byte one: the origin, the surface properties, then the counts
+// and the format, and no bounding box. Those get an empty one.
 RpWorld* RpWorldStreamRead(RwStream* stream)
 {
     rw::uint32 length;
-    if (stream == NULL || !rw::findChunk(stream, rw::ID_STRUCT, &length, NULL) || length < 64 ||
+    if (stream == NULL || !rw::findChunk(stream, rw::ID_STRUCT, &length, NULL) || length < 52 ||
         length > 128)
     {
         return NULL;
@@ -396,13 +398,22 @@ RpWorld* RpWorldStreamRead(RwStream* stream)
     }
 
     RwBBox bbox;
-    memcpy(&bbox, buf + length - sizeof(bbox), sizeof(bbox));
+    memset(&bbox, 0, sizeof(bbox));
+    if (length >= 64)
+    {
+        memcpy(&bbox, buf + length - sizeof(bbox), sizeof(bbox));
+    }
 
-    // numTriangles follows rootIsWorldSector and the origin in the 64-byte form.
+    // numTriangles follows rootIsWorldSector and the origin in the 64-byte
+    // form, and the surface properties too in the 52-byte one.
     rw::int32 numTriangles = 0;
     if (length == 64)
     {
         memcpy(&numTriangles, buf + 16, sizeof(numTriangles));
+    }
+    else if (length == 52)
+    {
+        memcpy(&numTriangles, buf + 28, sizeof(numTriangles));
     }
     if (numTriangles != 0)
     {
