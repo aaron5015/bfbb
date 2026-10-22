@@ -2583,6 +2583,29 @@ static void test_mods_model()
     ModsModelSuggestName(staged, "C:/Downloads/thing.zip", name, sizeof(name));
     check(strcmp(name, "Selftest Mod 5.0") == 0, "the suggested name is the mod's own folder");
 
+    // A mod-manager layout: the disc's files in files/, beside mod.json.
+    char managed[512];
+    char managedFiles[600];
+    check(ModsModelStage(managed, sizeof(managed), why, sizeof(why)), "a second staging folder");
+    snprintf(managedFiles, sizeof(managedFiles), "%s/files", managed);
+    iHostMakeDir(managedFiles);
+    write_scratch(managedFiles, "boot.HIP", "x", 1);
+    write_scratch(managed, "mod.json", "{}", 2);
+    ModsModelSuggestName(managed, "C:/Downloads/Second Strike.zip", name, sizeof(name));
+    check(strcmp(name, "Second Strike") == 0, "files/ at the archive's root takes the archive's name");
+
+    ModsModelRemoveTree(managedFiles);
+    char wrapped[600];
+    char wrappedFiles[700];
+    snprintf(wrapped, sizeof(wrapped), "%s/Boo-kini v1.1", managed);
+    snprintf(wrappedFiles, sizeof(wrappedFiles), "%s/files", wrapped);
+    iHostMakeDir(wrapped);
+    iHostMakeDir(wrappedFiles);
+    write_scratch(wrappedFiles, "boot.HIP", "x", 1);
+    ModsModelSuggestName(managed, "C:/Downloads/boo.zip", name, sizeof(name));
+    check(strcmp(name, "Boo-kini v1.1") == 0, "and files/ inside a folder takes that folder's name");
+    ModsModelRemoveTree(managed);
+
     check(!ModsModelNameOk("a/b", why, sizeof(why)) && !ModsModelNameOk(".x", why, sizeof(why)),
           "a name with a separator or a leading dot is refused");
 

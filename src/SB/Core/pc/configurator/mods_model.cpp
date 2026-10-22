@@ -500,8 +500,24 @@ void ModsModelSuggestName(const char* staged, const char* archive, char* out, si
     char root[kModsModelMaxPath];
     if (iModFolderFindAssets(staged, root, sizeof(root)) && !samePath(root, staged))
     {
-        iSaveFileLeaf(root, out, outSize);
-        return;
+        // A mod made for a GameCube mod manager keeps the disc's files in
+        // files/, beside its mod.json, and that name says nothing about the
+        // mod. The folder around it does, unless it is the archive's root.
+        char leaf[kModsModelMaxPath];
+        iSaveFileLeaf(root, leaf, sizeof(leaf));
+        char* slash = strrchr(root, '/');
+        if (iHostStrCaseCmp(leaf, "files") != 0 || slash == NULL)
+        {
+            snprintf(out, outSize, "%s", leaf);
+            return;
+        }
+
+        *slash = '\0';
+        if (!samePath(root, staged))
+        {
+            iSaveFileLeaf(root, out, outSize);
+            return;
+        }
     }
 
     char leaf[kModsModelMaxPath];
