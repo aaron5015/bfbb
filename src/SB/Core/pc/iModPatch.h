@@ -45,4 +45,11 @@ inline bool iModPatchScriptDone(bool waiting)
 // work. On the PC they land on whatever the compiler put after the array.
 #define IMODPATCH_MAX_HITCHES 64
 
+// zLasso's guide lists, one per enemy Sandy can lasso. Retail keeps 64 and
+// never checks; Second Strike's gl03, rb01 and sm04 need 65. On the GameCube
+// the 65th lands on zLight's tables after scene init has filled them, and no
+// light reads them in those levels; on the PC it wrote over zGoo's statics,
+// and the next goo test faulted.
+#define IMODPATCH_MAX_LASSO_TARGETS 256
+
 #endif

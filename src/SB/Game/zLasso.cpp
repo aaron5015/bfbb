@@ -11,6 +11,7 @@
 #include "iModel.h"
 #include "xstransvc.h"
 #include "iParMgr.h"
+#include "iModPatch.h"
 #if defined(PS2)
 #include <rwim3d.h>
 #endif
@@ -22,7 +23,7 @@ static U32 sNumGuideLists;
 static zLassoGuide* sCurrentGuide;
 static RxObjSpace3DVertex* lnverts;
 
-static zLassoGuideList sGuideList[64];
+static zLassoGuideList sGuideList[IMODPATCH_MAX_LASSO_TARGETS];
 
 static S32 negativeHondaX = 1;
 
