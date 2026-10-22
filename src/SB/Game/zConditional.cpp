@@ -9,6 +9,7 @@
 #include "zScene.h"
 #endif
 #include "xEvent.h"
+#include "iModPatch.h"
 
 S32 zConditionalEventCB(xBase*, xBase*, U32, const F32*, xBase*);
 
@@ -81,7 +82,7 @@ U32 zConditional_Evaluate(_zConditional* c)
     if (v == NULL)
         return 0;
 
-    U32 temp = v->varCB(context);
+    U32 temp = iModPatchVarRead(v, context);
 
     switch (c->asset->op)
     {

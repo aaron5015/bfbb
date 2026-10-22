@@ -52,4 +52,20 @@ inline bool iModPatchScriptDone(bool waiting)
 // and the next goo test faulted.
 #define IMODPATCH_MAX_LASSO_TARGETS 256
 
+// zConditional's read of a zVarEntry. The counter value, enabled and visible
+// entries (0x0F to 0x11) read a field of an object found by ID, and retail
+// reads it through NULL when the scene has no such object. Sock Expedition's
+// mnu4 tests a counter that hb04 lacks. Dolphin, which GameCube mods are made
+// on, returns 0 for those reads, and so does this.
+#define iModPatchVarRead(v, context) iModPatchVarReadEntry((v)->entry, (v)->varCB, context)
+
+inline U32 iModPatchVarReadEntry(U32 entry, U32 (*read)(void*), void* context)
+{
+    if (context == NULL && entry >= 0x0F && entry <= 0x11)
+    {
+        return 0;
+    }
+    return read(context);
+}
+
 #endif
