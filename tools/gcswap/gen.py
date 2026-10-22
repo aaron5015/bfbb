@@ -157,11 +157,16 @@ class Gen:
                         if sname not in fixed:
                             raise SystemExit("%s is not at a fixed offset" % sname)
                         cexpr = "gcsRead%d(p + 0x%X)" % (msize * 8, fixed[sname] + moff)
+                    # A count past the end still gets the elements that are
+                    # there: mods ship move points whose numPoints is one
+                    # more than their ids, and the game reads the rest from
+                    # the next asset.
                     lines.append("    {")
                     lines.append("        U32 n = %s;" % cexpr)
-                    lines.append("        if (n > (end - c) / 0x%X) return 0;" % esize)
-                    lines.append("        for (U32 k = 0; k < n; k++, c += 0x%X)" % esize)
+                    lines.append("        U32 fit = (end - c) / 0x%X;" % esize)
+                    lines.append("        for (U32 k = 0; k < n && k < fit; k++, c += 0x%X)" % esize)
                     lines.append("            %s;" % self.elem_call(elem))
+                    lines.append("        if (n > fit) return 0;")
                     lines.append("    }")
                 known = False
             elif step[0] == "tagged":

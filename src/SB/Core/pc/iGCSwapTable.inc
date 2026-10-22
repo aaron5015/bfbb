@@ -3380,9 +3380,10 @@ static S32 gcs_type_SCRP(U8* p, U32 size)
     c += 0x10;
     {
         U32 n = gcsRead32(p + 0xC);
-        if (n > (end - c) / 0x20) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x20)
+        U32 fit = (end - c) / 0x20;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x20)
             gcs_xScriptEventAsset(p + c);
+        if (n > fit) return 0;
     }
     return 1;
 }
@@ -3626,9 +3627,10 @@ static S32 gcs_type_GRUP(U8* p, U32 size)
     c += 0xC;
     {
         U32 n = gcsRead16(p + 0x8);
-        if (n > (end - c) / 0x4) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x4)
+        U32 fit = (end - c) / 0x4;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x4)
             gcsSwap32(p + c);
+        if (n > fit) return 0;
     }
     return 1;
 }
@@ -3647,9 +3649,10 @@ static S32 gcs_type_MVPT(U8* p, U32 size)
     c += 0x28;
     {
         U32 n = gcsRead16(p + 0x1A);
-        if (n > (end - c) / 0x4) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x4)
+        U32 fit = (end - c) / 0x4;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x4)
             gcsSwap32(p + c);
+        if (n > fit) return 0;
     }
     return 1;
 }
@@ -3857,9 +3860,10 @@ static S32 gcs_type_PICK(U8* p, U32 size)
     c += 0x8;
     {
         U32 n = gcsRead32(p + 0x4);
-        if (n > (end - c) / 0x14) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x14)
+        U32 fit = (end - c) / 0x14;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x14)
             gcs_zAssetPickup(p + c);
+        if (n > fit) return 0;
     }
     return 1;
 }
@@ -3955,21 +3959,24 @@ static S32 gcs_type_ATBL(U8* p, U32 size)
     c += 0x14;
     {
         U32 n = gcsRead32(p + 0x4);
-        if (n > (end - c) / 0x4) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x4)
+        U32 fit = (end - c) / 0x4;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x4)
             gcsSwap32(p + c);
+        if (n > fit) return 0;
     }
     {
         U32 n = gcsRead32(p + 0x8);
-        if (n > (end - c) / 0x20) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x20)
+        U32 fit = (end - c) / 0x20;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x20)
             gcs_xAnimAssetFile(p + c);
+        if (n > fit) return 0;
     }
     {
         U32 n = gcsRead32(p + 0xC);
-        if (n > (end - c) / 0x1C) return 0;
-        for (U32 k = 0; k < n; k++, c += 0x1C)
+        U32 fit = (end - c) / 0x1C;
+        for (U32 k = 0; k < n && k < fit; k++, c += 0x1C)
             gcs_xAnimAssetState(p + c);
+        if (n > fit) return 0;
     }
     for (; c + 4 <= end; c += 4)
         gcsSwap32(p + c);
