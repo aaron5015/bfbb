@@ -40,4 +40,9 @@ inline bool iModPatchScriptDone(bool waiting)
     return !waiting;
 }
 
+// zEntPlayer's trailer hitches. Retail keeps 32 and never checks; Second
+// Strike's b305 has 35. On the GameCube the extra three land in sStankTag and
+// work. On the PC they land on whatever the compiler put after the array.
+#define IMODPATCH_MAX_HITCHES 64
+
 #endif

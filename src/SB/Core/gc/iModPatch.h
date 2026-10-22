@@ -9,5 +9,6 @@
 #define iModPatchScriptDone(waiting) (waiting)
 #define IMODPATCH_ASSET_TYPES
 #define IMODPATCH_ASSET_TYPE_COUNT 0
+#define IMODPATCH_MAX_HITCHES 32
 
 #endif

@@ -180,7 +180,7 @@ static F32 sPlayerCollAdjust;
 
 static zPlayerLassoInfo* sLassoInfo;
 static zLasso* sLasso;
-static xEnt* sHitch[32];
+static xEnt* sHitch[IMODPATCH_MAX_HITCHES];
 static S32 sNumHitches;
 static F32 sHitchAngle;
 static F32 sSwingTimeElapsed;
