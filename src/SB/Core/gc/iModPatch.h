@@ -12,5 +12,6 @@
 #define IMODPATCH_MAX_HITCHES 32
 #define IMODPATCH_MAX_LASSO_TARGETS 64
 #define iModPatchVarRead(v, context) ((v)->varCB(context))
+#define iModPatchFindGoal(psy, gid) ((psy)->FindGoal(gid))
 
 #endif

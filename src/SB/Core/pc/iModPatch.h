@@ -3,6 +3,8 @@
 
 #include <types.h>
 
+#include "xBehaviour.h"
+
 // PC-only: what GameCube mods change in the game's code, done in C++.
 //
 // A GameCube mod can ship a DOL patch next to its assets. The port cannot run
@@ -66,6 +68,24 @@ inline U32 iModPatchVarReadEntry(U32 entry, U32 (*read)(void*), void* context)
         return 0;
     }
     return read(context);
+}
+
+// zNPCRobot's FindGoal('NGRj') before DieQuietly. A robot whose instinct has
+// no dead goal gets the safe goal back, a smaller class, and DieQuietly's write
+// to flg_deadinfo lands past it, on the first word of the next goal. On the
+// GameCube that word is a list field; on the PC it is the vtable pointer, and
+// the next call through it jumps to garbage. Second Strike's b306 duplotron
+// adopts such robots. A missing goal gets a scratch one to write into.
+inline xGoal* iModPatchFindGoal(xPsyche* psy, S32 gid)
+{
+    static U32 sScratch[64];
+
+    xGoal* goal = psy->FindGoal(gid);
+    if (goal == NULL || goal->GetID() != gid)
+    {
+        return (xGoal*)sScratch;
+    }
+    return goal;
 }
 
 #endif

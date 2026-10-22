@@ -28,6 +28,7 @@
 #include "xDraw.h"
 #include "xColor.h"
 #include "zNPCGoalStd.h"
+#include "iModPatch.h"
 #include "zNPCGoalCommon.h"
 #include "zParEmitter.h"
 #include "xParEmitter.h"
@@ -880,7 +881,7 @@ void zNPCRobot::Reset()
 
         if (npc_duplodude)
         {
-            goal = (zNPCGoalDead*)psy->FindGoal('NGRj');
+            goal = (zNPCGoalDead*)iModPatchFindGoal(psy, 'NGRj');
             goal->DieQuietly();
             psy_instinct->GoalSet('NGRj', 1);
         }
@@ -888,7 +889,7 @@ void zNPCRobot::Reset()
         {
             if ((U32)xEntIsEnabled(this) == 0)
             {
-                goal = (zNPCGoalDead*)psy->FindGoal('NGRj');
+                goal = (zNPCGoalDead*)iModPatchFindGoal(psy, 'NGRj');
                 goal->DieQuietly();
                 psy_instinct->GoalSet('NGRj', 1);
             }
@@ -1343,7 +1344,7 @@ void zNPCRobot::DuploOwner(zNPCCommon* duper)
 
     if (psy)
     {
-        zNPCGoalDead* goal = (zNPCGoalDead*)psy->FindGoal('NGRj');
+        zNPCGoalDead* goal = (zNPCGoalDead*)iModPatchFindGoal(psy, 'NGRj');
         goal->DieQuietly();
         psy->GoalSet('NGRj', 1);
     }
