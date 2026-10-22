@@ -5,6 +5,7 @@
 #include "zScript.h"
 #include "zScene.h"
 #include "zGlobals.h"
+#include "iModPatch.h"
 
 #include <types.h>
 
@@ -120,7 +121,7 @@ void zScriptUpdate(xBase* obj, xScene* scene, F32 dt)
     {
         zScriptExecuteEvents(script, script->time, script->time + dt);
         script->time += dt;
-        if (!script->more && script->state == ZSCRIPT_STATE_WAITING)
+        if (!script->more && iModPatchScriptDone(script->state == ZSCRIPT_STATE_WAITING))
         {
             zEntEvent(script, eEventExpired);
         }

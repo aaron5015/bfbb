@@ -100,6 +100,9 @@ static void gcs_xPortalAsset(U8* p);
 static void gcs_xPortalAsset_upto(U8* p, U32 n);
 static void gcs_xSFXAsset(U8* p);
 static void gcs_xSFXAsset_upto(U8* p, U32 n);
+static void gcs_xScriptAsset(U8* p);
+static void gcs_xScriptAsset_upto(U8* p, U32 n);
+static void gcs_xScriptEventAsset(U8* p);
 static void gcs_xSimpleObjAsset(U8* p);
 static void gcs_xSimpleObjAsset_upto(U8* p, U32 n);
 static void gcs_xTextAsset(U8* p);
@@ -2265,6 +2268,38 @@ static void gcs_xSFXAsset_upto(U8* p, U32 n) // xSFXAsset, 0x30 bytes
         gcsSwap32(p + 0x2C);
 }
 
+static void gcs_xScriptAsset(U8* p) // xScriptAsset, 0x10 bytes
+{
+    gcsSwap32(p + 0x0);
+    gcsSwap16(p + 0x6);
+    gcsSwap32(p + 0x8);
+    gcsSwap32(p + 0xC);
+}
+
+static void gcs_xScriptAsset_upto(U8* p, U32 n) // xScriptAsset, 0x10 bytes
+{
+    if (n >= 0x4)
+        gcsSwap32(p + 0x0);
+    if (n >= 0x8)
+        gcsSwap16(p + 0x6);
+    if (n >= 0xC)
+        gcsSwap32(p + 0x8);
+    if (n >= 0x10)
+        gcsSwap32(p + 0xC);
+}
+
+static void gcs_xScriptEventAsset(U8* p) // xScriptEventAsset, 0x20 bytes
+{
+    gcsSwap32(p + 0x0);
+    gcsSwap32(p + 0x4);
+    gcsSwap32(p + 0x8);
+    gcsSwap32(p + 0xC);
+    gcsSwap32(p + 0x10);
+    gcsSwap32(p + 0x14);
+    gcsSwap32(p + 0x18);
+    gcsSwap32(p + 0x1C);
+}
+
 static void gcs_xSimpleObjAsset(U8* p) // xSimpleObjAsset, 0xC bytes
 {
     gcsSwap32(p + 0x0);
@@ -3331,6 +3366,27 @@ static S32 gcs_type_TIMR(U8* p, U32 size)
     return 1;
 }
 
+static S32 gcs_type_SCRP(U8* p, U32 size)
+{
+    U32 end;
+    if (!gcsSwapLinks(p, size, &end)) return 0;
+    U32 c = 0;
+    if (c + 0x10 > end) // an older, shorter asset: what is there
+    {
+        if (c < end) gcs_xScriptAsset_upto(p + c, end - c);
+        return 1;
+    }
+    gcs_xScriptAsset(p + c);
+    c += 0x10;
+    {
+        U32 n = gcsRead32(p + 0xC);
+        if (n > (end - c) / 0x20) return 0;
+        for (U32 k = 0; k < n; k++, c += 0x20)
+            gcs_xScriptEventAsset(p + c);
+    }
+    return 1;
+}
+
 static S32 gcs_type_SFX(U8* p, U32 size)
 {
     U32 end;
@@ -4216,6 +4272,7 @@ static S32 iGCSwapGenerated(U32 type, U8* p, U32 size)
     case 0x504C4154: return gcs_type_PLAT(p, size); // 'PLAT'
     case 0x504C5952: return gcs_type_PLYR(p, size); // 'PLYR'
     case 0x504F5254: return gcs_type_PORT(p, size); // 'PORT'
+    case 0x53435250: return gcs_type_SCRP(p, size); // 'SCRP'
     case 0x53465820: return gcs_type_SFX(p, size); // 'SFX '
     case 0x53484457: return gcs_type_SHDW(p, size); // 'SHDW'
     case 0x53485250: return gcs_type_SHRP(p, size); // 'SHRP'
@@ -4275,6 +4332,7 @@ static bool iGCSwapGeneratedKnows(U32 type)
     case 0x504C4154:
     case 0x504C5952:
     case 0x504F5254:
+    case 0x53435250:
     case 0x53465820:
     case 0x53484457:
     case 0x53485250:

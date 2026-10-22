@@ -5,6 +5,7 @@
 #include "iScreen.h"
 #endif
 
+#include "iModPatch.h"
 #include "xAnim.h"
 #include "xCM.h"
 #include "xCurveAsset.h"
@@ -86,7 +87,7 @@ static u32 s_scFootSoundB;
 static u32 s_patFootSoundA;
 static u32 s_patFootSoundB;
 
-static st_PACKER_ASSETTYPE assetTypeHandlers[78] = {
+static st_PACKER_ASSETTYPE assetTypeHandlers[78 + IMODPATCH_ASSET_TYPE_COUNT] = {
     { 'BSP ', 0, 0, BSP_Read, NULL, NULL, NULL, NULL, BSP_Unload, NULL },
     { 'JSP ', 0, 0, JSP_Read, NULL, NULL, NULL, NULL, JSP_Unload, NULL },
     { 'TXD ' },
@@ -177,6 +178,7 @@ static st_PACKER_ASSETTYPE assetTypeHandlers[78] = {
     { 'DUPC' },
     { 'SLID' },
     { 'CRDT', 0, 0, CRDT_READ, NULL, NULL, NULL, NULL, NULL, NULL },
+    IMODPATCH_ASSET_TYPES
 };
 
 void zAssetStartup()

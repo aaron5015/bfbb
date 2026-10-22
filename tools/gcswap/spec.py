@@ -56,6 +56,8 @@ TYPES = {
     "BOUL": ["xEntAsset", "xEntBoulderAsset"],
     "PLYR": ["xEntAsset", ("words",)],
     "TIMR": ["xTimerAsset"],
+    # Mods only: retail has no SCRP assets. See pc/iModPatch.h.
+    "SCRP": ["xScriptAsset", ("array", "xScriptEventAsset", "xScriptAsset.eventCount")],
     "SFX ": ["xSFXAsset"],
     "CAM ": ["xCamAsset"],
     "CNTR": ["xCounterAsset"],

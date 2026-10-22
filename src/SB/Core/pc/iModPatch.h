@@ -23,4 +23,21 @@ U8* iModPatchByte(U32 address);
 bool iModPatchSpinHover();
 bool iModPatchBowlFullTurn();
 
+// Script assets (SCRP). Retail has a _zScript object but no packer handler for
+// its asset, so no package can make one. Mods built with Industrial Park add
+// them, with the "Script Asset Support" code that every GameCube mod loader
+// ships: one write puts 'SCRP' in assetTypeHandlers, the other turns
+// zScriptUpdate's `state == WAITING` into `!=`, so a script that has run out
+// of events sends eEventExpired. Retail packages hold no SCRP assets, so
+// neither change reaches an unmodded game.
+#define IMODPATCH_ASSET_TYPES { 'SCRP' },
+#define IMODPATCH_ASSET_TYPE_COUNT 1
+
+// Whether a script that ran out of events is done: `waiting` is retail's
+// test, that the script is in ZSCRIPT_STATE_WAITING.
+inline bool iModPatchScriptDone(bool waiting)
+{
+    return !waiting;
+}
+
 #endif
