@@ -26,6 +26,19 @@ Companion to `TF2_BFBB_BRIDGE_ROADMAP.md` (BFBB tree, `docs\`), which holds the 
 - The user's `sb.ini` currently has player damage turned **off** (`TakeDamage`), on purpose: while the bridge owns player health, BFBB must not drain its own pool or the player dies twice. Do not "fix" that.
 - `roadmapmessage.txt` at the BFBB root is the original ChatGPT checklist plus the early design discussion (MVPT arenas, knockback ownership, damage model, bungees, hazards). It is historical: a status note at the top names this file and the roadmap, and its still-open items are folded into the roadmap's "Parked design decisions and future tasks".
 
+### The upstream line, and the port
+
+BFBB now tracks **upstream treedome `1ab82a27`** (2026-10-22), merged in `082dcc10` on branch `upstream-upgrade`.
+
+- The fork used to sit on a flattened copy of treedome `84522edc` (2026-09-24) with **no shared ancestry** in git — `git merge-base HEAD upstream/treedome` was empty, so a merge had no base to work from. The port declared one with a one-off local graft (`git replace --graft <root> 84522edc`), ran a real three-way, and dropped the graft once the merge commit existed.
+- **The fork has ancestry now**: `git merge-base HEAD upstream/treedome` is `1ab82a27`. Future syncs are ordinary merges — `git fetch https://github.com/joeyballentine/bfbb.git treedome:refs/remotes/upstream/treedome`, then merge. Do not re-graft.
+- What came in: 171 commits, 960 files, and the bulk of it is `fac8c6fc` (10-14), the port of zcanann's game code. The HB00→HB01 transition the old build broke is fixed there, which is why this could not be cherry-picked.
+- 48 files conflicted. The four that touch gameplay are `zNPCGoalRobo.cpp`, `zNPCGoalStd.h`, `zNPCHazard.cpp`, `zNPCSupport.cpp`; 43 PC-port files took upstream wholesale because the fork had changed none of them since its last upstream merge; `iPadHostSDL.cpp` was resolved in place because it carries `iTF2BridgeApplyPad`.
+- Two decisions the merge made that a future reader will otherwise undo: the mon cloud's damage gate stays fork-side (`flg_hazard & 0x2000` only) so the buddy arm still runs when the player is outside the cloud, and `zNPCGoalRobo` keeps one `DamageNPCKnockBack` per tick because the decompiled code calls it twice.
+- librw follows to `15b435e`, which reads a C8 palette from `0x68` rather than `0x6C`. The rw self-test's fixture moved with it; `rw_selftest` is 0 failures again.
+
+Re-verify on this baseline before trusting anything below: the HB00→HB01→HB02 transitions, a talk box (E/R/right-mouse), robot knockback, buddy damage, spawn placement, jelly hitboxes, and the `bfbb_coll_info` numbers — the port moved `xBound`/`xCollide`/`xMemMgr` code, so the chunk/repair tuning measured on the old tree may not carry over.
+
 ## 2. Builds
 
 ### BFBB
