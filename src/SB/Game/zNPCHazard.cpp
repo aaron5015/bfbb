@@ -15,6 +15,7 @@
 #include "xutil.h"
 #include "xordarray.h"
 #include "zRenderState.h"
+#include "zTF2Bridge.h"
 
 extern const xVec3 g_O3;
 
@@ -1924,6 +1925,16 @@ S32 NPCHazard::ColBuddyCyl(F32 rad, F32 hyt)
 
 void NPCHazard::HurtThePlayer()
 {
+    // A blast is flagged here, at the hazard that deals it, not inferred from the
+    // robot type on the far side: a tubelet has both a flame and a reviving blast,
+    // and only the hazard knows which one is landing. It also holds when the owner
+    // cannot be named, which is the case that left the blast without a shove.
+    const int kind = (this->typ_hazard == NPC_HAZ_TUBELETBLAST ||
+                      this->typ_hazard == NPC_HAZ_DUPLOBOOM)
+                         ? BRIDGE_HITKIND_EXPLOSION
+                         : BRIDGE_HITKIND_NONE;
+    zTF2Bridge_NoteHitKind(kind, kind != BRIDGE_HITKIND_NONE ? &this->pos_hazard : NULL);
+
     if (this->npc_owner == NULL)
     {
         zEntPlayer_Damage(NULL, 1);
@@ -1932,6 +1943,8 @@ void NPCHazard::HurtThePlayer()
     {
         this->npc_owner->Vibrate(NPC_VIBE_NORM, -1.0f);
     }
+
+    zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_NONE, NULL);
 }
 
 void NPCHazard::HurtTarget()

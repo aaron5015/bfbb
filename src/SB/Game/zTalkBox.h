@@ -11,6 +11,14 @@
 #include "xSnd.h"
 #include "xTextAsset.h"
 
+// 1 while a talk box is up and would take a pad press right now: the state machine
+// is waiting on one, its permit allows the pad, and its own trigger_pads mode
+// matches who has the player (a free player or a trapped one). The bridge asks this
+// before it lets a TF2 button through to BFBB's pad -- with TF2 driving the
+// movement every other BFBB button stays suppressed, so this is the one exception:
+// a text box can only be answered by BFBB, and it answers to the pad.
+S32 zTalkBoxWantsPad();
+
 struct ztalkbox : xBase
 {
     struct asset_type : xDynAsset

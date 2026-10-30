@@ -10,6 +10,7 @@
 #include "zGrid.h"
 #include "zFX.h"
 #include "zUI.h"
+#include "zTF2Bridge.h"
 
 #include "xMath.h"
 #include "xMathInlines.h"
@@ -727,7 +728,10 @@ static S32 CheckPickupAgainstPlayer(xEnt* cbent, void*)
 
                         if (distsqr <= SQR(chkdist))
                         {
-                            if (!bungee_state::active())
+                            // Not while TF2 drives: the control-off below only comes
+                            // back from the grab pose's end callback, and that pose
+                            // needs the player standing in Idle01.
+                            if (!bungee_state::active() && !zTF2Bridge_DrivesPlayer())
                             {
                                 zEntPlayerControlOff(CONTROL_OWNER_REWARDANIM);
                             }
@@ -797,8 +801,17 @@ void zEntPickup_DoPickup(zEntPickup* ent)
 
         if (!bungee_state::active())
         {
-            zEntPlayerControlOff(CONTROL_OWNER_REWARDANIM);
-            zEntPlayer_GiveSpatula(1);
+            if (zTF2Bridge_DrivesPlayer())
+            {
+                // The reward without the pose, because the pose cannot finish for a
+                // player the bridge holds in the air -- see zEntPlayer_GiveSpatulaBridge.
+                zEntPlayer_GiveSpatulaBridge();
+            }
+            else
+            {
+                zEntPlayerControlOff(CONTROL_OWNER_REWARDANIM);
+                zEntPlayer_GiveSpatula(1);
+            }
 
             xMat4x3 mat;
 
