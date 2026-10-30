@@ -743,6 +743,11 @@ void zGameLoop()
 
         zTF2Bridge_AfterPlayerUpdate();
 
+        // State goes out here, not from zTF2Bridge_Frame at the top of the loop:
+        // the robots and the player have both updated, so TF2's proxies are this
+        // frame's positions instead of last frame's.
+        zTF2Bridge_SendState();
+
         gGameWhereAmI = eGameWhere_LoopSoundUpdate;
         xMat4x3 playerMat = *xEntGetFrame(&globals.player.ent);
         playerMat.pos.y += 0.6f;

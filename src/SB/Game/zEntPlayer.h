@@ -411,6 +411,11 @@ void zEntPlayer_Load(xEnt*, xSerial*);
 S32 zEntPlayer_Damage(xBase* src, U32 damage);
 S32 zEntPlayer_Damage(xBase* src, U32 damage, const xVec3* knockback);
 
+// Play the player's own death, ignoring hit cooldowns and g.TakeDamage. Used when
+// the TF2 bridge reports that the host player's health ran out: TF2 owns the
+// health, BFBB owns dying, the checkpoint and the respawn.
+void zEntPlayer_ForceDeathByBridge();
+
 xAnimTable* zSandy_AnimTable();
 xAnimTable* zPatrick_AnimTable();
 xAnimTable* zEntPlayer_AnimTable();
@@ -433,6 +438,14 @@ S32 zEntPlayer_InBossBattle();
 void zEntPlayer_setBoulderMode(U32 mode);
 void zEntPlayer_GiveHealth(S32);
 void zEntPlayer_GiveSpatula(S32);
+// The same reward without the grab pose. The pose is entered from Idle01 and
+// releases CONTROL_OWNER_REWARDANIM from the callback that ends it, so it can only
+// complete for a player standing in the idle state -- the retail softlock when a
+// spatula is grabbed mid-fall, made permanent by the bridge pinning the player.
+// Does what the pose does to saved and notified state: the autosave and the NPC
+// area notice. The camera pan and the pose stay unperformed; those are TF2's
+// (a taunt) once it has one.
+void zEntPlayer_GiveSpatulaBridge();
 void zEntPlayer_GivePatsSocksCurrentLevel(S32 quantity);
 
 void CalcJumpImpulse(zJumpParam*, const zPlayerSettings*);

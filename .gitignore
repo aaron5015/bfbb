@@ -98,6 +98,10 @@ scratch/
 # Fonts are fetched by tools/getfont.py, never committed.
 fonts/
 
+# Bridge session logs (logs/session_YYYY-MM-DD.log): written by both engines during
+# a play session, read afterwards, never committed.
+logs/
+
 # Gradle and the NDK build, under android/
 android/.gradle/
 android/app/.cxx/

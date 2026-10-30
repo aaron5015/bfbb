@@ -2,6 +2,7 @@
 #include "zNPCFXCinematic.h"
 #include "zNPCSupport.h"
 #include "zNPCTypeRobot.h"
+#include "zTF2Bridge.h"
 #include "zBuddy.h"
 #include "zGame.h"
 #include "zGameExtras.h"
@@ -1098,7 +1099,15 @@ void NPAR_Upd_TubeSpiral(NPARMgmt* mgmt, F32 dt)
                     F32 ds2_plyr = NPCC_DstSq(&npdata->pos, &pos_plyr, NULL);
                     if (ds2_plyr < 0.5f)
                     {
-                        zEntPlayer_DamageNPCKnockBack(NULL, 1, &npdata->pos);
+                        // Tubelet's flame spiral. It used to name no source at all,
+                        // so the bridge read it as a hazard: silent, no damage arrow,
+                        // and no shove shape. It is fire -- it burns and never throws
+                        // -- and the robot standing in its own spiral gives TF2 the
+                        // per-robot number and the pain sound.
+                        zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_FIRE, &npdata->pos);
+                        zEntPlayer_DamageNPCKnockBack(
+                            (xBase*)zTF2Bridge_ParticleDamageSource(&npdata->pos), 1, &npdata->pos);
+                        zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_NONE, NULL);
                     }
                 }
 
@@ -2249,7 +2258,13 @@ void NPAR_Upd_DogBreath(NPARMgmt* mgmt, F32 dt)
                     F32 ds2_plyr = NPCC_DstSq(&npdata->pos, &pos_plyr, NULL);
                     if (ds2_plyr < SQ(0.5f))
                     {
-                        zEntPlayer_DamageNPCKnockBack(NULL, 1, &npdata->pos);
+                        // Chomper's gas, same story as the flame spiral above: a
+                        // sourceless particle hit, flagged as fire so TF2 gives it a
+                        // pain sound and an arrow without a shove.
+                        zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_FIRE, &npdata->pos);
+                        zEntPlayer_DamageNPCKnockBack(
+                            (xBase*)zTF2Bridge_ParticleDamageSource(&npdata->pos), 1, &npdata->pos);
+                        zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_NONE, NULL);
                     }
                 }
 

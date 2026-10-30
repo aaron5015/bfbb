@@ -105,6 +105,12 @@ S32 xMemGetBase();
 void xMemPoolAddElements(xMemPool* pool, void* buffer, U32 count);
 void xMemPoolSetup(xMemPool* pool, void* buffer, U32 nextOffset, U32 flags,
                    xMemPoolInitCB initCB, U32 size, U32 count, U32 numRealloc);
+
+// Whether an address lies inside one of the game's own heaps. Everything the game
+// allocates for itself comes from them, so an address outside them is not a game
+// object -- which is the question a diagnostic has to ask before following a
+// pointer it read out of a scene. See the comment on the definition.
+S32 xMemAddrInHeap(const void* p);
 void* xMemPoolAlloc(xMemPool* pool);
 void xMemPoolFree(xMemPool* pool, void* data);
 

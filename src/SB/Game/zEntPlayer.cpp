@@ -69,6 +69,7 @@
 #include "zSaveLoad.h"
 #include "zShrapnel.h"
 #include "zSurface.h"
+#include "zTF2Bridge.h"
 #include "zThrown.h"
 
 static F32 sHackStuckTimer;
@@ -9988,6 +9989,16 @@ void zEntPlayer_Render(zEnt* ent)
         return;
     }
 
+    // TF2 owns the camera and the player's collision now (the bridge), so the merc
+    // is what the screen shows: SpongeBob would be rendered from inside, filling the
+    // view with his own geometry. Hidden by default and re-enabled with
+    // bfbb_player_visible 1; his collision is handed over either way.
+    if (zTF2Bridge_HidesPlayerModel())
+    {
+        xShadowManager_Remove(ent);
+        return;
+    }
+
     if (!globals.player.Visible)
     {
         xShadowManager_Remove(ent);
@@ -10374,6 +10385,68 @@ void zEntPlayer_DamageKnockIntoAir(F32 height)
     globals.player.Jump_CanFloat = 1;
 }
 
+// BFBB's own death: the death sound, the rewards, control off, and the player-death
+// event that starts the fade and the checkpoint reload. The damage funnel runs it
+// when a hit spends the last of the health; the bridge runs it when TF2 says the
+// host's health ran out.
+static void zEntPlayer_PlayerDied()
+{
+    sPlayerDiedLastTime = 1;
+    zBuddy_PlayerDeath();
+    zEntPlayer_SNDPlay(ePlayerSnd_Death, 0.0f);
+
+    if ((xrand() & 3) == 3)
+    {
+        zEntPlayer_SNDPlayStreamRandom(ePlayerStreamSnd_Exclaim1, ePlayerStreamSnd_Exclaim4, 0.6f);
+    }
+
+    globals.player.DamageTimer = 10.0f;
+    zEntPlayerControlOff(CONTROL_OWNER_GLOBAL);
+
+    if (globals.player.ent.driver)
+    {
+        globals.player.ent.driver = NULL;
+        xVec3Copy(&globals.player.ent.frame->vel, &g_O3);
+        xVec3Copy(&globals.player.ent.frame->oldvel, &g_O3);
+    }
+
+    zEntPickup_GiveAllRewardsNow();
+    gEnableRewardsQueue = 0;
+    zEntEvent(&globals.player.ent, &globals.player.ent, eEventPlayerDeath);
+}
+
+// TF2 says the host player's health ran out. Run BFBB's own death so the fade,
+// the rewards, the checkpoint and the respawn stay the game's.
+//
+// This deliberately does not go through zEntPlayer_Damage. That funnel is about
+// hits: it refuses to run while cheat mode is on, while the hit cooldown is up,
+// while a control-off (taxi, springboard, bungee, bubble bowl, trampoline) is
+// active, or while the player stands in a teleport box, and it only spends health
+// when g.TakeDamage is on. None of those are reasons for a player whose health TF2
+// already drained to stay standing, and any one of them left TF2 dead with
+// SpongeBob alive until the bridge's respawn timeout fired -- which is the weird
+// respawn that followed.
+void zEntPlayer_ForceDeathByBridge()
+{
+    if (globals.player.Health == 0)
+    {
+        return;
+    }
+
+    // No player on screen yet (still loading a scene): the death below touches the
+    // model, so wait a frame rather than dying into a null model.
+    if (globals.player.ent.frame == NULL || globals.player.ent.model == NULL)
+    {
+        return;
+    }
+
+    globals.player.DamageTimer = 0.0f;
+    globals.player.ControlOffTimer = 0.0f;
+    globals.player.ScareSource = NULL;
+    globals.player.Health = 0;
+    zEntPlayer_PlayerDied();
+}
+
 S32 zEntPlayer_Damage(xBase* src, U32 damage)
 {
     iColor_tag c_inside;
@@ -10385,6 +10458,7 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
         {
             globals.player.DamageTimer = globals.player.g.DamageTimeHit;
         }
+        zTF2Bridge_AuditRefusedHit(src, "cheat");
         return 0;
     }
     else
@@ -10394,12 +10468,39 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
             BoulderRollDoneCB();
         }
 
+        // BFBB gates every hit on one timer. The bridge keeps a window per
+        // (source, attack) instead, so an attack the game re-applies every frame --
+        // chomper's gas, tubelet's flame spiral, sleepy's beam -- has its own rate
+        // rather than sharing g.DamageTimeHit with every melee swing. With the bridge
+        // off this is the stock timer.
+        const bool bHitAllowed = zTF2Bridge_PlayerHitAllowed(src);
+
         if (!(((damage == 0x29a) && (damage = 1, 1 < globals.player.Health)) ||
-              (!(globals.player.DamageTimer > 0.0f) && !(globals.player.ControlOffTimer > 0.0f) &&
+              (bHitAllowed && !(globals.player.ControlOffTimer > 0.0f) &&
                (zEntTeleportBox_playerIn() == 0))))
         {
+            // A refused hit must not leave its attack kind behind to label the next.
+            zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_NONE, NULL);
+            // Which of the three gates ate it, for the audit. A hazard that is not
+            // even in the bridge's collision list never reaches this line at all, so
+            // "refused" and "never called" are different answers on purpose.
+            zTF2Bridge_AuditRefusedHit(src, !bHitAllowed ? "cooldown"
+                : (globals.player.ControlOffTimer > 0.0f) ? "control"
+                : "teleport");
             return 0;
         }
+
+        // Arm this attack's window, and take the timer to leave behind: the stock one
+        // for a normal hit, a short flinch for a continuously re-applied one so it
+        // cannot hold off a melee hit for a second and a half. Read before that timer
+        // is written, it also throttles BFBB's own reaction below.
+        const F32 fHitTimer = zTF2Bridge_NotePlayerHit(src);
+        const bool bReact = !(globals.player.DamageTimer > 0.0f);
+
+        // The bridge's player hit: accepted and past the cooldowns, so TF2 should
+        // spend its health on it. Reported before the clamp below, so a hit that
+        // empties the pool is still recognisable as lethal.
+        zTF2Bridge_ReportPlayerDamage(src, damage);
 
         zEntPlayerControlOn(CONTROL_OWNER_SPRINGBOARD);
         zEntPlayer_SNDStop(ePlayerSnd_BowlWindup);
@@ -10408,7 +10509,10 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
         zEntPlayer_SNDStop(ePlayerSnd_Heli);
         zEntPlayer_SNDStop(ePlayerSnd_SlideLoop);
         zEntPlayer_SNDStop(ePlayerSnd_SlipLoop);
-        zEntPlayer_SNDPlayRandom(ePlayerSnd_OuchStart, ePlayerSnd_OuchEnd, 0.0f);
+        if (bReact)
+        {
+            zEntPlayer_SNDPlayRandom(ePlayerSnd_OuchStart, ePlayerSnd_OuchEnd, 0.0f);
+        }
 
         // NOTE: the alpha channel of both colours is left uninitialised in retail.
         c_inside.r = 255;
@@ -10418,8 +10522,11 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
         c_outside.g = 0;
         c_outside.b = 0;
 
-        xFXShineStart((xVec3*)&globals.player.ent.model->Mat->pos, 2.0f, 0.5f, 0.0f, 0.1f, 0,
-                      &c_inside, &c_outside, 0.1f, 1);
+        if (bReact)
+        {
+            xFXShineStart((xVec3*)&globals.player.ent.model->Mat->pos, 2.0f, 0.5f, 0.0f, 0.1f, 0,
+                          &c_inside, &c_outside, 0.1f, 1);
+        }
 
         globals.player.ScareSource = src;
 
@@ -10435,33 +10542,11 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
 
         if (globals.player.Health == 0)
         {
-            sPlayerDiedLastTime = 1;
-            zBuddy_PlayerDeath();
-            zEntPlayer_SNDPlay(ePlayerSnd_Death, 0.0f);
-
-            if ((xrand() & 3) == 3)
-            {
-                zEntPlayer_SNDPlayStreamRandom(ePlayerStreamSnd_Exclaim1, ePlayerStreamSnd_Exclaim4,
-                                               0.6f);
-            }
-
-            globals.player.DamageTimer = 10.0f;
-            zEntPlayerControlOff(CONTROL_OWNER_GLOBAL);
-
-            if (globals.player.ent.driver)
-            {
-                globals.player.ent.driver = NULL;
-                xVec3Copy(&globals.player.ent.frame->vel, &g_O3);
-                xVec3Copy(&globals.player.ent.frame->oldvel, &g_O3);
-            }
-
-            zEntPickup_GiveAllRewardsNow();
-            gEnableRewardsQueue = 0;
-            zEntEvent(&globals.player.ent, &globals.player.ent, eEventPlayerDeath);
+            zEntPlayer_PlayerDied();
         }
         else
         {
-            globals.player.DamageTimer = globals.player.g.DamageTimeHit;
+            globals.player.DamageTimer = fHitTimer;
         }
 
         if (globals.player.HangEnt)
@@ -10474,29 +10559,32 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
             globals.player.HangElapsed = 0.0f;
         }
 
-        if (globals.player.ent.model == globals.player.model_sandy)
+        if (bReact)
         {
-            if (globals.player.Health != 0)
+            if (globals.player.ent.model == globals.player.model_sandy)
             {
-                player_hitlist_anim = (player_hitlist_anim + 1) % sandyHitMax;
-                xAnimPlayStartTransition(globals.player.model_sandy->Anim,
-                                         &sandyHitTran[player_hitlist_anim]);
+                if (globals.player.Health != 0)
+                {
+                    player_hitlist_anim = (player_hitlist_anim + 1) % sandyHitMax;
+                    xAnimPlayStartTransition(globals.player.model_sandy->Anim,
+                                             &sandyHitTran[player_hitlist_anim]);
+                }
             }
-        }
-        else if (globals.player.ent.model == globals.player.model_patrick)
-        {
-            if (globals.player.Health != 0)
+            else if (globals.player.ent.model == globals.player.model_patrick)
             {
-                player_hitlist_anim = (player_hitlist_anim + 1) % patrickHitMax;
-                xAnimPlayStartTransition(globals.player.model_patrick->Anim,
-                                         &patrickHitTran[player_hitlist_anim]);
+                if (globals.player.Health != 0)
+                {
+                    player_hitlist_anim = (player_hitlist_anim + 1) % patrickHitMax;
+                    xAnimPlayStartTransition(globals.player.model_patrick->Anim,
+                                             &patrickHitTran[player_hitlist_anim]);
+                }
             }
-        }
-        else if (globals.player.ent.model == globals.player.model_spongebob)
-        {
-            if (globals.player.Health != 0)
+            else if (globals.player.ent.model == globals.player.model_spongebob)
             {
-                player_hit = 1;
+                if (globals.player.Health != 0)
+                {
+                    player_hit = 1;
+                }
             }
         }
 
@@ -10509,7 +10597,10 @@ S32 zEntPlayer_Damage(xBase* src, U32 damage)
 
         globals.player.lassoInfo.lasso.flags = 0;
         globals.player.lassoInfo.target = NULL;
-        zRumbleStart(globals.currentActivePad, SDR_Damage);
+        if (bReact)
+        {
+            zRumbleStart(globals.currentActivePad, SDR_Damage);
+        }
 
         globals.player.SpeedMult = 1.0f;
         globals.player.SundaeTimer = -1.0f;
@@ -10590,6 +10681,57 @@ void zEntPlayer_GiveHealth(S32 quantity)
     {
         globals.player.Health = maxHealth;
     }
+}
+
+// The golden-spatula reward without its grab pose, for the frames where TF2 moves
+// the player. Why the pose cannot simply be left to run: `SpatulaGrab01` is only
+// entered from `Idle01` (SpatulaGrabCheck), and the transition out of it is what
+// restores the camera, the music and CONTROL_OWNER_REWARDANIM (SpatulaGrabStopCB).
+// The bridge pins the player's position and zeroes his velocity every frame, so he
+// is never standing in the idle state -- which is the stock "grabbed a spatula
+// while falling" softlock, except permanent. Everything the reward does that
+// outlives it is done here in one frame instead: the autosave the pose would have
+// taken when it ended, and the NPC area notice that makes everyone react.
+//
+// Deliberately not done: sSpatulaGrabbed (would arm a pose that cannot start),
+// the control-off and its timer, the music dip, and the reward camera. Input is
+// already suppressed by the bridge, and the camera belongs to TF2.
+void zEntPlayer_GiveSpatulaBridge()
+{
+    zNPCMsg_AreaNotify(NULL, NPC_MID_PLYRSPATULA, 30.0f, 0x104, NPC_TYPE_UNKNOWN);
+
+    if (!globals.autoSaveFeature)
+    {
+        return;
+    }
+
+    if (zEntPlayer_InBossBattle())
+    {
+        gWaitingToAutoSave = 1;
+        return;
+    }
+
+    // Same order as the pose's end callback: save, then take the icon down. The
+    // icon is normally raised by zSaveLoadAutoSaveUpdate on a frame in between, so
+    // raising it here for the same frame gets it the same way.
+    zSaveLoadPreAutoSave(true);
+
+    if (zSaveLoad_DoAutoSave() < 0)
+    {
+        xBase* sendTo = zSceneFindObject(xStrHash("MNU4 AUTO SAVE FAILED"));
+        if (sendTo)
+        {
+            zEntEvent(sendTo, eEventVisible);
+        }
+    }
+
+    xBase* icon = zSceneFindObject(xStrHash("SAVING GAME ICON UI"));
+    if (icon)
+    {
+        zEntEvent(icon, eEventInvisible);
+    }
+
+    zSaveLoadPreAutoSave(false);
 }
 
 void zEntPlayer_GiveSpatula(S32)

@@ -13,6 +13,8 @@
 #include "zScene.h"
 #include "zVolume.h"
 
+#include "zTF2Bridge.h"
+
 static zVolume* sClipVolume[32];
 static S32 sClipVolumeTotal;
 
@@ -172,7 +174,21 @@ void xParCmdDamagePlayer_Update(xParCmd* c, xParGroup* ps, float dt)
 
             if (collis.flags & 1)
             {
-                zEntPlayer_Damage(NULL, 1, NULL);
+                // This command is how tubelet's flame and chomper's gas hurt the
+                // player, and it names no entity at all: the bridge would report a
+                // sourceless hit, which TF2 treats as a hazard (silent, no damage
+                // arrow) instead of a robot. Naming the robot standing in the
+                // particles keeps it a robot hit; every other particle system
+                // still gets the sourceless call, exactly as before.
+                //
+                // The note is what tells TF2 this hit is fire or gas: it burns but
+                // never shoves, and it carries the particle's own position so the
+                // damage arrow has a direction. Cleared afterwards because the hit
+                // can be refused (BFBB's damage cooldown) without reaching the
+                // report, and a stale flag would mark the next robot hit as fire.
+                zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_FIRE, &p->m_pos);
+                zEntPlayer_Damage((xBase*)zTF2Bridge_ParticleDamageSource(&p->m_pos), 1, NULL);
+                zTF2Bridge_NoteHitKind(BRIDGE_HITKIND_NONE, NULL);
             }
         }
 

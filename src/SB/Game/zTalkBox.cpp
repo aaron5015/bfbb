@@ -2022,3 +2022,26 @@ namespace
     }
 
 } // namespace
+
+// Written to match what update_all itself does one statement later, so the bridge
+// cannot offer a press this frame that the talk box then refuses to read. The
+// permit bit is the game's own "pad input belongs to me" gate; the trigger_pads
+// mode decides whether the pad is read while the player is free (TP_ACTIVE) or
+// while he is trapped in the conversation (TP_TRAPPED).
+S32 zTalkBoxWantsPad()
+{
+    if (shared.state == NULL || shared.active == NULL || (shared.permit & 2) == 0)
+    {
+        return 0;
+    }
+
+    const trigger_pads_enum tp = (trigger_pads_enum)shared.active->asset->trigger_pads;
+    const bool trapped = globals.player.ControlOff != 0;
+
+    if ((tp == TP_ACTIVE && !trapped) || (tp == TP_TRAPPED && trapped))
+    {
+        return 1;
+    }
+
+    return 0;
+}

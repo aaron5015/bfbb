@@ -55,10 +55,14 @@ namespace
     bool sGameplay = false;
     double sGameplayAt = -1000.0;
     uint32_t sSendSeq = 0;
+    uint32_t sPlayerHitSeq = 0;
 
     bool sStickValid = false;
     float sStickX = 0.0f;
     float sStickY = 0.0f;
+
+    // Set by the game layer each frame while a talk box is waiting for a pad press.
+    bool sPadWanted = false;
 
     bool sHaveIntent = false;
     BridgeIntentPacket sIntent;
@@ -144,6 +148,11 @@ void iTF2BridgeInit()
     inet_pton(AF_INET, "127.0.0.1", &sTf2Addr.sin_addr);
 
     sActive = true;
+
+    // Build stamp. "Nothing changed after the rebuild" is otherwise indistinguishable
+    // from "the running exe is not the one that was built", and both sides print one.
+    printf("bfbb: tf2bridge build 2026-10-29-plyrspawn (state carries the level spawn asset)\n");
+
     sNpcHitHead = 0;
     sNpcHitCount = 0;
     sLastNpcHitSeq = 0;
@@ -308,11 +317,30 @@ void iTF2BridgeSendState(const BridgeStatePacket* state)
     sendto(sSock, (const char*)&p, sizeof(p), 0, (const sockaddr*)&sTf2Addr, sizeof(sTf2Addr));
 }
 
+void iTF2BridgeSendPlayerHit(const BridgePlayerHitPacket* hit)
+{
+    if (!sActive || hit == NULL)
+        return;
+
+    BridgePlayerHitPacket p = *hit;
+    p.magic = BRIDGE_MAGIC_PLAYER_HIT;
+    p.seq = ++sPlayerHitSeq;
+    p.sessionId = sSessionId;
+
+    sendto(sSock, (const char*)&p, sizeof(p), 0,
+           (const sockaddr*)&sTf2Addr, sizeof(sTf2Addr));
+}
+
 void iTF2BridgeSetStick(S32 valid, F32 x, F32 y)
 {
     sStickValid = valid != 0;
     sStickX = x;
     sStickY = y;
+}
+
+void iTF2BridgeSetPadWanted(S32 wanted)
+{
+    sPadWanted = wanted != 0;
 }
 
 bool iTF2BridgePopEvent(BridgeIntentPacket* out)
@@ -379,8 +407,37 @@ void iTF2BridgeApplyPad(iPadHostState* pad)
 
     // TF2 is running the movement and the gunplay: BFBB follows its position
     // (zTF2Bridge_AfterPlayerUpdate), and no BFBB move is pressed on its behalf.
+    //
+    // A talk box is the exception, and the only one. It is answered by BFBB's own
+    // pad and by nothing else, so a text box in the middle of the game is a wall
+    // TF2 cannot climb: the player is driven by TF2, BFBB is waiting for A, and
+    // nothing arrives. While the game layer reports one waiting, the confirm keys
+    // go through and everything else stays suppressed -- forwarding the lot would
+    // make SpongeBob jump and attack inside the body TF2 is moving.
     if (in->flags & BRIDGE_INTENT_OWNS_MOVE)
     {
+        if (sPadWanted)
+        {
+            // "Go on", and both of the ways the game accepts it. The state machine
+            // itself consumes A (a page of text, the yes in a yes/no box), but the
+            // tutorial boxes that print an R glyph are wired as links on the R1
+            // event instead, so offering only A leaves exactly those stuck. A box
+            // that listens to one ignores the other.
+            //
+            // Y is the no and B is the quit, which is what the prompt pictures name.
+            if (in->buttons & BRIDGE_IN_USE)
+            {
+                pad->buttons |= XPAD_BUTTON_X | XPAD_BUTTON_R1;
+            }
+            if (in->buttons & BRIDGE_IN_ATTACK2)
+            {
+                pad->buttons |= XPAD_BUTTON_SQUARE;
+            }
+            if (in->buttons & BRIDGE_IN_RELOAD)
+            {
+                pad->buttons |= XPAD_BUTTON_TRIANGLE;
+            }
+        }
         return;
     }
 

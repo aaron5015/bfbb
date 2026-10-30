@@ -327,6 +327,37 @@ void* xMemAlloc(U32 heapID, U32 size, S32 align)
     return (void*)(UPtr)hdr->addr;
 }
 
+// Whether an address lies inside one of the game's three heaps.
+//
+// A diagnostic that walks globals.sceneCur->ents and reads each entity's position
+// is reading pointers, not values: ent->frame and ent->asset are addresses the
+// scene handed out, and the array outlives them in a few windows -- a scene that
+// is half built, an entity freed with the previous level whose block has been
+// reused since. Following one of those is an access violation (a fault in the
+// middle of a log line, which is how it presents), not a wrong reading, so a null
+// test is not enough and the address itself has to be checked first.
+//
+// Everything the game allocates for itself comes from these heaps, so an address
+// that is not in one of them is not a game object. Only the range is checked, and
+// every heap is reserved committed, so a byte inside one is safe to read even if
+// whatever object was there is gone.
+S32 xMemAddrInHeap(const void* p)
+{
+    const U32 addr = (U32)(UPtr)p;
+
+    for (S32 i = 0; i < 3; ++i)
+    {
+        const xMemHeap_tag& h = gxHeap[i];
+
+        if (h.size != 0 && addr >= h.hard_base && addr < h.hard_base + h.size)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void* xMemPushTemp(U32 size)
 {
     return RwMalloc(size);

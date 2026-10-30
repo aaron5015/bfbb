@@ -24,6 +24,9 @@ void iTF2BridgePoll();
 // Sends one state packet, and records whether the game is in play (the
 // BRIDGE_STATE_GAMEPLAY flag) for iTF2BridgeApplyPad.
 void iTF2BridgeSendState(const BridgeStatePacket* state);
+// A hit on the BFBB player, forwarded so the TF2 host can spend its own health
+// on it. Fills in magic, seq and session; the caller fills the rest.
+void iTF2BridgeSendPlayerHit(const BridgePlayerHitPacket* hit);
 void iTF2BridgeSendRocketImpact(uint32_t entIndex, float x, float y, float z);
 
 // Called by the pad backend at the end of its poll on port 0. If the bridge is
@@ -37,6 +40,13 @@ void iTF2BridgeApplyPad(iPadHostState* pad);
 // Valid for one frame at a time: call every frame, with valid = FALSE to fall
 // back to the raw TF2 movement axes.
 void iTF2BridgeSetStick(S32 valid, F32 x, F32 y);
+
+// Is something in BFBB waiting for a pad press right now (a talk box)? While TF2
+// owns the movement, none of TF2's buttons reach BFBB's pad -- pressing them would
+// make SpongeBob jump and attack inside a body TF2 is moving. A talk box is the one
+// thing TF2 cannot answer for BFBB, so while this is set the confirm button is
+// forwarded anyway. Set every frame by the game layer, FALSE when the bridge is off.
+void iTF2BridgeSetPadWanted(S32 wanted);
 
 // Weapon-fire events (a packet carrying hitscan rays or the FIRED flag). Poll
 // queues every one, so a shot is not lost when a newer packet arrives in the same
