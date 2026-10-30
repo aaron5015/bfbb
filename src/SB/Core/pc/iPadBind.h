@@ -22,12 +22,26 @@
 //     a  = x, ls            either input on its own
 //     l2 = lt+rb            both at once
 //     l1 = lt+!rb           held, and something else not held
-//     l1 =                  nothing; the button can never be pressed
+//     l1 = none             nothing; the button can never be pressed
+//     l1 =                  the same as none
+//
+// `none` exists because a front end shows an empty box as "use the default"
+// and cannot tell that apart from an empty line.
 //
 // Negation is not a flourish. gc/iPad.cpp reads the GameCube's three shoulders
 // as four buttons by making Z a modifier, and the two arms of that are
 // exclusive: Z+L is L2 and is NOT also L1. Without `!` the port's default
 // bindings could not say that, and holding the modifier would press both.
+
+// Held to sneak: the walk. A keyboard is on or off where a stick is every speed
+// between, so this gives it the rest of the range. A bit beside the game's own
+// XPAD_BUTTON_* because a binding row needs one; iPad.cpp scales the stick by
+// it and no game code reads it.
+#define XPAD_BUTTON_WALK 0x400000
+
+// Toggles the first-person camera (iFirstPerson.h). A bit of its own for the
+// same reason: the consoles have no such view, so no game button means it.
+#define XPAD_BUTTON_VIEW 0x800000
 
 #define IPAD_BIND_ALTS 4
 #define IPAD_BIND_CHORD 3
@@ -164,6 +178,14 @@ bool iPadBindParse(const char* text, const iPadBindToken* tokens, S32 tokenCount
 
 // Is the binding satisfied right now? `held` answers for one device input id.
 bool iPadBindHeld(const iPadBind& bind, bool (*held)(S16 id));
+
+// Whether one press sets both buttons: holding exactly what an alternative of
+// either names satisfies the other. Exact about '+' and '!', so the gamecube
+// preset's `lt+!rb` and `lt+rb` do not overlap. Ids are compared as they are,
+// so the keyboard's `shift` is not matched against `lshift`.
+//
+// For the binding screens, which say when two rows share an input.
+bool iPadBindOverlap(const iPadBind& a, const iPadBind& b);
 
 // Which config.ini section a device reads, and which column of the table it
 // defaults from. The two always travel together -- a device that read [pad]

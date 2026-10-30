@@ -18,15 +18,21 @@
 #include <types.h>
 
 #include "config_model.h"
+#include "mods_model.h"
+#include "saves_model.h"
 #include "iBoot.h"
 #include "iConfig.h"
 #include "iConfigEdit.h"
 #include "iConfigTable.h"
 #include "iDrawDist.h"
 #include "iFile.h"
+#include "iGCMem.h"
+#include "iModPatch.h"
+#include "iGCSwap.h"
 #include "iHost.h"
 #include "iSnd.h"
 #include "iSndData.h"
+#include "iSndDsp.h"
 #include "iSoundtrack.h"
 #include "xpkrsvc.h"
 #include "xhipio.h"
@@ -35,6 +41,10 @@
 #include "xSnd.h"
 #include "iMath.h"
 #include "iMemMgr.h"
+#include "iModFolder.h"
+#include "iSaveFile.h"
+#include "iCameraLook.h"
+#include "iPadKeyboard.h"
 #include "iPadLayout.h"
 #include "iPadBind.h"
 #include "iPadHost.h"
@@ -49,6 +59,9 @@
 
 // Only for zFlyKey, whose layout test_flykey checks against the shipping asset.
 #include "zCamera.h"
+#include "zGlobals.h"
+#include "xEvent.h"
+#include "xLinkAsset.h"
 
 // iMemInit fills this in. It lives in xMemMgr.cpp, which needs the renderer to
 // build, so the harness supplies the one object under test rather than linking
@@ -259,7 +272,22 @@ static void test_config()
                                 "select = ls\n"
                                 "nonsense = a\n"
                                 "[keyboard]\n"
-                                "start = f1\n";
+                                "a      = space     ; jump, confirm\n"
+                                "b      = mouse2,lctrl\n"
+                                "x      = mouse1, e\n"
+                                "y      = q\n"
+                                "z      = f\n"
+                                "hud    = g\n"
+                                "l1     = z\n"
+                                "r1     = c\n"
+                                "l2     = x\n"
+                                "r2     = v\n"
+                                "start = f1\n"
+                                "select = backspace\n"
+                                "up     = up\n"
+                                "down   = down\n"
+                                "left   = left\n"
+                                "right  = right\n";
 
     FILE* f = fopen(path, "wb");
     if (f == NULL)
@@ -268,11 +296,68 @@ static void test_config()
         return;
     }
     fwrite(kFile, 1, sizeof(kFile) - 1, f);
+    // More entries than the parser once held, then one more. A key past the
+    // cap read as missing, so the load appended it again on every launch.
+    fprintf(f, "[fixes]\n");
+    for (int i = 0; i < 130; i++)
+    {
+        fprintf(f, "melee_once = on\n");
+    }
+    fprintf(f, "[cheats]\npanhandle = on\n");
     fclose(f);
+
+    // A mod whose mod.ini replaces one setting, tries to move the asset root,
+    // and names a setting that does not exist. Loaded with the file, so it is
+    // set up here.
+    char modDir[512];
+    char modIni[512];
+    snprintf(modDir, sizeof(modDir), "%s/testmod", dir);
+    snprintf(modIni, sizeof(modIni), "%s/mod.ini", modDir);
+    iHostMakeDir(modDir);
+    {
+        static const char kModIni[] = "[mod]\n"
+                                      "name = Test Mod\n"
+                                      "[video]\n"
+                                      "fov = 75\n"
+                                      "nosuch = 1\n"
+                                      "[assets]\n"
+                                      "path = elsewhere\n";
+        FILE* m = fopen(modIni, "wb");
+        if (m != NULL)
+        {
+            fwrite(kModIni, 1, sizeof(kModIni) - 1, m);
+            fclose(m);
+        }
+    }
+    // A second mod, below the first, setting the same key.
+    char modDir2[512];
+    char modIni2[512];
+    snprintf(modDir2, sizeof(modDir2), "%s/testmod2", dir);
+    snprintf(modIni2, sizeof(modIni2), "%s/mod.ini", modDir2);
+    iHostMakeDir(modDir2);
+    {
+        static const char kModIni2[] = "[video]\nfov = 60\n";
+        FILE* m = fopen(modIni2, "wb");
+        if (m != NULL)
+        {
+            fwrite(kModIni2, 1, sizeof(kModIni2) - 1, m);
+            fclose(m);
+        }
+    }
+
+    char mods[1100];
+    snprintf(mods, sizeof(mods), "%s | %s", modDir, modDir2);
+    iHostSetEnv("BFBB_MOD", mods);
 
     check(iHostSetEnv("BFBB_CONFIG", path), "BFBB_CONFIG can be set");
 
     iConfigLoad();
+
+    iHostSetEnv("BFBB_MOD", NULL);
+
+    check(iConfigGetFloat("video.fov", 0.0f) == 75.0f,
+          "a setting the mod's mod.ini gives wins, the first mod's over the second's");
+    check(iConfigGetBool("video.nosuch", TRUE) == TRUE, "an unknown setting in mod.ini is dropped");
 
     check(iConfigPath() != NULL && strcmp(iConfigPath(), path) == 0,
           "iConfigPath is the file BFBB_CONFIG named");
@@ -303,7 +388,7 @@ static void test_config()
     // or split at the space, and the value has to be longer than a word --
     // this is the setting that decides how much room an entry gets.
     check(strcmp(iConfigGetString("assets.path", ""), "D:\\my games\\bfbb xbox") == 0,
-          "the asset path survives spaces and backslashes");
+          "the asset path survives spaces and backslashes, and a mod cannot move it");
 
     // An unknown key is rejected at load, so it cannot be read back even under
     // its own name. That is what makes the report at load a guarantee rather
@@ -329,6 +414,8 @@ static void test_config()
     check(strcmp(iConfigGetString("pad.select", "!"), "ls") == 0,
           "a [pad] binding comes off the file");
     check(strcmp(iConfigGetString("keyboard.start", "!"), "f1") == 0, "and a [keyboard] one");
+    check(strcmp(iConfigGetString("keyboard.r1", "!"), iPadBindFind("r1")->key) == 0,
+          "a [keyboard] line at an old build's default answers with this build's");
 
     // Answered from the ACTIVE PRESET, not from the row's own column: the
     // generated file and a missing key have to agree, and under a preset the
@@ -349,7 +436,8 @@ static void test_config()
           "a binding for a button that does not exist is dropped, like any unknown key");
 
     check(iConfigGetInt("input.controller", 0) == 3, "input.controller comes off the file");
-
+    check(iConfigGetBool("cheats.panhandle", FALSE) == TRUE,
+          "a setting past the 128th entry comes off the file");
     // The frame rate. The file does not mention it, so this is the table's
     // default reaching a caller whose fallback is the wrong answer -- and it is
     // the one setting where the wrong answer is not visible on screen but in
@@ -388,15 +476,22 @@ static void test_config()
             check(strstr(grown, "shadow_resolution = auto") != NULL, "and so is another");
 
             // The bindings are not in the settings table -- they come from
-            // iPadBind.cpp -- and are appended the same way. The file names two
-            // of them, so the rest have to arrive.
-            //
-            // [keyboard] writes values; [pad] writes the same listing commented
-            // out, because an uncommented line there would beat input.preset
-            // and pin the pad to whichever preset made the file. That the pad
-            // side is COMMENTED is the whole point, so it is what is checked.
-            check(countLinesStartingWith(grown, "y ") == 1,
-                  "a keyboard binding the file omits arrives as a value");
+            // iPadBind.cpp -- and are NOT appended. An appended line would be a
+            // value, and a value pins that key past any later change to the
+            // defaults; an omitted one is answered by the build's default.
+            check(countLinesStartingWith(grown, "panhandle") == 1,
+                  "a setting past the 128th entry is not appended again");
+
+            check(countLinesStartingWith(grown, "view ") == 0,
+                  "a keyboard binding the file omits is left to the default");
+
+            // The file's [keyboard] block is an old build's: every row live.
+            // The rows at that build's defaults come out so the keys follow
+            // this build's; the one the player changed stays.
+            check(countLinesStartingWith(grown, "r1 ") == 0 &&
+                      countLinesStartingWith(grown, "b ") == 0,
+                  "a keyboard line at an old build's default is taken out");
+            check(strstr(grown, "start = f1") != NULL, "and one the player changed is kept");
 
             // The pad's does NOT arrive. A generated file lists those commented
             // so input.preset stays in charge, and a comment is not an entry --
@@ -433,7 +528,8 @@ static void test_config()
     iConfigSet("XBOX.glow", "on");
     iConfigSet("video.fov", "90");
     check(iConfigGetBool("xbox.glow", FALSE) == TRUE, "a set value is answered at once");
-    check(iConfigGetFloat("video.fov", 0.0f) == 90.0f, "and so is one the file never had");
+    check(iConfigGetFloat("video.fov", 0.0f) == 90.0f,
+          "and so is one the file never had, over the mod's");
     check(iConfigSave(), "the changed settings save");
     {
         char saved[8192];
@@ -448,6 +544,7 @@ static void test_config()
         check(strstr(saved, "Glow   =   on") != NULL, "the set value replaces the line's own");
         check(strstr(saved, "OFF") == NULL, "and the old value is gone");
         check(strstr(saved, "fov = 90") != NULL, "a setting the file lacked is added");
+        check(strstr(saved, "fov = 75") == NULL, "and the mod's value is never written");
         check(strstr(saved, "; the port's settings") != NULL && strstr(saved, "glwo = off") != NULL,
               "the comment and the unknown line survive the save");
     }
@@ -529,6 +626,10 @@ static void test_config()
     }
 
     iHostRemoveFile(written);
+    iHostRemoveFile(modIni);
+    iHostRemoveDir(modDir);
+    iHostRemoveFile(modIni2);
+    iHostRemoveDir(modDir2);
     iHostRemoveDir(dir);
 }
 
@@ -917,8 +1018,8 @@ static void test_config_model()
     check(ConfigModelSave(why, sizeof(why), NULL, NULL) == CONFIG_MODEL_OK, "it saves");
     check(!ConfigModelDirty(), "and is clean afterwards");
 
-    // The mod folder: a folder picker in [assets], beside the asset path, and a
-    // Windows path with spaces in it saves as typed.
+    // The mod folders: a list the mods page writes, and a Windows path with
+    // spaces in it saves as typed.
     S32 mod = -1;
     for (S32 i = 0; i < ConfigModelSettingCount(); i++)
     {
@@ -932,7 +1033,8 @@ static void test_config_model()
     check(mod >= 0, "assets.mod is in the table");
     if (mod >= 0)
     {
-        check(ConfigModelWantsBrowse(ConfigModelSetting(mod)), "and gets a Browse button");
+        check(!ConfigModelWantsBrowse(ConfigModelSetting(mod)),
+              "and is a list, not one folder with a Browse button");
         check(strcmp(ConfigModelSectionName(ConfigModelSectionOf(mod)), "assets") == 0,
               "in the assets section");
 
@@ -1129,7 +1231,7 @@ static void test_config_model_bindings()
 
     char def[256];
     ConfigModelBindDescribeDefault(CONFIG_MODEL_KEYBOARD, a, def, sizeof(def));
-    check(strcmp(def, "space") == 0, "the keyboard default is the table's key");
+    check(strcmp(def, iPadBindFind("a")->key) == 0, "the keyboard default is the table's key");
     ConfigModelBindDescribeDefault(CONFIG_MODEL_PAD, a, def, sizeof(def));
     check(strstr(def, "printed A") != NULL, "and a face button's pad default names its letter");
 
@@ -1618,6 +1720,38 @@ static void test_textpatch()
     patch_run(&p, "text_menu_reboot");
     check(strcmp(p.buf, "Reboot to Desktop") == 0, "an override too big for its asset is refused");
 
+    // An override too long for its asset is grown into a copy instead: the
+    // GameCube's strings are shorter than the Xbox's.
+    {
+        patch_setup(&p, "Reboot to Xbox Dashboard", 64);
+        patch_run(&p, "text_menu_reboot");
+
+        U8 asset[8] = { 2, 0, 0, 0, 'H', 'i', 0, 0 };
+        U32 grownSize = 0;
+        U8* grown = (U8*)iTextPatchGrown(iTextPatchAssetID("text_menu_reboot"), asset, 4,
+                                         sizeof(asset), &grownSize);
+        U32 len = 0;
+        if (grown != NULL)
+        {
+            memcpy(&len, grown, sizeof(len));
+        }
+        check(grown != NULL && strcmp((const char*)grown + 4, p.buf) == 0 &&
+                  grownSize == 4 + strlen(p.buf) + 1 && len == strlen(p.buf),
+              "an override too long for its asset is written into a copy");
+        U32 again = 0;
+        check(iTextPatchGrown(iTextPatchAssetID("text_menu_reboot"), asset, 4, sizeof(asset),
+                              &again) == grown,
+              "and the copy is reused on the next load");
+
+        U8 roomy[64] = { 0 };
+        check(iTextPatchGrown(iTextPatchAssetID("text_menu_reboot"), roomy, 4, sizeof(roomy),
+                              &again) == NULL,
+              "an override that fits is left to iTextPatchAsset");
+        check(iTextPatchGrown(iTextPatchAssetID("some other asset"), asset, 4, sizeof(asset),
+                              &again) == NULL,
+              "and an asset with no override gets no copy");
+    }
+
     // Nothing is written past the capacity, whatever happens above.
     patch_setup(&p, "Your Xbox console", 18);
     patch_run(&p, "some other asset");
@@ -1630,8 +1764,33 @@ static void test_textpatch()
           "an unterminated asset is left alone");
     check(p.buf[0] == 'X', "and not written to");
 
+    // The talk and exit prompts. The phrase goes at load and an include stands
+    // in for it; what the include says is decided as it is drawn. This process
+    // has no pad, so the keyboard is live and R1 is not a trigger.
+    patch_setup(&p, "Pull the {i:button_exitlevel_text} to enter the Theater", 64);
+    patch_run(&p, "a level's exit prompt");
+    check(strcmp(p.buf, "{i:pc_say_1c} to enter the Theater") == 0,
+          "the trigger phrase becomes a placeholder");
+    patch_setup(&p, "Press the {insert:button_talktonpc_text} button to read", 64);
+    patch_run(&p, "a sign");
+    check(strcmp(p.buf, "{i:pc_say_4b} to read") == 0, "and so does the button form");
+
+    const char* said = iTextPatchInsert(iTextPatchAssetID("pc_say_1c"));
+    check(said != NULL && strcmp(said, "Press {i:button_exitlevel_text}") == 0,
+          "off a trigger the placeholder says Press");
+    said = iTextPatchInsert(iTextPatchAssetID("button_exitlevel_text"));
+    check(said != NULL && strcmp(said, "{i:button_picture_05}") == 0,
+          "and the include loses its Trigger");
+    check(iTextPatchInsert(iTextPatchAssetID("button_jump_text")) == NULL,
+          "an include that names no trigger draws its own asset");
+
     // Global, and later tests do not expect it on.
     iTextPatchSetEnabled(FALSE);
+    said = iTextPatchInsert(iTextPatchAssetID("pc_say_1c"));
+    check(said != NULL && strcmp(said, "Pull the {i:button_exitlevel_text}") == 0,
+          "off, a placeholder says what shipped");
+    check(iTextPatchInsert(iTextPatchAssetID("button_exitlevel_text")) == NULL,
+          "and the include is the asset's own");
 }
 
 static void test_file()
@@ -1802,6 +1961,222 @@ static void read_through_ifile(const char* name, char* out, size_t size)
 // The mod folder: a file there is read in place of the asset root's file at
 // the same relative path, whatever the case, and a package from another
 // console's release is passed over for the original.
+static void putBE32(U8* p, U32 v)
+{
+    p[0] = (U8)(v >> 24);
+    p[1] = (U8)(v >> 16);
+    p[2] = (U8)(v >> 8);
+    p[3] = (U8)v;
+}
+
+static void putBE16(U8* p, U32 v)
+{
+    p[0] = (U8)(v >> 8);
+    p[1] = (U8)v;
+}
+
+static U32 getLE32(const U8* p)
+{
+    return (U32)p[0] | ((U32)p[1] << 8) | ((U32)p[2] << 16) | ((U32)p[3] << 24);
+}
+
+static U32 getLE16(const U8* p)
+{
+    return (U32)p[0] | ((U32)p[1] << 8);
+}
+
+// GameCube writes through eEventGivePowerUp's unchecked index. The addresses
+// are the retail GameCube's: globals is at 0x803C0558, its camera.mat.right.x
+// at 0x803C056C, and player.g.PowerUp at 0x803C0F15. zMain.cpp defines globals
+// in the game.
+zGlobals globals;
+
+static void test_gcmem()
+{
+    printf("iGCMem\n");
+
+    const U32 kPowerUp = 0x803C0F15;
+    const U32 kRightX = 0x803C056C;
+    U8* rightx = (U8*)&globals.camera.mat.right.x;
+
+    check(iGCMemAddress(kPowerUp) == &globals.player.g.PowerUp[0] &&
+              iGCMemAddress(kPowerUp + 1) == &globals.player.g.PowerUp[1],
+          "PowerUp is where the GameCube has it");
+    check(iGCMemAddress(kRightX) == rightx + 3 && iGCMemAddress(kRightX + 3) == rightx,
+          "a float's bytes come back in the PC's order");
+    check(iGCMemAddress(0x803C0560) == NULL, "a pointer is not mapped");
+    check(iGCMemAddress(0x80000000) == NULL && iGCMemAddress(0x803C0558 + 0x1FC8) == NULL,
+          "nor is anything outside globals");
+
+    xLinkAsset link;
+    memset(&link, 0, sizeof(link));
+    link.dstEvent = eEventGivePowerUp;
+    link.param[0] = 1.0f;
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventGivePowerUp && link.param[0] == 1.0f,
+          "a link that gives a power-up is kept as it is");
+
+    link.param[0] = (F32)(S32)(kRightX - kPowerUp);
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventGivePowerUp &&
+              &globals.player.g.PowerUp[(S32)link.param[0]] == rightx + 3,
+          "a link that writes a float's first byte writes the PC's last byte of it");
+
+    link.param[0] = (F32)(S32)(0x803C0560 - kPowerUp);
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventUnknown, "a link that writes a pointer is dropped");
+
+    link.dstEvent = eEventGivePowerUp;
+    link.param[0] = -1e9f;
+    iGCMemLink(&link);
+    check(link.dstEvent == eEventUnknown, "and so is one that writes outside globals");
+
+    // BFBB Deluxe's DOL patch reads two bytes of .sbss padding, which its hb00
+    // sets with indices 43487 and 43488.
+    check(!iModPatchSpinHover() && !iModPatchBowlFullTurn(), "the Deluxe patch starts off");
+    check(iGCMemAddress(0x803CB8F4) != NULL && iGCMemAddress(0x803CB8F8) == NULL,
+          "its four bytes of padding are mapped, and nothing past them");
+
+    link.dstEvent = eEventGivePowerUp;
+    link.param[0] = 43487.0f;
+    iGCMemLink(&link);
+    globals.player.g.PowerUp[(S32)link.param[0]] = 1;
+    check(link.dstEvent == eEventGivePowerUp && iModPatchSpinHover() && !iModPatchBowlFullTurn(),
+          "Deluxe's first write turns on the spin hover");
+
+    link.param[0] = 43488.0f;
+    iGCMemLink(&link);
+    globals.player.g.PowerUp[(S32)link.param[0]] = 1;
+    check(iModPatchBowlFullTurn(), "and its second the full bowl turn");
+    *iGCMemAddress(0x803CB8F4) = 0;
+    *iGCMemAddress(0x803CB8F5) = 0;
+}
+
+// GameCube assets turned around in place. The whole-disc check is
+// tools/gcswap/check.py, against the Xbox copy of every asset; these are the
+// shapes it depends on, built by hand.
+static void test_gcswap()
+{
+    printf("iGCSwap\n");
+
+    // A TIMR -- xTimerAsset, seconds and randomRange -- with one link after
+    // it. baseFlags is 16-bit and linkCount a byte; the link's two event
+    // numbers are 16-bit too.
+    U8 timr[0x10 + 0x20];
+    memset(timr, 0, sizeof(timr));
+    putBE32(timr + 0x0, 0x11223344); // id
+    timr[4] = 0x0D; // baseType
+    timr[5] = 1; // linkCount
+    putBE16(timr + 0x6, 0x0102); // baseFlags
+    putBE32(timr + 0x8, 0x41100000); // seconds, 9.0
+    putBE32(timr + 0xC, 0x3F000000); // randomRange, 0.5
+    putBE16(timr + 0x10, 0x0203); // srcEvent
+    putBE16(timr + 0x12, 0x0405); // dstEvent
+    putBE32(timr + 0x14, 0xAABBCCDD); // dstAssetID
+
+    check(iGCSwapKnowsType('TIMR'), "iGCSwap has a rule for TIMR");
+    check(iGCSwapAsset('TIMR', timr, sizeof(timr)) == IGCSWAP_DONE, "a TIMR swaps");
+    check(getLE32(timr + 0x0) == 0x11223344 && getLE16(timr + 0x6) == 0x0102,
+          "its id and 16-bit baseFlags come out little-endian");
+    check(timr[4] == 0x0D && timr[5] == 1, "and the bytes stay where they were");
+    check(getLE32(timr + 0x8) == 0x41100000 && getLE32(timr + 0xC) == 0x3F000000,
+          "and so do both floats");
+    check(getLE16(timr + 0x10) == 0x0203 && getLE16(timr + 0x12) == 0x0405 &&
+              getLE32(timr + 0x14) == 0xAABBCCDD,
+          "the link at the end is swapped field by field");
+
+    // randomRange is little-endian on the disc in some GameCube timers: the
+    // packer never swapped it. A value that only makes sense as is stays.
+    memset(timr, 0, sizeof(timr));
+    putBE32(timr + 0x8, 0x41100000);
+    timr[0xC] = 0x00; // 0.5, little-endian
+    timr[0xD] = 0x00;
+    timr[0xE] = 0x00;
+    timr[0xF] = 0x3F;
+    iGCSwapAsset('TIMR', timr, 0x10);
+    check(getLE32(timr + 0xC) == 0x3F000000, "a randomRange left little-endian is kept");
+
+    // An older, shorter TIMR without randomRange: what is there is swapped.
+    memset(timr, 0, sizeof(timr));
+    putBE32(timr + 0x8, 0x41100000);
+    check(iGCSwapAsset('TIMR', timr, 0xC) == IGCSWAP_DONE && getLE32(timr + 0x8) == 0x41100000,
+          "an asset older and shorter than its struct swaps the fields it has");
+
+    // An SKB1 animation: header, one key of eight 16-bit fields, two times,
+    // then 16-bit offsets.
+    U8 anim[0x1C + 0x10 + 8 + 4];
+    memset(anim, 0, sizeof(anim));
+    putBE32(anim + 0x0, 0x534B4231); // 'SKB1'
+    putBE16(anim + 0x8, 1); // BoneCount
+    putBE16(anim + 0xA, 2); // TimeCount
+    putBE32(anim + 0xC, 1); // KeyCount
+    putBE32(anim + 0x10, 0x3F800000);
+    for (U32 k = 0; k < 8; k++)
+    {
+        putBE16(anim + 0x1C + k * 2, 0x0100 + k);
+    }
+    putBE32(anim + 0x2C, 0x3F800000);
+    putBE32(anim + 0x30, 0x40000000);
+    putBE16(anim + 0x34, 0x0007);
+    putBE16(anim + 0x36, 0x0009);
+
+    check(iGCSwapAsset('ANIM', anim, sizeof(anim)) == IGCSWAP_DONE, "an SKB1 animation swaps");
+    check(getLE32(anim) == 0x534B4231 && getLE16(anim + 0x8) == 1 && getLE16(anim + 0xA) == 2 &&
+              getLE32(anim + 0xC) == 1,
+          "its header's counts are 16- and 32-bit where they should be");
+    check(getLE16(anim + 0x1C) == 0x0100 && getLE16(anim + 0x2A) == 0x0107,
+          "every key field is 16-bit");
+    check(getLE32(anim + 0x2C) == 0x3F800000 && getLE32(anim + 0x30) == 0x40000000,
+          "the times are floats");
+    check(getLE16(anim + 0x34) == 7 && getLE16(anim + 0x36) == 9, "and the offsets 16-bit");
+
+    U8 junk[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    check(iGCSwapAsset('ZZZZ', junk, sizeof(junk)) == IGCSWAP_UNKNOWN && junk[0] == 1,
+          "a type with no rule is left as it was");
+    check(iGCSwapAsset('ANIM', junk, sizeof(junk)) == IGCSWAP_MALFORMED,
+          "and an animation too short for its header says so");
+
+    // SNDI, the GameCube sound table: num_sfx, total_size, num_streams and
+    // num_cutscene, then 0x64-byte entries -- a DSPADPCM header and an id.
+    U8 sndi[0x10 + 2 * 0x64];
+    memset(sndi, 0, sizeof(sndi));
+    putBE32(sndi + 0x0, 1);
+    putBE32(sndi + 0x4, 0xCDCDCDCD);
+    putBE32(sndi + 0x8, 1);
+    putBE32(sndi + 0xC, 0);
+    U8* e = sndi + 0x10;
+    putBE32(e + 0x00, 3200); // num_samples
+    putBE32(e + 0x04, 3660); // num_nibbles
+    putBE32(e + 0x08, 22050); // sample_rate
+    putBE16(e + 0x0C, 1); // loop_flag
+    putBE32(e + 0x10, 2); // loop_start
+    putBE16(e + 0x1C, 0x0800); // coef[0]
+    putBE16(e + 0x3A, 0xFF00); // coef[15]
+    putBE16(e + 0x3E, 0x0011); // pred_scale
+    putBE16(e + 0x40, 0x1234); // yn1
+    putBE32(e + 0x60, 0xAABBCCDD);
+    putBE32(e + 0x64 + 0x60, 0x01020304);
+
+    check(iGCSwapKnowsType('SNDI'), "iGCSwap has a rule for SNDI");
+    check(iGCSwapAsset('SNDI', sndi, sizeof(sndi)) == IGCSWAP_DONE, "a GameCube SNDI swaps");
+    check(getLE32(sndi + 0x0) == 1 && getLE32(sndi + 0x8) == 1 && getLE32(sndi + 0xC) == 0,
+          "its counts come out little-endian");
+    check(getLE32(sndi + 0x4) == IGCSWAP_SNDI_GAMECUBE, "and total_size is stamped as GameCube");
+    check(getLE32(e + 0x00) == 3200 && getLE32(e + 0x04) == 3660 && getLE32(e + 0x08) == 22050 &&
+              getLE16(e + 0x0C) == 1 && getLE32(e + 0x10) == 2,
+          "an entry's lengths, rate and loop fields swap at their widths");
+    check(getLE16(e + 0x1C) == 0x0800 && getLE16(e + 0x3A) == 0xFF00 && getLE16(e + 0x3E) == 0x11 &&
+              getLE16(e + 0x40) == 0x1234,
+          "and its coefficients and context as 16-bit");
+    check(getLE32(e + 0x60) == 0xAABBCCDD && getLE32(e + 0x64 + 0x60) == 0x01020304,
+          "and every entry's asset id");
+
+    memset(sndi, 0, sizeof(sndi));
+    putBE32(sndi + 0x0, 3);
+    check(iGCSwapAsset('SNDI', sndi, sizeof(sndi)) == IGCSWAP_MALFORMED,
+          "a table counting more entries than it holds says so");
+}
+
 static void test_file_mod()
 {
     printf("iFile mod folder\n");
@@ -1826,12 +2201,19 @@ static void test_file_mod()
     static const U8 gcHip[] = { 'H', 'I', 'P', 'A', 0, 0, 0, 0,  'P', 'A', 'C', 'K', 0, 0, 0, 20,
                                 'P', 'L', 'A', 'T', 0, 0, 0, 12, 'G', 'C', 0,   'G', 'a', 'm',
                                 'e', 'C', 'u', 'b', 'e', 0 };
+    // The same with PLAT "P2\0PS2\0", a release the port does not read.
+    static const U8 ps2Hip[] = { 'H', 'I', 'P', 'A', 0,  0,   0,   0,   'P', 'A', 'C',
+                                 'K', 0,   0,   0,   16, 'P', 'L', 'A', 'T', 0,   0,
+                                 0,   8,   'P', '2', 0,  'P', 'S', '2', 0,   0 };
 
-    bool made = write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
-                write_scratch(base, "ONLY.HIP", "BASE", 4) &&
-                write_scratch(base, "GC.HIP", "BASE", 4) &&
-                write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
-                write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip));
+    bool made =
+        write_scratch(baseGl, "gl01.HIP", "BASE", 4) &&
+        write_scratch(base, "ONLY.HIP", "BASE", 4) && write_scratch(base, "GC.HIP", "BASE", 4) &&
+        write_scratch(base, "GC.HOP", "BASE", 4) && write_scratch(base, "P2.HOP", "BASE", 4) &&
+        write_scratch(modGl, "GL01.hip", "MODDED", 6) &&
+        write_scratch(mod, "gc.hip", gcHip, sizeof(gcHip)) &&
+        write_scratch(mod, "gc.hop", gcHip, sizeof(gcHip)) &&
+        write_scratch(mod, "p2.hop", ps2Hip, sizeof(ps2Hip));
     check(made, "the scratch asset and mod folders can be written");
 
     iHostSetEnv("BFBB_ASSETS", base);
@@ -1848,8 +2230,13 @@ static void test_file_mod()
     read_through_ifile("ONLY.HIP", got, sizeof(got));
     check(strcmp(got, "BASE") == 0, "a file the mod does not have comes from the asset root");
 
+    // GameCube packages are read; a PS2 one would load and then crash.
     read_through_ifile("GC.HIP", got, sizeof(got));
-    check(strcmp(got, "BASE") == 0, "a GameCube package in the mod folder is passed over");
+    check(memcmp(got, "HIPA", 4) == 0, "a GameCube .HIP in the mod folder is read");
+    read_through_ifile("GC.HOP", got, sizeof(got));
+    check(memcmp(got, "HIPA", 4) == 0, "and a GameCube .HOP");
+    read_through_ifile("P2.HOP", got, sizeof(got));
+    check(strcmp(got, "BASE") == 0, "but a PS2 package is passed over");
 
     char loaded[16];
     char path[512];
@@ -1858,6 +2245,43 @@ static void test_file_mod()
     loaded[6] = 0;
     free(buf);
     check(strcmp(loaded, "MODDED") == 0, "iFileLoad's absolute path is overridden too");
+
+    // Two mods, the first listed wins. The top one's copy of TWO.HOP is a
+    // PS2 package, so the one below supplies it.
+    char top[512];
+    char topGl[512];
+    if (scratch_dir("modtop", top, sizeof(top)))
+    {
+        snprintf(topGl, sizeof(topGl), "%s/gl", top);
+        iHostMakeDir(topGl);
+        write_scratch(topGl, "gl01.HIP", "TOP", 3);
+        write_scratch(top, "two.hop", ps2Hip, sizeof(ps2Hip));
+        write_scratch(mod, "TWO.HOP", "SECOND", 6);
+
+        snprintf(path, sizeof(path), "%s | %s", top, mod);
+        iHostSetEnv("BFBB_MOD", path);
+        iFileInit();
+        iFileSetPath((char*)".");
+
+        read_through_ifile("GL/GL01.HIP", got, sizeof(got));
+        check(strcmp(got, "TOP") == 0, "with two mods, the first listed supplies a file both have");
+        read_through_ifile("TWO.HOP", got, sizeof(got));
+        check(strcmp(got, "SECOND") == 0, "and a PS2 package in it falls to the next mod");
+        read_through_ifile("ONLY.HIP", got, sizeof(got));
+        check(strcmp(got, "BASE") == 0, "and a file neither has comes from the asset root");
+        check(iFileModCount() == 2 && strncmp(iFileModName(), "bfbb_pc_modtop_", 15) == 0 &&
+                  strstr(iFileModName(), "+bfbb_pc_modover_") != NULL,
+              "their saves are named for both, in order");
+
+        snprintf(path, sizeof(path), "%s/gl01.HIP", topGl);
+        iHostRemoveFile(path);
+        snprintf(path, sizeof(path), "%s/two.hop", top);
+        iHostRemoveFile(path);
+        snprintf(path, sizeof(path), "%s/TWO.HOP", mod);
+        iHostRemoveFile(path);
+        iHostRemoveDir(topGl);
+        iHostRemoveDir(top);
+    }
 
     // A mod folder that is not there is ignored rather than breaking the root.
     snprintf(path, sizeof(path), "%s/nosuch", mod);
@@ -1873,7 +2297,8 @@ static void test_file_mod()
     iFileExit();
 
     const char* files[][2] = { { baseGl, "gl01.HIP" }, { base, "ONLY.HIP" }, { base, "GC.HIP" },
-                               { modGl, "GL01.hip" },  { mod, "gc.hip" } };
+                               { base, "GC.HOP" },     { base, "P2.HOP" },   { modGl, "GL01.hip" },
+                               { mod, "gc.hip" },      { mod, "gc.hop" },    { mod, "p2.hop" } };
     for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
     {
         snprintf(path, sizeof(path), "%s/%s", files[i][0], files[i][1]);
@@ -1978,6 +2403,467 @@ static bool bind_says(const char* text, U32 held)
 
 #define FAKE(x) (1u << FAKE_##x)
 
+// Mod folders as the game and bfbb_config both find them: the setting, the
+// mod.ini, and the asset root inside an unpacked archive.
+static void test_mod_folder()
+{
+    printf("iModFolder\n");
+
+    char dir[512];
+    if (!scratch_dir("modfolder", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+
+    char got[512];
+    char typed[512];
+    snprintf(typed, sizeof(typed), "%s/", dir);
+    check(iModFolderResolve(typed, got, sizeof(got)) && strcmp(got, dir) == 0,
+          "a folder resolves to itself, without its trailing slash");
+
+    snprintf(typed, sizeof(typed), "%s", dir);
+    for (char* c = typed; *c != '\0'; c++)
+    {
+        if (*c == '/')
+        {
+            *c = '\\';
+        }
+    }
+    check(iModFolderResolve(typed, got, sizeof(got)) && strcmp(got, dir) == 0,
+          "and so does the same folder typed with backslashes");
+
+    snprintf(typed, sizeof(typed), "%s/nosuch", dir);
+    check(!iModFolderResolve(typed, got, sizeof(got)), "a folder that is not there does not");
+    check(!iModFolderResolve("", got, sizeof(got)), "nor does an empty setting");
+
+    iModFolderPath listed[kModFolderMax];
+    check(iModFolderSplit(" mods/A |mods/B|| C:\\x y ", listed, kModFolderMax) == 3 &&
+              strcmp(listed[0], "mods/A") == 0 && strcmp(listed[1], "mods/B") == 0 &&
+              strcmp(listed[2], "C:\\x y") == 0,
+          "a list of mods splits on '|', trimmed, empty entries dropped");
+    check(iModFolderSplit("", listed, kModFolderMax) == 0, "and an empty setting is no mods");
+
+    char saveName[256];
+    iModFolderSaveName(listed, 2, saveName, sizeof(saveName));
+    check(strcmp(saveName, "A+B") == 0, "several mods keep their saves under their names joined");
+    iModFolderSaveName(listed, 1, saveName, sizeof(saveName));
+    check(strcmp(saveName, "A") == 0, "and one mod's saves keep the folder they always had");
+
+    char mod[512];
+    snprintf(mod, sizeof(mod), "%s/Cool Mod", dir);
+    iHostMakeDir(mod);
+
+    iModInfo info;
+    iModFolderInfo(mod, &info);
+    check(!info.hasIni && strcmp(info.name, "Cool Mod") == 0,
+          "a mod without a mod.ini is named for its folder");
+
+    static const char kIni[] = "[mod]\n"
+                               "name = The Cool Mod\n"
+                               "version = 1.2\n"
+                               "author = someone ; a comment\n"
+                               "[Video]\n"
+                               "FOV = 75\n"
+                               "[xbox]\n"
+                               "glow = off\n";
+    write_scratch(mod, "mod.ini", kIni, sizeof(kIni) - 1);
+
+    iModFolderInfo(mod, &info);
+    check(info.hasIni && strcmp(info.name, "The Cool Mod") == 0 && strcmp(info.version, "1.2") == 0,
+          "mod.ini's [mod] section names it and gives its version");
+    check(strcmp(info.author, "someone") == 0, "and its author, without the comment");
+
+    struct Seen
+    {
+        char keys[4][64];
+        char values[4][64];
+        S32 count;
+    } seen = {};
+    struct Collect
+    {
+        static void fn(const char* key, const char* value, void* context)
+        {
+            Seen* s = (Seen*)context;
+            if (s->count < 4)
+            {
+                snprintf(s->keys[s->count], sizeof(s->keys[0]), "%s", key);
+                snprintf(s->values[s->count], sizeof(s->values[0]), "%s", value);
+                s->count++;
+            }
+        }
+    };
+    const S32 n = iModFolderSettings(mod, Collect::fn, &seen);
+    check(n == 2 && seen.count == 2, "every other section is settings, [mod] not among them");
+    check(strcmp(seen.keys[0], "video.fov") == 0 && strcmp(seen.values[0], "75") == 0,
+          "named section.name, folded to lower case");
+    check(strcmp(seen.keys[1], "xbox.glow") == 0 && strcmp(seen.values[1], "off") == 0,
+          "in file order");
+
+    // An archive's own folder around the mod, and a readme beside it.
+    char pack[512];
+    char packRoot[512];
+    char packHb[512];
+    snprintf(pack, sizeof(pack), "%s/pack", dir);
+    snprintf(packRoot, sizeof(packRoot), "%s/BFBBMix", pack);
+    snprintf(packHb, sizeof(packHb), "%s/hb", packRoot);
+    iHostMakeDir(pack);
+    iHostMakeDir(packRoot);
+    iHostMakeDir(packHb);
+    write_scratch(pack, "readme.txt", "x", 1);
+    write_scratch(packRoot, "boot.HIP", "x", 1);
+    write_scratch(packHb, "hb01.HIP", "x", 1);
+    check(iModFolderFindAssets(pack, got, sizeof(got)) && strcmp(got, packRoot) == 0,
+          "an archive's asset root is the folder holding its packages");
+
+    // Only level packages: the root is above their level folder.
+    char levels[512];
+    char levelsHb[512];
+    snprintf(levels, sizeof(levels), "%s/levels", dir);
+    snprintf(levelsHb, sizeof(levelsHb), "%s/HB", levels);
+    iHostMakeDir(levels);
+    iHostMakeDir(levelsHb);
+    write_scratch(levelsHb, "hb01.hip", "x", 1);
+    check(iModFolderFindAssets(levels, got, sizeof(got)) && strcmp(got, levels) == 0,
+          "a package in its level folder puts the root above that folder");
+
+    char empty[512];
+    snprintf(empty, sizeof(empty), "%s/empty", dir);
+    iHostMakeDir(empty);
+    write_scratch(empty, "notes.txt", "x", 1);
+    check(!iModFolderFindAssets(empty, got, sizeof(got)), "a folder with no packages is no mod");
+
+    check(ModsModelRemoveTree(dir) && !iHostPathExists(dir),
+          "a folder and everything under it can be deleted");
+}
+
+// Installing, picking and removing a mod in the library beside the
+// executable. Under a name nobody would give a mod, and the library folder is
+// removed afterwards only if this left it empty.
+static void test_mods_model()
+{
+    printf("mods_model\n");
+
+    char dir[512];
+    if (!scratch_dir("modsmodel", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/config.ini", dir);
+    write_scratch(dir, "config.ini", "[assets]\nmod =\n", 15);
+
+    char why[512];
+    if (!ConfigModelOpen(path, why, sizeof(why)))
+    {
+        check(false, "the model opens a file");
+        ModsModelRemoveTree(dir);
+        return;
+    }
+
+    const bool hadLibrary = iHostPathExists(ModsModelLibrary());
+
+    char staged[512];
+    check(ModsModelStage(staged, sizeof(staged), why, sizeof(why)), "a staging folder is made");
+
+    // An archive's own folder around the mod, as a zip unpacks.
+    char inner[600];
+    char innerHb[600];
+    snprintf(inner, sizeof(inner), "%s/Selftest Mod 5.0", staged);
+    snprintf(innerHb, sizeof(innerHb), "%s/hb", inner);
+    iHostMakeDir(inner);
+    iHostMakeDir(innerHb);
+    write_scratch(inner, "boot.HIP", "x", 1);
+    write_scratch(innerHb, "hb01.HIP", "x", 1);
+    write_scratch(staged, "readme.txt", "x", 1);
+
+    char name[256];
+    ModsModelSuggestName(staged, "C:/Downloads/thing.zip", name, sizeof(name));
+    check(strcmp(name, "Selftest Mod 5.0") == 0, "the suggested name is the mod's own folder");
+
+    // A mod-manager layout: the disc's files in files/, beside mod.json.
+    char managed[512];
+    char managedFiles[600];
+    check(ModsModelStage(managed, sizeof(managed), why, sizeof(why)), "a second staging folder");
+    snprintf(managedFiles, sizeof(managedFiles), "%s/files", managed);
+    iHostMakeDir(managedFiles);
+    write_scratch(managedFiles, "boot.HIP", "x", 1);
+    write_scratch(managed, "mod.json", "{}", 2);
+    ModsModelSuggestName(managed, "C:/Downloads/Second Strike.zip", name, sizeof(name));
+    check(strcmp(name, "Second Strike") == 0, "files/ at the archive's root takes the archive's name");
+
+    ModsModelRemoveTree(managedFiles);
+    char wrapped[600];
+    char wrappedFiles[700];
+    snprintf(wrapped, sizeof(wrapped), "%s/Boo-kini v1.1", managed);
+    snprintf(wrappedFiles, sizeof(wrappedFiles), "%s/files", wrapped);
+    iHostMakeDir(wrapped);
+    iHostMakeDir(wrappedFiles);
+    write_scratch(wrappedFiles, "boot.HIP", "x", 1);
+    ModsModelSuggestName(managed, "C:/Downloads/boo.zip", name, sizeof(name));
+    check(strcmp(name, "Boo-kini v1.1") == 0, "and files/ inside a folder takes that folder's name");
+    ModsModelRemoveTree(managed);
+
+    check(!ModsModelNameOk("a/b", why, sizeof(why)) && !ModsModelNameOk(".x", why, sizeof(why)),
+          "a name with a separator or a leading dot is refused");
+
+    char unique[64];
+    snprintf(unique, sizeof(unique), "bfbb selftest %llu",
+             (unsigned long long)(iHostMonotonicNs() % 1000000000ULL));
+
+    S32 index = -1;
+    check(ModsModelInstall(staged, unique, &index, why, sizeof(why)) && index >= 0,
+          "it installs into the library under the name given");
+    check(!iHostPathExists(staged), "and the staging folder is gone, readme and all");
+
+    if (index >= 0)
+    {
+        const ModsModelEntry* e = ModsModelAt(index);
+        char boot[700];
+        snprintf(boot, sizeof(boot), "%s/boot.HIP", e->folder);
+        check(e->inLibrary && iHostPathExists(boot), "the asset root is the mod's folder");
+
+        char want[300];
+        snprintf(want, sizeof(want), "mods/%s", unique);
+        check(strcmp(e->setting, want) == 0,
+              "and [assets] mod names it relative to the executable");
+
+        const S32 setting = ConfigModelFind("assets", "mod");
+
+        check(ModsModelRankOf(index) == -1 && ModsModelEnabledCount() == 0,
+              "nothing is on until it is turned on");
+        ModsModelSetEnabled(index, true);
+        check(ModsModelRankOf(index) == 0 && ConfigModelDirty() &&
+                  strcmp(ConfigModelText(setting), want) == 0,
+              "turning it on sets [assets] mod");
+
+        // A second mod, outside the library, with one file the first also has.
+        char other[600];
+        snprintf(other, sizeof(other), "%s/other", dir);
+        iHostMakeDir(other);
+        write_scratch(other, "BOOT.hip", "y", 1);
+        write_scratch(other, "font.HIP", "y", 1);
+
+        ModsModelUseFolder(other);
+        check(ModsModelEnabledCount() == 2 && ModsModelRankOf(index) == 1,
+              "a folder turned on goes to the top of the load order");
+
+        char list[700];
+        snprintf(list, sizeof(list), "%s | %s", other, want);
+        check(strcmp(ConfigModelText(setting), list) == 0,
+              "and [assets] mod lists both, top first");
+
+        const S32 top = ModsModelEnabledAt(0);
+        char examples[256];
+        check(ModsModelOverlap(index, top, examples, sizeof(examples)) == 1 &&
+                  strcmp(examples, "boot.hip") == 0,
+              "the files two mods share are found whatever their case");
+
+        ModsModelMove(index, -1);
+        check(ModsModelRankOf(index) == 0 && ModsModelRankOf(top) == 1, "a mod can be moved up");
+
+        // A folder the setting names that is not there is listed, and can be
+        // turned off to take it out.
+        char withMissing[800];
+        snprintf(withMissing, sizeof(withMissing), "%s | nowhere/at all", ConfigModelText(setting));
+        ConfigModelSetText(setting, withMissing);
+        ModsModelScan();
+        const S32 missing = ModsModelEnabledAt(2);
+        check(ModsModelEnabledCount() == 3 && ModsModelAt(missing)->missing,
+              "a mod folder that is not there is listed as missing");
+        ModsModelSetEnabled(missing, false);
+        check(strstr(ConfigModelText(setting), "nowhere") == NULL, "and turning it off drops it");
+
+        check(ModsModelRemove(index, why, sizeof(why)), "it can be removed");
+        check(strcmp(ConfigModelText(setting), other) == 0, "which takes it out of the load order");
+    }
+
+    if (!hadLibrary)
+    {
+        iHostRemoveDir(ModsModelLibrary());
+    }
+
+    ConfigModelClose();
+    ModsModelRemoveTree(dir);
+}
+
+static void put32(U8* p, U32 v)
+{
+    p[0] = (U8)v;
+    p[1] = (U8)(v >> 8);
+    p[2] = (U8)(v >> 16);
+    p[3] = (U8)(v >> 24);
+}
+
+static U32 tagOf(const char* s)
+{
+    return ((U32)s[0] << 24) | ((U32)s[1] << 16) | ((U32)s[2] << 8) | (U32)s[3];
+}
+
+// The bytes of a save as xsavegame writes one: a leader, one more chunk, and
+// the header with its crc. Returns the save's size.
+static size_t make_save(U8* out, size_t room, const char* label, S32 progress)
+{
+    memset(out, 0, room);
+
+    size_t at = 16;
+    put32(out + at, tagOf("LEDR"));
+    put32(out + at + 4, 0x60);
+    put32(out + at + 8, 0x58);
+    snprintf((char*)out + at + 12, 64, "%s", label);
+    put32(out + at + 12 + 64, (U32)progress);
+    at += 12 + 0x60;
+
+    put32(out + at, tagOf("ROOM"));
+    put32(out + at + 4, 4);
+    put32(out + at + 8, 4);
+    memcpy(out + at + 12, "HB01", 4);
+    at += 16;
+
+    put32(out, tagOf("GDAT"));
+    put32(out + 4, 1);
+    put32(out + 8, (U32)at);
+    put32(out + 12, iSaveFileCrc(out + 16, at - 16));
+    return at;
+}
+
+// Save files as bfbb_config reads them, and an Xbox one's signature.
+static void test_save_file()
+{
+    printf("iSaveFile\n");
+
+    U8 save[512];
+    const size_t size = make_save(save, sizeof(save), "Jellyfish Fields", 42);
+
+    char why[256];
+    size_t total = 0;
+    check(iSaveFileCheck(save, size, &total, why, sizeof(why)) && total == size,
+          "a save checks out at its own size");
+
+    // An Xbox file is the same with 20 bytes of signature after it.
+    memset(save + size, 0xAB, 20);
+    total = 0;
+    check(iSaveFileCheck(save, size + 20, &total, why, sizeof(why)) && total == size,
+          "an Xbox save checks out too, its signature left off");
+
+    check(!iSaveFileCheck(save, size - 1, &total, why, sizeof(why)), "a save cut short does not");
+
+    save[size - 1] ^= 1;
+    check(!iSaveFileCheck(save, size, &total, why, sizeof(why)),
+          "nor does one with a byte changed");
+    save[size - 1] ^= 1;
+
+    save[0] ^= 1;
+    check(!iSaveFileCheck(save, size, &total, why, sizeof(why)), "nor anything that is not a save");
+    save[0] ^= 1;
+
+    iSaveFileLeader leader;
+    check(iSaveFileReadLeader(save, size, &leader) &&
+              strcmp(leader.label, "Jellyfish Fields") == 0 && leader.progress == 42,
+          "the leader gives the label and progress the save screen lists");
+
+    // SaveMeta.xbx: UTF-16LE with a byte order mark.
+    static const char kMeta[] = "Name=SpongeBob02\r\n";
+    U8 meta[2 + 2 * sizeof(kMeta)];
+    meta[0] = 0xFF;
+    meta[1] = 0xFE;
+    for (size_t i = 0; i < sizeof(kMeta) - 1; i++)
+    {
+        meta[2 + 2 * i] = (U8)kMeta[i];
+        meta[3 + 2 * i] = 0;
+    }
+    char name[64];
+    check(iSaveFileXboxMetaName(meta, 2 + 2 * (sizeof(kMeta) - 1), name, sizeof(name)) &&
+              strcmp(name, "SpongeBob02") == 0,
+          "SaveMeta.xbx names the file the save had on the Xbox");
+    check(iSaveFileGameOf(name) == 2 && iSaveFileGameOf("spongebob00") == 0 &&
+              iSaveFileGameOf("SpongeBob03") == -1,
+          "and that name is one of the three games, or none");
+
+    char leaf[64];
+    iSaveFileLeaf("D:\\mods\\BFBBMix\\", leaf, sizeof(leaf));
+    check(strcmp(leaf, "BFBBMix") == 0, "a mod's saves are named for its folder");
+}
+
+// Importing an Xbox save into the folder the game would use.
+static void test_saves_model()
+{
+    printf("saves_model\n");
+
+    char dir[512];
+    char saves[512];
+    if (!scratch_dir("savesmodel", dir, sizeof(dir)))
+    {
+        check(false, "could not make a temp directory");
+        return;
+    }
+    snprintf(saves, sizeof(saves), "%s/saves", dir);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/config.ini", dir);
+    write_scratch(dir, "config.ini", "[game]\n", 7);
+
+    char why[512];
+    if (!ConfigModelOpen(path, why, sizeof(why)))
+    {
+        check(false, "the model opens a file");
+        ModsModelRemoveTree(dir);
+        return;
+    }
+
+    iHostSetEnv("BFBB_SAVE_DIR", saves);
+
+    char folder[512];
+    SavesModelFolder(folder, sizeof(folder));
+    check(strcmp(folder, saves) == 0, "the save folder is the game's, BFBB_SAVE_DIR included");
+
+    iSaveFileLeader leader;
+    check(!SavesModelRead(1, &leader), "an empty game reads as empty");
+
+    U8 xsv[512];
+    const size_t size = make_save(xsv, sizeof(xsv), "Rock Bottom", 7);
+    memset(xsv + size, 0xCD, 20);
+
+    static const U8 kMeta[] = { 'N', 0, 'a', 0, 'm', 0, 'e', 0, '=', 0, 'S', 0, 'p', 0, 'o', 0,
+                                'n', 0, 'g', 0, 'e', 0, 'B', 0, 'o', 0, 'b', 0, '0', 0, '1', 0 };
+
+    SavesModelXbox save;
+    check(SavesModelReadXbox(xsv, size + 20, kMeta, sizeof(kMeta), "test", &save, why, sizeof(why)),
+          "an Xbox save reads");
+    check(save.size == size && save.game == 1, "without its signature, and knowing it was game 2");
+
+    check(SavesModelImport(&save, save.game, why, sizeof(why)), "it imports, making the folder");
+    check(SavesModelRead(1, &leader) && strcmp(leader.label, "Rock Bottom") == 0,
+          "and game 2 now holds it");
+
+    char file[600];
+    snprintf(file, sizeof(file), "%s/SpongeBob01", saves);
+    iHostFileInfo info;
+    check(iHostStat(file, &info) && info.size == size, "as the PC's file, the signature cut off");
+
+    write_scratch(saves, "SpongeBob01.tga", "old", 3);
+    check(SavesModelImport(&save, 1, why, sizeof(why)), "a second import replaces it");
+
+    char bak[600];
+    char tga[600];
+    snprintf(bak, sizeof(bak), "%s/SpongeBob01.bak", saves);
+    snprintf(tga, sizeof(tga), "%s/SpongeBob01.tga", saves);
+    check(iHostPathExists(bak), "keeping the save it replaced beside it");
+    check(!iHostPathExists(tga), "and deleting that save's thumbnail");
+
+    SavesModelFreeXbox(&save);
+
+    xsv[20] ^= 1;
+    check(!SavesModelReadXbox(xsv, size + 20, NULL, 0, "test", &save, why, sizeof(why)),
+          "a damaged Xbox save is refused");
+
+    iHostSetEnv("BFBB_SAVE_DIR", NULL);
+    ConfigModelClose();
+    ModsModelRemoveTree(dir);
+}
+
 static void test_pad_bindings()
 {
     iPadBind b;
@@ -2019,6 +2905,37 @@ static void test_pad_bindings()
     check(b.alts == 0, "as nothing");
     sFakeHeld = FAKE(ONE) | FAKE(TWO) | FAKE(THREE);
     check(!iPadBindHeld(b, fake_held), "and nothing can press it");
+
+    check(iPadBindParse("  None ", kFakeTokens, kFakeTokenCount, "test", &b) && b.alts == 0,
+          "'none' is the same as empty, in any case and with spaces round it");
+    check(!iPadBindParse("none, one", kFakeTokens, kFakeTokenCount, "test", &b),
+          "but only as the whole binding");
+    check(!iPadBindParse("nonesuch", kFakeTokens, kFakeTokenCount, "test", &b),
+          "and not as the start of a longer word");
+
+    // One press setting two buttons, which the binding screens report.
+    {
+        iPadBind x;
+        iPadBind y;
+
+        iPadBindParse("one", kFakeTokens, kFakeTokenCount, "test", &x);
+        iPadBindParse("three, one", kFakeTokens, kFakeTokenCount, "test", &y);
+        check(iPadBindOverlap(x, y), "two bindings sharing an input overlap");
+
+        iPadBindParse("two", kFakeTokens, kFakeTokenCount, "test", &y);
+        check(!iPadBindOverlap(x, y), "and two on different inputs do not");
+
+        iPadBindParse("one+!two", kFakeTokens, kFakeTokenCount, "test", &x);
+        iPadBindParse("one+two", kFakeTokens, kFakeTokenCount, "test", &y);
+        check(!iPadBindOverlap(x, y), "the gamecube preset's l1 and l2 do not overlap");
+
+        iPadBindParse("two", kFakeTokens, kFakeTokenCount, "test", &x);
+        check(iPadBindOverlap(x, y) && iPadBindOverlap(y, x),
+              "but its z does overlap l2, since the chord holds z down, either way round");
+
+        iPadBindParse("", kFakeTokens, kFakeTokenCount, "test", &x);
+        check(!iPadBindOverlap(x, x), "and an empty binding overlaps nothing");
+    }
 
     // Whitespace is not significant anywhere.
     check(bind_says("  one  +  ! two  ,  three  ", FAKE(THREE)), "spaces around the operators");
@@ -2279,6 +3196,97 @@ static void test_pad_bindings()
     }
 }
 
+// The keyboard's own bindings, which a prompt names while the keyboard is in
+// use. `b` on a pad is the east face button and `b` on a keyboard is the B key,
+// and drawing one for the other is the fault this guards.
+static void test_pad_keyboard_glyphs()
+{
+#ifdef BFBB_INPUT_HAVE_KEYBOARD
+    const iPadBindButton* jump = iPadBindFind("a");
+    check(jump != NULL, "there is a row for jump");
+
+    if (jump != NULL)
+    {
+        // The first of the row's alternatives, which is the one a prompt draws.
+        const char* key = iPadKeyboardBoundInput(jump->mask);
+        size_t first = strcspn(jump->key, ", ");
+        check(key != NULL && strlen(key) == first && strncmp(key, jump->key, first) == 0,
+              "the keyboard names the key the jump row defaults to");
+    }
+
+    // A row that leads with a mouse button names the button, which is what its
+    // prompt draws.
+    const iPadBindButton* spin = iPadBindFind("x");
+    if (spin != NULL)
+    {
+        const char* input = iPadKeyboardBoundInput(spin->mask);
+        check(input != NULL && strcmp(input, "mouse1") == 0,
+              "a mouse-then-key binding names the mouse button");
+    }
+
+    check(iPadKeyboardBoundInput(0) == NULL, "a button no row carries names nothing");
+
+    // A set is a folder of files named after binding tokens, so every token the
+    // keyboard defaults bind must have a picture. Read from the source tree,
+    // which is what the build copies.
+    S32 missing = 0;
+    char first[64] = "";
+    for (S32 i = 0; i < kPadBindButtonCount; i++)
+    {
+        const char* key = iPadKeyboardBoundInput(kPadBindButtons[i].mask);
+        if (key == NULL)
+        {
+            continue;
+        }
+
+        char path[768];
+        snprintf(path, sizeof(path), "%s/src/SB/Core/pc/res/buttons/keyboard/%s.png",
+                 BFBB_SOURCE_DIR, key);
+        if (!iHostPathExists(path))
+        {
+            if (missing++ == 0)
+            {
+                snprintf(first, sizeof(first), "%s", key);
+            }
+        }
+    }
+    if (missing != 0)
+    {
+        printf("  (%d bound key(s) have no picture, first is '%s' -- run tools/keyglyphs.py)\n",
+               (int)missing, first);
+    }
+    check(missing == 0, "every key the defaults bind has a picture in buttons/keyboard");
+#else
+    check(true, "no keyboard in this build");
+#endif
+}
+
+// Two sources turn the camera at once, and it sees the sum. A source that is
+// not steering contributes nothing.
+static void test_camera_look()
+{
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, FALSE);
+    iCameraLookSetActive(iCAMERALOOK_MOUSE, FALSE);
+    check(!iCameraLookActive(), "no source, no orbit");
+
+    iCameraLookSetActive(iCAMERALOOK_MOUSE, TRUE);
+    check(iCameraLookActive(), "one source is enough");
+
+    iCameraLookSet(iCAMERALOOK_TOUCH, 1.0f, 1.0f);
+    iCameraLookSet(iCAMERALOOK_MOUSE, 0.25f, -0.5f);
+    check(iCameraLookYaw() == 0.25f, "an inactive source adds nothing");
+    check(iCameraLookPitch() == -0.5f, "on either axis");
+
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, TRUE);
+    iCameraLookSet(iCAMERALOOK_TOUCH, 1.0f, 0.0f);
+    iCameraLookSet(iCAMERALOOK_MOUSE, 0.5f, 0.0f);
+    check(iCameraLookYaw() == 1.5f, "two sources add");
+    check(iCameraLookYaw() == 0.0f, "and a read consumes them");
+
+    iCameraLookSetActive(iCAMERALOOK_TOUCH, FALSE);
+    iCameraLookSetActive(iCAMERALOOK_MOUSE, FALSE);
+}
+
 // Where each set prints the face buttons. This is what a prompt falls back on
 // when there is no binding to ask -- nobody on a pad, or a button chorded --
 // and getting it wrong draws the button beside the one that acts.
@@ -2528,6 +3536,32 @@ static void test_pad_stick_deadzone()
     iPadStickSetDeadzone(-1.0f);
     check(iPadStickDeadzone(IPAD_STICK_DEADZONE_LEFT) == IPAD_STICK_DEADZONE_LEFT,
           "and it goes back to auto");
+
+    // input.sticks and input.invert_camera_*. The move stick reads (1, 2) and
+    // the camera stick (3, 4) going in.
+    F32 mx = 1.0f, my = 2.0f, cx = 3.0f, cy = 4.0f;
+    iPadStickSwap(&mx, &my, &cx, &cy);
+    iPadStickInvertCamera(&cx, &cy);
+    check(mx == 1.0f && my == 2.0f && cx == 3.0f && cy == 4.0f, "the defaults change nothing");
+
+    iPadStickSetInvert(TRUE, FALSE);
+    iPadStickInvertCamera(&cx, &cy);
+    check(cx == -3.0f && cy == 4.0f, "invert x reverses the camera's x alone");
+
+    cx = 3.0f;
+    iPadStickSetInvert(FALSE, TRUE);
+    iPadStickInvertCamera(&cx, &cy);
+    check(cx == 3.0f && cy == -4.0f, "invert y reverses the camera's y alone");
+
+    mx = 1.0f, my = 2.0f, cx = 3.0f, cy = 4.0f;
+    iPadStickSetSwap(TRUE);
+    iPadStickSwap(&mx, &my, &cx, &cy);
+    iPadStickInvertCamera(&cx, &cy);
+    check(mx == 3.0f && my == 4.0f && cx == 1.0f && cy == -2.0f,
+          "swapped, the right stick moves and the left stick's y is the inverted one");
+
+    iPadStickSetSwap(FALSE);
+    iPadStickSetInvert(FALSE, FALSE);
 }
 
 // The button bits, restated rather than included from xPad.h -- the same
@@ -2945,6 +3979,8 @@ static void test_pad()
     test_pad_stick_deadzone();
     test_pad_layout();
     test_pad_face_glyphs();
+    test_pad_keyboard_glyphs();
+    test_camera_look();
     test_pad_stick_shape();
 
     iPadHostExit();
@@ -3215,6 +4251,12 @@ F32 xVec3Normalize(xVec3* o, const xVec3* v)
 
 void xSndInternalUpdateVoicePos(xSndVoiceInfo*)
 {
+}
+
+// zEnt.h's weak xSndPlay3D overload, which zGlobals.h brings in, calls this one.
+U32 xSndPlay3D(U32, F32, F32, U32, U32, const xVec3*, F32, F32, sound_category, F32)
+{
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -3571,6 +4613,147 @@ static void test_snd_data()
 
     iSndDataRelease(sFakePkgAsset);
     iSndDataReset();
+
+    // GameCube DSP ADPCM. Coefficient pair 1 is (1.0, 0), so each sample is
+    // the last plus nibble * scale. The frames are the ones test_snd_dsp
+    // decodes; here they come through the cache, once bare and once behind the
+    // big-endian header copy a cutscene sound carries.
+    iSndDspHeader dsp;
+    memset(&dsp, 0, sizeof(dsp));
+    dsp.num_samples = 16;
+    dsp.num_nibbles = 2 * 16 + 2;
+    dsp.sample_rate = 22050;
+    dsp.coef[2] = 2048;
+
+    const U8 frames[16] = { 0x11, 0x12, 0x34, 0x5F, 0, 0, 0, 0, 0x00, 0x7F, 0, 0, 0, 0, 0, 0 };
+
+    for (S32 headed = 0; headed < 2; headed++)
+    {
+        snprintf(path, sizeof(path), "%s/dsp.HOP", dir);
+        f = fopen(path, "wb");
+        check(f != NULL, "the DSP ADPCM package could be created");
+        if (f == NULL)
+        {
+            return;
+        }
+
+        U8 head[ISNDDSP_HEADER_SIZE];
+        memset(head, 0, sizeof(head));
+        putBE32(head + 0x0, dsp.num_samples);
+        putBE32(head + 0x4, dsp.num_nibbles);
+        putBE32(head + 0x8, dsp.sample_rate);
+        if (headed)
+        {
+            fwrite(head, 1, sizeof(head), f);
+        }
+        fwrite(frames, 1, sizeof(frames), f);
+        fclose(f);
+
+        snprintf(sFakePkgName, sizeof(sFakePkgName), "dsp.HOP");
+        sFakePkgAsset = 0x0D5B0000 + headed;
+        sFakePkgOffset = 0;
+        sFakePkgSize = (U32)sizeof(frames) + (headed ? ISNDDSP_HEADER_SIZE : 0);
+
+        iSndDataFormat gc;
+        gc.format_tag = ISNDDATA_FORMAT_GC_DSPADPCM;
+        gc.channels = 1;
+        gc.block_align = ISNDDSP_FRAME_BYTES;
+        gc.dsp = &dsp;
+
+        U32 gbytes = 0;
+        const S16* g = (const S16*)iSndDataAcquire(sFakePkgAsset, &gc, &gbytes, NULL);
+
+        check(g != NULL,
+              headed ? "a cutscene's DSP ADPCM sound decodes" : "a DSP ADPCM sound decodes");
+        check(gbytes == 16 * sizeof(S16), "to num_samples 16-bit samples");
+        if (g != NULL)
+        {
+            check(g[0] == 2 && g[4] == 30 && g[5] == 28 && g[13] == 28 && g[14] == 7 && g[15] == -1,
+                  headed ? "from past its header copy" : "with the table's coefficients");
+        }
+
+        iSndDataRelease(sFakePkgAsset);
+        iSndDataReset();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GameCube DSP ADPCM
+
+static void test_snd_dsp()
+{
+    printf("iSndDsp\n");
+
+    check(iSndDspNibbleToSample(2) == 0 && iSndDspNibbleToSample(15) == 13 &&
+              iSndDspNibbleToSample(18) == 14 && iSndDspNibbleToSample(34) == 28,
+          "a nibble address skips each frame's two header nibbles");
+    check(iSndDspBytesFor(0) == 0 && iSndDspBytesFor(14) == 8 && iSndDspBytesFor(15) == 16,
+          "fourteen samples to an eight-byte frame");
+
+    iSndDspHeader h;
+    memset(&h, 0, sizeof(h));
+    h.num_samples = 16;
+    h.coef[2] = 2048; // pair 1: hist1 * 1.0
+    h.coef[3] = 0;
+
+    // Frame 0: pair 1, scale 2, nibbles 1 2 3 4 5 -1 then zeros, high nibble
+    // first. Frame 1: pair 0 (both coefficients 0), scale 1, nibbles 7 -1.
+    const U8 frames[16] = { 0x11, 0x12, 0x34, 0x5F, 0, 0, 0, 0, 0x00, 0x7F, 0, 0, 0, 0, 0, 0 };
+    S16 out[24];
+
+    check(iSndDspDecode(frames, sizeof(frames), &h, out) == 16, "two frames give 16 samples");
+    check(out[0] == 2 && out[1] == 6 && out[2] == 12 && out[3] == 20 && out[4] == 30,
+          "each sample is the last plus nibble * scale under (1.0, 0)");
+    check(out[5] == 28 && out[13] == 28, "a negative nibble steps down; zeros hold");
+    check(out[14] == 7 && out[15] == -1, "pair 0 ignores the history, and rounds toward -inf");
+
+    h.yn1 = 100;
+    iSndDspDecode(frames, sizeof(frames), &h, out);
+    check(out[0] == 102, "the header's yn1 seeds the history");
+    h.yn1 = 0;
+
+    // A frame cut short decodes as far as its bytes go, and the rest of
+    // num_samples is silence.
+    h.num_samples = 20;
+    memset(out, 0x55, sizeof(out));
+    check(iSndDspDecode(frames, 10, &h, out) == 16, "a two-byte last frame gives two samples");
+    check(out[14] == 7 && out[15] == -1 && out[16] == 0 && out[19] == 0,
+          "and what the data does not reach is silence");
+
+    // Scale 2^12, nibble 7, twice: 28672 then 57344, which clamps.
+    const U8 loud[8] = { 0x1C, 0x77, 0, 0, 0, 0, 0, 0 };
+    h.num_samples = 2;
+    iSndDspDecode(loud, sizeof(loud), &h, out);
+    check(out[0] == 28672 && out[1] == 32767, "a sample past 16 bits clamps");
+
+    U8 asset[ISNDDSP_HEADER_SIZE + 8];
+    memset(asset, 0, sizeof(asset));
+    h.num_samples = 14;
+    h.num_nibbles = 16;
+    h.sample_rate = 32000;
+    putBE32(asset + 0x0, 14);
+    putBE32(asset + 0x4, 16);
+    putBE32(asset + 0x8, 32000);
+    check(iSndDspDataOffset(asset, sizeof(asset), &h) == ISNDDSP_HEADER_SIZE,
+          "a sound that starts with its own header is read past it");
+    putBE32(asset + 0x8, 22050);
+    check(iSndDspDataOffset(asset, sizeof(asset), &h) == 0, "and one that does not, from byte 0");
+
+    // iSndDspSwapHeader: the u32s, the u16s and the coefficients.
+    U8 be[ISNDDSP_HEADER_SIZE];
+    memset(be, 0, sizeof(be));
+    putBE32(be + 0x00, 0x00123456);
+    putBE16(be + 0x0C, 1);
+    putBE32(be + 0x10, 2);
+    putBE16(be + 0x1C, 0xF800);
+    putBE16(be + 0x3E, 0x0047);
+    putBE16(be + 0x48, 0xFFFE);
+    iSndDspSwapHeader(be);
+    iSndDspHeader sw;
+    memcpy(&sw, be, sizeof(sw));
+    check(sw.num_samples == 0x00123456 && sw.loop_flag == 1 && sw.loop_start == 2 &&
+              sw.coef[0] == -2048 && sw.pred_scale == 0x47 && sw.loop_yn2 == -2,
+          "a big-endian header swaps field by field");
 }
 
 // ---------------------------------------------------------------------------
@@ -4437,6 +5620,45 @@ static void test_snd()
         iSndStop(0x4400 + pass);
     }
 
+    // A GameCube table, as iGCSwap leaves it: host byte order, total_size
+    // stamped, 0x64-byte entries that are the DSPADPCM header and an id. One
+    // sound, one stream, one cutscene sound.
+    static U32 gcTable[(0x10 + 3 * 0x64) / 4];
+    memset(gcTable, 0, sizeof(gcTable));
+    gcTable[0] = 1;
+    gcTable[1] = IGCSWAP_SNDI_GAMECUBE;
+    gcTable[2] = 1;
+    gcTable[3] = 1;
+    const U32 gcIds[3] = { 0x33333333, 0x44444444, 0x55555555 };
+    for (U32 i = 0; i < 3; i++)
+    {
+        iSndDspHeader h;
+        memset(&h, 0, sizeof(h));
+        h.num_samples = 3200 * (i + 1);
+        h.sample_rate = 16000 * (i + 1);
+        h.loop_start = 2;
+        memcpy((U8*)gcTable + 0x10 + i * 0x64, &h, sizeof(h));
+        memcpy((U8*)gcTable + 0x10 + i * 0x64 + 0x60, &gcIds[i], 4);
+    }
+
+    check(iSndLoadSounds(gcTable) == 1, "iSndLoadSounds accepts a GameCube table");
+
+    test_lookup* g0 = (test_lookup*)iSndLookup(gcIds[0]);
+    check(g0 != NULL && g0->num_samples == 3200 && g0->sample_rate == 16000 && g0->ID >= 0x1000,
+          "a GameCube sound looks up with its own length and rate, as a sound");
+    test_lookup* g1 = (test_lookup*)iSndLookup(gcIds[1]);
+    check(g1 != NULL && g1->num_samples == 6400 && g1->sample_rate == 32000 && g1->ID > 0 &&
+              g1->ID < 0x1000,
+          "a GameCube stream looks up as a stream");
+    test_lookup* g2 = (test_lookup*)iSndLookup(gcIds[2]);
+    check(g2 != NULL && g2->num_samples == 9600 && g2->ID < 0x1000,
+          "and a cutscene sound past both, also in the stream range");
+    check(iSndLookup(SND_ASSET) != NULL, "the Xbox table below it still answers");
+
+    iSndSceneExit();
+    check(iSndLookup(gcIds[0]) == NULL && iSndLookup(SND_ASSET) != NULL,
+          "a scene ending pops the GameCube table and leaves the one below");
+
     iSndExit();
     iHostSetEnv("BFBB_AUDIO", NULL);
 }
@@ -5195,9 +6417,16 @@ int main()
     test_mem();
     test_file();
     test_file_mod();
+    test_mod_folder();
+    test_mods_model();
+    test_save_file();
+    test_saves_model();
+    test_gcswap();
+    test_gcmem();
     test_idtag();
     test_pad();
     test_savegame();
+    test_snd_dsp();
     test_snd_data();
     test_soundtrack();
 #ifdef BFBB_AUDIO_BACKEND_SDL

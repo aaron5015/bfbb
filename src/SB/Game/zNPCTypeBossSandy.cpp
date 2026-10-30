@@ -1,3 +1,7 @@
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
+
 #include "xVec3Inlines.h"
 #include <types.h>
 
@@ -75,7 +79,7 @@ static F32 sElbowDropTimer;
 static F32 sChaseTimer;
 static S32 sNumAttacks;
 static S32 sDidClothesline;
-static volatile F32 sElbowDropThreshold;
+static F32 sElbowDropThreshold;
 static zNPCBSandy* sSandyPtr;
 static xVec3* sCamSubTarget;
 static F32 sCurrYaw;
@@ -111,12 +115,12 @@ static xVec3 sBoneOffset[13] = { {},
                                  { 0.0f, -0.6f, 0.3f },
                                  {},
                                  { 0.0f, -0.6f, 0.3f } };
-static char* sNFSoundLabel[30] = {
-    "FAB1006", "FAB1007",   "FAB1008",   "FAB1009", "FAB1010", "FAB1011", "FAB1012", "FAB1013",
-    "FAB1014", "FAB1015",   "FAB1016",   "FAB1017", "FAB1018", "FAB1019", "FAB1020", "FAB1021",
-    "FAB1022", "FAB1023",   "FAB1024",   "FAB1025", "FAB1026", "FAB1027", "FAB1028", "FAB1029",
-    "FAB1030", "FAB1031",   "FAB1032",   "FAB1041_a", "FAB1041_b", "FAB1065"
-};
+static char* sNFSoundLabel[30] = { "FAB1006", "FAB1007", "FAB1008",   "FAB1009",   "FAB1010",
+                                   "FAB1011", "FAB1012", "FAB1013",   "FAB1014",   "FAB1015",
+                                   "FAB1016", "FAB1017", "FAB1018",   "FAB1019",   "FAB1020",
+                                   "FAB1021", "FAB1022", "FAB1023",   "FAB1024",   "FAB1025",
+                                   "FAB1026", "FAB1027", "FAB1028",   "FAB1029",   "FAB1030",
+                                   "FAB1031", "FAB1032", "FAB1041_a", "FAB1041_b", "FAB1065" };
 
 static void on_change_newsfish(const tweak_info& tweak);
 void on_change_shockwave(const tweak_info& tweak);
@@ -266,7 +270,7 @@ U32 HeadIsCarried(xAnimTransition*, xAnimSingle*, void*)
 
 U32 HeadNotCarried(xAnimTransition*, xAnimSingle*, void*)
 {
-    return !(globals.player.carry.grabbed == sSandyPtr->headBoulder);
+    return globals.player.carry.grabbed != sSandyPtr->headBoulder;
 }
 
 U32 HeadIsShocked(xAnimTransition*, xAnimSingle*, void*)
@@ -416,8 +420,8 @@ void zNPCBSandy::Init(xEntAsset* asset)
         objName[10]++;
         if (objName[10] > '9')
         {
-            objName[10] = '0';
             objName[9]++;
+            objName[10] = '0';
         }
     }
 
@@ -428,18 +432,15 @@ void zNPCBSandy::Init(xEntAsset* asset)
     this->curveNodeG = colorPicker ? 1.0f : 0.0f;
     this->curveNodeB = colorPicker ? 1.0f : 0.0f;
 
-    this->curveNode[0].time = 0.0f;
-    this->curveNode[0].scale = 1.0f;
-    this->curveNode[0].color.r = (U8)(255.0f * this->curveNodeR);
-    this->curveNode[0].color.g = (U8)(255.0f * this->curveNodeG);
-    this->curveNode[0].color.b = (U8)(255.0f * this->curveNodeB);
-    this->curveNode[0].color.a = 0xff;
-    this->curveNode[1].time = 1.0f;
-    this->curveNode[1].scale = 1.0f;
-    this->curveNode[1].color.r = (U8)(255.0f * this->curveNodeR);
-    this->curveNode[1].color.g = (U8)(255.0f * this->curveNodeG);
-    this->curveNode[1].color.b = (U8)(255.0f * this->curveNodeB);
-    this->curveNode[1].color.a = 0xff;
+    for (i = 0; i < 2; i++)
+    {
+        this->curveNode[i].time = i;
+        this->curveNode[i].scale = 1.0f;
+        this->curveNode[i].color.r = (U8)(255.0f * this->curveNodeR);
+        this->curveNode[i].color.g = (U8)(255.0f * this->curveNodeG);
+        this->curveNode[i].color.b = (U8)(255.0f * this->curveNodeB);
+        this->curveNode[i].color.a = 0xff;
+    }
     this->curveNodeAlpha = 1.0f;
     this->laserShow.set_curve(&this->curveNode[0], 0x6);
     this->laserShow.cfg.life_time = 0.5f;
@@ -486,14 +487,18 @@ void zNPCBSandy::Init(xEntAsset* asset)
     this->shockwaveGrowthRate = 20.0f;
     this->shockwaveMaxRadius = 10.0f;
 
-    xDebugAddTweak("NPC|zNPCBSandy|Shockwave|GrowthRate", &this->shockwaveGrowthRate, 0.0f, 1000000000.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|Shockwave|MaxRadius", &this->shockwaveMaxRadius, 0.0f, 1000000000.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|Shockwave|GrowthRate", &this->shockwaveGrowthRate, 0.0f,
+                   1000000000.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|Shockwave|MaxRadius", &this->shockwaveMaxRadius, 0.0f,
+                   1000000000.0f, 0, 0, 0);
 
     this->edropShockwaveTime = 2.25f;
     this->edropTurnMinTime = 1.0f;
 
-    xDebugAddTweak("NPC|zNPCBSandy|ElbowDrop|ShockwaveTime", &this->edropShockwaveTime, 0.0f, 1000000000.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|ElbowDrop|TurnTime", &this->edropTurnMinTime, 0.0f, 1000000000.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|ElbowDrop|ShockwaveTime", &this->edropShockwaveTime, 0.0f,
+                   1000000000.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|ElbowDrop|TurnTime", &this->edropTurnMinTime, 0.0f,
+                   1000000000.0f, 0, 0, 0);
 }
 
 void zNPCBSandy::Setup()
@@ -645,25 +650,36 @@ void zNPCBSandy::Reset()
     this->headBoulder->localCenter.y = 0.036f;
     this->headBoulder->localCenter.z = 0.11f;
 
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|radius", &this->headBoulder->bound.sph.r, 0.1f, 10.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|center|x", &this->headBoulder->bound.sph.center.x, -10.0f, 10.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|center|y", &this->headBoulder->bound.sph.center.y, -10.0f, 10.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|center|z", &this->headBoulder->bound.sph.center.z, -10.0f, 10.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|localCener|x", &this->headBoulder->localCenter.x, -10.0f, 10.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|localCener|y", &this->headBoulder->localCenter.y, -10.0f, 10.0f, 0, 0, 0);
-    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|localCener|z", &this->headBoulder->localCenter.z, -10.0f, 10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|radius", &this->headBoulder->bound.sph.r, 0.1f,
+                   10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|center|x", &this->headBoulder->bound.sph.center.x,
+                   -10.0f, 10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|center|y", &this->headBoulder->bound.sph.center.y,
+                   -10.0f, 10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|center|z", &this->headBoulder->bound.sph.center.z,
+                   -10.0f, 10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|localCener|x", &this->headBoulder->localCenter.x,
+                   -10.0f, 10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|localCener|y", &this->headBoulder->localCenter.y,
+                   -10.0f, 10.0f, 0, 0, 0);
+    xDebugAddTweak("NPC|zNPCBSandy|headBoulder|localCener|z", &this->headBoulder->localCenter.z,
+                   -10.0f, 10.0f, 0, 0, 0);
 
     this->hangingScoreboard = (xEnt*)zSceneFindObject(xStrHash("SO_SCOREBOARD"));
     this->bustedScoreboard = (xEnt*)zSceneFindObject(xStrHash("SCOREBOARD_BUSTED"));
     this->crashedScoreboard = (xEnt*)zSceneFindObject(xStrHash("SCOREBOARD_HAZARD"));
 
     ((zEntSimpleObj*)this->crashedScoreboard)->sflags |= 0x8;
+#if !defined(PS2)
     this->crashedScoreboard->model->PipeFlags &= ~0xc;
     this->crashedScoreboard->model->PipeFlags |= 0x4;
+#endif
 
     this->scoreboardShrap = (zShrapnelAsset*)xSTFindAsset(xStrHash("pdome_scoreboard_shrapnel"), 0);
-    this->sboardSecondShrap = (zShrapnelAsset*)xSTFindAsset(xStrHash("pdome_scoreboard_secondary_shrapnel"), 0);
-    this->sboardThirdShrap = (zShrapnelAsset*)xSTFindAsset(xStrHash("pdome_scoreboard_tertiary_shrapnel"), 0);
+    this->sboardSecondShrap =
+        (zShrapnelAsset*)xSTFindAsset(xStrHash("pdome_scoreboard_secondary_shrapnel"), 0);
+    this->sboardThirdShrap =
+        (zShrapnelAsset*)xSTFindAsset(xStrHash("pdome_scoreboard_tertiary_shrapnel"), 0);
     this->lightRigShrap = (zShrapnelAsset*)xSTFindAsset(xStrHash("pdome_scaffolding_shrapnel"), 0);
     this->lightRig[0] = (xEnt*)zSceneFindObject(xStrHash("SO_LIGHTRIG01"));
     this->lightRig[1] = (xEnt*)zSceneFindObject(xStrHash("SO_LIGHTRIG010"));
@@ -731,8 +747,10 @@ void zNPCBSandy::Reset()
             objName[7] = '0' + (char)j;
 
             this->ropeObject[i][j] = (xEnt*)zSceneFindObject(xStrHash(objName));
+#if !defined(PS2)
             this->ropeObject[i][j]->model->PipeFlags &= ~0xc;
             this->ropeObject[i][j]->model->PipeFlags |= 0x4;
+#endif
 
             xAnimState* state = this->ropeObject[i][j]->model->Anim->Table->StateList;
             while (state)
@@ -754,14 +772,18 @@ void zNPCBSandy::Reset()
         objName[5] = '0' + (char)i;
 
         this->ropeObjectLo[i] = (xEnt*)zSceneFindObject(xStrHash(objName));
+#if !defined(PS2)
         this->ropeObjectLo[i]->model->PipeFlags &= ~0xc;
         this->ropeObjectLo[i]->model->PipeFlags |= 0x4;
+#endif
     }
 
     this->ropeSb = this->ropeObjectLo[4];
     this->ropeSbDamaged = (xEnt*)zSceneFindObject(xStrHash("ROPE_4_LO_DAMAGED"));
+#if !defined(PS2)
     this->ropeSbDamaged->model->PipeFlags &= ~0xc;
     this->ropeSbDamaged->model->PipeFlags |= 0x4;
+#endif
 
     strcpy(objName, "TURNBUCKLE_OBJ_00");
     for (i = 0; i < 8; i++)
@@ -769,14 +791,17 @@ void zNPCBSandy::Reset()
         objName[16] = '0' + (char)i;
 
         this->turnbuckle[i] = (xEnt*)zSceneFindObject(xStrHash(objName));
+#if !defined(PS2)
         this->turnbuckle[i]->model->PipeFlags &= ~0xc;
         this->turnbuckle[i]->model->PipeFlags |= 0x4;
+#endif
     }
 
     sRadiusOfRing = 0.0f;
     for (i = 0; i < 4; i++)
     {
-        xVec3Sub(&endPnt, &this->bouncePoint[i], &this->bouncePoint[i + 4]);
+        j = i + 4;
+        xVec3Sub(&endPnt, &this->bouncePoint[i], &this->bouncePoint[j]);
         sRadiusOfRing = 0.125f * xVec3Length(&endPnt) + sRadiusOfRing;
     }
 
@@ -1137,9 +1162,9 @@ static void zNPCBSandy_BossDamageEffect(xModelInstance* minst, U32 turnOff)
             return;
         }
 
-        j = 0;
         minst = BDErecord[i].BDEminst;
         BDErecord[i].BDEtimer = 0.0f;
+        j = 0;
 
         while (minst != NULL)
         {
@@ -1166,9 +1191,9 @@ static void zNPCBSandy_BossDamageEffect(xModelInstance* minst, U32 turnOff)
             return;
         }
 
-        j = 0;
         BDErecord[i].BDEminst = minst;
         BDErecord[i].BDEtimer = 3.0f;
+        j = 0;
 
         while (minst != NULL)
         {
@@ -1275,7 +1300,7 @@ void zNPCBSandy::Render()
         RwRenderStateSet(rwRENDERSTATETEXTURERASTER, this->targetRaster);
 
         xVec3Copy((xVec3*)&mat.pos, &this->targetPos);
-        xVec3Copy((xVec3*)&mat.at, (xVec3*)&globals.camera.mat.at);
+        xVec3Copy((xVec3*)&mat.at, &globals.camera.mat.at);
 
         mat.at.y = 0.0f;
 
@@ -1340,15 +1365,24 @@ void zNPCBSandy::InitFX()
     this->maxLightningWait[0] = 1.0f;
     this->maxLightningWait[1] = 1.0f;
 
-    xMat4x3Copy((xMat4x3*)&this->sparkTransform[0][0], (xMat4x3*)this->hangingScoreboard->model->Mat);
-    xMat4x3Copy((xMat4x3*)&this->sparkTransform[0][1], (xMat4x3*)this->hangingScoreboard->model->Mat);
-    xMat4x3Copy((xMat4x3*)&this->sparkTransform[1][0], (xMat4x3*)this->crashedScoreboard->model->Mat);
-    xVec3SMul((xVec3*)&this->sparkTransform[1][1], (xVec3*)this->crashedScoreboard->model->Mat, 0.8f);
-    xVec3SMul((xVec3*)&this->sparkTransform[1][1].up, (xVec3*)&this->crashedScoreboard->model->Mat->at, -0.8f);
-    xVec3SMul((xVec3*)&this->sparkTransform[1][1].at, (xVec3*)&this->crashedScoreboard->model->Mat->up, 0.8f);
-    xVec3Copy((xVec3*)&this->sparkTransform[1][1].pos, (xVec3*)&this->crashedScoreboard->model->Mat->pos);
-    xVec3AddScaled((xVec3*)&this->sparkTransform[1][1].pos, (xVec3*)&this->crashedScoreboard->model->Mat->up, 4.5f);
-    xVec3AddScaled((xVec3*)&this->sparkTransform[1][1].pos, (xVec3*)&this->crashedScoreboard->model->Mat->at, 5.0f);
+    xMat4x3Copy((xMat4x3*)&this->sparkTransform[0][0],
+                (xMat4x3*)this->hangingScoreboard->model->Mat);
+    xMat4x3Copy((xMat4x3*)&this->sparkTransform[0][1],
+                (xMat4x3*)this->hangingScoreboard->model->Mat);
+    xMat4x3Copy((xMat4x3*)&this->sparkTransform[1][0],
+                (xMat4x3*)this->crashedScoreboard->model->Mat);
+    xVec3SMul((xVec3*)&this->sparkTransform[1][1], (xVec3*)this->crashedScoreboard->model->Mat,
+              0.8f);
+    xVec3SMul((xVec3*)&this->sparkTransform[1][1].up,
+              (xVec3*)&this->crashedScoreboard->model->Mat->at, -0.8f);
+    xVec3SMul((xVec3*)&this->sparkTransform[1][1].at,
+              (xVec3*)&this->crashedScoreboard->model->Mat->up, 0.8f);
+    xVec3Copy((xVec3*)&this->sparkTransform[1][1].pos,
+              (xVec3*)&this->crashedScoreboard->model->Mat->pos);
+    xVec3AddScaled((xVec3*)&this->sparkTransform[1][1].pos,
+                   (xVec3*)&this->crashedScoreboard->model->Mat->up, 4.5f);
+    xVec3AddScaled((xVec3*)&this->sparkTransform[1][1].pos,
+                   (xVec3*)&this->crashedScoreboard->model->Mat->at, 5.0f);
     xVec3Init((xVec3*)&this->endPoints[0][0], -2.0f, 2.0f, 0.0f);
     xVec3Init((xVec3*)&this->endPoints[0][1], 2.0f, 2.0f, 0.0f);
 
@@ -1832,7 +1866,7 @@ void zNPCBSandy::Process(xScene* xscn, F32 dt)
         {
             this->edgeAlpha[i] = 1.0f;
 
-            xVec3Sub(&toEdge, (xVec3*)&globals.camera.mat.pos, &this->ringEdgeCenter[i]);
+            xVec3Sub(&toEdge, &globals.camera.mat.pos, &this->ringEdgeCenter[i]);
 
             if (xVec3Dot(&toEdge, &this->ropeNormal[i]) < 0.0f)
             {
@@ -2627,13 +2661,13 @@ static S32 idleCB(xGoal* rawgoal, void*, en_trantype* trantype, F32, void*)
     {
         if (length > 12.0f) // 12.0
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB3';
+            *trantype = GOAL_TRAN_SET;
         }
         else
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB4';
+            *trantype = GOAL_TRAN_SET;
         }
     }
 
@@ -2667,18 +2701,18 @@ static S32 tauntCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
     {
         if (globals.player.ControlOff)
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB1';
+            *trantype = GOAL_TRAN_SET;
         }
         else if (length > 12.0f) // 12.0
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB3';
+            *trantype = GOAL_TRAN_SET;
         }
         else
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB4';
+            *trantype = GOAL_TRAN_SET;
         }
     }
 
@@ -2730,43 +2764,43 @@ static S32 chaseCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
 
     if (globals.player.ControlOff)
     {
-        *trantype = GOAL_TRAN_SET;
         nextgoal = 'NGB1';
+        *trantype = GOAL_TRAN_SET;
     }
     else if (chase->timeInGoal > 0.30000001192092896f)
     {
         if (length < 12.0f)
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB4';
+            *trantype = GOAL_TRAN_SET;
         }
         else if (sChaseTimer > 2.5f)
         {
             if (sandy->round != 1 && sNumAttacks == 1)
             {
-                *trantype = GOAL_TRAN_SET;
                 nextgoal = 'NGB:';
+                *trantype = GOAL_TRAN_SET;
             }
             else if (sNumAttacks == 0)
             {
-                *trantype = GOAL_TRAN_SET;
                 nextgoal = 'NGB6';
+                *trantype = GOAL_TRAN_SET;
             }
             else if (sandy->round == 1 && sNumAttacks >= 1)
             {
-                *trantype = GOAL_TRAN_SET;
                 nextgoal = 'NGB7';
+                *trantype = GOAL_TRAN_SET;
             }
             else if (sandy->round != 1 && sNumAttacks >= 2)
             {
-                *trantype = GOAL_TRAN_SET;
                 nextgoal = 'NGB7';
+                *trantype = GOAL_TRAN_SET;
             }
         }
         else if (sandy->round == 1 && sNumAttacks == 1 && ringDistSq < 9.0f)
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB7';
+            *trantype = GOAL_TRAN_SET;
         }
     }
 
@@ -2778,8 +2812,7 @@ static S32 meleeCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
     zNPCGoalBossSandyMelee* melee = (zNPCGoalBossSandyMelee*)rawgoal;
     zNPCBSandy* sandy = (zNPCBSandy*)melee->psyche->clt_owner;
     S32 nextgoal = 0;
-    U32 idx;
-    U32 numHints;
+    U32 numWarnings;
     xVec3 tempVector;
     F32 length;
 
@@ -2793,8 +2826,8 @@ static S32 meleeCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
     {
         if (globals.player.ControlOff)
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB1';
+            *trantype = GOAL_TRAN_SET;
         }
         else if (sandy->bossFlags & 0x2)
         {
@@ -2804,8 +2837,8 @@ static S32 meleeCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
         }
         else if (length > 12.0f)
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB3';
+            *trantype = GOAL_TRAN_SET;
         }
         else
         {
@@ -2817,27 +2850,23 @@ static S32 meleeCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
 
     if (nextgoal == 'NGB2')
     {
-        numHints = sandy->nfFlags & 0x3;
+        numWarnings = sandy->nfFlags & 0x3;
 
-        if (numHints < 3 || (xrand() & 0x300) == 0)
+        if (numWarnings < 3 || (xrand() & 0x300) == 0)
         {
-            idx = 2;
-            if (numHints < 3)
-            {
-                idx = numHints;
-            }
+            numWarnings = (numWarnings < 3) ? numWarnings : 2;
 
             if (sandy->round == 2)
             {
-                sandy->newsfish->SpeakStart(sNFSoundValue[idx + 9], 0, 0xFFFFFFFF);
+                sandy->newsfish->SpeakStart(sNFSoundValue[numWarnings + 9], 0, 0xFFFFFFFF);
             }
             else
             {
-                sandy->newsfish->SpeakStart(sNFSoundValue[idx], 0, 0xFFFFFFFF);
+                sandy->newsfish->SpeakStart(sNFSoundValue[numWarnings], 0, 0xFFFFFFFF);
             }
 
             sandy->nfFlags &= ~0x3;
-            sandy->nfFlags |= idx + 1;
+            sandy->nfFlags |= numWarnings + 1;
         }
     }
 
@@ -2854,8 +2883,8 @@ static S32 noHeadCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
     {
         if (sandy->AnimTimeRemain(NULL) < 1.7000000476837158f * dt) // 1.7
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB1';
+            *trantype = GOAL_TRAN_SET;
         }
     }
 
@@ -2889,24 +2918,24 @@ static S32 elbowDropCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, voi
     {
         if (globals.player.ControlOff)
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB1';
+            *trantype = GOAL_TRAN_SET;
         }
         else if (sandy->bossFlags & 2)
         {
             sandy->bossFlags &= ~2; // clear bit 2
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB2';
+            *trantype = GOAL_TRAN_SET;
         }
         else if (length < 12.0f) // 12.0
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB4';
+            *trantype = GOAL_TRAN_SET;
         }
         else
         {
-            *trantype = GOAL_TRAN_SET;
             nextgoal = 'NGB3';
+            *trantype = GOAL_TRAN_SET;
         }
     }
 
@@ -2925,13 +2954,13 @@ static S32 leapCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
         {
             if (sandy->bossFlags & 2)
             {
-                *trantype = GOAL_TRAN_SET;
                 nextgoal = 'NGB9';
+                *trantype = GOAL_TRAN_SET;
             }
             else
             {
-                *trantype = GOAL_TRAN_SET;
                 nextgoal = 'NGB8';
+                *trantype = GOAL_TRAN_SET;
             }
         }
     }
@@ -2949,8 +2978,8 @@ static S32 sitCB(xGoal* rawgoal, void*, en_trantype* trantype, F32 dt, void*)
     {
         xSndPlay3D(xStrHash("B101_SC_headoff1"), 2.31f, 0.0f, 0x0, 0x0, sandy, 30.0f, SND_CAT_GAME,
                    0.0f);
-        *trantype = GOAL_TRAN_SET;
         nextgoal = 'NGB5';
+        *trantype = GOAL_TRAN_SET;
     }
     else if (sit->sitFlags & 0x1)
     {
@@ -3362,7 +3391,6 @@ S32 zNPCGoalBossSandyNoHead::Process(en_trantype* trantype, F32 dt, void* updCtx
 {
     zNPCBSandy* sandy = (zNPCBSandy*)psyche->clt_owner;
     U32 numHints;
-    U32 hintsGiven;
     xVec3 newAt;
     F32 lerpFactor;
     xMat4x3 boneMat;
@@ -3394,15 +3422,11 @@ S32 zNPCGoalBossSandyNoHead::Process(en_trantype* trantype, F32 dt, void* updCtx
 
             if ((sandy->nfFlags & 0x4) == 0 && (sandy->round == 2 || sandy->round == 3))
             {
-                hintsGiven = (sandy->nfFlags >> 3) & 3;
+                numHints = (sandy->nfFlags & 0x18) >> 3;
 
-                if (hintsGiven < 3 || (xrand() & 0x300) == 0)
+                if (numHints < 3 || (xrand() & 0x300) == 0)
                 {
-                    numHints = 2;
-                    if (hintsGiven < 3)
-                    {
-                        numHints = hintsGiven;
-                    }
+                    numHints = (numHints < 3) ? numHints : 2;
 
                     if (sandy->round == 2)
                     {
@@ -3508,8 +3532,7 @@ S32 zNPCGoalBossSandyNoHead::Process(en_trantype* trantype, F32 dt, void* updCtx
 
                 sandy->frame->mat.at.y = 0.0f;
                 xVec3Normalize(&sandy->frame->mat.at, &sandy->frame->mat.at);
-                xVec3Cross(&sandy->frame->mat.right, &sandy->frame->mat.up,
-                           &sandy->frame->mat.at);
+                xVec3Cross(&sandy->frame->mat.right, &sandy->frame->mat.up, &sandy->frame->mat.at);
 
                 sandy->frame->mat.pos.y = 0.0f;
 
@@ -3630,8 +3653,7 @@ S32 zNPCGoalBossSandyNoHead::Process(en_trantype* trantype, F32 dt, void* updCtx
 
             xVec3SMul((xVec3*)&sandy->headBoulder->model->Mat->pos, &sandy->pBoulder,
                       1.0f - lerpFactor);
-            xVec3AddScaled((xVec3*)&sandy->headBoulder->model->Mat->pos, &sandy->pHead,
-                           lerpFactor);
+            xVec3AddScaled((xVec3*)&sandy->headBoulder->model->Mat->pos, &sandy->pHead, lerpFactor);
         }
     }
 
@@ -3730,8 +3752,7 @@ S32 zNPCGoalBossSandyLeap::Enter(F32 dt, void* updCtxt)
 {
     zNPCBSandy* sandy = (zNPCBSandy*)psyche->clt_owner;
     xVec3 toRing;
-    F32 dist;
-    F32 mag;
+    F32 rad2;
 
     timeInGoal = 0.0f;
     stage = 0;
@@ -3744,15 +3765,24 @@ S32 zNPCGoalBossSandyLeap::Enter(F32 dt, void* updCtxt)
 
     if (sandy->round == 2)
     {
+#if defined(PS2)
+        F32 centerX = sandy->ringEdgeCenter[4].x;
+        toRing.x = endX - centerX;
+#else
         toRing.x = endX - sandy->ringEdgeCenter[4].x;
+#endif
         toRing.y = 0.0f;
         toRing.z = endZ - sandy->ringEdgeCenter[4].z;
 
-        dist = xVec3Length2(&toRing);
-        if (dist < 100.0f)
+        rad2 = xVec3Length2(&toRing);
+        if (rad2 < 100.0f)
         {
-            xVec3SMulBy(&toRing, 10.0f / xsqrt(dist));
+            xVec3SMulBy(&toRing, 10.0f / xsqrt(rad2));
+#if defined(PS2)
+            endX = toRing.x + centerX;
+#else
             endX = toRing.x + sandy->ringEdgeCenter[4].x;
+#endif
             endZ = toRing.z + sandy->ringEdgeCenter[4].z;
         }
     }
@@ -3763,12 +3793,12 @@ S32 zNPCGoalBossSandyLeap::Enter(F32 dt, void* updCtxt)
         endZ = 0.0f;
     }
 
-    mag = endX * endX + endZ * endZ;
-    if (mag > 100.0f)
+    rad2 = endX * endX + endZ * endZ;
+    if (rad2 > 100.0f)
     {
-        mag = 1.0f / xsqrt(mag);
-        endX = endX * (10.0f * mag);
-        endZ = endZ * (10.0f * mag);
+        rad2 = 1.0f / xsqrt(rad2);
+        endX = endX * (10.0f * rad2);
+        endZ = endZ * (10.0f * rad2);
     }
 
     startX = sandy->model->Mat->pos.x - endX;
@@ -3914,7 +3944,6 @@ S32 zNPCGoalBossSandyLeap::Exit(F32 dt, void* updCtxt)
 S32 zNPCGoalBossSandySit::Enter(F32 dt, void* updCtxt)
 {
     zNPCBSandy* sandy = (zNPCBSandy*)psyche->clt_owner;
-    U32 idx;
     U32 numHints;
 
     timeInGoal = 0.0f;
@@ -3924,20 +3953,16 @@ S32 zNPCGoalBossSandySit::Enter(F32 dt, void* updCtxt)
 
     if ((sandy->nfFlags & 0x4) == 0 && sandy->round == 1)
     {
-        numHints = (sandy->nfFlags >> 3) & 3;
+        numHints = (sandy->nfFlags & 0x18) >> 3;
 
         if (numHints < 3 || (xrand() & 0x300) == 0)
         {
-            idx = 2;
-            if (numHints < 3)
-            {
-                idx = numHints;
-            }
+            numHints = (numHints < 3) ? numHints : 2;
 
-            sandy->newsfish->SpeakStart(sNFSoundValue[idx + 3], 0, 0xFFFFFFFF);
+            sandy->newsfish->SpeakStart(sNFSoundValue[numHints + 3], 0, 0xFFFFFFFF);
 
             sandy->nfFlags &= ~0x18;
-            sandy->nfFlags |= (idx + 1) * 8;
+            sandy->nfFlags |= (numHints + 1) * 8;
         }
     }
 
@@ -3946,14 +3971,14 @@ S32 zNPCGoalBossSandySit::Enter(F32 dt, void* updCtxt)
 
 S32 zNPCGoalBossSandySit::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
 {
-    RwMatrix* bmat;
     zNPCBSandy* sandy = (zNPCBSandy*)psyche->clt_owner;
-    S32 inRing;
-    S32 numSpins;
-    S32 numHints;
     F32 popFactor;
+    S32 numSpins;
+    xVec3* pos;
+    S32 inRing;
     xVec3 boulderCenter;
     xVec3 shrapVel;
+    S32 numHints;
 
     timeInGoal += dt;
 
@@ -3989,8 +4014,8 @@ S32 zNPCGoalBossSandySit::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
         sandy->headBoulder->collis_chk = 0x20;
         sandy->headBoulder->collis_pen = 0x20;
 
-        xMat4x3Mul((xMat4x3*)sandy->headBoulder->model->Mat,
-                   (xMat4x3*)&sandy->model->Mat[sBone[1]], (xMat4x3*)sandy->model->Mat);
+        xMat4x3Mul((xMat4x3*)sandy->headBoulder->model->Mat, (xMat4x3*)&sandy->model->Mat[sBone[1]],
+                   (xMat4x3*)sandy->model->Mat);
         xMat3x3RMulVec(&boulderCenter, (xMat3x3*)sandy->headBoulder->model->Mat,
                        &sandy->headBoulder->localCenter);
         xVec3Copy(&sandy->headBoulder->bound.box.center, &sandy->boundList[1]->bound.box.center);
@@ -4086,10 +4111,9 @@ S32 zNPCGoalBossSandySit::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
                    0.0f);
         zEntEvent(sandy, sandy, eEventNPCHPDecremented);
 
-        bmat = sandy->headBoulder->model->Mat;
+        pos = (xVec3*)&sandy->headBoulder->model->Mat->pos;
 
-        inRing =
-            bmat->pos.x > -3.0f && bmat->pos.x < 3.0f && bmat->pos.z > -3.0f && bmat->pos.z < 3.0f;
+        inRing = pos->x > -3.0f && pos->x < 3.0f && pos->z > -3.0f && pos->z < 3.0f;
 
         if (inRing || (sandy->hitPoints == 6 && (sandy->hangingScoreboard->flags & 0x1)))
         {
@@ -4114,9 +4138,9 @@ S32 zNPCGoalBossSandySit::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
 
         if (!inRing)
         {
-            if (bmat->pos.x > bmat->pos.z)
+            if (pos->x > pos->z)
             {
-                if (bmat->pos.x < -bmat->pos.z)
+                if (pos->x < -pos->z)
                 {
                     sandy->lightRigShrap->initCB(sandy->lightRigShrap, sandy->lightRig[2]->model,
                                                  NULL, NULL);
@@ -4129,7 +4153,7 @@ S32 zNPCGoalBossSandySit::Process(en_trantype* trantype, F32 dt, void* updCtxt, 
             }
             else
             {
-                if (bmat->pos.x < -bmat->pos.z)
+                if (pos->x < -pos->z)
                 {
                     sandy->lightRigShrap->initCB(sandy->lightRigShrap, sandy->lightRig[0]->model,
                                                  NULL, NULL);
@@ -4388,7 +4412,7 @@ S32 zNPCGoalBossSandyClothesline::Enter(F32 dt, void* updCtxt)
 }
 
 S32 zNPCGoalBossSandyClothesline::Process(en_trantype* trantype, F32 dt, void* updCtxt,
-                                         xScene* xscn)
+                                          xScene* xscn)
 {
     zNPCBSandy* sandy = (zNPCBSandy*)psyche->clt_owner;
     U32 flip;
@@ -4674,14 +4698,11 @@ void xBinaryCamera::add_tweaks(char const*)
 {
 }
 
+#if !defined(PS2)
 void xBinaryCamera::set_targets(xVec3 const& par_1, xVec3 const& par_2, F32 par_3)
 {
     this->s1 = (xVec3*)(&par_1);
     this->s2 = (xVec3*)(&par_2);
     this->s2_radius = par_3;
 }
-
-S32 zNPCGoalBossSandyLeap::Name()
-{
-    return 0;
-}
+#endif

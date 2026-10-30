@@ -3,6 +3,8 @@
 #ifdef PLATFORM_PC
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "menu/iMenuMouse.h"
 #endif
 
 #include "zSaveLoad.h"
@@ -373,6 +375,12 @@ void zUIFont_Render(xEnt* e)
         }
     }
 
+#ifdef PLATFORM_PC
+    // Brighter under the menu pointer, for the hints it can click. See
+    // menu/iMenuMouse.h.
+    iMenuMouseTint(ent, &var_104.r, &var_104.g, &var_104.b);
+#endif
+
     if (!(ent->uiFlags & 0x4))
     {
         return;
@@ -385,8 +393,8 @@ void zUIFont_Render(xEnt* e)
         if (ent->uiFontFlags & 0x8)
         {
             iColor_tag c = xColorFromRGBA(a.bcolor[0], a.bcolor[1], a.bcolor[2], a.bcolor[3]);
-            basic_rect<F32> r = { NSCREENX(a.pos.x), NSCREENY(a.pos.y), NSCREENX(a.dim[0]),
-                                  NSCREENY(a.dim[1]) };
+            const basic_rect<F32> r = { NSCREENX(a.pos.x), NSCREENY(a.pos.y), NSCREENX(a.dim[0]),
+                                        NSCREENY(a.dim[1]) };
 
             render_fill_rect(r, c);
         }
@@ -457,7 +465,7 @@ F32 xtextbox::yextent(F32 max, S32& size, bool cache) const
     return yextent(max, size, temp_layout(cache), 0, -1);
 }
 
-#ifdef GAMECUBE
+#if defined(GAMECUBE) && !defined(PS2)
 __declspec(section ".sdata2") static F32 _930 = 0.5f;
 __declspec(section ".sdata2") static F64 _932_0 = 4.503599627370496e15;
 #endif

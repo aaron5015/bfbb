@@ -1,0 +1,8 @@
+# Jellyfish Rock (jf01) at 640x480 on Direct3D 9, booted straight into the scene.
+# The fly-through and Squidward's scene run until his talk box at 2400. B
+# leaves it; the shot is 120 frames later.
+
+wait 2400
+press b
+wait 120
+shot reg_jf01 0

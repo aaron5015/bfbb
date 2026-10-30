@@ -38,12 +38,22 @@ at load rather than ignored.
     mod                 Empty by default. A folder laid out like the asset
                         folder; a file in it is read instead of the asset
                         folder's file at the same relative path, in any case.
+                        Several folders separated by '|' are asked in order,
+                        and the first that has a file supplies it.
                         The asset folder is never written to. A .HIP or .HOP
                         whose PLAT is not the Xbox's is skipped with a message
-                        and the original is read. Each replaced file is logged
-                        once. `BFBB_MOD` overrides it. iModOverride in iFile.cpp.
+                        and the next mod, or the original, is read. Each
+                        replaced file is logged once. `BFBB_MOD` overrides it. iModOverride in iFile.cpp.
+                        A relative path is tried in the working directory,
+                        then beside the executable; bfbb_config installs mods
+                        to `mods/` there and writes `mods/<name>`. A mod.ini
+                        in the mod's root describes it in [mod] and sets
+                        config.ini settings in its other sections, without
+                        writing them to config.ini; the first mod to set a key
+                        wins. iModFolder.h.
                         Saves go to bfbb/mods/<folder name>/saves under the
-                        per-user data folder instead of bfbb/saves, unless
+                        per-user data folder instead of bfbb/saves, with the
+                        folder names joined by '+' for several mods, unless
                         `save_folder` or `BFBB_SAVE_DIR` names one.
 
     platform_wording    On by default. Rewrites the console out of the game's

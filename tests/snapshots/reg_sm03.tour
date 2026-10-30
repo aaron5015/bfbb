@@ -1,0 +1,8 @@
+# Flounder Hill (sm03) at 640x480 on Direct3D 9, booted straight into the scene.
+# The fly-through ends in Bubble Buddy's talk box by 720. B leaves it; the
+# shot is 120 frames later.
+
+wait 960
+press b
+wait 120
+shot reg_sm03 0

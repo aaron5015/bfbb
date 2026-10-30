@@ -2,7 +2,9 @@
 
 #include "xstransvc.h"
 
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <math.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
 #else
 #include <cmath>
@@ -65,10 +67,12 @@ F32 xJaw_EvalData(void* data, F32 time)
 
     numdata = *(S32*)data;
 
+#if !defined(PS2)
     if (numdata > (U32)0xFFFF)
     {
         swap(data);
     }
+#endif
 
     time *= 60.0f;
     idx = std::floorf(time);

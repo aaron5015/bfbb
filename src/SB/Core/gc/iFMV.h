@@ -10,6 +10,18 @@
 #include <stddef.h>
 #endif
 
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+enum
+{
+    FMV_SCREEN_HEIGHT = 528
+};
+#else
+enum
+{
+    FMV_SCREEN_HEIGHT = 480
+};
+#endif
+
 #ifdef __cplusplus
 
 struct _GXRenderModeObj;

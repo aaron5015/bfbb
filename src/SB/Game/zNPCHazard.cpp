@@ -1,4 +1,11 @@
 #include <stdio.h>
+
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+#define NPC_FRAME_TIME (1.0f / 50.0f)
+#else
+#define NPC_FRAME_TIME (1.0f / 60.0f)
+#endif
+
 #include "zNPCHazard.h"
 #include "zBuddy.h"
 
@@ -17,16 +24,18 @@
 #include "zRenderState.h"
 #include "zTF2Bridge.h"
 
+#if defined(PS2)
+#include "xstransvc.h"
+#include <rwim3d.h>
+#define FABS(x) xabs(x)
+#endif
+
 extern const xVec3 g_O3;
 
 // These structs were used in deadstripped functions.
 // This function is here to force the symbols to be linked.
 void __deadstripped_zNPCHazard()
 {
-    const char _446[0x0C] = {};
-    const char _447[0x0C] = {};
-    const char _451[0x0C] = {};
-
     const char _461[0x28] = {};
     const char _462[0x28] = {};
     const char _463[0x28] = {};
@@ -43,21 +52,36 @@ void __deadstripped_zNPCHazard()
 static RpAtomic* g_hazard_rawModel[30] = { NULL };
 
 static char* g_strz_hazModel[30] = {
-    "fx_boomball_bubble",       "fx_boomball_smoke",
-    "fx_fodbomb.dff",           "fx_tubelet_blast.dff",
-    "fx_duplotron_blast.dff",   "fx_cattleprod.dff",
-    "fx_proj_tartar.dff",       "fx_tartar_splat.dff",
-    "fx_steam.dff",             "fx_proj_missile.dff",
-    "fx_chuck_splish.dff",      "fx_chuck_splash.dff",
-    "fx_proj_bone.dff",         "fx_proj_slick_bubble.dff",
-    "fx_oil_puddle.dff",        "fx_oil_burst.dff",
-    "fx_oil_glob.dff",          "fx_proj_cloud.dff",
-    "frag_generic_wrench",      "frag_generic_joystick.dff",
-    "frag_generic_sink.dff",    "frag_generic_duck.dff",
-    "frag_generic_bra.dff",     "frag_generic_headphones.dff",
-    "frag_generic_cellphone.dff", "frag_generic_shoe.dff",
-    "fx_duplotron_blast.dff",   "fx_robobits.dff",
-    "fx_vissplash_wave.dff",    "fx_arfdog_nukem.dff",
+    "fx_boomball_bubble",
+    "fx_boomball_smoke",
+    "fx_fodbomb.dff",
+    "fx_tubelet_blast.dff",
+    "fx_duplotron_blast.dff",
+    "fx_cattleprod.dff",
+    "fx_proj_tartar.dff",
+    "fx_tartar_splat.dff",
+    "fx_steam.dff",
+    "fx_proj_missile.dff",
+    "fx_chuck_splish.dff",
+    "fx_chuck_splash.dff",
+    "fx_proj_bone.dff",
+    "fx_proj_slick_bubble.dff",
+    "fx_oil_puddle.dff",
+    "fx_oil_burst.dff",
+    "fx_oil_glob.dff",
+    "fx_proj_cloud.dff",
+    "frag_generic_wrench",
+    "frag_generic_joystick.dff",
+    "frag_generic_sink.dff",
+    "frag_generic_duck.dff",
+    "frag_generic_bra.dff",
+    "frag_generic_headphones.dff",
+    "frag_generic_cellphone.dff",
+    "frag_generic_shoe.dff",
+    "fx_duplotron_blast.dff",
+    "fx_robobits.dff",
+    "fx_vissplash_wave.dff",
+    "fx_arfdog_nukem.dff",
 };
 
 static U32 g_hash_hazanim[3] = { 0, 0, 0 };
@@ -66,11 +90,11 @@ static char* g_strz_hazanim[3] = { "Unknown", "Idle01", "Active01" };
 static NPCHazard* g_haz_uvAnimQue[27] = { NULL };
 
 static en_hazmodel g_haz_uvModelTypes[] = {
-    NPC_HAZMDL_CATTLEPROD,      NPC_HAZMDL_TARTARSTEAM,     NPC_HAZMDL_SLICKPROJ,
-    NPC_HAZMDL_SLICKPUDDLE,     NPC_HAZMDL_SLICKBURST,      NPC_HAZMDL_SLICKGLOB,
-    NPC_HAZMDL_TUBEBLAST,       NPC_HAZMDL_CHUCKSPLISH,     NPC_HAZMDL_CHUCKSPLASH,
-    NPC_HAZMDL_VISSPLASH,       NPC_HAZMDL_PUPPYNUKE,       NPC_HAZMDL_FODBOMB,
-    NPC_HAZMDL_BOOMBALL_BUBBLE, NPC_HAZMDL_BOOMBALL_SMOKE,  NPC_HAZMDL_FORCE,
+    NPC_HAZMDL_CATTLEPROD,      NPC_HAZMDL_TARTARSTEAM,    NPC_HAZMDL_SLICKPROJ,
+    NPC_HAZMDL_SLICKPUDDLE,     NPC_HAZMDL_SLICKBURST,     NPC_HAZMDL_SLICKGLOB,
+    NPC_HAZMDL_TUBEBLAST,       NPC_HAZMDL_CHUCKSPLISH,    NPC_HAZMDL_CHUCKSPLASH,
+    NPC_HAZMDL_VISSPLASH,       NPC_HAZMDL_PUPPYNUKE,      NPC_HAZMDL_FODBOMB,
+    NPC_HAZMDL_BOOMBALL_BUBBLE, NPC_HAZMDL_BOOMBALL_SMOKE, NPC_HAZMDL_FORCE,
 };
 
 static en_hazmodel g_funfrag_choices[8] = {
@@ -88,8 +112,8 @@ char* g_strz_hazshrap[5] = {
 static RwRaster* g_rast_hazshad[30] = { NULL };
 
 char* g_strz_hazshad[30] = {
-    "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-    "shadow_monsoon_cloud", "", "", "", "", "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "shadow_monsoon_cloud",
+    "", "", "", "", "", "", "", "", "", "", "", "",
 };
 
 static NPCHazard g_hazards[64] = { NPC_HAZ_UNKNOWN };
@@ -515,6 +539,9 @@ void zNPCCommon_Hazards_RenderAll(S32 doOpaqueStuff)
     zRenderState(rs_old);
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 NPCHazard* HAZ_Acquire()
 {
     NPCHazard* haz_found = NULL;
@@ -534,6 +561,9 @@ NPCHazard* HAZ_Acquire()
     }
     return haz_found;
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 S32 HAZ_AvailablePool()
 {
@@ -577,6 +607,17 @@ void NPCHazard::WipeIt()
 S32 NPCHazard::ConfigHelper(en_npchaz haztype)
 {
     S32 result = 1;
+    HAZBall* ball = &this->custdata.ball;
+
+    HAZShroom* shroom = &this->custdata.shroom;
+
+    HAZPatriot* patriot = &this->custdata.patriot;
+
+    HAZCloud* cloud = &this->custdata.cloud;
+
+    HAZTarTar* tartar = &this->custdata.tartar;
+
+    HAZCollide* hazcol = &this->custdata.collide;
 
     this->typ_hazard = haztype;
     this->SetBuddyTarget(NULL);
@@ -598,9 +639,9 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         this->uva_uvanim =
             this->GetUVAInfo(NPC_HAZMDL_BOOMBALL_BUBBLE, uv_scroll_eo.x, uv_scroll_eo.y);
         this->tmr_remain = 2.5f;
-        this->custdata.typical.rad_min = 0.1f;
-        this->custdata.typical.rad_max = 2.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.1f;
+        ball->rad_max = 2.0f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_EXPLODE_INNER:
@@ -615,9 +656,9 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         this->uva_uvanim =
             this->GetUVAInfo(NPC_HAZMDL_BOOMBALL_BUBBLE, uv_scroll_ei.x, uv_scroll_ei.y);
         this->tmr_remain = 2.0f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 1.5f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 1.5f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_FODBOMB:
@@ -634,9 +675,9 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         }
         this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_FODBOMB, uv_scroll_fb.x, uv_scroll_fb.y);
         this->tmr_remain = 0.4f;
-        this->custdata.typical.rad_min = 0.3f;
-        this->custdata.typical.rad_max = 2.75f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.3f;
+        ball->rad_max = 2.75f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_CATTLEPROD:
@@ -649,12 +690,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_CATTLEPROD, uv_scroll_cp.x, uv_scroll_cp.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_CATTLEPROD, uv_scroll_cp.x, uv_scroll_cp.y);
         this->tmr_remain = 0.2f;
-        this->custdata.typical.rad_min = 0.15f;
-        this->custdata.typical.rad_max = 0.5f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.15f;
+        ball->rad_max = 0.5f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_TUBELETBLAST:
@@ -669,12 +709,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_TUBEBLAST, uv_scroll_tb.x, uv_scroll_tb.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_TUBEBLAST, uv_scroll_tb.x, uv_scroll_tb.y);
         this->tmr_remain = 1.0f;
-        this->custdata.typical.rad_min = 0.25f;
-        this->custdata.typical.rad_max = 7.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.25f;
+        ball->rad_max = 7.0f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_PUPPYNUKE:
@@ -686,12 +725,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_PUPPYNUKE, uv_scroll_pn.x, uv_scroll_pn.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_PUPPYNUKE, uv_scroll_pn.x, uv_scroll_pn.y);
         this->tmr_remain = 0.3f;
-        this->custdata.typical.rad_min = 0.5f;
-        this->custdata.typical.rad_max = 2.5f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.5f;
+        ball->rad_max = 2.5f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_DUPLOBOOM:
@@ -704,13 +742,18 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             result = 0;
         }
         this->tmr_remain = 0.75f;
-        this->custdata.typical.rad_min = 1.0f;
-        this->custdata.typical.rad_max = 5.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 1.0f;
+        ball->rad_max = 5.0f;
+        ball->rad_cur = ball->rad_min;
 
-        ang_spin.x = 0.016666668f * ((xrand() & 0x800000) ? 3.1415927f : -0.78539819f);
+        ang_spin.x = NPC_FRAME_TIME * ((xrand() & 0x800000) ? 3.1415927f : -0.78539819f);
         ang_spin.y = ang_spin.z = 0.0f;
+#if defined(PS2)
+        xMat3x3Euler(&this->custdata.typical.mat_rotDelta, &ang_spin);
+        this->flg_hazard |= 0x4000;
+#else
         this->TypData_RotMatStore(&ang_spin);
+#endif
         break;
     }
     case NPC_HAZ_THUNDER:
@@ -723,29 +766,34 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             result = 0;
         }
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 0.1f;
-        this->custdata.typical.rad_max = 5.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.1f;
+        ball->rad_max = 5.0f;
+        ball->rad_cur = ball->rad_min;
 
-        ang_spin.x = 0.016666668f * ((xrand() & 0x800000) ? 3.1415927f : -0.78539819f);
+        ang_spin.x = NPC_FRAME_TIME * ((xrand() & 0x800000) ? 3.1415927f : -0.78539819f);
         ang_spin.y = ang_spin.z = 0.0f;
+#if defined(PS2)
+        xMat3x3Euler(&this->custdata.typical.mat_rotDelta, &ang_spin);
+        this->flg_hazard |= 0x4000;
+#else
         this->TypData_RotMatStore(&ang_spin);
+#endif
         break;
     }
     case NPC_HAZ_DUPLO_SHROOM:
         this->flg_hazard |= 0x9180;
         this->tmr_remain = 5.0f;
-        xVec3Copy(&this->custdata.shroom.vel_rise, &g_Y3);
-        xVec3Copy(&this->custdata.shroom.acc_rise, &g_Y3);
+        xVec3Copy(&shroom->vel_rise, &g_Y3);
+        xVec3Copy(&shroom->acc_rise, &g_Y3);
         this->TypData_RotMatStore(NULL);
         break;
     case NPC_HAZ_PATRIOT:
         this->flg_hazard |= 0x201180;
         this->tmr_remain = 5.0f;
-        xVec3Copy(&this->custdata.patriot.pos_began, &g_O3);
-        this->custdata.patriot.spd_peak = 10.0f;
-        this->custdata.patriot.spd_curr = 0.0f;
-        this->custdata.patriot.acc_rate = 5.0f;
+        xVec3Copy(&patriot->pos_began, &g_O3);
+        patriot->spd_peak = 10.0f;
+        patriot->spd_curr = 0.0f;
+        patriot->acc_rate = 5.0f;
         break;
     case NPC_HAZ_TARTARPROJ:
         this->flg_hazard |= 0x21a380;
@@ -754,10 +802,10 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             result = 0;
         }
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 0.2f;
-        this->custdata.typical.rad_max = 0.25f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
-        this->custdata.collide.flg_collide |= 7;
+        ball->rad_min = 0.2f;
+        ball->rad_max = 0.25f;
+        ball->rad_cur = ball->rad_min;
+        hazcol->flg_collide |= 7;
         break;
     case NPC_HAZ_TARTARSPILL:
         this->flg_hazard |= 0xb380;
@@ -766,9 +814,9 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             result = 0;
         }
         this->tmr_remain = 4.0f;
-        this->custdata.typical.rad_min = 0.2f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_max;
+        ball->rad_min = 0.2f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_max;
         break;
     case NPC_HAZ_TARTARSTINK:
     {
@@ -779,25 +827,24 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_TARTARSTEAM, uv_scroll_ts.x, uv_scroll_ts.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_TARTARSTEAM, uv_scroll_ts.x, uv_scroll_ts.y);
         this->tmr_remain = 3.75f;
-        this->custdata.typical.rad_min = 0.2f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_max;
+        ball->rad_min = 0.2f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_max;
         break;
     }
     case NPC_HAZ_CHUCKBOMB:
         this->flg_hazard |= 0x21a380;
-        this->custdata.collide.flg_collide |= 7;
+        hazcol->flg_collide |= 7;
         if (!this->GrabModel(NPC_HAZMDL_CHUCKBOMB))
         {
             result = 0;
         }
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 1.0f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 1.0f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
         break;
     case NPC_HAZ_CHUCKBLAST:
     {
@@ -808,12 +855,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_CHUCKSPLASH, uv_scroll_cb.x, uv_scroll_cb.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_CHUCKSPLASH, uv_scroll_cb.x, uv_scroll_cb.y);
         this->tmr_remain = 1.0f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 3.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 3.0f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_CHUCKBLOOSH:
@@ -825,13 +871,12 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_CHUCKSPLISH, uv_scroll_cl.x, uv_scroll_cl.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_CHUCKSPLISH, uv_scroll_cl.x, uv_scroll_cl.y);
         this->tmr_remain = 1.6f + 1.6f * (0.25f * (xurand() - 0.5f));
-        this->custdata.typical.rad_min = 0.2f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
-        this->custdata.tartar.vel = g_Y3;
+        ball->rad_min = 0.2f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
+        tartar->vel = g_Y3;
         break;
     }
     case NPC_HAZ_ARFBONE:
@@ -844,22 +889,27 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             result = 0;
         }
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
 
-        ang_spin.x = 0.016666668f * ((xrand() & 0x800000) ? 12.566371f : -12.566371f);
+        ang_spin.x = NPC_FRAME_TIME * ((xrand() & 0x800000) ? 12.566371f : -12.566371f);
         ang_spin.y = ang_spin.z = 0.0f;
+#if defined(PS2)
+        xMat3x3Euler(&this->custdata.typical.mat_rotDelta, &ang_spin);
+        this->flg_hazard |= 0x4000;
+#else
         this->TypData_RotMatStore(&ang_spin);
-        this->custdata.collide.flg_collide |= 7;
+#endif
+        hazcol->flg_collide |= 7;
         break;
     }
     case NPC_HAZ_ARFBONEBLAST:
         this->flg_hazard |= 0xb180;
         this->tmr_remain = 1.0f;
-        this->custdata.typical.rad_min = 0.5f;
-        this->custdata.typical.rad_max = 0.5f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.5f;
+        ball->rad_max = 0.5f;
+        ball->rad_cur = ball->rad_min;
         break;
     case NPC_HAZ_OILBUBBLE:
     {
@@ -870,13 +920,12 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_SLICKPROJ, uv_scroll_ob.x, uv_scroll_ob.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_SLICKPROJ, uv_scroll_ob.x, uv_scroll_ob.y);
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
-        this->custdata.collide.flg_collide |= 7;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
+        hazcol->flg_collide |= 7;
         break;
     }
     case NPC_HAZ_OILSLICK:
@@ -888,12 +937,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_SLICKPUDDLE, uv_scroll_os.x, uv_scroll_os.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_SLICKPUDDLE, uv_scroll_os.x, uv_scroll_os.y);
         this->tmr_remain = 10.0f;
-        this->custdata.typical.rad_min = 0.2f;
-        this->custdata.typical.rad_max = 1.5f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.2f;
+        ball->rad_max = 1.5f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_OILBURST:
@@ -905,12 +953,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_SLICKBURST, uv_scroll_or.x, uv_scroll_or.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_SLICKBURST, uv_scroll_or.x, uv_scroll_or.y);
         this->tmr_remain = 0.75f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 1.75f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 1.75f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     case NPC_HAZ_OILGLOB:
@@ -922,14 +969,13 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_SLICKGLOB, uv_scroll_og.x, uv_scroll_og.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_SLICKGLOB, uv_scroll_og.x, uv_scroll_og.y);
         this->tmr_remain = 1.2f + 1.2f * (0.25f * (xurand() - 0.5f));
-        this->custdata.typical.rad_min = 0.1f;
-        this->custdata.typical.rad_max = 0.55f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
-        xVec3Copy(&this->custdata.shroom.vel_rise, &g_O3);
-        xVec3SMul(&this->custdata.shroom.acc_rise, &g_Y3, 1.2f);
+        ball->rad_min = 0.1f;
+        ball->rad_max = 0.55f;
+        ball->rad_cur = ball->rad_min;
+        xVec3Copy(&shroom->vel_rise, &g_O3);
+        xVec3SMul(&shroom->acc_rise, &g_Y3, 1.2f);
         break;
     }
     case NPC_HAZ_MONCLOUD:
@@ -943,16 +989,21 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         }
         this->shadowCache = NPCC_ShadowCacheReserve();
         this->tmr_remain = 7.5f;
-        this->custdata.cloud.spd_cloud = 3.0f;
-        this->custdata.cloud.rad_maxRange = 10.0f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
-        xVec3Copy(&this->custdata.cloud.pos_home, &g_O3);
+        cloud->spd_cloud = 3.0f;
+        cloud->rad_maxRange = 10.0f;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
+        xVec3Copy(&cloud->pos_home, &g_O3);
 
-        ang_spin.x = 0.016666668f * ((xrand() & 0x800000) ? 0.78539819f : -0.78539819f);
+        ang_spin.x = NPC_FRAME_TIME * ((xrand() & 0x800000) ? 0.78539819f : -0.78539819f);
         ang_spin.y = ang_spin.z = 0.0f;
+#if defined(PS2)
+        xMat3x3Euler(&this->custdata.typical.mat_rotDelta, &ang_spin);
+        this->flg_hazard |= 0x4000;
+#else
         this->TypData_RotMatStore(&ang_spin);
+#endif
         break;
     }
     case NPC_HAZ_FUNFRAG:
@@ -966,9 +1017,9 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             }
         }
         this->tmr_remain = 2.5f;
-        this->custdata.typical.rad_min = 1.0f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 1.0f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
         this->TypData_RotMatStore(NULL);
         break;
     case NPC_HAZ_ROBOBITS:
@@ -981,16 +1032,21 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
             result = 0;
         }
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 1e-05f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 1e-05f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
 
         xVec3 ang_spin = vec_tumble;
         ang_spin.x *= 2.0f * (xurand() - 0.5f);
         ang_spin.y *= 2.0f * (xurand() - 0.5f);
         ang_spin.z *= 2.0f * (xurand() - 0.5f);
-        ang_spin *= 0.016666668f;
+        ang_spin *= NPC_FRAME_TIME;
+#if defined(PS2)
+        xMat3x3Euler(&this->custdata.typical.mat_rotDelta, &ang_spin);
+        this->flg_hazard |= 0x4000;
+#else
         this->TypData_RotMatStore(&ang_spin);
+#endif
         break;
     }
     case NPC_HAZ_VISSPLASH:
@@ -1002,12 +1058,11 @@ S32 NPCHazard::ConfigHelper(en_npchaz haztype)
         {
             result = 0;
         }
-        this->uva_uvanim =
-            this->GetUVAInfo(NPC_HAZMDL_CHUCKSPLASH, uv_scroll_vs.x, uv_scroll_vs.y);
+        this->uva_uvanim = this->GetUVAInfo(NPC_HAZMDL_CHUCKSPLASH, uv_scroll_vs.x, uv_scroll_vs.y);
         this->tmr_remain = 0.25f;
-        this->custdata.typical.rad_min = 0.0f;
-        this->custdata.typical.rad_max = 1.0f;
-        this->custdata.typical.rad_cur = this->custdata.typical.rad_min;
+        ball->rad_min = 0.0f;
+        ball->rad_max = 1.0f;
+        ball->rad_cur = ball->rad_min;
         break;
     }
     default:
@@ -1119,20 +1174,8 @@ void NPCHazard::Discard()
 
         Cleanup();
 
-        // Two statements, per the target: subi / stw / lwz / srawi / andc.
-        // The reload of the counter after the store is why `g_cnt_activehaz` is
-        // declared volatile; reading it once into `cnt` keeps the clamp down to
-        // the single load the target has.
-        //
-        // Do not collapse this back into one expression. The previous
-        // single-statement form `g_cnt_activehaz &= ~((g_cnt_activehaz - 1) >> 31);`
-        // scored higher than the naive form but never decremented at all: for any
-        // x >= 1 it folds to x &= 0xFFFFFFFF. The active-hazard count only ever grew.
         g_cnt_activehaz--;
-
-        S32 cnt = g_cnt_activehaz;
-
-        g_cnt_activehaz = cnt & ~(cnt >> 31);
+        g_cnt_activehaz = MAX(0, g_cnt_activehaz);
     }
 }
 
@@ -1181,8 +1224,7 @@ void NPCHazard::Timestep(F32 dt)
 
     this->pam_interp = CLAMP(rat, 0.0f, 1.0f);
 
-    if (this->mdl_hazard != NULL && (this->flg_hazard & 0x4000) &&
-        (this->flg_hazard & 0x8000))
+    if (this->mdl_hazard != NULL && (this->flg_hazard & 0x4000) && (this->flg_hazard & 0x8000))
     {
 #ifdef PLATFORM_PC
         // mat_rotDelta is one sixtieth of a second of spin, so applying it once
@@ -1286,6 +1328,7 @@ void NPCHazard::Timestep(F32 dt)
 
 void NPCHazard::Render()
 {
+    HAZBall* ball = &this->custdata.ball;
     xMat4x3 mat;
     en_npchaz typ = this->typ_hazard;
     xVec3 scale = { 1.0f, 1.0f, 1.0f };
@@ -1297,8 +1340,7 @@ void NPCHazard::Render()
         if (this->mdl_hazard != NULL)
         {
             this->SetAlpha(0.25f * ARCH(this->pam_interp));
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1308,15 +1350,14 @@ void NPCHazard::Render()
             static const xVec3 scale = { 1.0f, 1.5f, 1.0f };
 
             this->SetAlpha(0.35f * (1.0f - this->pam_interp));
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
     case NPC_HAZ_CATTLEPROD:
         if (this->mdl_hazard != NULL)
         {
-            F32 scaleit = 2.0f * this->custdata.typical.rad_cur;
+            F32 scaleit = 2.0f * ball->rad_cur;
 
             this->SetAlpha(0.6f);
             xVec3SMul(&this->mdl_hazard->Scale, &scale, scaleit);
@@ -1329,8 +1370,7 @@ void NPCHazard::Render()
             static const xVec3 scl_tallish = { 1.0f, 2.0f, 1.0f };
 
             this->SetAlpha(1.0f - this->pam_interp);
-            xVec3SMul(&this->mdl_hazard->Scale, &scl_tallish,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scl_tallish, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1342,7 +1382,7 @@ void NPCHazard::Render()
             F32 scaleit;
 
             this->SetAlpha(0.2f * ARCH(this->pam_interp));
-            scaleit = 2.0f * this->custdata.typical.rad_cur;
+            scaleit = 2.0f * ball->rad_cur;
             xVec3SMul(&this->mdl_hazard->Scale, &wider, scaleit);
             xModelRender(this->mdl_hazard);
             xVec3SMul(&this->mdl_hazard->Scale, &taller, scaleit);
@@ -1352,9 +1392,9 @@ void NPCHazard::Render()
     case NPC_HAZ_DUPLOBOOM:
         if (this->mdl_hazard != NULL)
         {
-            F32 alpha = 0.2f * (1.0f - this->pam_interp);
-            F32 scaleit = 2.0f * this->custdata.typical.rad_cur;
             const xVec3 tallish = { 1.0f, 2.0f, 1.0f };
+            F32 alpha = 0.2f * (1.0f - this->pam_interp);
+            F32 scaleit = 2.0f * ball->rad_cur;
 
             this->SetAlpha(alpha);
             xVec3SMul(&this->mdl_hazard->Scale, &tallish, scaleit);
@@ -1367,20 +1407,19 @@ void NPCHazard::Render()
             static const xVec3 tallish = { 1.0f, 1.75f, 1.0f };
 
             this->SetAlpha(0.5f * (1.0f - this->pam_interp));
-            xVec3SMul(&this->mdl_hazard->Scale, &tallish,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &tallish, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
     case NPC_HAZ_MONCLOUD:
         if (this->mdl_hazard != NULL)
         {
-            F32 alpha = 1.0f;
-            F32 ds2 = NPCC_ds2_toCam(&this->pos_hazard, NULL);
+            F32 alf_maxClamped = 1.0f;
+            F32 ds2_cam = NPCC_ds2_toCam(&this->pos_hazard, NULL);
             F32 pam;
             RwRaster* rast;
 
-            if (ds2 >= SQ(4.0f))
+            if (ds2_cam >= SQ(4.0f))
             {
                 xVec3 dir_plyr = *xEntGetPos(&globals.player.ent) - globals.camera.mat.pos;
                 dir_plyr.normalize();
@@ -1388,23 +1427,24 @@ void NPCHazard::Render()
                 xVec3 dir_haz = this->pos_hazard - globals.camera.mat.pos;
                 dir_haz.normalize();
 
-                F32 dotter = xVec3Dot(&dir_haz, &dir_plyr);
-                if (dotter > 0.86f)
+                F32 dot = xVec3Dot(&dir_haz, &dir_plyr);
+                if (dot > 0.86f)
                 {
-                    alpha = SMOOTH(CLAMP(1.0f - (dotter - 0.86f) / (1.0f - 0.86f), 0.0f, 1.0f),
-                                   0.7f, 1.0f);
+                    F32 rat = (dot - 0.86f) / (1.0f - 0.86f);
+                    rat = CLAMP(1.0f - rat, 0.0f, 1.0f);
+                    alf_maxClamped = SMOOTH(rat, 0.7f, alf_maxClamped);
                 }
             }
 
-            if (ds2 < SQ(4.0f))
+            if (ds2_cam < SQ(4.0f))
             {
-                alpha = 0.7f;
+                alf_maxClamped = 0.7f;
             }
-            else if (ds2 < SQ(6.0f))
+            else if (ds2_cam < SQ(6.0f))
             {
-                F32 num = ds2 - SQ(4.0f);
+                F32 amt_tran = ds2_cam - SQ(4.0f);
 
-                alpha = SMOOTH(num / (SQ(6.0f) - SQ(4.0f)), 0.7f, alpha);
+                alf_maxClamped = SMOOTH(amt_tran / (SQ(6.0f) - SQ(4.0f)), 0.7f, alf_maxClamped);
             }
 
             if (this->pam_interp < 0.15f)
@@ -1420,9 +1460,8 @@ void NPCHazard::Render()
                 pam = (1.0f - this->pam_interp) / (1.0f - 0.85f);
             }
 
-            this->SetAlpha(SMOOTH(pam, 0.0f, alpha));
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      2.0f * this->custdata.typical.rad_cur);
+            this->SetAlpha(SMOOTH(pam, 0.0f, alf_maxClamped));
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 2.0f * ball->rad_cur);
 
             RwRenderStateSet(rwRENDERSTATECULLMODE, (void*)3);
             xModelRender(this->mdl_hazard);
@@ -1439,25 +1478,27 @@ void NPCHazard::Render()
                 break;
             }
 
-            F32 ds2_cam = NPCC_ds2_toCam(&this->pos_hazard, NULL);
-            if (ds2_cam < SQ(20.0f))
             {
-                F32 rat_sq = ds2_cam / SQ(20.0f);
-                F32 alf_shadow = CLAMP(0.3f + (1.0f - rat_sq), 0.0f, 1.0f);
-
-                mat.right = *(xVec3*)this->Right();
-                mat.at = g_NY3;
-                mat.up = *(xVec3*)this->At();
-                mat.pos = this->pos_hazard;
-
-                static S32 skipfill = 0;
-
-                NPCC_RenderProjTexture(rast, alf_shadow, &mat, 1.2f, 10.0f, this->shadowCache,
-                                       !skipfill, NULL);
-
-                if (skipfill++ > 12)
+                F32 ds2_cam = NPCC_ds2_toCam(&this->pos_hazard, NULL);
+                if (ds2_cam < SQ(20.0f))
                 {
-                    skipfill = 0;
+                    F32 rat_sq = 1.0f - ds2_cam / SQ(20.0f);
+                    F32 alf_shadow = CLAMP(0.3f + rat_sq, 0.0f, 1.0f);
+
+                    mat.right = *(xVec3*)this->Right();
+                    mat.at = g_NY3;
+                    mat.up = *(xVec3*)this->At();
+                    mat.pos = this->pos_hazard;
+
+                    static S32 skipfill = 0;
+
+                    NPCC_RenderProjTexture(rast, alf_shadow, &mat, 1.2f, 10.0f, this->shadowCache,
+                                           !skipfill, NULL);
+
+                    if (skipfill++ > 12)
+                    {
+                        skipfill = 0;
+                    }
                 }
             }
         }
@@ -1470,8 +1511,7 @@ void NPCHazard::Render()
                 this->flg_hazard &= ~0x200;
                 this->SetAlpha(4.0f * this->tmr_remain);
             }
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      6.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 6.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1487,15 +1527,14 @@ void NPCHazard::Render()
                 this->flg_hazard &= ~0x200;
                 this->SetAlpha(this->tmr_remain);
             }
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
     case NPC_HAZ_TARTARSTINK:
         if (this->mdl_hazard != NULL)
         {
-            F32 scaleit = 2.0f * this->custdata.typical.rad_cur;
+            F32 scaleit = 2.0f * ball->rad_cur;
             xVec3 squat = { 0.75f, 0.5f, 0.75f };
 
             xVec3SMul(&this->mdl_hazard->Scale, &squat, scaleit);
@@ -1510,8 +1549,7 @@ void NPCHazard::Render()
                 this->flg_hazard &= ~0x200;
                 this->SetAlpha(5.0f * this->tmr_remain);
             }
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      3.0f * (2.0f * this->custdata.typical.rad_cur));
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 3.0f * (2.0f * ball->rad_cur));
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1521,8 +1559,7 @@ void NPCHazard::Render()
         if (this->mdl_hazard != NULL)
         {
             this->SetAlpha(0.75f);
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1537,7 +1574,7 @@ void NPCHazard::Render()
             {
                 this->SetAlpha(0.75f * MAX(0.0f, this->tmr_remain / 0.5f));
             }
-            xVec3SMul(&this->mdl_hazard->Scale, &scale, this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1546,7 +1583,7 @@ void NPCHazard::Render()
         {
             this->SetAlpha(0.75f * (1.0f - this->pam_interp));
 
-            F32 scaleit = 2.0f * this->custdata.typical.rad_cur;
+            F32 scaleit = 2.0f * ball->rad_cur;
             const xVec3 uni = { 1.0f, 1.0f, 1.0f };
 
             xVec3SMul(&this->mdl_hazard->Scale, &uni, scaleit);
@@ -1565,7 +1602,7 @@ void NPCHazard::Render()
                 this->SetAlpha(0.75f * MAX(0.0f, this->tmr_remain / 0.35f));
             }
 
-            F32 scaleit = 2.0f * this->custdata.typical.rad_cur;
+            F32 scaleit = 2.0f * ball->rad_cur;
             const xVec3 scl_a = { 0.75f, 0.1f, 0.5f };
             const xVec3 scl_b = { 0.25f, 1.5f, 0.25f };
             const xVec3 scl_c = { 1.5f, 0.75f, 1.5f };
@@ -1592,23 +1629,22 @@ void NPCHazard::Render()
                 this->flg_hazard &= ~0x200;
                 this->SetAlpha(4.0f * this->tmr_remain);
             }
-            xVec3SMul(&this->mdl_hazard->Scale, &scale, this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
     case NPC_HAZ_CHUCKBLAST:
         if (this->mdl_hazard != NULL)
         {
-            F32 rad = this->custdata.typical.rad_cur;
+            F32 rad = ball->rad_cur;
             F32 fx = CLAMP(xabs(isin(3.1415927f * this->pam_interp)), 0.0f, 1.0f);
 
             this->SetAlpha(fx);
 
             {
-                F32 dim_flux = 1.2f * fx;
-                xVec3 scl_wave = { 2.0f, 0.0f, 2.0f };
-
-                scl_wave.y = dim_flux;
+                F32 dim_flux = 1.2f;
+                dim_flux *= fx;
+                const xVec3 scl_wave = { 2.0f, dim_flux, 2.0f };
                 xVec3SMul(&this->mdl_hazard->Scale, &scl_wave, rad);
                 xModelRender(this->mdl_hazard);
             }
@@ -1622,14 +1658,15 @@ void NPCHazard::Render()
                 }
                 else
                 {
-                    rat_ff = 1.0f - (this->pam_interp - 0.15f) / 0.85f;
+                    rat_ff = this->pam_interp - 0.15f;
+                    rat_ff /= 0.85f;
+                    rat_ff = 1.0f - rat_ff;
                 }
 
                 F32 arch = EASE(rat_ff);
-                F32 dim_flux = 3.75f * arch;
-                xVec3 scl_fount = { 1.0f, 0.0f, 1.0f };
-
-                scl_fount.y = dim_flux;
+                F32 dim_flux = 3.75f;
+                dim_flux *= arch;
+                const xVec3 scl_fount = { 1.0f, dim_flux, 1.0f };
                 xVec3SMul(&this->mdl_hazard->Scale, &scl_fount, rad);
                 xModelRender(this->mdl_hazard);
             }
@@ -1648,16 +1685,14 @@ void NPCHazard::Render()
             {
                 this->SetAlpha(0.25f * MAX(0.0f, this->tmr_remain / 0.8f));
             }
-            xVec3SMul(&this->mdl_hazard->Scale, &scale_cl,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale_cl, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
     case NPC_HAZ_FUNFRAG:
         if (this->mdl_hazard != NULL)
         {
-            xVec3SMul(&this->mdl_hazard->Scale, &scale,
-                      2.0f * this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale, 2.0f * ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
@@ -1667,23 +1702,22 @@ void NPCHazard::Render()
             static const xVec3 scale_rb = { 1.0f, 1.0f, 1.0f };
 
             this->SetAlpha(1.0f);
-            xVec3SMul(&this->mdl_hazard->Scale, &scale_rb, this->custdata.typical.rad_cur);
+            xVec3SMul(&this->mdl_hazard->Scale, &scale_rb, ball->rad_cur);
             xModelRender(this->mdl_hazard);
         }
         break;
     case NPC_HAZ_VISSPLASH:
         if (this->mdl_hazard != NULL)
         {
-            F32 rad = this->custdata.typical.rad_cur;
+            F32 rad = ball->rad_cur;
             F32 fx = CLAMP(xabs(isin(3.1415927f * this->pam_interp)), 0.0f, 1.0f);
 
             this->SetAlpha(fx);
 
             {
-                F32 dim_flux = 1.2f * fx;
-                xVec3 scl_wave = { 2.0f, 0.0f, 2.0f };
-
-                scl_wave.y = dim_flux;
+                F32 dim_flux = 1.2f;
+                dim_flux *= fx;
+                const xVec3 scl_wave = { 2.0f, dim_flux, 2.0f };
                 xVec3SMul(&this->mdl_hazard->Scale, &scl_wave, rad);
                 xModelRender(this->mdl_hazard);
             }
@@ -1697,14 +1731,15 @@ void NPCHazard::Render()
                 }
                 else
                 {
-                    rat_ff = 1.0f - (this->pam_interp - 0.15f) / 0.85f;
+                    rat_ff = this->pam_interp - 0.15f;
+                    rat_ff /= 0.85f;
+                    rat_ff = 1.0f - rat_ff;
                 }
 
                 F32 arch = EASE(rat_ff);
-                F32 dim_flux = 3.75f * arch;
-                xVec3 scl_fount = { 1.0f, 0.0f, 1.0f };
-
-                scl_fount.y = dim_flux;
+                F32 dim_flux = 3.75f;
+                dim_flux *= arch;
+                const xVec3 scl_fount = { 1.0f, dim_flux, 1.0f };
                 xVec3SMul(&this->mdl_hazard->Scale, &scl_fount, rad);
                 xModelRender(this->mdl_hazard);
             }
@@ -1727,6 +1762,10 @@ void NPCHazard::Render()
 
 void NPCHazard::Cleanup()
 {
+    HAZCloud* cloud = &this->custdata.cloud;
+    HAZCatProd* catprod = &this->custdata.catprod;
+    HAZTarTar* tartar = &this->custdata.tartar;
+
     this->flg_hazard = 0;
 
     if (this->mdl_hazard != NULL)
@@ -1742,37 +1781,37 @@ void NPCHazard::Cleanup()
 
     switch (this->typ_hazard)
     {
-    case NPC_HAZ_TARTARPROJ:
     case NPC_HAZ_OILBUBBLE:
-        if (this->custdata.tartar.streakID != 0xDEAD)
+    case NPC_HAZ_TARTARPROJ:
+        if (tartar->streakID != 0xDEAD)
         {
-            xFXStreakStop(this->custdata.tartar.streakID);
+            xFXStreakStop(tartar->streakID);
         }
-        this->custdata.tartar.streakID = 0xDEAD;
+        tartar->streakID = 0xDEAD;
         break;
     case NPC_HAZ_CATTLEPROD:
-        if (this->custdata.catprod.zap_lyta != NULL)
+        if (catprod->zap_lyta != NULL)
         {
-            zLightningKill(this->custdata.catprod.zap_lyta);
+            zLightningKill(catprod->zap_lyta);
         }
-        if (this->custdata.catprod.zap_lytb != NULL)
+        if (catprod->zap_lytb != NULL)
         {
-            zLightningKill(this->custdata.catprod.zap_lytb);
+            zLightningKill(catprod->zap_lytb);
         }
-        this->custdata.catprod.zap_lyta = NULL;
-        this->custdata.catprod.zap_lytb = NULL;
+        catprod->zap_lyta = NULL;
+        catprod->zap_lytb = NULL;
         break;
     case NPC_HAZ_MONCLOUD:
-        if (this->custdata.cloud.zap_lytnin != NULL)
+        if (cloud->zap_lytnin != NULL)
         {
-            zLightningKill(this->custdata.cloud.zap_lytnin);
+            zLightningKill(cloud->zap_lytnin);
         }
-        if (this->custdata.cloud.zap_warnin != NULL)
+        if (cloud->zap_warnin != NULL)
         {
-            zLightningKill(this->custdata.cloud.zap_warnin);
+            zLightningKill(cloud->zap_warnin);
         }
-        this->custdata.cloud.zap_lytnin = NULL;
-        this->custdata.cloud.zap_warnin = NULL;
+        cloud->zap_lytnin = NULL;
+        cloud->zap_warnin = NULL;
         break;
     default:
         break;
@@ -1817,35 +1856,47 @@ S32 NPCHazard::ColTestSphere(const xBound* bnd_tgt, F32 rad)
     return hit;
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 S32 NPCHazard::ColTestCyl(const xBound* bnd_tgt, F32 rad, F32 hyt)
 {
-    S32 hit = 1;
-    // `delta` is const because the scheduler otherwise treats the stores that
+    S32 inrange = 1;
+    // `diff` is const because the scheduler otherwise treats the stores that
     // fill it as possibly aliasing the 0.5f literal load, and refuses to hoist
     // that load above them the way the retail code does.
-    const xVec3 delta = bnd_tgt->cyl.center - this->pos_hazard;
-    F32 hyt_top = 0.5f * hyt;
-    F32 rad_sum = rad + bnd_tgt->cyl.r;
-    F32 hyt_bot;
+    const xVec3 diff = bnd_tgt->cyl.center - this->pos_hazard;
+#if defined(PS2)
+    F32 upper = hyt + 0.5f * hyt;
+#else
+    F32 upper = 0.5f * hyt;
+#endif
+    F32 rad_eff = rad + bnd_tgt->cyl.r;
+    F32 lower;
 
-    hyt_top = hyt + hyt_top;
-    hyt_bot = hyt_top - hyt;
+#if !defined(PS2)
+    upper = hyt + upper;
+#endif
+    lower = upper - hyt;
 
-    if (delta.y > hyt_top)
+    if (diff.y > upper)
     {
-        hit = 0;
+        inrange = 0;
     }
-    else if (delta.y < hyt_bot)
+    else if (diff.y < lower)
     {
-        hit = 0;
+        inrange = 0;
     }
-    else if (xVec3Length2(&delta) > SQ(rad_sum))
+    else if (xVec3Length2(&diff) > SQ(rad_eff))
     {
-        hit = 0;
+        inrange = 0;
     }
 
-    return hit;
+    return inrange;
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 S32 NPCHazard::ColPlyrSphere(F32 rad)
 {
@@ -1979,7 +2030,7 @@ void NPCHazard::TypData_RotMatStore(xVec3* euler)
         ang_spin.x = 12.566371f * (2.0f * (xurand() - 0.5f));
         ang_spin.y = 0.78539819f * (2.0f * (xurand() - 0.5f));
         ang_spin.z = 12.566371f * (2.0f * (xurand() - 0.5f));
-        xVec3SMulBy(&ang_spin, 0.016666668f);
+        xVec3SMulBy(&ang_spin, NPC_FRAME_TIME);
         xMat3x3Euler(mat_spin, &ang_spin);
 #ifdef PLATFORM_PC
         xVec3SMul(&this->ang_spinRate, &ang_spin, 60.0f);
@@ -2039,6 +2090,9 @@ void NPCHazard::OrientToDir(const xVec3* vec_path, S32 doTheTwist)
     this->TypData_RotMatSet(&mat_orient);
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 en_hazmodel NPCHazard::PickFunFrag()
 {
     S32 choices[8] = {};
@@ -2053,67 +2107,90 @@ en_hazmodel NPCHazard::PickFunFrag()
         }
     }
 
+#if defined(PS2)
+    if (cnt_choice < 1)
+    {
+        return (en_hazmodel)0;
+    }
+    F32 rand = xurand();
+    S32 idx = rand * cnt_choice;
+    if (idx >= cnt_choice)
+    {
+        idx = cnt_choice - 1;
+    }
+    if (idx < 0)
+    {
+        idx = 0;
+    }
+    return (en_hazmodel)choices[idx];
+#else
     return (en_hazmodel)xUtil_choose<S32>(choices, cnt_choice, NULL);
+#endif
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 void NPCHazard::PreCollide()
 {
-    F32 gravity = 10.0f;
+    F32 grav = 10.0f;
 
     if (this->typ_hazard == NPC_HAZ_CHUCKBOMB)
     {
-        gravity = 5.0f;
+        grav = 5.0f;
     }
     else if (this->typ_hazard == NPC_HAZ_TARTARPROJ)
     {
-        gravity = 7.5f;
+        grav = 7.5f;
     }
     else if (this->typ_hazard == NPC_HAZ_ARFBONE)
     {
-        gravity = 0.5f;
+        grav = 0.5f;
     }
     else if (this->typ_hazard == NPC_HAZ_OILBUBBLE)
     {
-        gravity = 0.2f;
+        grav = 0.2f;
     }
     else if (this->typ_hazard == NPC_HAZ_FUNFRAG)
     {
-        gravity = 7.5f;
+        grav = 7.5f;
     }
     else if (this->typ_hazard == NPC_HAZ_CHUCKBLOOSH)
     {
-        gravity = 25.2f;
+        grav = 25.2f;
     }
     else if (this->typ_hazard == NPC_HAZ_ROBOBITS)
     {
         // Same value as the initialiser, so CW emits the compare and no store.
-        gravity = 10.0f;
+        grav = 10.0f;
     }
 
-    xParabola* parab = &this->custdata.collide.parabinfo;
+    HAZTarTar* tartar = &this->custdata.tartar;
+    xParabola* parab = &tartar->parabinfo;
     static xCollis colrec;
 
     this->tmr_remain += 5.0f;
 
     xVec3Copy(&parab->initPos, &this->pos_hazard);
-    xVec3Copy(&parab->initVel, &this->custdata.tartar.vel);
-    parab->gravity = gravity;
+    xVec3Copy(&parab->initVel, &tartar->vel);
+    parab->gravity = grav;
     parab->minTime = 0.0f;
     parab->maxTime = this->tmr_remain;
 
     memset(&colrec, 0, sizeof(colrec));
 
-    if (xParabolaHitsEnv(parab, globals.sceneCur->env, &colrec))
+    S32 rc = xParabolaHitsEnv(parab, globals.sceneCur->env, &colrec);
+    if (rc)
     {
         this->flg_hazard |= 0x20000;
-        xVec3Copy(&this->custdata.collide.dir_normal, &colrec.norm);
+        xVec3Copy(&tartar->dir_normal, &colrec.norm);
         parab->maxTime = colrec.dist;
         this->tmr_remain = colrec.dist;
     }
     else
     {
         this->flg_hazard &= ~0x20000;
-        xVec3Copy(&this->custdata.collide.dir_normal, &g_Y3);
+        xVec3Copy(&tartar->dir_normal, &g_Y3);
     }
 
     this->tym_lifespan = this->tmr_remain;
@@ -2142,7 +2219,7 @@ S32 NPCHazard::StaggeredCollide()
         return 0;
     }
 
-    hazcol->cnt_skipcol = ((xrand() >> 23) & 1) + 5;
+    hazcol->cnt_skipcol = ((xrand() & 0x800000) ? 1 : 0) + 5;
 #endif
 
     static xCollis colrec;
@@ -2186,9 +2263,9 @@ void NPCHazard::StagColGeneral(S32 who)
     xParabola* parab = &this->custdata.collide.parabinfo;
     F32 tym_used = this->tym_lifespan - this->tmr_remain;
     F32 tym_beg = MIN(tym_used, this->tym_lifespan);
-    F32 tym_end = MIN(0.5f + tym_beg, this->tym_lifespan);
+    F32 tym_end = MIN(30.0f * NPC_FRAME_TIME + tym_beg, this->tym_lifespan);
 
-    tym_end += 0.016666668f;
+    tym_end += NPC_FRAME_TIME;
     xVec3 pos_beg = this->pos_hazard;
     xVec3 pos_end;
     xSweptSphere swdata;
@@ -2248,18 +2325,20 @@ void NPCHazard::CollideResponse(xSweptSphere* swdata, F32 tym_inFuture)
 
 void NPCHazard::ColResp_Default(xSweptSphere* swdata, F32 tym_inFuture)
 {
-    xParabola* parab = &this->custdata.collide.parabinfo;
-    F32 tym_all = this->tym_lifespan - this->tmr_remain;
-    F32 tym_used = MIN(tym_all, this->tym_lifespan);
+    HAZCollide* hazcol = &this->custdata.collide;
+    xParabola* parab = &hazcol->parabinfo;
+    F32 tym_alive = this->tym_lifespan - this->tmr_remain;
+    tym_alive = MIN(tym_alive, this->tym_lifespan);
 
     this->tmr_remain = MIN(this->tmr_remain, tym_inFuture);
-    parab->maxTime = tym_used + this->tmr_remain;
+    parab->maxTime = tym_alive + this->tmr_remain;
     this->tym_lifespan = parab->maxTime;
 
-    xParabolaEvalPos(parab, &this->custdata.collide.pos_collide, parab->maxTime);
-    this->custdata.collide.dir_normal = swdata->worldNormal;
+    xParabolaEvalPos(parab, &hazcol->pos_collide, parab->maxTime);
+    hazcol->dir_normal = swdata->worldNormal;
 
-    if (swdata->optr == NULL || ((xBase*)swdata->optr)->baseType != eBaseTypeStatic)
+    xEnt* ent_hit = (xEnt*)swdata->optr;
+    if (ent_hit == NULL || ent_hit->baseType != eBaseTypeStatic)
     {
         this->flg_hazard |= 0x40000;
     }
@@ -2282,12 +2361,12 @@ xAnimTable* ZNPC_AnimTable_HazardStd()
 
 void NPCHazard::Upd_Explode(F32 dt)
 {
-    this->custdata.typical.rad_cur = LERP(ARCH(this->pam_interp),
-                                          this->custdata.typical.rad_min,
-                                          this->custdata.typical.rad_max);
+    HAZBall* ball = &this->custdata.ball;
+
+    ball->rad_cur = LERP(ARCH(this->pam_interp), ball->rad_min, ball->rad_max);
 
     if ((this->flg_hazard & 0x2000) && !(globals.player.DamageTimer > 0.0f) &&
-        this->ColPlyrSphere(this->custdata.typical.rad_cur))
+        this->ColPlyrSphere(ball->rad_cur))
     {
         this->HurtThePlayer();
     }
@@ -2295,29 +2374,37 @@ void NPCHazard::Upd_Explode(F32 dt)
     this->DeathStar();
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 void NPCHazard::DeathStar()
 {
     static const xVec3 pos_offset = { 0.0f, 0.0f, 0.0f };
-    xVec3 pos_star = this->pos_hazard + pos_offset;
+    HAZBall* ball = &this->custdata.ball;
+    xVec3 pos_emit = this->pos_hazard + pos_offset;
 
     if (this->flg_hazard & 0x8)
     {
-        xVec3 pos_slam = this->pos_hazard;
+        xVec3 pos_emit = this->pos_hazard;
 
-        pos_slam += pos_offset;
-        zFX_SpawnBubbleSlam(&pos_slam, 30, 6.2831855f, 5.0f, 2.0f);
+        pos_emit += pos_offset;
+        zFX_SpawnBubbleSlam(&pos_emit, 30, 6.2831855f, 5.0f, 2.0f);
     }
 
     if (this->pam_interp < 0.16f)
     {
         // Two statements, per the target: `lfs <member>` issues before
         // `lfs 0.4f`, and the fmuls writes the constant's register
-        // (`fmuls f0, f0, f1`). `F32 spd = 0.4f * rad_max;` swaps both, and
-        // `spd *= 0.4f;` fixes the loads but not the multiply.
-        F32 spd = this->custdata.typical.rad_max;
-        spd = 0.4f * spd;
-        xVec3 vel_bub = { spd, spd, spd };
-        xVec3 vel_rnd = { 2.0f, 2.0f, 2.0f };
+        // (`fmuls f0, f0, f1`). `F32 size = 0.4f * rad_max;` swaps both, and
+        // `size *= 0.4f;` fixes the loads but not the multiply.
+        F32 size = ball->rad_max;
+#if defined(PS2)
+        xVec3 pos_spread = { 0.4f * size, 0.4f * size, 0.4f * size };
+#else
+        size = 0.4f * size;
+        xVec3 pos_spread = { size, size, size };
+#endif
+        xVec3 vel_spread = { 2.0f, 2.0f, 2.0f };
 
         // pam_interp is the fraction of the hazard's life spent, so this runs
         // every frame of the first sixth of it: twenty bubbles a frame is an
@@ -2325,13 +2412,16 @@ void NPCHazard::DeathStar()
         // its only caller, so the frame's length comes from the global the
         // update writes.
 #ifdef PLATFORM_PC
-        zFX_SpawnBubbleTrail(&pos_star, xFrameEmitCount(20.0f, globals.update_dt), &vel_bub,
-                             &vel_rnd);
+        zFX_SpawnBubbleTrail(&pos_emit, xFrameEmitCount(20.0f, globals.update_dt), &pos_spread,
+                             &vel_spread);
 #else
-        zFX_SpawnBubbleTrail(&pos_star, 20, &vel_bub, &vel_rnd);
+        zFX_SpawnBubbleTrail(&pos_emit, 20, &pos_spread, &vel_spread);
 #endif
     }
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 void NPCHazard::Upd_PuppyNuke(F32 dt)
 {
@@ -2404,6 +2494,9 @@ void __deadstripped_zNPCHazard_2()
     const char _2452[0x0C] = {};
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 void NPCHazard::FodBombBubbles(F32 dt)
 {
     static const xVec3 pos_spread = { 0.1f, 2.0f, 0.1f };
@@ -2429,6 +2522,9 @@ void NPCHazard::FodBombBubbles(F32 dt)
         zFX_SpawnBubbleSlam(&this->pos_hazard, 0x18, PI, 4.0f * tym, tym);
     }
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 // Third block of deadstripped-function structs; see __deadstripped_zNPCHazard.
 void __deadstripped_zNPCHazard_3()
@@ -3048,28 +3144,10 @@ void NPCHazard::TarTarSplash(const xVec3* dir_norm)
         xVec3 vel_emit;
         vel_emit = up;
 
-        F32 direction;
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += at * direction * (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
-
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += rt * direction * (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
+        vel_emit += at * ((xrand() & 0x800000) ? 1.0f : -1.0f) *
+                    (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
+        vel_emit += rt * ((xrand() & 0x800000) ? 1.0f : -1.0f) *
+                    (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
         vel_emit.normalize();
         vel_emit *= 15.0f;
 
@@ -3127,13 +3205,12 @@ void NPCHazard::Upd_ChuckBomb(F32 dt)
         {
             xParabolaEvalPos(parab, &this->pos_hazard, parab->maxTime);
             ReconChuck();
-            return;
         }
         else
         {
             ReconChuck();
-            return;
         }
+        return;
     }
 
     if (this->flg_hazard & 0x8)
@@ -3162,8 +3239,7 @@ void NPCHazard::Upd_ChuckBomb(F32 dt)
         xMat3x3LookVec(&mat_rot, &dir);
 
         xMat3x3 mat_spiral;
-        xMat3x3Rot(&mat_spiral, &mat_rot.at,
-                   2.0f * PI * (this->tym_lifespan - this->tmr_remain));
+        xMat3x3Rot(&mat_spiral, &mat_rot.at, 2.0f * PI * (this->tym_lifespan - this->tmr_remain));
         xMat3x3Mul(&mat_rot, &mat_rot, &mat_spiral);
 
         TypData_RotMatSet(&mat_rot);
@@ -3346,28 +3422,10 @@ void NPCHazard::WaterSplash(const xVec3* dir_norm)
         xVec3 vel_emit;
         vel_emit = up * (0.5f * xurand() + 1.5f);
 
-        F32 direction;
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += at * direction * (0.5f * (2.0f * (xurand() - 0.5f)) + 1.0f);
-
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += rt * direction * (0.5f * (2.0f * (xurand() - 0.5f)) + 1.0f);
+        vel_emit +=
+            at * ((xrand() & 0x800000) ? 1.0f : -1.0f) * (0.5f * (2.0f * (xurand() - 0.5f)) + 1.0f);
+        vel_emit +=
+            rt * ((xrand() & 0x800000) ? 1.0f : -1.0f) * (0.5f * (2.0f * (xurand() - 0.5f)) + 1.0f);
         vel_emit.normalize();
         vel_emit *= 10.0f;
 
@@ -3377,31 +3435,12 @@ void NPCHazard::WaterSplash(const xVec3* dir_norm)
     for (S32 i = 0; i < 8; i++)
     {
         xVec3 vel_emit;
-        xurand();
-        vel_emit = up * 1.0f;
+        vel_emit = up * (0.0f * xurand() + 1.0f);
 
-        F32 direction;
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += at * direction * (0.75f * (2.0f * (xurand() - 0.5f)) + 0.75f);
-
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += rt * direction * (0.75f * (2.0f * (xurand() - 0.5f)) + 0.75f);
+        vel_emit += at * ((xrand() & 0x800000) ? 1.0f : -1.0f) *
+                    (0.75f * (2.0f * (xurand() - 0.5f)) + 0.75f);
+        vel_emit += rt * ((xrand() & 0x800000) ? 1.0f : -1.0f) *
+                    (0.75f * (2.0f * (xurand() - 0.5f)) + 0.75f);
         vel_emit.normalize();
         vel_emit *= 7.0f;
 
@@ -3461,8 +3500,7 @@ S32 NPCHazard::KickBlooshBlob(const xVec3* vel_flight)
     // `xurand() - 0.5f` (same RNG order as the two-statement form) while the
     // final multiply keeps the target's `fmuls f31, f0, f31` operand order.
     tartar->vel += *(xVec3*)this->At() * (2.0f * (xurand() - 0.5f) * (3.5f * xurand() + 2.5f));
-    tartar->vel +=
-        *(xVec3*)this->Right() * (2.0f * (xurand() - 0.5f) * (3.5f * xurand() + 2.5f));
+    tartar->vel += *(xVec3*)this->Right() * (2.0f * (xurand() - 0.5f) * (3.5f * xurand() + 2.5f));
 
     if (xVec3Dot(&g_Y3, (xVec3*)this->Up()) > 0.86f)
     {
@@ -3548,19 +3586,17 @@ void NPCHazard::Upd_BoneFlight(F32 dt)
             if (!(this->flg_hazard & 0x40000))
             {
                 ReconArfBone();
-                return;
             }
             else
             {
                 MarkForRecycle();
-                return;
             }
         }
         else
         {
             MarkForRecycle();
-            return;
         }
+        return;
     }
 
     if (this->flg_hazard & 0x8)
@@ -3842,28 +3878,10 @@ void NPCHazard::OilSplash(const xVec3* dir_norm)
         xVec3 vel_emit;
         vel_emit = up;
 
-        F32 direction;
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += at * direction * (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
-
-        if (xrand() & 0x800000)
-        {
-            direction = 1.0f;
-        }
-        else
-        {
-            direction = -1.0f;
-        }
-
-        vel_emit += rt * direction * (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
+        vel_emit += at * ((xrand() & 0x800000) ? 1.0f : -1.0f) *
+                    (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
+        vel_emit += rt * ((xrand() & 0x800000) ? 1.0f : -1.0f) *
+                    (0.4f * (2.0f * (xurand() - 0.5f)) + 0.25f);
         vel_emit.normalize();
         vel_emit *= 15.0f;
 
@@ -3894,7 +3912,8 @@ void NPCHazard::Upd_OilOoze(F32 dt)
 
     if (this->flg_hazard & 0x8 && HAZ_AvailablePool() > 5)
     {
-        if (KickOilBurst())
+        S32 rc = KickOilBurst();
+        if (rc)
         {
             this->flg_hazard |= 0x40;
         }
@@ -3907,7 +3926,8 @@ void NPCHazard::Upd_OilOoze(F32 dt)
 
     if (this->tmr_nextglob < 0.0f && this->tmr_remain > 1.0f)
     {
-        if (KickOilGlobby())
+        S32 rc = KickOilGlobby();
+        if (rc)
         {
             this->flg_hazard |= 0x40;
         }
@@ -4100,27 +4120,28 @@ void NPCHazard::Upd_OilGlob(F32 dt)
 
 void NPCHazard::Upd_MonCloud(F32 dt)
 {
-    xVec3 dir_flat;
-    xVec3 dir_delta;
+    HAZCloud* cloud = &this->custdata.cloud;
     F32 ds2_owner;
-    zNPCCommon* npc_owner = this->npc_owner;
+    xVec3 dir_owner;
+    zNPCCommon* npc = this->npc_owner;
+    xVec3 vel;
 
-    if (npc_owner != NULL)
+    if (npc != NULL)
     {
-        ds2_owner = npc_owner->XZDstSqToPos(&this->pos_hazard, &dir_flat, NULL);
+        ds2_owner = npc->XZDstSqToPos(&this->pos_hazard, &dir_owner, NULL);
         if (ds2_owner < 1e-05f)
         {
-            xVec3Copy(&dir_flat, NPCC_rightDir(npc_owner));
+            xVec3Copy(&dir_owner, NPCC_rightDir(npc));
             ds2_owner = 1.0f;
         }
 
-        F32 ds2_home = NPCC_DstSq(&this->custdata.cloud.pos_home, &this->pos_hazard, NULL);
+        F32 ds2_home = NPCC_DstSq(&cloud->pos_home, &this->pos_hazard, NULL);
 
-        if (!npc_owner->IsHealthy() || ds2_home > SQ(this->custdata.cloud.rad_maxRange))
+        if (!npc->IsHealthy() || ds2_home > SQ(cloud->rad_maxRange))
         {
             this->tmr_remain = MIN(this->tmr_remain, 1.0f);
         }
-        else if (!xEntIsVisible(npc_owner) || globals.cmgr != NULL)
+        else if (!xEntIsVisible(npc) || globals.cmgr != NULL)
         {
             this->tmr_remain = -1.0f;
             this->MarkForRecycle();
@@ -4137,50 +4158,52 @@ void NPCHazard::Upd_MonCloud(F32 dt)
         this->SetBuddyTarget(NULL);
     }
 
-    xEnt* plyr = &globals.player.ent;
-    const xVec3* target_pos = this->GetBuddyTarget() != NULL ? this->GetBuddyTarget() : xEntGetPos(plyr);
+    // Buddy work: the cloud chases the buddy when one is out, the player otherwise.
+    const xVec3* target_pos =
+        this->GetBuddyTarget() != NULL ? this->GetBuddyTarget() : xEntGetPos(&globals.player.ent);
 
-    xVec3Sub(&dir_delta, target_pos, &this->pos_hazard);
-    dir_delta.y += 4.0f;
+    xVec3Sub(&vel, target_pos, &this->pos_hazard);
+    vel.y += 4.0f;
 
-    F32 dst_plyr = xVec3Length(&dir_delta);
+    F32 dst_plyr = xVec3Length(&vel);
 
     if (!(ds2_owner < 0.0f) && ds2_owner < 2.0f)
     {
-        xVec3SMul(&dir_delta, &dir_flat,
-                  (dt * this->custdata.cloud.spd_cloud) * (1.0f / xsqrt(ds2_owner)));
-        xVec3AddTo(&this->pos_hazard, &dir_delta);
+        xVec3SMul(&vel, &dir_owner, (dt * cloud->spd_cloud) * (1.0f / xsqrt(ds2_owner)));
+        xVec3AddTo(&this->pos_hazard, &vel);
     }
     else if (dst_plyr > 0.1f)
     {
-        xVec3SMulBy(&dir_delta, (dt * this->custdata.cloud.spd_cloud) / dst_plyr);
-        xVec3AddTo(&this->pos_hazard, &dir_delta);
+        xVec3SMulBy(&vel, (dt * cloud->spd_cloud) / dst_plyr);
+        xVec3AddTo(&this->pos_hazard, &vel);
     }
     else
     {
         F32 slowit = 0.75f * dt;
 
-        dir_delta.x = dir_delta.x * slowit;
-        dir_delta.z = dir_delta.z * slowit;
-        xVec3AddTo(&this->pos_hazard, &dir_delta);
+        vel.x = vel.x * slowit;
+        vel.z = vel.z * slowit;
+        xVec3AddTo(&this->pos_hazard, &vel);
     }
 
-    F32 tym_used = this->tym_lifespan - this->tmr_remain;
-    F32 rad_span = this->custdata.cloud.rad_max - this->custdata.cloud.rad_min;
+    F32 diff = cloud->rad_max - cloud->rad_min;
+    F32 tym_alive = this->tym_lifespan - this->tmr_remain;
 
-    if (tym_used < 0.25f)
+    if (tym_alive < 0.25f)
     {
-        this->custdata.cloud.rad_cur = 4.0f * (tym_used * rad_span);
+        cloud->rad_cur = 4.0f * (tym_alive * diff);
     }
     else if (this->tmr_remain > 0.25f)
     {
-        this->custdata.cloud.rad_cur = this->custdata.cloud.rad_max;
+        cloud->rad_cur = cloud->rad_max;
     }
     else
     {
-        this->custdata.cloud.rad_cur = 4.0f * (this->tmr_remain * rad_span);
+        cloud->rad_cur = 4.0f * (this->tmr_remain * diff);
     }
 
+    // Not gated on the player: the buddy arm below has to run even when the
+    // player is outside the cloud.
     if (this->flg_hazard & 0x2000)
     {
         S32 buddy_hit = this->GetBuddyTarget() != NULL &&
@@ -4197,32 +4220,32 @@ void NPCHazard::Upd_MonCloud(F32 dt)
         }
     }
 
-    xVec3Sub(&dir_delta, target_pos, &this->pos_hazard);
+    xVec3Sub(&vel, target_pos, &this->pos_hazard);
 
-    F32 ds2_plyr = SQ(dir_delta.x) + SQ(dir_delta.z);
+    dst_plyr = SQ(vel.x) + SQ(vel.z);
 
-    if (ds2_plyr > 1.0f && this->custdata.cloud.zap_lytnin == NULL)
+    if (dst_plyr > 1.0f && cloud->zap_lytnin == NULL)
     {
-        this->custdata.cloud.tmr_dozap = 0.0f;
+        cloud->tmr_dozap = 0.0f;
     }
-    else if (xabs(dir_delta.y) > 10.0f)
+    else if (xabs(vel.y) > 10.0f)
     {
-        this->custdata.cloud.tmr_dozap = 0.0f;
+        cloud->tmr_dozap = 0.0f;
     }
     else
     {
-        this->custdata.cloud.tmr_dozap = this->custdata.cloud.tmr_dozap + dt;
+        cloud->tmr_dozap = cloud->tmr_dozap + dt;
     }
 
     static S32 showLightning = 1;
 
-    if (this->custdata.cloud.zap_lytnin == NULL && ds2_plyr > 2.0f && ds2_owner > 2.0f)
+    if (cloud->zap_lytnin == NULL && dst_plyr > 2.0f && ds2_owner > 2.0f)
     {
         F32 rate_zap = 1.0f;
 
         if ((S32)((this->tym_lifespan - this->tmr_remain) * rate_zap) & 1)
         {
-            if (this->custdata.cloud.zap_warnin == NULL)
+            if (cloud->zap_warnin == NULL)
             {
                 static xCollis colrec;
                 _tagLightningAdd lyt;
@@ -4230,67 +4253,101 @@ void NPCHazard::Upd_MonCloud(F32 dt)
                 memset(&colrec, 0, sizeof(colrec));
                 this->npc_owner->SndPlayRandom(NPC_STYP_LIGHTNING);
 
-                xVec3Copy(&this->custdata.cloud.pos_warnin, &this->pos_hazard);
-                this->custdata.cloud.pos_warnin.y = this->custdata.cloud.pos_warnin.y - 7.0f;
-                this->custdata.cloud.pos_warnin.x =
-                    this->custdata.cloud.rad_cur * (2.0f * (xurand() - 0.5f)) +
-                    this->custdata.cloud.pos_warnin.x;
-                this->custdata.cloud.pos_warnin.z =
-                    this->custdata.cloud.rad_cur * (2.0f * (xurand() - 0.5f)) +
-                    this->custdata.cloud.pos_warnin.z;
+                xVec3Copy(&cloud->pos_warnin, &this->pos_hazard);
+                cloud->pos_warnin.y = cloud->pos_warnin.y - 7.0f;
+                cloud->pos_warnin.x =
+                    cloud->rad_cur * (2.0f * (xurand() - 0.5f)) + cloud->pos_warnin.x;
+                cloud->pos_warnin.z =
+                    cloud->rad_cur * (2.0f * (xurand() - 0.5f)) + cloud->pos_warnin.z;
 
-                if (!NPCC_HaveLOSToPos(&this->pos_hazard, &this->custdata.cloud.pos_warnin,
-                                       10.0f, NULL, &colrec))
+                if (!NPCC_HaveLOSToPos(&this->pos_hazard, &cloud->pos_warnin, 10.0f, NULL, &colrec))
                 {
-                    this->custdata.cloud.pos_warnin.y =
-                        this->custdata.cloud.pos_warnin.y + (7.0f - colrec.dist);
+                    cloud->pos_warnin.y = cloud->pos_warnin.y + (7.0f - colrec.dist);
                 }
 
                 NPCC_MakeLightningInfo(NPC_LYT_CLOUDWARN, &lyt);
                 lyt.start = &this->pos_hazard;
-                lyt.end = &this->custdata.cloud.pos_warnin;
+                lyt.end = &cloud->pos_warnin;
                 lyt.time = 1.5f;
 
                 if (showLightning)
                 {
-                    this->custdata.cloud.zap_warnin = zLightningAdd(&lyt);
+                    cloud->zap_warnin = zLightningAdd(&lyt);
                 }
             }
             else
             {
-                zLightningModifyEndpoints(this->custdata.cloud.zap_warnin, &this->pos_hazard,
-                                          &this->custdata.cloud.pos_warnin);
-                xVec3Copy(&g_parf_zapwarn.pos, &this->custdata.cloud.pos_warnin);
+                zLightningModifyEndpoints(cloud->zap_warnin, &this->pos_hazard, &cloud->pos_warnin);
+                xVec3Copy(&g_parf_zapwarn.pos, &cloud->pos_warnin);
                 xParEmitterEmitCustom(g_pemit_zapwarn, dt, &g_parf_zapwarn);
             }
         }
-        else if (this->custdata.cloud.zap_warnin != NULL)
+        else if (cloud->zap_warnin != NULL)
         {
-            zLightningKill(this->custdata.cloud.zap_warnin);
-            this->custdata.cloud.zap_warnin = NULL;
-            xVec3Copy(&this->custdata.cloud.pos_warnin, &g_O3);
+            zLightningKill(cloud->zap_warnin);
+            cloud->zap_warnin = NULL;
+            xVec3Copy(&cloud->pos_warnin, &g_O3);
         }
     }
-    else if (this->custdata.cloud.zap_lytnin == NULL)
+    else if (cloud->zap_lytnin == NULL)
     {
-        if (this->custdata.cloud.zap_warnin != NULL)
+        if (cloud->zap_warnin != NULL)
         {
-            zLightningKill(this->custdata.cloud.zap_warnin);
-            this->custdata.cloud.zap_warnin = NULL;
-            xVec3Copy(&this->custdata.cloud.pos_warnin, &g_O3);
+            zLightningKill(cloud->zap_warnin);
+            cloud->zap_warnin = NULL;
+            xVec3Copy(&cloud->pos_warnin, &g_O3);
         }
     }
 
-    if (this->custdata.cloud.tmr_dozap > 1.0f && this->custdata.cloud.zap_lytnin != NULL)
+    S32 emit_particles_and_cripple_framerate = 0;
+    if (emit_particles_and_cripple_framerate)
     {
-        if (this->custdata.cloud.tmr_dozap > 1.25f)
+        xVec3 pos_emit = this->pos_hazard;
+
+        g_parf_zaprain.pos = pos_emit;
+        g_parf_zaprain.pos.y -= 1.0f;
+        g_parf_zaprain.pos.y -= xurand();
+        g_parf_zaprain.pos.x += cloud->rad_cur * (2.0f * (xurand() - 0.5f));
+        g_parf_zaprain.pos.z += cloud->rad_cur * (2.0f * (xurand() - 0.5f));
+        xParEmitterEmitCustom(g_pemit_zaprain, dt, &g_parf_zaprain);
+
+        g_parf_zaprain.pos = pos_emit;
+        g_parf_zaprain.pos.y -= 2.0f;
+        g_parf_zaprain.pos.y -= xurand();
+        g_parf_zaprain.pos.x += cloud->rad_cur * (2.0f * (xurand() - 0.5f));
+        g_parf_zaprain.pos.z += cloud->rad_cur * (2.0f * (xurand() - 0.5f));
+        xParEmitterEmitCustom(g_pemit_zaprain, dt, &g_parf_zaprain);
+
+        g_parf_zaprain.pos = pos_emit;
+        g_parf_zaprain.pos.y -= 3.0f;
+        g_parf_zaprain.pos.y -= xurand();
+        g_parf_zaprain.pos.x += cloud->rad_cur * (2.0f * (xurand() - 0.5f));
+        g_parf_zaprain.pos.z += cloud->rad_cur * (2.0f * (xurand() - 0.5f));
+        xParEmitterEmitCustom(g_pemit_zaprain, dt, &g_parf_zaprain);
+    }
+
+    if (cloud->tmr_dozap > 1.0f && cloud->zap_lytnin != NULL)
+    {
+        if (cloud->tmr_dozap > 1.25f)
         {
-            zLightningKill(this->custdata.cloud.zap_lytnin);
-            this->custdata.cloud.zap_lytnin = NULL;
-            this->custdata.cloud.tmr_dozap = 0.0f;
+            zLightningKill(cloud->zap_lytnin);
+            cloud->zap_lytnin = NULL;
+            cloud->tmr_dozap = 0.0f;
+        }
+        else if (emit_particles_and_cripple_framerate)
+        {
+            xVec3 pos_emit = this->pos_hazard;
+
+            g_parf_zapwarn.pos = pos_emit;
+            g_parf_zapwarn.pos.y -= 1.0f;
+            xParEmitterEmitCustom(g_pemit_zapwarn, dt, &g_parf_zapwarn);
+            g_parf_zapwarn.pos.y -= 1.0f;
+            xParEmitterEmitCustom(g_pemit_zapwarn, dt, &g_parf_zapwarn);
+            g_parf_zapwarn.pos.y -= 1.0f;
+            xParEmitterEmitCustom(g_pemit_zapwarn, dt, &g_parf_zapwarn);
         }
     }
-    else if (this->custdata.cloud.tmr_dozap > 1.0f && ds2_owner > 2.0f)
+    else if (cloud->tmr_dozap > 1.0f && ds2_owner > 2.0f)
     {
         _tagLightningAdd lyt;
         xVec3 lightning_target = *target_pos;
@@ -4302,7 +4359,7 @@ void NPCHazard::Upd_MonCloud(F32 dt)
 
         if (showLightning)
         {
-            this->custdata.cloud.zap_lytnin = zLightningAdd(&lyt);
+            cloud->zap_lytnin = zLightningAdd(&lyt);
         }
 
         if (this->GetBuddyTarget() != NULL)

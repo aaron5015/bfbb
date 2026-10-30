@@ -1102,6 +1102,86 @@ static int CompareU64(const void* a, const void* b)
 static S32 MeantToBeInward(RpGeometry* geo);
 static void MarkSeenFromInside(RpGeometry* geo);
 static void ForgetSeenFromInside(RpGeometry* geo);
+static void ForgetThin(RpGeometry* geo);
+
+// Give up the slots and the inward mark a geometry holds, because it is about
+// to be freed and the next one allocated at its address must not inherit them.
+static void ForgetGeometry(RpGeometry* geo)
+{
+    ForgetSeenFromInside(geo);
+    ForgetThin(geo);
+
+    U32 i = PointerSlot(geo, kWeldSlots);
+
+    for (S32 tries = 0; sWelded[i] != NULL && tries < kWeldSlots; tries++)
+    {
+        if (sWelded[i] == geo)
+        {
+            sWelded[i] = kSlotFreed;
+            sRampRow[i] = 0;
+            return;
+        }
+
+        i = (i + 1) & (kWeldSlots - 1);
+    }
+}
+
+// The geometries an atomic had before iToonHullNormals replaced them, each
+// holding a reference of ours so a pointer taken before the swap still reads.
+// iToonForgetModel drops it with the model.
+struct ToonReplaced
+{
+    RpAtomic* atomic;
+    RpGeometry* original;
+};
+
+static ToonReplaced* sReplaced;
+static S32 sReplacedCount;
+static S32 sReplacedMax;
+
+static void KeepReplaced(RpAtomic* atomic, RpGeometry* original)
+{
+    if (sReplacedCount == sReplacedMax)
+    {
+        S32 want = sReplacedMax > 0 ? sReplacedMax * 2 : 64;
+        ToonReplaced* grown = (ToonReplaced*)RwMalloc(want * sizeof(ToonReplaced));
+
+        if (grown == NULL)
+        {
+            return;
+        }
+
+        if (sReplaced != NULL)
+        {
+            memcpy(grown, sReplaced, sReplacedCount * sizeof(ToonReplaced));
+            RwFree(sReplaced);
+        }
+
+        sReplaced = grown;
+        sReplacedMax = want;
+    }
+
+    ((rw::Geometry*)original)->addRef();
+    sReplaced[sReplacedCount].atomic = atomic;
+    sReplaced[sReplacedCount].original = original;
+    sReplacedCount++;
+}
+
+static void DropReplaced(RpAtomic* atomic)
+{
+    for (S32 i = 0; i < sReplacedCount;)
+    {
+        if (sReplaced[i].atomic != atomic)
+        {
+            i++;
+            continue;
+        }
+
+        ForgetGeometry(sReplaced[i].original);
+        ((rw::Geometry*)sReplaced[i].original)->destroy();
+        sReplaced[i] = sReplaced[--sReplacedCount];
+    }
+}
 
 // **Written somewhere of its own, because the surface still needs its own
 // normals.** This used to overwrite them, and everything that reads a normal
@@ -1461,7 +1541,7 @@ void iToonHullNormals(void* atomic)
         MarkSeenFromInside(built);
     }
 
-    ((rw::Geometry*)geo)->addRef();
+    KeepReplaced(a, geo);
 
     // **The atomic keeps its own bounding sphere, because it is not always its
     // geometry's.** This mesh has the vertices of the one it replaces, so either
@@ -1473,6 +1553,9 @@ void iToonHullNormals(void* atomic)
     // the same reason. 1 is rpATOMICSAMEBOUNDINGSPHERE, which rpworld.h
     // declares the call without naming.
     RpAtomicSetGeometry(a, built, 1);
+
+    // setGeometry took the atomic's reference; this drops the one create gave.
+    ((rw::Geometry*)built)->destroy();
 }
 
 // Where the model's lower ink starts, from the bind pose.
@@ -1998,37 +2081,19 @@ static RpAtomic* ForgetSlotCB(RpAtomic* atomic, void* data)
 {
     RpGeometry* geo = RpAtomicGetGeometry(atomic);
 
-    if (geo == NULL)
+    if (geo != NULL)
     {
-        return atomic;
+        ForgetGeometry(geo);
     }
 
-    ForgetSeenFromInside(geo);
-
-    U32 i = PointerSlot(geo, kWeldSlots);
-
-    for (S32 tries = 0; sWelded[i] != NULL && tries < kWeldSlots; tries++)
-    {
-        if (sWelded[i] == geo)
-        {
-            sWelded[i] = kSlotFreed;
-            sRampRow[i] = 0;
-            break;
-        }
-
-        i = (i + 1) & (kWeldSlots - 1);
-    }
-
+    DropReplaced(atomic);
     return atomic;
 }
 
+// Not behind ToonOff: a model swapped while the look was on still holds the
+// references, whatever the setting says by the time it unloads.
 void iToonForgetModel(void* clump)
 {
-    if (ToonOff())
-    {
-        return;
-    }
-
     if (clump == NULL)
     {
         return;
@@ -2666,7 +2731,10 @@ void iToonSolidify(void* atomic)
         // Its own sphere again, as with the hull's normals above: the same
         // object, thicker by the width of a line, and a radius the game set by
         // hand is a statement about the object and not about the mesh.
+        // The sheet goes when the atomic lets go of it, so its slot goes first.
+        ForgetGeometry(geo);
         RpAtomicSetGeometry(a, solid, 1);
+        ((rw::Geometry*)solid)->destroy();
 
         // And smoothed, if the level's models are. This mesh was built after
         // iHipolyModel ran over the asset, so it has to ask for itself; the rim
@@ -3119,7 +3187,9 @@ static S32 ThinSlot(RpGeometry* geo)
 {
     U32 i = PointerSlot(geo, kThinSlots);
     S32 tries = 0;
+    S32 freed = -1;
 
+    // As WeldSlot: the whole probe, then the first freed slot it passed.
     while (sThinGeo[i] != NULL && tries < kThinSlots)
     {
         if (sThinGeo[i] == geo)
@@ -3127,11 +3197,20 @@ static S32 ThinSlot(RpGeometry* geo)
             return (S32)i;
         }
 
+        if (sThinGeo[i] == kSlotFreed && freed < 0)
+        {
+            freed = (S32)i;
+        }
+
         i = (i + 1) & (kThinSlots - 1);
         tries++;
     }
 
-    if (tries >= kThinSlots)
+    if (freed >= 0)
+    {
+        i = (U32)freed;
+    }
+    else if (tries >= kThinSlots)
     {
         return -1;
     }
@@ -3183,6 +3262,22 @@ static S32 ThinSlot(RpGeometry* geo)
     sThinCentre[i].z = 0.5f * (hi.z + lo.z);
 
     return (S32)i;
+}
+
+static void ForgetThin(RpGeometry* geo)
+{
+    U32 i = PointerSlot(geo, kThinSlots);
+
+    for (S32 tries = 0; sThinGeo[i] != NULL && tries < kThinSlots; tries++)
+    {
+        if (sThinGeo[i] == geo)
+        {
+            sThinGeo[i] = kSlotFreed;
+            return;
+        }
+
+        i = (i + 1) & (kThinSlots - 1);
+    }
 }
 
 // **A model cannot be inked thicker than it is, and the pixel floor does not

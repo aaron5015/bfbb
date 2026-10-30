@@ -1,0 +1,8 @@
+# Kelp Vines (kf05) at 640x480 on Direct3D 9, booted straight into the scene.
+# The fly-through ends in SpongeBob's talk box by 600. B leaves it; the shot
+# is 120 frames later.
+
+wait 900
+press b
+wait 120
+shot reg_kf05 0

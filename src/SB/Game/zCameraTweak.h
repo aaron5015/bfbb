@@ -3,7 +3,9 @@
 
 #include "xDynAsset.h"
 
+#if !defined(PS2)
 #include <stddef.h>
+#endif
 
 struct CameraTweak_asset : xDynAsset
 {
@@ -45,7 +47,11 @@ F32 zCameraTweakGlobal_GetPitch();
 void zCameraTweakGlobal_Update(F32 dt);
 void zCameraTweakGlobal_Reset();
 void zCameraTweak_Init(xBase& data, xDynAsset& asset, size_t);
-void zCameraTweak_Init(zCameraTweak* tweak, CameraTweak_asset* asset);
+#if defined(PS2)
+inline
+#endif
+    void
+    zCameraTweak_Init(zCameraTweak* tweak, CameraTweak_asset* asset);
 void zCameraTweak_Save(zCameraTweak* tweak, xSerial* s);
 void zCameraTweak_Load(zCameraTweak* tweak, xSerial* s);
 S32 zCameraTweak_EventCB(xBase* from, xBase* to, U32 toEvent, const F32* toParam, xBase* b3);

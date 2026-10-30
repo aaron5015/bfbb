@@ -21,8 +21,11 @@
 # confirm what four other jobs already said.
 name: Android
 
+# Not on pushes to treedome: pc-port.yml calls this workflow there, for the
+# APK in the release, and running it here as well would build it twice.
 on:
   push:
+    branches-ignore: [treedome]
     paths:
       - 'android/**'
       - 'CMakeLists.txt'
@@ -45,15 +48,19 @@ on:
       - '.github/workflows/android.yml'
       - '.gitmodules'
   workflow_dispatch:
+  # From pc-port.yml, with the tag of the draft release to upload the APK to.
+  workflow_call:
+    inputs:
+      release:
+        type: string
+        required: true
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     name: assembleDebug (arm64-v8a)
 
-    # To create the rolling prerelease below. Everything else this job does is
-    # a read; naming the two explicitly is what keeps the token from carrying
-    # anything it does not need.
+    # To upload to pc-port.yml's draft release.
     permissions:
       contents: write
 
@@ -61,10 +68,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Two of the three, as in pc-port.yml: wxWidgets is 300 MB of working
-      # tree for a configurator this build switches off anyway.
+      # Everything but wxWidgets, which is 300 MB of working tree for a
+      # configurator this build switches off. The three Vulkan libraries are
+      # for the default GL3;VULKAN build.
       - name: Submodules
-        run: git submodule update --init --recursive third_party/librw third_party/SDL
+        run: >
+          git submodule update --init --recursive third_party/librw third_party/SDL
+          third_party/Vulkan-Headers third_party/volk third_party/VulkanMemoryAllocator
 
       - name: Check the submodules came down
         run: |
@@ -79,6 +89,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      # Pinned: the runner's own Gradle moved to 9, which cannot resolve the
+      # Android Gradle plugin 8.7.3's classpath. No wrapper validation: this
+      # build has no wrapper, and the only jar it would find is the one in
+      # SDL's android-project, which is not run.
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+          validate-wrappers: false
 
       # The runner image ships an SDK and at least one NDK; android/app/build.
       # gradle pins the NDK version it wants and Gradle installs it if the
@@ -102,67 +122,14 @@ jobs:
           unzip -l "$apk" | grep -q 'lib/arm64-v8a/libmain\.so' \
             || { echo "the APK has no lib/arm64-v8a/libmain.so -- the native build did not reach it"; exit 1; }
 
-      # So someone can install the thing and find out what it does on a device,
-      # which is the only way the questions in docs/ANDROID.md get answered.
-      #
-      # NOT allowed to fail the job. Artifact storage is an account-wide quota
-      # that fills up from every workflow in every repository, and a build that
-      # compiled and packaged correctly should not go red because there was
-      # nowhere to put a copy of it -- the step above is what decides whether
-      # the APK is good. If this step is skipped, clear some artifacts or wait
-      # for the usage recalculation and re-run.
-      # A RELEASE asset, not an Actions artifact.
-      #
-      # Artifacts are billed against an account-wide shared storage quota that
-      # every workflow in every repository draws on, and this one was full --
-      # so the APK was built correctly and had nowhere to go, on every run,
-      # for reasons with nothing to do with the port. Release assets are
-      # repository storage instead, which is not that quota.
-      #
-      # One ROLLING prerelease rather than one per push. The asset name is
-      # fixed, so the download URL is stable and can be pasted anywhere:
-      #
-      #   .../releases/download/android-latest/bfbb-arm64-v8a.apk
-      #
-      # and exactly one 8 MB file exists at a time instead of one per commit.
-      # Deleted and recreated rather than uploaded over, so the tag points at
-      # the commit that was actually built -- a fixed tag left where it was
-      # first created is a download that quietly stops matching its label.
-      #
-      # Pushes only. A pull request from a fork gets a read-only token and
-      # could not publish this anyway.
-      - name: Publish the APK as a rolling prerelease
-        if: github.event_name == 'push'
+      # Straight to pc-port.yml's draft release, never to Actions artifacts:
+      # those count against the account's storage quota, release assets do not.
+      # A run of its own, for a pull request or a push, uploads nothing.
+      - name: Upload to the release
+        if: inputs.release != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
-          cp "$apk" bfbb-arm64-v8a.apk
-
-          cat > notes.md <<'NOTES'
-          The Android port, built by CI. **This is a build, not a release** --
-          see `docs/ANDROID.md` for what does and does not work yet.
-
-          * arm64-v8a, minSdk 24, debug-signed.
-          * It ships NO game data. The assets go in
-            `Android/data/io.github.joeyballentine.bfbb/files/assets`, which the
-            app creates on first run.
-          * Whether it starts at all turns on the game arena landing below 4 GB
-            on your device -- `tools/android/arena_probe.c` is what answers
-            that, and it can be built and run on the phone under Termux.
-          NOTES
-          {
-            echo ""
-            echo "Built from \`$GITHUB_REF_NAME\` at \`$GITHUB_SHA\`."
-          } >> notes.md
-
-          # `|| true` for the first run, when there is no release to delete.
-          gh release delete android-latest --yes --cleanup-tag || true
-
-          gh release create android-latest bfbb-arm64-v8a.apk \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "Android build (arm64-v8a)" \
-            --notes-file notes.md
-
-          echo "::notice::APK published: $(gh release view android-latest --json url --jq .url)"
+          cp "$(ls android/app/build/outputs/apk/debug/*.apk | head -1)" bfbb-arm64-v8a.apk
+          gh release upload "${{ inputs.release }}" bfbb-arm64-v8a.apk --clobber

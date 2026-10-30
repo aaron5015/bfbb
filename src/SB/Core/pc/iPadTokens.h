@@ -38,13 +38,26 @@ enum iPadInput
 #define KEY_EITHER_CTRL 1001
 #define KEY_EITHER_ALT 1002
 
+// The mouse buttons and the wheel, which SDL gives no scancode. They are rows of
+// the key table all the same, so a binding can name one wherever it names a
+// key. Numbered rather than named left and right: SDL swaps the two for a
+// left-handed mouse, so `mouse1` is the primary button whichever side it is on.
+#define KEY_MOUSE_1 1010
+#define KEY_MOUSE_2 1011
+#define KEY_MOUSE_3 1012
+#define KEY_MOUSE_4 1013
+#define KEY_MOUSE_5 1014
+#define KEY_WHEEL_UP 1020
+#define KEY_WHEEL_DOWN 1021
+
 // Where a trigger clicks, in SDL's 0..32767. See iPadHostSDL.cpp for how the
 // number was arrived at.
 #define IPAD_SDL_TRIGGER_THRESHOLD 9830
 
 const iPadBindToken* iPadPadTokens(S32* count);
 
-// Ids are SDL scancodes, or KEY_EITHER_*. Letters and digits are included.
+// Ids are SDL scancodes, KEY_EITHER_*, KEY_MOUSE_* or KEY_WHEEL_*. Letters and
+// digits are included.
 const iPadBindToken* iPadKeyTokens(S32* count);
 
 // The PADIN_* an SDL_GamepadButton reports as, or -1 for a button no binding

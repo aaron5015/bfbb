@@ -119,7 +119,7 @@ struct st_ISG_MEMCARD_DATA
     CARDFileInfo unk_9c;
     CARDStat unk_b0;
     S32 unk_pad6[4];
-    S32 unk_12c;
+    S32 cardIsIll;
 };
 
 #define ISG_NUM_SLOTS 2
@@ -129,8 +129,8 @@ struct st_ISGSESSION
     st_ISG_MEMCARD_DATA mcdata[ISG_NUM_SLOTS];
     S32 slot;
     S32 unk_264;
-    en_ASYNC_OPERR unk_268;
-    en_ASYNC_OPSTAT unk_26c;
+    en_ASYNC_OPERR as_operr;
+    en_ASYNC_OPSTAT as_opstat;
     S32 unk_270;
     void (*chgfunc)(void*, en_CHGCODE); // 0x274
     void* cltdata; // 0x278
@@ -187,5 +187,8 @@ S32 iSGCheckForCorruptFiles(st_ISGSESSION*, char files[][64]);
 
 // The PC port keeps a still of the game for its save list; see pc/isavegame.h.
 #define iSGCaptureThumb()
+
+// The PC port can load a game from the pause menu; see pc/isavegame.h.
+#define iSGShowMenu(show, scene) (show)
 
 #endif

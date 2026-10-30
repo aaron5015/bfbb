@@ -14,6 +14,11 @@
 
 #include <types.h>
 #include <rwplcore.h>
+#if defined(PS2)
+#include <rwim2d.h>
+#include <rwim3d.h>
+#include "xstransvc.h"
+#endif
 
 bool oob_player_teleported;
 
@@ -21,9 +26,6 @@ bool oob_player_teleported;
 // This function is here to force the symbols to be linked.
 void __deadstripped_zEntPlayerOOBState()
 {
-    const char _405[0x0C] = {};
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
     const char _441[0x0C] = {};
 
     const char _612[0x28] = {};
@@ -47,6 +49,22 @@ void __deadstripped_zEntPlayerOOBState2()
     const char _792[0x10] = {};
 }
 
+#if defined(PS2)
+#if defined(VERSION_SLES_51968) || defined(VERSION_SLES_51970)
+#define OOB_SCREEN_WIDTH 512.0f
+#define OOB_SCREEN_HEIGHT 512.0f
+#else
+#define OOB_SCREEN_WIDTH 640.0f
+#define OOB_SCREEN_HEIGHT 448.0f
+#endif
+#else
+#define OOB_SCREEN_WIDTH 640.0f
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+#define OOB_SCREEN_HEIGHT 528.0f
+#else
+#define OOB_SCREEN_HEIGHT 480.0f
+#endif
+#endif
 
 namespace oob_state
 {
@@ -171,6 +189,13 @@ namespace oob_state
             xModelRender2D(model, screen_rect, from, to);
         }
 
+        // Preserve the early float-pool entries left by stripped OOB helpers.
+        void __deadstripped_motion_settings(F32& time, F32& distance)
+        {
+            time = 0.5f;
+            distance = 3.0f;
+        }
+
         static void move_up(xVec3& vec, F32 scale)
         {
             xMat4x3& camMat = globals.camera.mat;
@@ -188,7 +213,7 @@ namespace oob_state
             xVec3 localCoords;
             xMat4x3Tolocal(&localCoords, &camMat, &loc);
 
-            loc += camMat.right * x * localCoords.z * (4.0f / 3.0f);
+            loc += camMat.right * x * localCoords.z * (OOB_SCREEN_WIDTH / OOB_SCREEN_HEIGHT);
         }
 
         static void update_max_out_time(const xSurface& surface)
@@ -217,7 +242,7 @@ namespace oob_state
             bool stupid = !idiot_levels[0].triggered;
             idiot_levels[0].triggered = true;
 
-            for (S32 i = 1; i < 6; i++)
+            for (U32 i = 1; i < 6; i++)
             {
                 if (scene == idiot_levels[i].scene)
                 {
@@ -232,15 +257,14 @@ namespace oob_state
 
         static void move_hand(F32 dt)
         {
-            F32 old_vel = shared.vel;
-
-            shared.vel = shared.accel * dt + old_vel;
-            shared.loc += shared.dir * (0.5f * shared.accel * dt * dt + old_vel * dt);
+            F32 dd = 0.5f * shared.accel * dt * dt + shared.vel * dt;
+            shared.vel += shared.accel * dt;
+            shared.loc += shared.dir * dd;
         }
 
-        static void set_rect_verts(rwGameCube2DVertex*, F32, F32, F32, F32, iColor_tag c, F32 nsz,
+        static void set_rect_verts(RwIm2DVertex*, F32, F32, F32, F32, iColor_tag c, F32 nsz,
                                    F32 rcz);
-        static void set_rect_vert(rwGameCube2DVertex&, F32 x, F32 y, F32 z, iColor_tag c, F32 rcz);
+        static void set_rect_vert(RwIm2DVertex&, F32 x, F32 y, F32 z, iColor_tag c, F32 rcz);
         static void render_fade()
         {
             iColor_tag color = {};
@@ -252,13 +276,18 @@ namespace oob_state
             F32 rcz = RwIm2DGetFarScreenZ();
 
             RwIm2DVertex vert[4];
-            set_rect_verts((rwGameCube2DVertex*)vert, 0.0f, 0.0f, xScreenWidthF(),
-                           xScreenHeightF(), color, rcz, nsz);
+#ifdef PLATFORM_PC
+            set_rect_verts((RwIm2DVertex*)vert, 0.0f, 0.0f, xScreenWidthF(), xScreenHeightF(),
+                           color, rcz, nsz);
+#else
+            set_rect_verts((RwIm2DVertex*)vert, 0.0f, 0.0f, OOB_SCREEN_WIDTH, OOB_SCREEN_HEIGHT,
+                           color, rcz, nsz);
+#endif
             RwIm2DRenderPrimitive(rwPRIMTYPETRISTRIP, (RwIm2DVertex*)vert, 4);
         }
 
-        static void set_rect_verts(rwGameCube2DVertex* verts, F32 x, F32 y, F32 w, F32 h,
-                                   iColor_tag c, F32 rcz, F32 nsz)
+        static void set_rect_verts(RwIm2DVertex* verts, F32 x, F32 y, F32 w, F32 h, iColor_tag c,
+                                   F32 rcz, F32 nsz)
         {
             set_rect_vert(verts[0], x, y, rcz, c, nsz);
             set_rect_vert(verts[1], x, y + h, rcz, c, nsz);
@@ -266,9 +295,15 @@ namespace oob_state
             set_rect_vert(verts[3], x + w, y + h, rcz, c, nsz);
         }
 
-        static void set_rect_vert(rwGameCube2DVertex& vert, F32 x, F32 y, F32 z, iColor_tag c,
-                                  F32 rcz)
+        static void set_rect_vert(RwIm2DVertex& vert, F32 x, F32 y, F32 z, iColor_tag c, F32 rcz)
         {
+#if defined(PS2)
+            RwIm2DVertexSetScreenX(&vert, x);
+            RwIm2DVertexSetScreenY(&vert, y);
+            RwIm2DVertexSetScreenZ(&vert, z);
+            RwIm2DVertexSetRecipCameraZ(&vert, rcz);
+            RwIm2DVertexSetIntRGBA(&vert, c.r, c.g, c.b, c.a);
+#else
             vert.x = x;
             vert.y = y;
             vert.z = z;
@@ -276,6 +311,7 @@ namespace oob_state
             vert.emissiveColor.green = c.g;
             vert.emissiveColor.blue = c.b;
             vert.emissiveColor.alpha = c.a;
+#endif
         }
 
         static void render_ghost()
@@ -285,8 +321,7 @@ namespace oob_state
             iDrawSetFBMSK(-1);
             zRenderState(SDRS_OOBPlayerZ);
 
-            xModelInstance* xm = ent.model;
-            while (xm != NULL)
+            for (xModelInstance* xm = ent.model; xm != NULL; xm = xm->Next)
             {
                 RpAtomic& model = *xm->Data;
 
@@ -294,8 +329,6 @@ namespace oob_state
                 {
                     iModelRender(&model, xm->Mat);
                 }
-
-                xm = xm->Next;
             }
 
             iDrawSetFBMSK(0);
@@ -305,8 +338,7 @@ namespace oob_state
             U8 alpha = 255.0f * (1.0f - shared.fade_alpha) + 0.5f;
             alpha &= 0xFF;
 
-            xm = ent.model;
-            while (xm != NULL)
+            for (xModelInstance* xm = ent.model; xm != NULL; xm = xm->Next)
             {
                 RpAtomic& model = *xm->Data;
 
@@ -316,8 +348,6 @@ namespace oob_state
                     iModelRender(&model, xm->Mat);
                     iModelResetMaterial(&model);
                 }
-
-                xm = xm->Next;
             }
 
             xLightKit_Enable(NULL, globals.currWorld);
@@ -328,15 +358,14 @@ namespace oob_state
             zRenderState(SDRS_OOBHand);
 
             xVec3 modelLoc = { 0.0f, 0.0f, 0.0f };
-            xVec3 modelSize = { 0.0f, 0.0f, 1.0f };
-            xVec3 modelYpr = { 0.0f, 0.0f, 0.0f };
-
             modelLoc.x = shared.loc.x;
             modelLoc.y = shared.loc.y;
 
+            xVec3 modelSize = { 0.0f, 0.0f, 1.0f };
             modelSize.x = fixed.hand_size_x;
             modelSize.y = fixed.hand_size_y;
 
+            xVec3 modelYpr = { 0.0f, 0.0f, 0.0f };
             modelYpr.x = fixed.hand_yaw;
             modelYpr.y = fixed.hand_pitch;
             modelYpr.z = fixed.hand_roll;
@@ -405,13 +434,13 @@ void oob_state::init()
 
     static in_state_type in_state;
     shared.states[0] = &in_state;
-    
+
     static out_state_type out_state;
     shared.states[1] = &out_state;
-    
+
     static grab_state_type grab_state;
     shared.states[2] = &grab_state;
-    
+
     static drop_state_type drop_state;
     shared.states[3] = &drop_state;
 
@@ -590,8 +619,7 @@ namespace oob_state
         {
             move_hand(dt);
 
-            xVec2 in_out_path = fixed.in_loc - fixed.out_loc;
-            xVec2 norm = in_out_path.normal();
+            xVec2 norm = (fixed.in_loc - fixed.out_loc).normal();
 
             F32 projection = norm.dot(fixed.in_loc - shared.loc);
             if (projection > fixed.grab.in_stop_dist)
@@ -780,7 +808,8 @@ namespace oob_state
 
             if (assume_player_is_stupid())
             {
-                shared.tutorial->start_talk(xStrHash("out_of_bounds_txt"), (ztalkbox::callback*)&cb, NULL);
+                shared.tutorial->start_talk(xStrHash("out_of_bounds_txt"), (ztalkbox::callback*)&cb,
+                                            NULL);
                 return SS_TUTORIAL;
             }
 
@@ -797,8 +826,7 @@ namespace oob_state
         {
             move_hand(dt);
 
-            xVec2 in_out_path = fixed.in_loc - fixed.out_loc;
-            xVec2 norm = in_out_path.normal();
+            xVec2 norm = (fixed.in_loc - fixed.out_loc).normal();
 
             F32 projection = norm.dot(fixed.in_loc - shared.loc);
             if (projection > fixed.grab.in_stop_dist)
@@ -852,7 +880,7 @@ namespace oob_state
         grab_state_type::tutorial_callback::tutorial_callback(grab_state_type& owner) : owner(owner)
         {
         }
-        
+
         out_state_type::out_state_type() : state_type(STATE_OUT)
         {
         }
@@ -861,15 +889,19 @@ namespace oob_state
         {
         }
 
-        void state_type::start()
-        {
-        };
+        void state_type::start() {};
 
-        void state_type::stop()
-        {
-        };
+        void state_type::stop() {};
     } // namespace
 } // namespace oob_state
+
+// Keep the empty base callbacks before update, as in retail. This discarded
+// caller controls their emission order without adding a live call.
+void __deadstripped_oob_base_callbacks(oob_state::state_type& state)
+{
+    state.oob_state::state_type::stop();
+    state.oob_state::state_type::start();
+}
 
 U8 oob_state::update(xScene& scene, F32 dt)
 {
@@ -906,13 +938,12 @@ U8 oob_state::update(xScene& scene, F32 dt)
         shared.state->start();
     }
 
-
     return shared.control;
 }
 
 bool oob_state::IsPlayerInControl()
 {
-    return oob_state::shared.control == 0;
+    return !oob_state::shared.control;
 }
 
 F32 oob_state::oob_timer()
@@ -956,7 +987,7 @@ void oob_state::fx_render()
         render_fade();
         render_ghost();
     }
-    
+
     if (shared.render_hand && shared.model != NULL)
     {
         render_hand();
@@ -1012,8 +1043,7 @@ namespace oob_state
             shared.control = 0;
         };
 
-        void in_state_type::stop()
-        {
+        void in_state_type::stop() {
 
         };
 
@@ -1077,13 +1107,13 @@ namespace oob_state
                     return STATE_GRAB;
                 }
             }
-            else 
+            else
             {
                 if (!globals.player.JumpState)
                 {
                     shared.reset_time = 0.0f;
                 }
-                
+
                 shared.reset_time -= dt;
                 if (shared.reset_time <= 0.0f)
                 {
@@ -1094,8 +1124,15 @@ namespace oob_state
             return STATE_OUT;
         };
 
+        void grab_state_type::tutorial_callback::on_stop()
+        {
+            owner.finished_tutorial = true;
+        }
+
         void grab_state_type::start()
         {
+            xEnt& player = globals.player.ent;
+
             this->finished_tutorial = FALSE;
             zEntPlayerControlOff(CONTROL_OWNER_OOB);
 
@@ -1103,9 +1140,13 @@ namespace oob_state
             cruise_bubble::reset();
 
             shared.flags |= 0x4;
+#if defined(PS2)
+            shared.vertical = xabs(fixed.in_loc.y - fixed.out_loc.y) > 0.01f;
+#else
             shared.vertical = FABS(fixed.in_loc.y - fixed.out_loc.y) > 0.01f;
+#endif
             shared.control = TRUE;
-            
+
             this->move_substate = shared.model != NULL ? SS_REORIENT : SS_INVALID;
             this->reorient_time = fixed.reorient_time;
 
@@ -1121,11 +1162,11 @@ namespace oob_state
             this->fade_time = fixed.grab.fade_time;
 
             shared.fade_alpha = 1.0f;
-            this->player_start = globals.player.ent.frame->mat.pos;
+            this->player_start = player.frame->mat.pos;
 
             xVec3 eulerOut;
-            xMat3x3GetEuler(&globals.player.ent.frame->mat, &eulerOut);
-            globals.player.ent.frame->rot.angle = xrmod(eulerOut.x);
+            xMat3x3GetEuler(&player.frame->mat, &eulerOut);
+            player.frame->rot.angle = xrmod(eulerOut.x);
 
             this->angle_delta = xrmod(PI + (globals.camera.pcur - eulerOut.x)) - PI;
             this->angle_delta /= fixed.reorient_time;
@@ -1198,12 +1239,12 @@ namespace oob_state
         {
             this->player_start = globals.player.cp.pos;
             this->move_substate = shared.model != NULL ? SS_MOVING_IN : SS_INVALID;
-            
+
             shared.vel = fixed.drop.in_vel;
             shared.accel = 0.0f;
             shared.loc.x = fixed.out_loc.x;
             shared.loc.y = fixed.out_loc.y;
-            
+
             this->fade_substate = SS_START_FADE_IN;
             this->fade_start_time = fixed.drop.fade_start_time;
             this->fade_time = fixed.drop.fade_time;
@@ -1215,7 +1256,7 @@ namespace oob_state
             globals.player.ControlOffTimer = FLOAT_MAX;
             xScrFxStopFade();
             zCameraDisableInput();
-            
+
             xModelInstance& m = *p.model;
             xEntFrame& f = *p.frame;
 
@@ -1232,8 +1273,10 @@ namespace oob_state
             set_camera(true);
             globals.camera.tgt_omat = &shared_target;
             globals.camera.tgt_mat = &shared_target;
-            xCameraMove(&globals.camera, 0x20, fixed.cam_dist, fixed.cam_height, PI + globals.player.cp.rot, 0.0f, 0.0f, 0.0f);
-            xCameraLookYPR(&globals.camera, 0x0, globals.player.cp.rot, fixed.cam_pitch, 0.0f, 0.0f, 0.0f, 0.0f);
+            xCameraMove(&globals.camera, 0x20, fixed.cam_dist, fixed.cam_height,
+                        PI + globals.player.cp.rot, 0.0f, 0.0f, 0.0f);
+            xCameraLookYPR(&globals.camera, 0x0, globals.player.cp.rot, fixed.cam_pitch, 0.0f, 0.0f,
+                           0.0f, 0.0f);
         }
 
         void drop_state_type::stop()
@@ -1242,7 +1285,7 @@ namespace oob_state
             globals.player.ControlOffTimer = 1.0f;
 
             reset_camera();
-            
+
             shared.render_hand = FALSE;
             shared.fade_alpha = 1.0f;
             shared.flags &= ~0x4;

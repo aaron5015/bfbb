@@ -362,7 +362,7 @@ if(BFBB_INPUT_BACKEND STREQUAL "null")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostNull.cpp)
 elseif(BFBB_INPUT_BACKEND STREQUAL "sdl")
   set(INPUT_SOURCES ${PC_DIR}/iPadHostSDL.cpp ${PC_DIR}/iPadKeyboardSDL.cpp ${PC_DIR}/iPadTokens.cpp
-                    ${PC_DIR}/iPadTouch.cpp)
+                    ${PC_DIR}/iPadTouch.cpp ${PC_DIR}/iPadMouseSDL.cpp ${PC_DIR}/iMouseLook.cpp)
 
   # So the self-test knows which backend it is linked against: the contract it
   # checks is the same either way, but "no controller on port 0" means an
@@ -855,10 +855,12 @@ file(GLOB MENU_SOURCES CONFIGURE_DEPENDS ${PC_DIR}/menu/*.cpp)
 add_library(bfbb_platform STATIC
   ${PC_DIR}/iBoot.cpp
   ${PC_DIR}/iCameraLook.cpp
+  ${PC_DIR}/iCheats.cpp
   ${PC_DIR}/iConfig.cpp
   ${PC_DIR}/iConfigTable.cpp
   ${PC_DIR}/iConfigEdit.cpp
   ${PC_DIR}/iDrawDist.cpp
+  ${PC_DIR}/iFirstPerson.cpp
   ${PC_DIR}/iFile.cpp
   ${PC_DIR}/iFixes.cpp
   ${PC_DIR}/iFont.cpp
@@ -872,6 +874,7 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iMath.cpp
   ${PC_DIR}/iMemMgr.cpp
   ${PC_DIR}/iMenuFrame.cpp
+  ${PC_DIR}/iMenuSpin.cpp
   ${PC_DIR}/iPad.cpp
   ${PC_DIR}/iPadLayout.cpp
   ${PC_DIR}/iPadBind.cpp
@@ -879,6 +882,9 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iPadGlyph.cpp
   ${PC_DIR}/iPadStick.cpp
   ${PC_DIR}/iSystem.cpp
+  ${PC_DIR}/iGCMem.cpp
+  ${PC_DIR}/iModPatch.cpp
+  ${PC_DIR}/iGCSwap.cpp
   ${PC_DIR}/iTextPatch.cpp
   ${PC_DIR}/iTour.cpp
   ${PC_DIR}/iTF2Bridge.cpp
@@ -888,8 +894,11 @@ add_library(bfbb_platform STATIC
   ${PC_DIR}/iTRC.cpp
   ${PC_DIR}/iTime.cpp
   ${PC_DIR}/isavegame.cpp
+  ${PC_DIR}/iSaveFile.cpp
+  ${PC_DIR}/iModFolder.cpp
   ${PC_DIR}/iSnd.cpp
   ${PC_DIR}/iSndData.cpp
+  ${PC_DIR}/iSndDsp.cpp
   ${PC_DIR}/iSoundtrack.cpp
 
   # Copied unchanged from gc/ -- pure geometry and collision, nothing
@@ -1097,9 +1106,11 @@ endif()
 # extensions the game's sources use, chaining to the system headers with
 # include_next. It has to come first for that to work.
 # The assets written as code include the game's own headers, and get the game
-# code's warning settings with them.
+# code's warning settings with them. So does the first-person camera, which
+# drives xCamera and reads the player.
 set_source_files_properties(
   ${PC_DIR}/iAssetOverride.cpp
+  ${PC_DIR}/iFirstPerson.cpp
   ${MENU_SOURCES}
   PROPERTIES COMPILE_OPTIONS "${BFBB_NO_WARNINGS}")
 
@@ -1437,7 +1448,9 @@ if(NOT ANDROID)
   add_custom_command(TARGET bfbb POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${PC_DIR}/res/buttons $<TARGET_FILE_DIR:bfbb>/buttons
-    COMMENT "Staging the button glyphs"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${PC_DIR}/res/cursor $<TARGET_FILE_DIR:bfbb>/cursor
+    COMMENT "Staging the button glyphs and the menu pointer"
   )
 endif()
 
@@ -1484,13 +1497,14 @@ endif()
 # and keeping two windows in step to save one host a dependency was not worth
 # what it cost to look at both every time a setting changed shape.
 #
-# It links three files and no game library. iConfigTable.cpp is the settings
-# and their domains, iConfigEdit.cpp writes one back without disturbing the
-# rest of the file, and the host layer is there for the case-insensitive
-# compare, the exe directory and starting the game. It does NOT link
-# iConfig.cpp, which reaches iPadBind.cpp for the two binding sections and from
-# there into xPad.h and the pad backend -- most of the game, to read a file
-# this program reads itself.
+# It links no game library. iConfigTable.cpp is the settings and their
+# domains, iConfigEdit.cpp writes one back without disturbing the rest of the
+# file, iModFolder.cpp and iSaveFile.cpp are the mod folders and save files the
+# mods and saves pages show, and the host layer is there for the
+# case-insensitive compare, the exe directory and starting the game. It does
+# NOT link iConfig.cpp, which reaches iPadBind.cpp for the two binding sections
+# and from there into xPad.h and the pad backend -- most of the game, to read a
+# file this program reads itself.
 
 # Off on Android. It is a wxWidgets window -- a desktop toolkit with no
 # Android port at all -- and it exists to be run BEFORE the game, which is not
@@ -1620,8 +1634,12 @@ if(BFBB_BUILD_CONFIGURATOR)
   add_executable(bfbb_config WIN32
     ${PC_DIR}/configurator/main_wx.cpp
     ${PC_DIR}/configurator/config_model.cpp
+    ${PC_DIR}/configurator/mods_model.cpp
+    ${PC_DIR}/configurator/saves_model.cpp
     ${PC_DIR}/iConfigTable.cpp
     ${PC_DIR}/iConfigEdit.cpp
+    ${PC_DIR}/iSaveFile.cpp
+    ${PC_DIR}/iModFolder.cpp
 
     # The binding table, the parser and the input names, for the [keyboard]
     # and [pad] pages. None of it reads config.ini or opens a device; SDL is
@@ -1687,9 +1705,14 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   # bfbb_config because that target is a window and ctest cannot run one --
   # which left the rules about which settings reach the file untested.
   ${PC_DIR}/configurator/config_model.cpp
+  ${PC_DIR}/configurator/mods_model.cpp
+  ${PC_DIR}/configurator/saves_model.cpp
 
   ${PC_DIR}/iDrawDist.cpp
   ${PC_DIR}/iFile.cpp
+  ${PC_DIR}/iGCMem.cpp
+  ${PC_DIR}/iModPatch.cpp
+  ${PC_DIR}/iGCSwap.cpp
   ${PC_DIR}/iScreen.cpp
   ${PC_DIR}/iTextPatch.cpp
   ${PC_DIR}/intrin.cpp
@@ -1697,6 +1720,8 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   ${PC_DIR}/iMemMgr.cpp
   ${PC_DIR}/iTime.cpp
   ${PC_DIR}/isavegame.cpp
+  ${PC_DIR}/iSaveFile.cpp
+  ${PC_DIR}/iModFolder.cpp
   ${PC_DIR}/iSnd.cpp
 
   # The sample cache, with test doubles in selftest.cpp standing in for the
@@ -1704,6 +1729,7 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   # is what makes its eviction and pinning rules testable at all; the real
   # xstransvc closure is far too large for this target.
   ${PC_DIR}/iSndData.cpp
+  ${PC_DIR}/iSndDsp.cpp
 
   # The soundtrack override, which iSndData asks before it reads an archive.
   # Deliberately built here WITHOUT BFBB_HAVE_FFMPEG: the WAVE reader is the
@@ -1770,7 +1796,8 @@ add_executable(pc_selftest ${PC_DIR}/tests/selftest.cpp
   # carry the bridge implementation too.
   ${PC_DIR}/iTF2Bridge.cpp
 )
-target_compile_definitions(pc_selftest PRIVATE ${INPUT_DEFINES} ${AUDIO_DEFINES})
+target_compile_definitions(pc_selftest PRIVATE ${INPUT_DEFINES} ${AUDIO_DEFINES}
+                           BFBB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 # pc_selftest compiles the backend sources itself rather than linking
 # bfbb_platform, so the backends' libraries are its own to ask for.

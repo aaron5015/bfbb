@@ -114,12 +114,18 @@ struct Firework
     static F32 acc_thrust;
     static F32 acc_gravity;
 
+#if defined(PS2)
+    en_fwstate fwstate : 8;
+    en_fwstyle fwstyle : 8;
+    S32 flg_firework : 16;
+#else
     struct
     {
         en_fwstate fwstate : 8;
         en_fwstyle fwstyle : 8;
         S32 flg_firework : 16; //0x2
     };
+#endif
     F32 tym_lifespan;
     F32 tmr_remain; //0x14?
     xVec3 pos;
@@ -160,8 +166,25 @@ RwRaster* NPCC_FindRWRaster(RwTexture* txtr);
 void zNPC_SNDInit();
 S32 NPCC_LampStatus();
 F32 NPCC_TmrCycle(F32* tmr, F32 dt, F32 interval);
+#if defined(PS2)
+inline xVec3* NPCC_rightDir(xEnt* ent)
+{
+    return (xVec3*)&ent->model->Mat->right;
+}
+
+inline xVec3* NPCC_faceDir(xEnt* ent)
+{
+    return (xVec3*)&ent->model->Mat->at;
+}
+
+inline xVec3* NPCC_upDir(xEnt* ent)
+{
+    return (xVec3*)&ent->model->Mat->up;
+}
+#else
 xVec3* NPCC_rightDir(xEnt* ent);
 xVec3* NPCC_faceDir(xEnt* ent);
+#endif
 void NPCC_ang_toXZDir(F32 angle, xVec3* dir);
 F32 NPCC_dir_toXZAng(const xVec3* dir);
 F32 NPCC_aimVary(xVec3* dir_aim, xVec3* pos_src, xVec3* pos_tgt, F32 dst_vary, S32 flg_vary,
@@ -178,5 +201,75 @@ RwRaster* NPCC_FindRWRaster(char*);
 void NPCC_Bounce(xVec3* vec_input, xVec3* vec_anti, F32 elastic);
 void NPCC_xBoundAway(xBound* bnd);
 void NPCC_xBoundBack(xBound* bnd);
+
+struct NPCLaser
+{
+    RwRaster* rast_laser;
+    F32 radius[2];
+    F32 uv_scroll[2];
+    RwRGBA rgba[2];
+    F32 uv_base[2];
+
+    void ColorSet(const RwRGBA*, const RwRGBA*);
+    void TextureSet(RwRaster* rast);
+    RwRaster* TextureGet();
+    void RadiusSet(F32 rad_start, F32 rad_end);
+    void UVScrollSet(F32 u, F32 v);
+    void Render(xVec3*, xVec3*);
+    void UVScrollUpdate(F32);
+    void Prepare();
+};
+
+inline void NPCC_DrawPlayerPredict(S32, F32, F32)
+{
+}
+
+inline void NPCLaser::ColorSet(const RwRGBA* unk1, const RwRGBA* unk2)
+{
+    rgba[0] = *unk1;
+    rgba[1] = *unk2;
+}
+
+F32 BOWL3(F32 param_1);
+F32 BOWL(F32 param_1);
+
+inline F32 ARCH3(F32 param_1)
+{
+    return 1.0f - BOWL3(param_1);
+}
+
+inline F32 QUB(F32 param_1)
+{
+    return param_1 * param_1 * param_1;
+}
+
+inline F32 BOWL3(F32 param_1)
+{
+    return QUB((F32)2.0f * (F32)iabs(param_1 - 0.5f));
+}
+
+inline F32 ARCH(F32 param_1)
+{
+    return 1.0f - BOWL(param_1);
+}
+
+inline F32 BOWL(F32 param_1)
+{
+    return SQ((F32)2.0f * (param_1 - 0.5f));
+}
+
+inline F32 NPCC_DstSq(const xVec3* pos_a, const xVec3* pos_b, xVec3* dir)
+{
+    xVec3 tmp;
+
+    if (dir == NULL)
+    {
+        dir = &tmp;
+    }
+
+    xVec3Sub(dir, pos_b, pos_a);
+
+    return xVec3Length2(dir);
+}
 
 #endif

@@ -3,7 +3,11 @@
 
 #include <types.h>
 #include <xstransvc.h>
+#if defined(PS2)
+#include <rwim3d.h>
+#else
 #include <rtslerp.h>
+#endif
 
 #include "zGlobals.h"
 #include "zNPCHazard.h"
@@ -28,9 +32,6 @@
 // offsets every later .rodata relocation.
 void __deadstripped_zNPCSupport_head()
 {
-    const char _405[0x0C] = {};
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
     const char _441[0x0C] = {};
 
     const char _597[0x28] = {};
@@ -203,9 +204,13 @@ S32 NPCWidget::NPCIsTheLocker(const zNPCCommon* npc_lock)
     {
         return 0;
     }
+    else if (npc_lock == npc_ownerlock)
+    {
+        return 1;
+    }
     else
     {
-        return npc_lock == npc_ownerlock ? 1 : 0;
+        return 0;
     }
 }
 
@@ -237,7 +242,10 @@ S32 NPCWidget::Lock(const zNPCCommon* npc)
 
 void NPCWidget_ScenePostInit()
 {
-    g_npc_widgets->Init(NPC_WIDGE_TALK);
+    for (S32 i = 0; i < NPC_WIDGE_NOMORE; i++)
+    {
+        g_npc_widgets[i].Init((en_NPC_UI_WIDGETS)i);
+    }
 }
 
 NPCWidget* NPCWidget_Find(en_NPC_UI_WIDGETS which)
@@ -284,12 +292,18 @@ S32 NPCTarget::FindNearest(S32 flg_consider, xBase* skipme, xVec3* from, F32 dst
     S32 found = 0;
     st_XORDEREDARRAY* npclist;
     F32 ds2_best;
+#if defined(PS2)
+    zNPCCommon *npc, *npc_best = NULL;
+#else
     zNPCCommon *npc, *npc_best;
+#endif
     xVec3 vec = {};
     F32 fv;
     S32 i, ntyp;
 
+#if !defined(PS2)
     npc_best = NULL;
+#endif
     ds2_best = (dst_max < 0.0f) ? FLOAT_MAX : SQ(dst_max);
 
     if (flg_consider & 0x1)
@@ -324,7 +338,11 @@ S32 NPCTarget::FindNearest(S32 flg_consider, xBase* skipme, xVec3* from, F32 dst
         }
     }
 
+#if defined(PS2)
+    if (!found && from && (flg_consider & 0x1E))
+#else
     if (from && (flg_consider & 0x1E))
+#endif
     {
         npclist = zNPCMgr_GetNPCList();
 
@@ -344,6 +362,9 @@ S32 NPCTarget::FindNearest(S32 flg_consider, xBase* skipme, xVec3* from, F32 dst
                 if (npc->IsAlive())
                 {
                     xVec3Sub(&vec, xEntGetPos(npc), from);
+#if defined(PS2)
+                    fv = iabs(vec.y);
+#endif
                     if (flg_consider & 0x80)
                     {
                         vec.y = 0.0f;
@@ -437,6 +458,8 @@ S32 NPCTarget::IsDead()
         }
         break;
     case NPC_TGT_BASE:
+    case NPC_TGT_POS:
+    case NPC_TGT_MVPT:
         break;
     case NPC_TGT_BUDDY:
         if (buddy_target == NULL)
@@ -563,14 +586,15 @@ void NPCLaser::Render(xVec3* pos_src, xVec3* pos_tgt)
 
 void NPCCone::RenderCone(xVec3* pos_tiptop, xVec3* pos_botcenter)
 {
+    RwRGBA rgba_top = this->rgba_top;
+    const RwRGBA rgba_bot = this->rgba_bot;
+    xVec3 pos_top = *pos_tiptop;
+    const xVec3 pos_bot = *pos_botcenter;
+
     F32 u_tip = this->uv_tip[0] + 0.5f * this->uv_slice[0];
     F32 v_tip = this->uv_tip[1];
     F32 u_base = this->uv_tip[0] + this->uv_slice[0];
-    F32 v_base = this->uv_tip[1] + this->uv_slice[1];
-    RwRGBA rgba_top = this->rgba_top;
-    RwRGBA rgba_bot = this->rgba_bot;
-    xVec3 pos_top = *pos_tiptop;
-    const xVec3 pos_bot = *pos_botcenter;
+    F32 v_base = v_tip + this->uv_slice[1];
 
     void* mem = xMemPushTemp(10 * sizeof(RwIm3DVertex));
     if (!mem)
@@ -600,10 +624,7 @@ void NPCCone::RenderCone(xVec3* pos_tiptop, xVec3* pos_botcenter)
         pos_vtx *= this->rad_cone;
         pos_vtx += pos_bot;
 
-        F32 px = pos_vtx.x;
-        F32 py = pos_vtx.y;
-        F32 pz = pos_vtx.z;
-        RwIm3DVertexSetPos(vtx, px, py, pz);
+        RwIm3DVertexSetPos(vtx, pos_vtx.x, pos_vtx.y, pos_vtx.z);
         RwIm3DVertexSetRGBA(vtx, rgba_bot.red, rgba_bot.green, rgba_bot.blue, rgba_bot.alpha);
 
         F32 u_off = 1 / 8.0f * i;
@@ -643,9 +664,20 @@ void NPCBlinker::Reset()
     idx_uvcell = 0;
 }
 
+#if defined(PS2)
+static inline S32 NPCBlinkerTimerElapsed(F32 timer)
+{
+    return timer < 0.0f;
+}
+#endif
+
 void NPCBlinker::Update(F32 dt, F32 ratio, F32 tym_slow, F32 tym_fast)
 {
+#if defined(PS2)
+    if (NPCBlinkerTimerElapsed(tmr_uvcell))
+#else
     if (tmr_uvcell < 0.0f)
+#endif
     {
         idx_uvcell++;
         if (3 < idx_uvcell)
@@ -704,7 +736,8 @@ void NPCBlinker::Render(const xVec3* pos_blink, F32 rad_blink, const RwRaster* r
     xVec3Copy(&pos_bot, pos_blink);
 
     xVec3AddScaled(&pos_top, &dir_up, rad_blink);
-    xVec3AddScaled(&pos_bot, &dir_up, -rad_blink);
+    F32 rad_neg = -rad_blink;
+    xVec3AddScaled(&pos_bot, &dir_up, rad_neg);
 
     IndexToUVCoord(idx_uvcell, uv_lo, uv_hi);
 
@@ -717,7 +750,6 @@ void NPCBlinker::Render(const xVec3* pos_blink, F32 rad_blink, const RwRaster* r
     for (i = 0; i <= 6; i++)
     {
         F32 rat = (F32)i / 6.0f;
-        F32 px, py, pz;
 
         pos_lerp.x = LERP(rat, pos_top.x, pos_bot.x);
         pos_lerp.y = LERP(rat, pos_top.y, pos_bot.y);
@@ -727,39 +759,27 @@ void NPCBlinker::Render(const xVec3* pos_blink, F32 rad_blink, const RwRaster* r
 
         pos_vtx = dir_card * rad_blink;
         pos_vtx += pos_lerp;
-        px = pos_vtx.x;
-        py = pos_vtx.y;
-        pz = pos_vtx.z;
-        RwIm3DVertexSetPos(&vtx_horz[0], px, py, pz);
+        RwIm3DVertexSetPos(&vtx_horz[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
         RwIm3DVertexSetRGBA(&vtx_horz[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
         RwIm3DVertexSetUV(&vtx_horz[0], uv_lo[0], v);
 
-        pos_vtx = dir_card * -rad_blink;
+        pos_vtx = dir_card * rad_neg;
         pos_vtx += pos_lerp;
-        px = pos_vtx.x;
-        py = pos_vtx.y;
-        pz = pos_vtx.z;
-        RwIm3DVertexSetPos(&vtx_horz[1], px, py, pz);
+        RwIm3DVertexSetPos(&vtx_horz[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
         RwIm3DVertexSetRGBA(&vtx_horz[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
         RwIm3DVertexSetUV(&vtx_horz[1], uv_hi[0], v);
 
         vtx_horz += 2;
 
-        pos_vtx = dir_perp * -rad_blink;
+        pos_vtx = dir_perp * rad_neg;
         pos_vtx += pos_lerp;
-        px = pos_vtx.x;
-        py = pos_vtx.y;
-        pz = pos_vtx.z;
-        RwIm3DVertexSetPos(&vtx_vert[0], px, py, pz);
+        RwIm3DVertexSetPos(&vtx_vert[0], pos_vtx.x, pos_vtx.y, pos_vtx.z);
         RwIm3DVertexSetRGBA(&vtx_vert[0], rgba.red, rgba.green, rgba.blue, rgba.alpha);
         RwIm3DVertexSetUV(&vtx_vert[0], uv_lo[0], v);
 
         pos_vtx = dir_perp * rad_blink;
         pos_vtx += pos_lerp;
-        px = pos_vtx.x;
-        py = pos_vtx.y;
-        pz = pos_vtx.z;
-        RwIm3DVertexSetPos(&vtx_vert[1], px, py, pz);
+        RwIm3DVertexSetPos(&vtx_vert[1], pos_vtx.x, pos_vtx.y, pos_vtx.z);
         RwIm3DVertexSetRGBA(&vtx_vert[1], rgba.red, rgba.green, rgba.blue, rgba.alpha);
         RwIm3DVertexSetUV(&vtx_vert[1], uv_hi[0], v);
 
@@ -820,6 +840,10 @@ void Firework::Update(F32 dt)
 {
     switch (this->fwstate)
     {
+    case FW_STAT_UNUSED:
+        break;
+    case FW_STAT_READY:
+        break;
     case FW_STAT_FLIGHT:
         this->FlyFlyFly(dt);
         if (this->tmr_remain < 0.0f)
@@ -892,7 +916,13 @@ F32 NPCC_aimVary(xVec3* dir_aim, xVec3* pos_src, xVec3* pos_tgt, F32 dst_vary, S
 
     dst_toFake = 0.0f;
 
+#if defined(PS2)
+    dir_toReal.x = pos_tgt->x - pos_src->x;
+    dir_toReal.y = pos_tgt->y - pos_src->y;
+    dir_toReal.z = pos_tgt->z - pos_src->z;
+#else
     xVec3Sub(&dir_toReal, pos_tgt, pos_src);
+#endif
 
     if (flg_vary & 0x10)
     {
@@ -1060,12 +1090,12 @@ S32 g_pc_playerInvisible;
 
 S32 NPCC_LampStatus()
 {
-    return g_pc_playerInvisible == 0 ? true : false;
+    return !g_pc_playerInvisible;
 }
 
 U32 NPCC_ForceTalkOk()
 {
-    return globals.player.g.DisableForceConversation == 0;
+    return !globals.player.g.DisableForceConversation;
 }
 
 RwRaster* NPCC_FindRWRaster(const char* txtrname)
@@ -1152,13 +1182,26 @@ U32 NPCC_LineHitsBound(xVec3* a, xVec3* b, xBound* bnd, xCollis* callers_colrec)
     {
         colrec = (xCollis*)callers_colrec;
     }
+#if defined(PS2)
+    F32 originX = a->x;
+    vec.x = b->x - originX;
+    vec.y = b->y - a->y;
+    vec.z = b->z - a->z;
+#else
     xVec3Sub(&vec, b, a);
+#endif
     len = xVec3Length(&vec);
     if (len < 0.001f)
     {
         len = 0.001f;
     }
+#if defined(PS2)
+    ray.origin.x = originX;
+    ray.origin.y = a->y;
+    ray.origin.z = a->z;
+#else
     xVec3Copy(&ray.origin, a);
+#endif
     xVec3SMul(&ray.dir, &vec, (1.0f / len));
 
     ray.min_t = 0.1f;
@@ -1316,12 +1359,18 @@ S32 NPCC_HaveLOSToPos(xVec3* pos_src, xVec3* pos_tgt, F32 dst_max, xBase* tgt, x
         colrec = &localCollis;
     }
 
-    ray.max_t = dst_max;
     ray.min_t = 0.0f;
+    ray.max_t = dst_max;
 
     xVec3Sub(&ray.dir, pos_tgt, pos_src);
     xVec3Normalize(&ray.dir, &ray.dir);
+#if defined(PS2)
+    ray.origin.x = pos_src->x;
+    ray.origin.y = pos_src->y;
+    ray.origin.z = pos_src->z;
+#else
     xVec3Copy(&ray.origin, pos_src);
+#endif
 
     ray.flags = (1 << 10) | (1 << 11);
 
@@ -1391,17 +1440,16 @@ void NPCC_Bounce(xVec3* vec_input, xVec3* vec_anti, F32 elastic)
     xVec3SMulBy(vec_input, elastic);
 }
 
-// Two more unreferenced templates the target holds between the one
-// NPCC_ds2_toCam creates and the xMat3x3 NPCC_rotHPB creates; the first is
-// { 0.0f, 0.0f, 1.0f }.
+// An unreferenced { 0.0f, 0.0f, 1.0f } template the target holds between the
+// one NPCC_ds2_toCam creates and NPCC_rotHPB's own xVec3/xMat3x3 templates.
 void __deadstripped_zNPCSupport_cam()
 {
     const xVec3 _2148 = { 0.0f, 0.0f, 1.0f };
-    const char _2149[0x0C] = {};
 }
 
 void NPCC_rotHPB(xMat3x3* mat, F32 heading, F32 pitch, F32 bank)
 {
+    xVec3 axis = {};
     xMat3x3 mat_rot = {};
 
     xMat3x3RotZ(mat, bank);
@@ -1427,24 +1475,43 @@ void NPCC_GenSmooth(xVec3** pos_base, xVec3** pos_mid)
     static S32 init = 0;
 
     S32 i;
+#if defined(PS2)
+    F32 u, u3;
+#endif
 
     if (!init)
     {
         init = 1;
 
+#if defined(PS2)
         for (i = 0; i < 4; i++)
         {
+            u = yews[i];
+            u3 = u * (u * u);
+
+            prepute[i][0] = -0.5f * u3 + u * u + -0.5f * u;
+            prepute[i][1] = 1.5f * u3 + -2.5f * (u * u) + 1.0f;
+            prepute[i][2] = -1.5f * u3 + 2.0f * (u * u) + 0.5f * u;
+            prepute[i][3] = 0.5f * u3 + -0.5f * (u * u);
+        }
+#else
+        i = 0;
+        while (i < 4)
+        {
             F32 u2, u, u3;
-            F32* pre = prepute[i];
+            F32* pre;
             u = yews[i];
             u2 = u * u;
             u3 = u * u2;
+            pre = prepute[i];
+            i++;
 
             pre[0] = u2 + -0.5f * u3 + -0.5f * u;
             pre[1] = 1.5f * u3 + -2.5f * u2 + 1.0f;
             pre[2] = -1.5f * u3 + 2.0f * u2 + 0.5f * u;
             pre[3] = 0.5f * u3 + -0.5f * u2;
         }
+#endif
     }
 
     for (i = 0; i < 4; i++)
@@ -1488,7 +1555,13 @@ void NPCC_MakePerp(xVec3* dir_perp, const xVec3* dir_axis)
 void NPCC_MakeArbPlane(const xVec3* dir_norm, xVec3* at, xVec3* rt)
 {
     NPCC_MakePerp(at, dir_norm);
+#if defined(PS2)
+    rt->x = at->y * dir_norm->z - dir_norm->y * at->z;
+    rt->y = at->z * dir_norm->x - at->x * dir_norm->z;
+    rt->z = at->x * dir_norm->y - dir_norm->x * at->y;
+#else
     xVec3Cross(rt, at, dir_norm);
+#endif
 }
 
 U32 NPCWidget::IsLocked()

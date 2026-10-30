@@ -48,6 +48,10 @@ static S32 sWidth;
 static S32 sHeight;
 static iWindowMode sMode = iWINDOW_WINDOWED;
 static S32 sExclusive;
+
+// Which fullscreen Alt+Enter goes back to from windowed: the one the window
+// was last in, so a player who chose exclusive keeps getting exclusive.
+static iWindowMode sLastFullscreen = iWINDOW_BORDERLESS;
 static bool sTour;
 
 // Where the window was the last time it was windowed, for iWindowSetMode to put
@@ -153,6 +157,10 @@ S32 iWindowOpen(const iWindowParams* params)
     SDL_DisableScreenSaver();
 
     sMode = params->mode;
+    if (sMode != iWINDOW_WINDOWED)
+    {
+        sLastFullscreen = sMode;
+    }
 
     // iTour.h: a hidden window, which nothing may make visible.
     const char* tour = getenv("BFBB_TOUR");
@@ -452,15 +460,16 @@ void iWindowPump()
             sHeight = event.window.data2;
             break;
 
-        // Alt+Enter and F11 toggle windowed. iPadKeyboardSDL.cpp keeps an Enter
-        // pressed with Alt held from also reaching the game as Start.
+        // Alt+Enter and F11 toggle between windowed and the last fullscreen.
+        // iPadKeyboardSDL.cpp keeps an Enter pressed with Alt held from also
+        // reaching the game as Start.
         case SDL_EVENT_KEY_DOWN:
             if (!event.key.repeat &&
                 (event.key.key == SDLK_F11 ||
                  ((event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) &&
                   (event.key.mod & SDL_KMOD_ALT) != 0)))
             {
-                iWindowSetMode(sMode == iWINDOW_WINDOWED ? iWINDOW_BORDERLESS : iWINDOW_WINDOWED);
+                iWindowSetMode(sMode == iWINDOW_WINDOWED ? sLastFullscreen : iWINDOW_WINDOWED);
             }
             break;
 
@@ -606,6 +615,11 @@ S32 iWindowShouldClose()
     return sShouldClose;
 }
 
+void iWindowRequestClose()
+{
+    sShouldClose = 1;
+}
+
 iWindowMode iWindowGetMode()
 {
     return sMode;
@@ -616,25 +630,140 @@ void iWindowSetExclusive(S32 on)
     sExclusive = on;
 }
 
+#ifndef __ANDROID__
+// Exclusive fullscreen, from the borderless frame. Under D3D the device takes
+// the display (iRwSetExclusive); under GL3 the window is SDL's, so it is SDL's
+// fullscreen with the desktop's own mode.
+static S32 EnterExclusive()
+{
+#ifdef RW_GL3
+    if (iBackendIsGL3())
+    {
+        SDL_DisplayID display = SDL_GetDisplayForWindow(sWindow);
+        const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(display);
+        SDL_DisplayMode mode;
+        if (desktop == NULL ||
+            !SDL_GetClosestFullscreenDisplayMode(display, desktop->w, desktop->h,
+                                                 desktop->refresh_rate, false, &mode) ||
+            !SDL_SetWindowFullscreenMode(sWindow, &mode) || !SDL_SetWindowFullscreen(sWindow, true))
+        {
+            return FALSE;
+        }
+        SDL_SyncWindow(sWindow);
+        return TRUE;
+    }
+#endif
+    return iRwSetExclusive(TRUE);
+}
+
+// Back to the borderless frame.
+static S32 LeaveExclusive()
+{
+#ifdef RW_GL3
+    if (iBackendIsGL3())
+    {
+        // GL3's borderless is fullscreen with no mode; see iWindowDeferredCreated.
+        SDL_SetWindowFullscreenMode(sWindow, NULL);
+        SDL_SetWindowFullscreen(sWindow, true);
+        SDL_SyncWindow(sWindow);
+        return TRUE;
+    }
+#endif
+    return iRwSetExclusive(FALSE);
+}
+
+static void ReadBackSize()
+{
+    int got_w = 0;
+    int got_h = 0;
+    if (SDL_GetWindowSizeInPixels(sWindow, &got_w, &got_h) && got_w > 0 && got_h > 0)
+    {
+        sWidth = got_w;
+        sHeight = got_h;
+    }
+}
+
+static const char* ModeName(iWindowMode mode)
+{
+    return mode == iWINDOW_WINDOWED ?
+               "windowed" :
+               (mode == iWINDOW_FULLSCREEN ? "exclusive fullscreen" : "borderless");
+}
+
+static S32 SetFrame(iWindowMode mode);
+#endif
+
 S32 iWindowSetMode(iWindowMode mode)
 {
 #ifdef __ANDROID__
     (void)mode;
     return FALSE;
 #else
-    if (sWindow == NULL || mode == iWINDOW_FULLSCREEN || sTour)
+    if (sWindow == NULL || sTour)
     {
         return FALSE;
     }
-
-    if (sExclusive)
+    if (mode == sMode)
     {
-        printf("bfbb: the window is in exclusive fullscreen; set video.mode and restart to "
-               "change it\n");
+        return TRUE;
+    }
+
+    // Out of exclusive first, renderer before frame: the device gives the
+    // display back, and the window it leaves is the borderless one. A
+    // FULLSCREEN that never got exclusive -- no mode matched -- is borderless
+    // already.
+    if (sMode == iWINDOW_FULLSCREEN)
+    {
+        if (sExclusive && !LeaveExclusive())
+        {
+            printf("bfbb: the renderer would not leave exclusive fullscreen\n");
+            fflush(stdout);
+            return FALSE;
+        }
+        sExclusive = FALSE;
+        sMode = iWINDOW_BORDERLESS;
+        if (mode == iWINDOW_BORDERLESS)
+        {
+            ReadBackSize();
+            sLastFullscreen = iWINDOW_BORDERLESS;
+            printf("bfbb: window is now %s, %dx%d\n", ModeName(sMode), (int)sWidth, (int)sHeight);
+            fflush(stdout);
+            return TRUE;
+        }
+    }
+
+    // Into exclusive from the borderless frame, which covers the monitor the
+    // window is on: frame before renderer.
+    if (mode == iWINDOW_FULLSCREEN)
+    {
+        if (sMode == iWINDOW_WINDOWED && !SetFrame(iWINDOW_BORDERLESS))
+        {
+            return FALSE;
+        }
+        if (!EnterExclusive())
+        {
+            printf("bfbb: exclusive fullscreen was refused; staying borderless\n");
+            fflush(stdout);
+            return FALSE;
+        }
+        sExclusive = TRUE;
+        sMode = iWINDOW_FULLSCREEN;
+        sLastFullscreen = iWINDOW_FULLSCREEN;
+        ReadBackSize();
+        printf("bfbb: window is now %s, %dx%d\n", ModeName(sMode), (int)sWidth, (int)sHeight);
         fflush(stdout);
-        return FALSE;
+        return TRUE;
     }
 
+    return SetFrame(mode);
+#endif
+}
+
+#ifndef __ANDROID__
+// Between WINDOWED and BORDERLESS, which are a frame and a size and nothing to
+// the renderer.
+static S32 SetFrame(iWindowMode mode)
+{
     bool windowed = sMode == iWINDOW_WINDOWED;
     if ((mode == iWINDOW_WINDOWED) == windowed)
     {
@@ -712,21 +841,18 @@ S32 iWindowSetMode(iWindowMode mode)
     // The transitions are asynchronous wherever there is a compositor. The size
     // read back is what the back buffer follows.
     SDL_SyncWindow(sWindow);
-    int got_w = 0;
-    int got_h = 0;
-    if (SDL_GetWindowSizeInPixels(sWindow, &got_w, &got_h) && got_w > 0 && got_h > 0)
-    {
-        sWidth = got_w;
-        sHeight = got_h;
-    }
+    ReadBackSize();
 
     sMode = mode;
-    printf("bfbb: window is now %s, %dx%d\n", mode == iWINDOW_WINDOWED ? "windowed" : "borderless",
-           (int)sWidth, (int)sHeight);
+    if (mode != iWINDOW_WINDOWED)
+    {
+        sLastFullscreen = mode;
+    }
+    printf("bfbb: window is now %s, %dx%d\n", ModeName(sMode), (int)sWidth, (int)sHeight);
     fflush(stdout);
     return TRUE;
-#endif
 }
+#endif
 
 void iWindowGetSize(S32* width, S32* height)
 {

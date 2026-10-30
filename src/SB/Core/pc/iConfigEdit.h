@@ -9,9 +9,10 @@
 // anything else in it.
 //
 // The configurator uses it, and so does iConfigSave, which writes back what the
-// in-game settings screen changed. Those are the only two writers of an
-// existing file; iConfig.cpp's own writes are an exclusive create of the
-// defaults and an append of settings a newer build added.
+// in-game settings screen changed, and so does the load, to take out the
+// [keyboard] lines an old build pinned at its defaults. iConfig.cpp's other
+// writes are an exclusive create of the defaults and an append of settings a
+// newer build added.
 //
 // The file is held as its own LINES, not as a set of key/value pairs that get
 // written back out. Setting a value rewrites the text between the '=' and any
@@ -43,6 +44,12 @@ void iConfigEditClose(iConfigEditFile* file);
 // a key the file does not have is one the configurator must not write back
 // unless it was changed.
 const char* iConfigEditGet(const iConfigEditFile* file, const char* section, const char* name);
+
+// The section and name of the index'th setting line in the file, in file
+// order, or false past the last. Comments, headers and blank lines are not
+// counted. Both strings point into the file and last until it changes.
+bool iConfigEditKeyAt(const iConfigEditFile* file, S32 index, const char** section,
+                      const char** name);
 
 // Set it, inserting the line if the file does not have it. Returns false only
 // when the file has no room left for a new line.

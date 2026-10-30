@@ -34,6 +34,9 @@ const char* ConfigModelPath();
 S32 ConfigModelSettingCount();
 const iConfigSetting* ConfigModelSetting(S32 i);
 
+// The index of "section"/"name", or -1.
+S32 ConfigModelFind(const char* section, const char* name);
+
 // The distinct sections of the table, in table order.
 S32 ConfigModelSectionCount();
 const char* ConfigModelSectionName(S32 section);
@@ -100,18 +103,26 @@ S32 ConfigModelBindCount();
 const char* ConfigModelBindName(S32 row);
 const char* ConfigModelBindDoes(S32 row);
 
-// The binding the file gives the button, or "" for none. None means the
-// default: the game answers a missing line from its own table.
+// The binding the file gives the button, or "" for no line. No line means the
+// default: the game answers a missing line from its own table. A line bound to
+// nothing reads "none", whether the file wrote that or left the value empty.
 const char* ConfigModelBindText(ConfigModelDevice device, S32 row);
 
 // Record a binding. "" puts the button back on its default and takes the line
-// out of the file on the next save. Checked on save, like a setting.
+// out of the file on the next save; "none" binds nothing to it. Checked on
+// save, like a setting.
 void ConfigModelBindSetText(ConfigModelDevice device, S32 row, const char* text);
 
 // What the default is, in words: the key table's binding for the keyboard,
 // and for the pad what input.preset (as this model now holds it) binds the
 // row to. A preset that names a printed letter rather than a position says so.
 void ConfigModelBindDescribeDefault(ConfigModelDevice device, S32 row, char* out, size_t outSize);
+
+// The names of the other rows that one press of this row's input also sets,
+// separated by ", ", or "" for none. Each row counts with what it runs with:
+// its box, or its default when the box is empty. A box that does not parse
+// counts as bound to nothing.
+void ConfigModelBindDescribeOverlaps(ConfigModelDevice device, S32 row, char* out, size_t outSize);
 
 // The input names a binding for this device may use.
 const iPadBindToken* ConfigModelBindTokens(ConfigModelDevice device, S32* count);

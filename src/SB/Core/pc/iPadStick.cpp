@@ -1,4 +1,5 @@
-// The analog stick deadzone. The argument for it is in iPadStick.h.
+// The analog stick deadzone and the stick remapping. The argument for both is
+// in iPadStick.h.
 
 #include "iPadStick.h"
 
@@ -6,6 +7,46 @@
 
 // Negative is auto: the backend's own constant stands.
 static F32 sDeadzonePercent = -1.0f;
+
+static S32 sSwap;
+static S32 sInvertX;
+static S32 sInvertY;
+
+void iPadStickSetSwap(S32 swap)
+{
+    sSwap = swap;
+}
+
+void iPadStickSetInvert(S32 x, S32 y)
+{
+    sInvertX = x;
+    sInvertY = y;
+}
+
+void iPadStickSwap(F32* moveX, F32* moveY, F32* camX, F32* camY)
+{
+    if (sSwap)
+    {
+        F32 x = *moveX;
+        F32 y = *moveY;
+        *moveX = *camX;
+        *moveY = *camY;
+        *camX = x;
+        *camY = y;
+    }
+}
+
+void iPadStickInvertCamera(F32* camX, F32* camY)
+{
+    if (sInvertX)
+    {
+        *camX = -*camX;
+    }
+    if (sInvertY)
+    {
+        *camY = -*camY;
+    }
+}
 
 void iPadStickSetDeadzone(F32 percent)
 {

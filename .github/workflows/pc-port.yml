@@ -27,6 +27,12 @@ on:
   push:
   pull_request:
 
+# One run at a time per branch or tag. prepare deletes treedome's unfinished
+# drafts, and a second push running alongside would delete the first's.
+concurrency:
+  group: pc-port-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
@@ -330,14 +336,74 @@ jobs:
           SDL_AUDIODRIVER: dummy
         run: ./build-ci/pc_selftest
 
-  # Release builds, staged into a folder and uploaded.
+  # Opens a draft release for the package and android jobs to upload into, on a
+  # push to treedome or a `v*` tag. Anywhere else it does nothing, its output is
+  # empty, and the builds upload nowhere.
+  #
+  # treedome's draft is tagged latest-<sha> until the release job renames it to
+  # `latest`. A draft from a run that never got that far is deleted here.
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      stage: ${{ steps.draft.outputs.stage }}
+
+    steps:
+      - name: Open the draft
+        id: draft
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/treedome' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release list --limit 100 --json tagName,isDraft \
+            --jq '.[] | select(.isDraft and (.tagName | startswith("latest-"))) | .tagName' |
+            while read -r old; do gh release delete "$old" --yes; done
+
+          cat > notes.md <<'NOTES'
+          These builds contain no game data. You need the files from the **Xbox**
+          release; see the README for where to point the game at them.
+
+          | File | Platform |
+          | --- | --- |
+          | `bfbb-windows-x86.zip` | Windows. Direct3D 9, Direct3D 11, OpenGL and Vulkan in one executable. Take this one. |
+          | `bfbb-windows-x86_64.zip` | Windows, 64-bit. |
+          | `bfbb-linux-x86_64.tar.gz` | Linux, OpenGL and Vulkan. |
+          | `bfbb-macos-x86_64.tar.gz` | macOS on Intel, OpenGL. Vulkan is built in and untested there. Unsigned: run `xattr -dr com.apple.quarantine` on the folder first. |
+          | `bfbb-arm64-v8a.apk` | Android 7.0 or newer, arm64, OpenGL ES and Vulkan. Debug-signed. |
+
+          `[video] backend` in `config.ini` picks the renderer. `auto` takes Direct3D 9
+          on Windows and OpenGL elsewhere.
+
+          A platform whose build failed for this commit is missing from the files.
+
+          The macOS build has no libusb, so Switch 2 controllers and the GameCube
+          adapter do not work on it.
+          NOTES
+          echo "" >> notes.md
+          echo "Built from \`$GITHUB_REF_NAME\` at \`$GITHUB_SHA\`." >> notes.md
+
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            stage=$GITHUB_REF_NAME
+            gh release create "$stage" --draft --verify-tag \
+              --title "$stage" --notes-file notes.md
+          else
+            stage=latest-${GITHUB_SHA::12}
+            gh release create "$stage" --draft --target "$GITHUB_SHA" \
+              --title "Latest build" --notes-file notes.md
+          fi
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
+  # Release builds, staged into a folder and archived. On a release they are
+  # uploaded to the draft that prepare opened.
   #
   # Separate from the jobs above rather than an upload step bolted onto them.
   # Those build Debug, which is unoptimised and too slow to play; this is the
   # configuration someone would actually run, and it is the only one worth
   # downloading.
   #
-  # One artifact per HOST and word size, not one per backend. The Windows build
+  # One archive per HOST and word size, not one per backend. The Windows build
   # carries D3D9, D3D11 and GL3 together and video.backend in config.ini picks
   # between them, so a machine whose Direct3D driver misbehaves has the OpenGL
   # one in the same download.
@@ -347,17 +413,20 @@ jobs:
   # FFmpeg, drivers -- needs, and it carries a doubled game heap, so an
   # out-of-memory bug that the real console would hit can hide in it.
   #
-  # Each artifact is a folder to run the game out of: the executable, the
+  # Each archive is a folder to run the game out of: the executable, the
   # configurator, the button glyphs, and whatever DLLs the build staged beside
   # them. It does NOT contain the game's data. config.ini is not
   # in it either -- the game writes one with the defaults on first run, and
   # shipping one would freeze today's defaults into every download.
   #
-  # What these are missing: FFmpeg is not installed on the runners, so the movie
-  # decoder and the soundtrack override are their stubs -- no FMV, no music
-  # replacement. BUILD-INFO.txt in the artifact says so.
+  # What these are missing: libusb on macOS, for the reason at the FFmpeg and
+  # libusb steps. BUILD-INFO.txt in the archive says so.
   package:
+    needs: prepare
     runs-on: ${{ matrix.os }}
+    # To upload to the draft release.
+    permissions:
+      contents: write
     # Gating on Windows and reporting elsewhere, the same split the jobs above
     # use: the Windows Release builds are the ones people download. Both word
     # sizes gate, so that the 64-bit one is not left to rot green.
@@ -367,17 +436,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # An empty backend means the host default, which is D3D9, D3D11 and
-          # GL3 on Windows and GL3 elsewhere. `msvc` and `bits` are read only on
-          # Windows; off it the word size is the host's and there is no choice.
-          - { os: windows-latest, backend: "", name: windows-x86,    msvc: x86, bits: "" }
-          - { os: windows-latest, backend: "", name: windows-x86_64, msvc: x64, bits: "-DBFBB_BUILD_32BIT=OFF" }
-          - { os: ubuntu-latest,  backend: "", name: linux-x86_64 }
+          # The host default plus Vulkan, which is not in the default set.
+          # video.backend = auto still takes D3D9 on Windows and GL3 elsewhere:
+          # rw/backend.cpp tries Vulkan last. `msvc` and `bits` are read only
+          # on Windows; off it the word size is the host's and there is no
+          # choice.
+          - { os: windows-latest, backend: "D3D9;D3D11;GL3;VULKAN", name: windows-x86,    msvc: x86, bits: "" }
+          - { os: windows-latest, backend: "D3D9;D3D11;GL3;VULKAN", name: windows-x86_64, msvc: x64, bits: "-DBFBB_BUILD_32BIT=OFF" }
+          - { os: ubuntu-latest,  backend: "GL3;VULKAN", name: linux-x86_64 }
           # macos-latest is absent on purpose. An arm64 build compiles and then
           # is SIGKILLed at exec, because the game arena needs a low 4 GB that
           # Apple Silicon will not give up -- see the unix job. Publishing a
           # binary that cannot start is worse than publishing none.
-          - { os: macos-15-intel, backend: "", name: macos-x86_64 }
+          - { os: macos-15-intel, backend: "GL3;VULKAN", name: macos-x86_64 }
 
     steps:
       - name: Checkout
@@ -390,7 +461,7 @@ jobs:
       - name: Submodules
         shell: bash
         run: |
-          git submodule update --init --recursive third_party/librw third_party/SDL
+          git submodule update --init --recursive third_party/librw third_party/SDL             third_party/Vulkan-Headers third_party/volk third_party/VulkanMemoryAllocator
           if [ "$RUNNER_OS" = "Windows" ]; then
             git submodule update --init --recursive third_party/wxWidgets
           fi
@@ -418,7 +489,8 @@ jobs:
             libxfixes-dev libxss-dev libxrender-dev libxtst-dev \
             libxkbcommon-dev libxkbcommon-x11-dev \
             libwayland-dev wayland-protocols libdecor-0-dev \
-            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev \
+            libusb-1.0-0-dev
 
       # The configurator is drawn in wxWidgets, so the package needs one. A
       # package manager has it off Windows and this is the path a real machine
@@ -434,6 +506,63 @@ jobs:
           else
             brew install wxwidgets
           fi
+
+      # FFmpeg plays the movies and the soundtrack override. libusb is how SDL
+      # reads the Switch 2 controllers and the GameCube adapter.
+      #
+      # Windows takes both from vcpkg, as tools/pcbuild.bat does, and the build
+      # stages their DLLs beside bfbb.exe. FFmpeg from source is most of half an
+      # hour under vcpkg, so its binary cache is kept, keyed on the runner's
+      # vcpkg commit.
+      #
+      # Linux and macOS build a static FFmpeg (tools/ci/ffmpeg.sh), so the
+      # executable does not depend on one distribution's libavcodec soname.
+      # Linux's libusb is the distribution's, installed above. macOS has none:
+      # Homebrew's is a dylib in Homebrew's prefix, which a player's Mac does
+      # not have.
+      - name: vcpkg cache key
+        if: runner.os == 'Windows'
+        id: vcpkg
+        shell: bash
+        run: |
+          echo "commit=$(git -C "$VCPKG_INSTALLATION_ROOT" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "cache=$(cygpath -m "$RUNNER_TEMP")/vcpkg-cache" >> "$GITHUB_OUTPUT"
+
+      - name: vcpkg cache
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.cache }}
+          key: vcpkg-${{ matrix.msvc }}-windows-${{ steps.vcpkg.outputs.commit }}-ffmpeg-libusb
+
+      - name: FFmpeg and libusb (vcpkg)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ steps.vcpkg.outputs.cache }}
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          root=$(cygpath -m "$VCPKG_INSTALLATION_ROOT")
+          "$root/vcpkg" install \
+            "ffmpeg[core,avcodec,avformat,swresample,swscale]:${{ matrix.msvc }}-windows" \
+            "libusb:${{ matrix.msvc }}-windows"
+          echo "BFBB_PREFIX=$root/installed/${{ matrix.msvc }}-windows" >> "$GITHUB_ENV"
+
+      - name: FFmpeg cache
+        if: runner.os != 'Windows'
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ffmpeg
+          key: ffmpeg-${{ matrix.name }}-${{ hashFiles('tools/ci/ffmpeg.sh') }}
+
+      - name: FFmpeg
+        if: runner.os != 'Windows'
+        run: |
+          if [ "${{ steps.ffmpeg.outputs.cache-hit }}" != true ]; then
+            sh tools/ci/ffmpeg.sh "$RUNNER_TEMP/ffmpeg"
+          fi
+          echo "BFBB_PREFIX=$RUNNER_TEMP/ffmpeg" >> "$GITHUB_ENV"
 
       # CMAKE_RUNTIME_OUTPUT_DIRECTORY is what makes this a package rather than
       # a file list: the button glyphs and the DLLs are staged beside bfbb by
@@ -455,10 +584,24 @@ jobs:
           cmake -S . -B build-pkg -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DBFBB_SDL=vendored
-          ${{ matrix.backend != '' && format('-DBFBB_RENDER_BACKENDS={0}', matrix.backend) || '' }}
+          "-DBFBB_RENDER_BACKENDS=${{ matrix.backend }}"
           ${{ matrix.bits }}
           -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=dist
+          -DCMAKE_PREFIX_PATH="$BFBB_PREFIX"
           ${{ runner.os == 'Windows' && '-DCMAKE_CXX_COMPILER=clang++' || '' }}
+
+      # Both are optional to CMakeLists.txt, which builds without them and says
+      # so in a STATUS line. Here they are not: a package without them is the
+      # regression this step is for.
+      - name: Check FFmpeg and libusb were found
+        shell: bash
+        run: |
+          grep -q '^FFMPEG_AVCODEC_LIBRARY:[A-Z]*=.*avcodec' build-pkg/CMakeCache.txt \
+            || { echo "FFmpeg was not found"; exit 1; }
+          if [ "$RUNNER_OS" != macOS ]; then
+            grep -q '^LibUSB_LIBRARY:[A-Z]*=.*usb' build-pkg/CMakeCache.txt \
+              || { echo "libusb was not found"; exit 1; }
+          fi
 
       - name: Build
         run: cmake --build build-pkg --target bfbb
@@ -498,16 +641,82 @@ jobs:
           auto takes the first of the ones listed above, and naming one is worth
           trying if the picture is wrong or the game will not start.
 
-          FFmpeg was not available on the build machine, so the movie decoder and
-          the soundtrack override are stubs in this build: cutscenes do not play
-          and [audio] soundtrack does nothing. Everything else is here.
+          ${{ runner.os == 'macOS' && 'Built without libusb: Switch 2 controllers and the GameCube adapter do not work.' || '' }}
           EOF
           ls -R dist
 
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: bfbb-${{ matrix.name }}
-          path: build-pkg/dist/
-          retention-days: 14
-          if-no-files-found: error
+      # An archive rather than the folder, so the executable bit survives on
+      # Linux and macOS. Made on every run, so a packaging break shows up
+      # before a release needs it.
+      - name: Archive
+        shell: bash
+        working-directory: build-pkg
+        run: |
+          mv dist "bfbb-${{ matrix.name }}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "bfbb-${{ matrix.name }}.zip" "bfbb-${{ matrix.name }}"
+          else
+            tar -czf "bfbb-${{ matrix.name }}.tar.gz" "bfbb-${{ matrix.name }}"
+          fi
+
+      # Straight to the draft release, never to Actions artifacts: those count
+      # against the account's storage quota, release assets do not.
+      - name: Upload to the release
+        if: needs.prepare.outputs.stage != ''
+        shell: bash
+        working-directory: build-pkg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${{ needs.prepare.outputs.stage }}" bfbb-${{ matrix.name }}.* --clobber
+
+  # The APK for the release. android.yml runs by itself for pull requests and
+  # for pushes that touch the Android side; this is the same job, called so
+  # that the release has an APK from the same commit.
+  android:
+    needs: prepare
+    if: needs.prepare.outputs.stage != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android.yml
+    with:
+      release: ${{ needs.prepare.outputs.stage }}
+
+  # Publishes the draft. A push to treedome replaces the `latest` prerelease,
+  # so the old one stays up until every build of the new one is in. A `v*` tag
+  # keeps its release.
+  #
+  # Runs without the APK if the Android build failed: a broken Android build
+  # should not hold back the desktop ones. A failed Windows package stops it,
+  # and the draft is deleted by the next run's prepare. The other desktop
+  # packages are continue-on-error and are left out when they fail.
+  release:
+    needs: [prepare, package, android]
+    if: >
+      !cancelled() && needs.prepare.outputs.stage != '' &&
+      needs.package.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          STAGE: ${{ needs.prepare.outputs.stage }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            gh release edit "$STAGE" --draft=false
+            tag=$STAGE
+          else
+            tag=latest
+            # `|| true` for the first run, when there is no release to delete.
+            gh release delete "$tag" --yes --cleanup-tag || true
+            gh release edit "$STAGE" --tag "$tag" --target "$GITHUB_SHA" \
+              --draft=false --prerelease
+          fi
+          echo "::notice::Published: $(gh release view "$tag" --json url --jq .url)"

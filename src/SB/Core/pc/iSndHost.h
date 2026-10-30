@@ -123,4 +123,12 @@ void iSndHostSetReverb(const iSndHostReverb* params);
 // Names the backend that was linked in, for the startup log.
 const char* iSndHostName();
 
+// Where a recording tour (iTour.h) takes the game's sound. While a sink is
+// set and there is no device, iSndHostUpdate mixes each step of the tour's
+// clock and passes it here as interleaved stereo float frames at `rate`,
+// instead of only advancing the voices. NULL stops it. A backend that cannot
+// mix ignores it.
+typedef void (*iSndHostSink)(const float* stereo, U32 frames, U32 rate);
+void iSndHostSetSink(iSndHostSink sink);
+
 #endif

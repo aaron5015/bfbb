@@ -21,17 +21,17 @@ void RwGameCubeGetXFBs(void*, void*);
 }
 
 // .bss
-static U32 Bink_surface_type[5];
+static u32 Bink_surface_type[RAD3DSURFACECOUNT];
 
 // .sbss
 static S32 frame_num;
-U32 fuckingSurfaceType;
+u32 Rad_surface_type;
 static HBINK Bink;
 static HRAD3DIMAGE Image;
 static S32 Paused;
 static void* pixels;
 static volatile F32 vol;
-S32 ip;
+S32 track_id;
 s32 oof;
 void* iFMV::mXFBs[2];
 void* iFMV::mCurrentFrameBuffer;
@@ -70,33 +70,25 @@ U32 iFMVPlay(char* filename, U32 buttons, F32 time, bool skippable, bool lockCon
 
 static void Setup_surface_array()
 {
-    Bink_surface_type[0] = BINKSURFACE32;
-    Bink_surface_type[1] = BINKSURFACE32A;
-    Bink_surface_type[2] = BINKSURFACE565;
-    Bink_surface_type[3] = BINKSURFACE4444;
-    Bink_surface_type[4] = BINKSURFACEYUY2;
+    Bink_surface_type[RAD3DSURFACE32] = BINKSURFACE32;
+    Bink_surface_type[RAD3DSURFACE32A] = BINKSURFACE32A;
+    Bink_surface_type[RAD3DSURFACE565] = BINKSURFACE565;
+    Bink_surface_type[RAD3DSURFACE4444] = BINKSURFACE4444;
+    Bink_surface_type[RAD3DSURFACEYUY2] = BINKSURFACEYUY2;
 }
 
-// WIP.
 void Decompress_frame(HBINK bnk, HRAD3DIMAGE rad_image, long flags)
 {
-    struct Result
+    u32 pixel_pitch;
+    u32 pixel_format;
+    volatile S32 do_frame_status;
+    volatile S32 copy_status;
+
+    do_frame_status = BinkDoFrame(bnk);
+    if (Lock_RAD_3D_image(rad_image, &pixels, &pixel_pitch, &pixel_format))
     {
-        S32 unk_0;
-        S32 unk_4;
-        U32 unk_8;
-        U32 unk_c;
-    };
-    Result result;
-    result.unk_4 = BinkDoFrame(bnk);
-    if (Lock_RAD_3D_image(rad_image, &pixels, &result.unk_c, &result.unk_8) != 0)
-    {
-        S32 mask = flags * -1;
-        mask = mask | flags;
-        mask = mask >> 0x1f;
-        mask = mask & 0x80000000;
-        mask |= Bink_surface_type[result.unk_8];
-        result.unk_0 = BinkCopyToBuffer(bnk, pixels, result.unk_c, bnk->Height, NULL, NULL, mask);
+        copy_status = BinkCopyToBuffer(bnk, pixels, pixel_pitch, bnk->Height, 0, 0,
+                                       Bink_surface_type[pixel_format] | (flags ? BINKCOPYALL : 0));
         Unlock_RAD_3D_image(rad_image);
     }
 }
@@ -124,7 +116,7 @@ static void DrawFrame(float arg0, float arg1, float arg2, float arg3)
     }
 
     GXSetDispCopyGamma(GX_GM_1_0);
-    C_MTXOrtho(mtx, 0.0f, 480.0f, 0.0f, 640.0f, 0.0f, 10000.0f);
+    C_MTXOrtho(mtx, 0.0f, (F32)FMV_SCREEN_HEIGHT, 0.0f, 640.0f, 0.0f, 10000.0f);
     GXSetProjection(mtx, GX_ORTHOGRAPHIC);
     PSMTXIdentity(idt);
     GXLoadPosMtxImm(idt, 0);
@@ -163,12 +155,12 @@ static void xDrawLine2D_LocaliFMVVersion(float, float, float, float);
 static void Show_frame()
 {
     RwRGBA color = { 0 };
-    RwCamera* cam = iCameraCreate(640, 480, FALSE);
+    RwCamera* cam = iCameraCreate(640, FMV_SCREEN_HEIGHT, FALSE);
     RwCameraClear(cam, &color, rwCAMERACLEARIMAGE);
 
     RwCameraBeginUpdate(cam);
     Width_scale = 640 / Bink->Width;
-    Height_scale = 480 / Bink->Height;
+    Height_scale = FMV_SCREEN_HEIGHT / Bink->Height;
     xDrawLine2D_LocaliFMVVersion(0.0f, 0.0f, 0.0f, 0.0f);
     DrawFrame(0.0f, 0.0f, Width_scale, Height_scale);
     RwCameraEndUpdate(cam);
@@ -214,7 +206,7 @@ static void PlayFMV(char* fname, size_t buttons, F32 time)
         if (iTRCDisk::IsDiskIDed())
         {
             Bink = BinkOpen(fname, NULL);
-            if (*(HBINK volatile*)&Bink == NULL)
+            if (Bink == NULL)
             {
                 BinkGetError();
             }
@@ -243,17 +235,17 @@ static void PlayFMV(char* fname, size_t buttons, F32 time)
     {
         if (Bink->NumTracks != 0)
         {
-            for (ip = 0; ip <= Bink->NumTracks; ++ip)
+            for (track_id = 0; track_id <= Bink->NumTracks; ++track_id)
             {
                 vol = gSnd.categoryVolFader[SND_CAT_CUTSCENE];
                 vol = vol * vol;
-                vol *= 32768.0f;
-                BinkSetVolume(Bink, ip, vol);
+                vol = vol * 32768.0f;
+                BinkSetVolume(Bink, track_id, vol);
             }
         }
 
-        Image = Open_RAD_3D_image(NULL, Bink->Width, Bink->Height, fuckingSurfaceType);
-        if (*(HRAD3DIMAGE volatile*)&Image != NULL)
+        Image = Open_RAD_3D_image(NULL, Bink->Width, Bink->Height, Rad_surface_type);
+        if (Image != NULL)
         {
             if (frame_num != 0)
             {
@@ -410,7 +402,9 @@ static void xDrawLine2D_LocaliFMVVersion(F32 arg0, F32 arg1, F32 arg2, F32 arg3)
     RwIm2DVertexSetScreenX(&verts[1], arg2);
     RwIm2DVertexSetScreenY(&verts[1], arg3);
     RwIm2DVertexSetScreenZ(&verts[1], nearz);
-    RwIm2DVertexSetIntRGBA(&verts[1], color.red, color.green, color.blue, color.alpha);
+    RwIm2DVertexSetIntRGBA(&verts[1], RwIm2DVertexGetRed(&verts[0]),
+                           RwIm2DVertexGetGreen(&verts[0]), RwIm2DVertexGetBlue(&verts[0]),
+                           RwIm2DVertexGetAlpha(&verts[0]));
 
     RwRenderStateSet(rwRENDERSTATETEXTURERASTER, NULL);
     RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, NULL);

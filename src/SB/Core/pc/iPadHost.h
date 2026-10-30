@@ -3,6 +3,8 @@
 
 #include <types.h>
 
+struct iPadBind;
+
 // PC-only. There is no GameCube counterpart to this file: the console reads
 // its controllers through one API that is always present, so iPad.cpp there
 // talks to PADRead directly. A host has several possible input sources and
@@ -61,11 +63,35 @@ const char* iPadHostName();
 // bound is a chord: `l2 = lt+rb` is two inputs and there is no single name for
 // it.
 //
+// Answers for the device the player is using, which iPadHostKeyboardIsLive
+// says. On the keyboard this names a KEY, so "a" out of here is the south face
+// button or the A key depending on which, and a caller that turns the name into
+// a picture has to ask.
+//
 // For the button prompts. A glyph has to follow the BINDING rather than the
 // console, or the game would keep drawing the disc's button while a different
 // one presses it. Only a backend can answer: the parsed bindings hold opaque
 // ids and only the backend has the table that names them. See iPadGlyph.h.
 const char* iPadHostBoundInput(U32 xpadButton);
+
+// Whether the keyboard and mouse are what the player is using: what the
+// prompts draw, and what `mouse.look = auto` turns on for.
+//
+// The device last TOUCHED, not the last one plugged in. Both feed port 0 at
+// once, so being connected settles nothing. A key or the mouse makes it the
+// keyboard; a pad button, or a stick pushed past a nudge, makes it the pad. With
+// no pad on port 0 it is always the keyboard.
+S32 iPadHostKeyboardIsLive();
+
+// The menu pointer. With `on` the OS cursor is the game's own -- the glove
+// with `hand` -- capture is let go, and the left button stops being a binding.
+// TRUE if a pointer is showing, which needs a mouse and the keyboard and mouse
+// to be what the player is using.
+S32 iPadHostSetPointer(S32 on, S32 hand);
+
+// Where the pointer is, in window pixels, and what it did in the last poll.
+// FALSE when no window of ours has focus.
+S32 iPadHostPointer(F32* x, F32* y, S32* moved, S32* clicked, S32* wheel);
 
 // What sort of controller is on port 0, as the name of a glyph set: "xbox",
 // "gamecube", "ps2". NULL when there is no pad, or when the backend cannot
@@ -94,6 +120,10 @@ const char* iPadHostInputForLabel(char letter);
 // Re-read [pad] and [keyboard], after iConfigSet has changed one.
 void iPadHostReloadBindings();
 
+// The bindings in force for the controller (`pad` TRUE) or the keyboard, one
+// per row of kPadBindButtons. NULL from a backend that reads none.
+const iPadBind* iPadHostBindings(S32 pad);
+
 // The next key, or the next input on the controller on port 0, to go down,
 // written as its binding name ("space", "lb"). Called every frame while
 // waiting; `prime` TRUE on the first call forgets whatever is already held, so
@@ -104,5 +134,9 @@ S32 iPadHostCaptureButton(S32 prime, char* out, S32 size);
 // For iTour.h: with `on`, port 0 holds exactly `buttons` (XPAD_BUTTON_*) and
 // every real controller and the keyboard are ignored.
 void iPadHostScript(S32 on, U32 buttons);
+
+// For iTour.h: the sticks port 0 holds while scripted, in iPadHostState's
+// units (full deflection at magnitude 1, Y up-positive).
+void iPadHostScriptSticks(F32 x, F32 y, F32 subx, F32 suby);
 
 #endif

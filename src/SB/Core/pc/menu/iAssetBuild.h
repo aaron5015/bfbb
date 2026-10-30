@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "iQuitDesktop.h"
 #include "iSaveScreen.h"
 #include "iSettingsScreen.h"
 

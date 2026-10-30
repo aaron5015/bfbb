@@ -31,7 +31,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("LD BADFORMAT TXT"),
            "{c=ffff0000}Save failed!{~:c}{n}The save folder could not be written to.{n}Press "
            "{i:ui_accept} to continue.");
-    p.Text(H("LD BADLOAD TXT"), "{c=ffff0000}Load failed!{~:c} Unable to load game. Press {i:ui_accept} to continue");
+    p.Text(H("LD BADLOAD TXT"), ISAVESCREEN_BADLOAD_SAY);
     p.Text(H("LD ERR NOCARD TXT"), "No save folder was found.");
     p.Text(H("LD ERR NOGAME TXT"), "No SpongeBob games were found.");
     p.Text(H("LD FORMAT PROMPT TXT"), "Your save folder is not ready.{n}{n}Do you wish to create it?");
@@ -65,7 +65,9 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("LEVEL TXT 9"), "Industrial Park");
     p.Text(H("MAX TXT"), "Max!");
     p.Text(H("MIN TXT"), "Min");
-    p.Text(H("MNIU4 NPCTALK TXT"), "Pull the {i:button_talktonpc_text} to Talk");
+    // "Pull the {i:button_talktonpc_text}", worded for the device. See
+    // iTextPatch.h.
+    p.Text(H("MNIU4 NPCTALK TXT"), "{i:pc_say_3c} to Talk");
     p.Text(H("MNU3 CREDITS TXT"), "Credits");
     p.Text(H("MNU3 NEW GAME TXT"), "New Game");
     p.Text(H("MNU3 PROMOTIONAL MATERIALS TXT"), "Promo Materials");
@@ -97,10 +99,10 @@ void MNU4_BuildText(iAssetPkg& p)
            "{red=.3}{blue=0}{green=0}Autosaving Data...{~:c}{n}{n}Do not close the game while it is "
            "saving.");
     p.Text(H("MNU4 AUTO SAVE TXT"), "Please do not close the game while it is saving.");
-    p.Text(H("MNU4 BUSSTOP TXT"), "Pull the {i:button_exitlevel_text} to switch characters");
+    p.Text(H("MNU4 BUSSTOP TXT"), "{i:pc_say_1c} to switch characters");
     p.Text(H("MNU4 D-PAD ADJUST TXT"), "{c=ff646464}{~:c}< > Adjust");
     p.Text(H("MNU4 EXIT GAME NO TXT"), "No");
-    p.Text(H("MNU4 EXIT GAME PROMPT TXT"), "Quit Game and lose all unsaved game data ?");
+    p.Text(H("MNU4 EXIT GAME PROMPT TXT"), "Quit the game and lose all unsaved game data ?");
     p.Text(H("MNU4 EXIT GAME YES TXT"), "Yes");
     p.Text(H("MNU4 FREE DISK TEXT"), "Available Free Space: {var:SpaceAvailableString}");
     p.Text(H("MNU4 OPTIONS SCREEN TXT"), "Screen Adjust");
@@ -246,9 +248,7 @@ void MNU4_BuildText(iAssetPkg& p)
     p.Text(H("SOUND TITLE TXT"), "Sound Mode");
     p.Text(H("SQUARE TXT"), "{i:ui_misc}");
     p.Text(H("STEREO TXT"), "Stereo");
-    p.Text(H("SV BADSAVE TXT"),
-           "{c=ffff0000}Save failed!{~:c} There is not enough free space to create new save games. "
-           "Press {i:ui_accept} to continue.");
+    p.TextSpace(H(ISAVESCREEN_BADSAVE_TEXT), ISAVESCREEN_BADSAVE_SAY, 160);
     p.Text(H("SV FORMAT CONFIRM TXT"), "Are you sure you wish to create your save folder?");
     p.Text(H("SV MC DONTREMOVE PAL TXT"), "WARNING: {var:MCAccessType}...{n}Do not close the game while it is saving.");
     p.Text(H("SV MC DONTREMOVE TXT"), "Saving Game.....{n}Do not close the game while it is saving.");
@@ -256,7 +256,7 @@ void MNU4_BuildText(iAssetPkg& p)
            "There is not enough free space to create new save games. Press {i:ui_accept} to "
            "continue.");
     p.Text(H("SV NOSPACEGAME TXT"), "There is not enough space to save your game.");
-    p.Text(H("SV OVERWRITE TXT"), "A game already exists. Would you like to overwrite it?");
+    p.TextSpace(H(ISAVESCREEN_OVERWRITE_TEXT), ISAVESCREEN_OVERWRITE_ASK, 128);
     p.Text(H("SV RETRY TXT"), "{i:ui_accept} Retry");
     p.Text(H("TASK TXT 01"), "Complete task numero uno.");
     p.Text(H("TASK TXT 02"), "complete task numero dos.");
@@ -372,14 +372,20 @@ void MNU4_BuildText(iAssetPkg& p)
     // The settings screen (iSettingsScreen.cpp fills these in) and the two
     // menu entries that open it.
     p.Text(H("PC SETTINGS TXT"), "Settings");
+
+    // Quit Game's three choices (iQuitDesktop.h).
+    p.Text(H("PC QUIT MAIN MENU TXT"), "Quit to Main Menu");
+    p.Text(H("PC QUIT DESKTOP TXT"), HOST_QUIT);
+    p.Text(H("PC QUIT CANCEL TXT"), "Cancel");
     p.TextSpace(H(ISETTINGS_TITLE_TEXT), "Settings", 256);
     p.TextSpace(H(ISETTINGS_HELP_TEXT), "", 256);
+    p.Text(H(ISETTINGS_BACK_TEXT), "{i:ui_cancel} Back");
     for (S32 i = 0; i < ISETTINGS_ROWS; i++)
     {
         char name[32];
         sprintf(name, ISETTINGS_LABEL_TEXT, (int)i);
         p.TextSpace(H(name), "", 64);
         sprintf(name, ISETTINGS_VALUE_TEXT, (int)i);
-        p.TextSpace(H(name), "", 96);
+        p.TextSpace(H(name), "", 128);
     }
 }

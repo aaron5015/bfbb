@@ -1,0 +1,8 @@
+# SpongeBob's dream (db01) at 640x480 on Direct3D 9, booted straight into the scene.
+# The fly-through ends in SpongeBob's talk box by 660. B leaves it; the shot
+# is 120 frames later.
+
+wait 900
+press b
+wait 120
+shot reg_db01 0

@@ -3,6 +3,9 @@
 #include "xEvent.h"
 #include "xFixes.h"
 #include "iModel.h"
+#if defined(PS2)
+#include <rwplcore.h>
+#endif
 #ifdef PLATFORM_PC
 #include "iScreen.h"
 #include "iToon.h"
@@ -61,9 +64,9 @@ void xSkyDome_AddEntity(xEnt* ent, S32 sortorder, S32 lockY)
     sSkyList[i].sortorder = sortorder;
     sSkyList[i].lockY = lockY;
 
-    ent->render = xSkyDome_EmptyRender;
-
     sSkyCount++;
+
+    ent->render = xSkyDome_EmptyRender;
 
     ent->model->Flags &= (U16)~0x1;
     ent->baseFlags &= (U16)~0x10;

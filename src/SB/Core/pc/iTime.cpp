@@ -15,12 +15,21 @@ static U64 sSuspendedNs;
 static U64 sSuspendStartNs;
 static bool sSuspended;
 
+// The clock iTimeFixedStep installs, and its step; 0 when it is not in use.
+static U64 sFixedNs;
+static U64 sFixedStepNs;
+
 // A monotonic clock, not the wall clock: retail reads the GameCube timebase,
 // which no user action can move. Wall-clock jumps (NTP, DST, the user editing
 // the clock) would otherwise show up as a single enormous frame delta. Which
 // clock that is on this host is iHost's problem.
 static iTime iTicksNow()
 {
+    if (sFixedStepNs != 0)
+    {
+        return (iTime)(sFixedNs / (1000000000ULL / ITIME_TICKS_PER_SECOND));
+    }
+
     U64 now = sSuspended ? sSuspendStartNs : iHostMonotonicNs();
     return (iTime)((now - sSuspendedNs) / (1000000000ULL / ITIME_TICKS_PER_SECOND));
 }
@@ -41,6 +50,49 @@ void iTimeResume()
         sSuspendedNs += iHostMonotonicNs() - sSuspendStartNs;
         sSuspended = false;
     }
+}
+
+void iTimeFixedStep(U32 fps)
+{
+    sFixedNs = 0;
+    sFixedStepNs = 1000000000ULL / fps;
+    sStartupTime = 0;
+}
+
+void iTimeStep()
+{
+    sFixedNs += sFixedStepNs;
+}
+
+S32 iTimeFixedNs(U64* ns)
+{
+    if (sFixedStepNs == 0)
+    {
+        return FALSE;
+    }
+
+    *ns = sFixedNs;
+    return TRUE;
+}
+
+// iTimeSetSeed's value, and whether it was called.
+static U32 sSeed;
+static bool sSeedPinned;
+
+U32 iTimeSeed()
+{
+    return sSeedPinned ? sSeed : (U32)iTimeGet();
+}
+
+void iTimeSetSeed(U32 seed)
+{
+    sSeed = seed;
+    sSeedPinned = true;
+}
+
+S32 iTimeSeedPinned()
+{
+    return sSeedPinned;
 }
 
 void iTimeInit()

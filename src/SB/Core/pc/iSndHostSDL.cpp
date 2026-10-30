@@ -1,6 +1,7 @@
 #include "iSndHost.h"
 #include "iHost.h"
 #include "iSndReverb.h"
+#include "iTime.h"
 
 #include <SDL3/SDL.h>
 
@@ -100,6 +101,15 @@ static char sName[128];
 // The silent path's clock. Only read and written by iSndHostUpdate, on the game
 // thread, and only when there is no device.
 static U64 sLastSilentNs;
+
+// What the silent path steps voices by: the tour's fixed clock when there is
+// one (iTime.h), so a voice ends on the same frame each run at any frame rate,
+// and the monotonic clock otherwise.
+static U64 iSilentNowNs()
+{
+    U64 fixed;
+    return iTimeFixedNs(&fixed) ? fixed : iHostMonotonicNs();
+}
 
 // Scratch for one mixed block, in float. Sized on the endpoint buffer, which
 // shared-mode WASAPI reports once at initialisation.
@@ -515,7 +525,19 @@ void iSndHostInit()
     {
         snprintf(sName, sizeof(sName), "SDL3 (silenced by BFBB_AUDIO=0, but keeps time)");
         sOutRate = 48000;
-        sLastSilentNs = iHostMonotonicNs();
+        sLastSilentNs = iSilentNowNs();
+        return;
+    }
+
+    // A tour runs at whatever frame rate the machine manages. A device drains
+    // at its own real-time rate, which would end each voice on a different
+    // frame each run; the silent path steps them on the tour's clock instead.
+    U64 fixed;
+    if (iTimeFixedNs(&fixed))
+    {
+        snprintf(sName, sizeof(sName), "SDL3 (silent in a tour, on the tour's clock)");
+        sOutRate = 48000;
+        sLastSilentNs = fixed;
         return;
     }
 
@@ -530,7 +552,7 @@ void iSndHostInit()
         // frames. Any value works as long as it matches what the voices are
         // stepped against; 48 kHz is what a device would most likely have been.
         sOutRate = 48000;
-        sLastSilentNs = iHostMonotonicNs();
+        sLastSilentNs = iSilentNowNs();
     }
 }
 
@@ -728,6 +750,50 @@ bool iSndHostIsPlaying(S32 voice)
     return playing;
 }
 
+// A recording tour's sound: the silent path's step, mixed rather than skipped.
+// Whole frames only, with the remainder carried, so the recording has exactly
+// as many samples as the tour has time.
+static iSndHostSink sSink;
+static double sSinkCarry;
+
+static void iMixToSink(double frames)
+{
+    frames += sSinkCarry;
+    U32 whole = (U32)frames;
+    sSinkCarry = frames - (double)whole;
+
+    const U32 kChunk = 4096;
+    if (sMixBuffer == NULL || sMixBufferFrames < kChunk)
+    {
+        free(sMixBuffer);
+        sMixBuffer = (float*)malloc(sizeof(float) * 2 * kChunk);
+        sMixBufferFrames = sMixBuffer != NULL ? kChunk : 0;
+    }
+    if (sMixBuffer == NULL)
+    {
+        return;
+    }
+
+    while (whole > 0)
+    {
+        U32 n = whole < sMixBufferFrames ? whole : sMixBufferFrames;
+
+        SDL_LockMutex(sLock);
+        iMixLocked(n);
+        SDL_UnlockMutex(sLock);
+
+        iClamp(n);
+        sSink(sMixBuffer, n, sOutRate);
+        whole -= n;
+    }
+}
+
+void iSndHostSetSink(iSndHostSink sink)
+{
+    sSink = sink;
+    sSinkCarry = 0.0;
+}
+
 void iSndHostUpdate()
 {
     if (sDeviceUp)
@@ -739,7 +805,7 @@ void iSndHostUpdate()
 
     // No device: advance the voices on the wall clock instead, so that
     // everything the game derives from a sound's length still happens on time.
-    U64 now = iHostMonotonicNs();
+    U64 now = iSilentNowNs();
     U64 elapsed = now - sLastSilentNs;
     sLastSilentNs = now;
 
@@ -754,6 +820,12 @@ void iSndHostUpdate()
     double frames = ((double)elapsed / 1000000000.0) * (double)sOutRate;
 
     iEnsureLock();
+
+    if (sSink != NULL)
+    {
+        iMixToSink(frames);
+        return;
+    }
 
     SDL_LockMutex(sLock);
 

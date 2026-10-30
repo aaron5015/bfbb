@@ -696,12 +696,26 @@ static void test_images()
     check(RwImageSetFromRaster(NULL, NULL) == NULL, "RwImageSetFromRaster(NULL, NULL) is refused");
 }
 
-// A GameCube native texture's STRUCT: 0x6C bytes of big-endian header with the
-// size and GX formats filled in, then `payload`.
-static void makeGCTexture(RwUInt8* out, int w, int h, int fmt, int palfmt, const RwUInt8* payload,
-                          size_t n)
+// A GameCube native texture's STRUCT: a big-endian header with the size and GX
+// formats filled in, an optional C4/C8 palette at 0x68, the level size at 0x6C,
+// then `payload`.
+//
+// Where the texels start depends on the format: a palettised texture carries
+// 256 big-endian entries between the palette and the size, which pushes its
+// texels from 0x6C out to 0x26C. Reading the palette at 0x6C instead -- where
+// this test used to put it -- shifts every colour by two entries and every texel
+// by four bytes, so the fixture follows the header, not the decoder.
+static size_t gcTexelOffset(int fmt)
 {
-    memset(out, 0, 0x6C);
+    return (fmt == 9) ? 0x26C : 0x6C; // 9 is GX_TF_C8
+}
+
+static size_t makeGCTexture(RwUInt8* out, int w, int h, int fmt, int palfmt, const RwUInt8* pal,
+                            const RwUInt8* payload, size_t n)
+{
+    const size_t texels = gcTexelOffset(fmt);
+
+    memset(out, 0, texels);
     out[3] = 6;
     out[0x5C] = (RwUInt8)(w >> 8);
     out[0x5D] = (RwUInt8)w;
@@ -709,7 +723,14 @@ static void makeGCTexture(RwUInt8* out, int w, int h, int fmt, int palfmt, const
     out[0x5F] = (RwUInt8)h;
     out[0x62] = (RwUInt8)fmt;
     out[0x63] = (RwUInt8)palfmt;
-    memcpy(out + 0x6C, payload, n);
+
+    if (pal != NULL)
+    {
+        memcpy(out + 0x68, pal, 512);
+    }
+
+    memcpy(out + texels, payload, n);
+    return texels + n;
 }
 
 static const RwUInt8* gcTexel(rw::Image* img, int x, int y)
@@ -739,9 +760,9 @@ static void test_gc_textures()
         memset(cmpr + b * 8 + 4, 0xFF, 4);
     }
 
-    RwUInt8 buf[0x6C + 512 + 32];
-    makeGCTexture(buf, 8, 8, 14, 0xFF, cmpr, sizeof(cmpr));
-    rw::Image* img = rw::readGCTextureImage(buf, 0x6C + sizeof(cmpr));
+    RwUInt8 buf[0x26C + 512 + 32];
+    size_t cmprLen = makeGCTexture(buf, 8, 8, 14, 0xFF, NULL, cmpr, sizeof(cmpr));
+    rw::Image* img = rw::readGCTextureImage(buf, cmprLen);
     check(img != NULL && img->width == 8 && img->height == 8 && img->depth == 32,
           "a CMPR texture decodes to an 8x8 RGBA image");
     if (img != NULL)
@@ -759,17 +780,20 @@ static void test_gc_textures()
 
     // C8, one 8x4 tile, with an RGB5A3 palette ahead of the texels: entry 0
     // opaque red (RGB555), entry 1 white at alpha 7 of 7, entry 2 red at alpha 0.
-    RwUInt8 c8[512 + 32];
+    RwUInt8 pal[512];
+    memset(pal, 0, sizeof(pal));
+    pal[0] = 0xFC; // FC00
+    pal[2] = 0x7F; // 7FFF
+    pal[3] = 0xFF;
+    pal[4] = 0x0F; // 0F00
+
+    RwUInt8 c8[32];
     memset(c8, 0, sizeof(c8));
-    c8[0] = 0xFC; // FC00
-    c8[2] = 0x7F; // 7FFF
-    c8[3] = 0xFF;
-    c8[4] = 0x0F; // 0F00
-    c8[512 + 0] = 1;
-    c8[512 + 1] = 2;
-    c8[512 + 8] = 1; // second row
-    makeGCTexture(buf, 8, 4, 9, 2, c8, sizeof(c8));
-    img = rw::readGCTextureImage(buf, 0x6C + sizeof(c8));
+    c8[0] = 1;
+    c8[1] = 2;
+    c8[8] = 1; // second row
+    size_t c8Len = makeGCTexture(buf, 8, 4, 9, 2, pal, c8, sizeof(c8));
+    img = rw::readGCTextureImage(buf, c8Len);
     check(img != NULL, "a C8 texture decodes");
     if (img != NULL)
     {
@@ -784,10 +808,10 @@ static void test_gc_textures()
         img->destroy();
     }
 
-    check(rw::readGCTextureImage(buf, 0x6C + 100) == NULL,
+    check(rw::readGCTextureImage(buf, c8Len - 8) == NULL,
           "a struct too short for its texels is refused rather than overrun");
-    makeGCTexture(buf, 8, 8, 7, 0xFF, cmpr, sizeof(cmpr));
-    check(rw::readGCTextureImage(buf, 0x6C + sizeof(cmpr)) == NULL,
+    cmprLen = makeGCTexture(buf, 8, 8, 7, 0xFF, NULL, cmpr, sizeof(cmpr));
+    check(rw::readGCTextureImage(buf, cmprLen) == NULL,
           "and so is a GX format this does not know");
 }
 
@@ -1099,6 +1123,33 @@ static void test_cameras()
         iFixSetSkyClip(TRUE);
 
         RwCameraEndUpdate(camera);
+    }
+
+    // ---- one melee event per contact ----
+    {
+        static int umbrella;
+        static int other;
+        const F64 frame = 1.0 / 60.0;
+
+        check(iFixMeleeNewContact(&umbrella, 100.0) == TRUE, "the first update of contact is a hit");
+        check(iFixMeleeNewContact(&umbrella, 100.0 + frame) == FALSE,
+              "the next update of the same contact is not");
+        S32 again = 0;
+        for (S32 i = 2; i <= 8; i++)
+        {
+            again += iFixMeleeNewContact(&umbrella, 100.0 + i * frame);
+        }
+        check(again == 0, "nor is any of the rest of a spin's nine, while the updates keep coming");
+        check(iFixMeleeNewContact(&other, 100.0 + 8 * frame) == TRUE,
+              "a second target touched on the same update is its own contact");
+        check(iFixMeleeNewContact(&umbrella, 101.0) == TRUE, "a hit after a pause is a new contact");
+        check(iFixMeleeNewContact(&umbrella, 50.0) == TRUE,
+              "and so is one after the clock went backwards");
+
+        iFixSetMeleeOnce(FALSE);
+        check(iFixMeleeNewContact(&umbrella, 50.0 + frame) == TRUE,
+              "fixes.melee_once off hits on every update, as the game shipped");
+        iFixSetMeleeOnce(TRUE);
     }
 
     reinterpret_cast<rw::Camera*>(camera)->setFrame(NULL);
@@ -2269,6 +2320,22 @@ static void test_atomics()
     isx.type = rpINTERSECTPOINT;
     RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
     check(log.calls == 0, "a point intersection against an atomic is refused");
+
+    // SlideTrackUpdate writes the LTM straight onto a clean frame and does not
+    // touch the matrix. The query has to land where the LTM puts the atomic.
+    _rwFrameSyncDirty();
+    frame->ltm.pos.x = -20.0f;
+    memset(&log, 0, sizeof(log));
+    isx.type = rpINTERSECTSPHERE;
+    isx.t.sphere.center.x = -20.0f;
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 2, "a clean frame is tested at its LTM");
+
+    // And a RwFrameTransform after that is what counts again.
+    RwFrameTranslate(frame, &ten, rwCOMBINEREPLACE);
+    memset(&log, 0, sizeof(log));
+    RpAtomicForAllIntersections(atomic, &isx, logIsxCB, &log);
+    check(log.calls == 0, "a moved frame is tested at its matrix, not the stale LTM");
 
     RpAtomicSetFrame(atomic, NULL);
     RwFrameDestroy(frame);

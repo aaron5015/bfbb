@@ -5,6 +5,7 @@
 #include "iConfigEdit.h"
 #include "iConfigTable.h"
 #include "iHost.h"
+#include "iModFolder.h"
 #include "iPadBind.h"
 
 #include <stdio.h>
@@ -17,10 +18,10 @@ namespace
     // RenderWare has an allocator -- that is the whole point of the file. A
     // settings file is a few dozen lines; a file that exceeds these is
     // truncated with a message rather than silently losing its tail.
-    // 64 was enough when every setting was a feature switch. The two binding
-    // sections are one line per game button each, so a file that spells out
-    // every binding is already 45 lines before anyone adds a comment.
-    const S32 kMaxEntries = 128;
+    // Room for every setting in kConfigSettings and every [keyboard] and [pad]
+    // row several times over. A setting past the cap reads as missing, so the
+    // appender writes it again on every run and the file grows without end.
+    const S32 kMaxEntries = 512;
     const S32 kMaxKey = 64;
     const S32 kMaxValue = 512;
     const S32 kMaxLine = 512;
@@ -35,6 +36,12 @@ namespace
     Entry sEntries[kMaxEntries];
     S32 sCount;
     S32 sLoaded;
+
+    // The mod's mod.ini settings (iModFolder.h). They answer ahead of the file
+    // and are never written to it.
+    const S32 kMaxModEntries = 64;
+    Entry sModEntries[kMaxModEntries];
+    S32 sModCount;
     char sPath[kMaxPath];
     S32 sHavePath;
 
@@ -112,6 +119,139 @@ namespace
         return NULL;
     }
 
+    // [keyboard] as builds before the PC layout wrote it: every line live, so
+    // each one pins its key to that build's default. The later of the two
+    // layouts put a mouse button on b and x and added walk.
+    struct OldKeyboardDefault
+    {
+        const char* name;
+        const char* key;
+    };
+
+    const OldKeyboardDefault kOldKeyboardDefaults[] = {
+        { "a", "space" },
+        { "b", "lctrl" },
+        { "b", "mouse2, lctrl" },
+        { "x", "e" },
+        { "x", "mouse1, e" },
+        { "y", "q" },
+        { "z", "f" },
+        { "hud", "g" },
+        { "l1", "z" },
+        { "r1", "c" },
+        { "l2", "x" },
+        { "r2", "v" },
+        { "start", "enter" },
+        { "select", "backspace" },
+        { "up", "up" },
+        { "down", "down" },
+        { "left", "left" },
+        { "right", "right" },
+        { "walk", "shift" },
+    };
+
+    // A file an old build wrote has a live line for every one of these, since
+    // its appender put back any that went missing. One with fewer has been
+    // edited since and is left alone.
+    const char* const kOldKeyboardRows[] = {
+        "a",  "b",     "x",      "y",  "z",    "l1",   "r1",    "l2",
+        "r2", "start", "select", "up", "down", "left", "right",
+    };
+
+    // Equal ignoring case and spaces: "mouse2,lctrl" is "mouse2, lctrl".
+    bool sameBinding(const char* a, const char* b)
+    {
+        for (;;)
+        {
+            while (*a == ' ' || *a == '\t')
+            {
+                a++;
+            }
+            while (*b == ' ' || *b == '\t')
+            {
+                b++;
+            }
+
+            char ca = (*a >= 'A' && *a <= 'Z') ? (char)(*a + ('a' - 'A')) : *a;
+            char cb = (*b >= 'A' && *b <= 'Z') ? (char)(*b + ('a' - 'A')) : *b;
+            if (ca != cb)
+            {
+                return false;
+            }
+            if (ca == '\0')
+            {
+                return true;
+            }
+            a++;
+            b++;
+        }
+    }
+
+    bool isOldKeyboardDefault(const char* name, const char* value)
+    {
+        for (size_t i = 0; i < sizeof(kOldKeyboardDefaults) / sizeof(kOldKeyboardDefaults[0]); i++)
+        {
+            if (strcmp(kOldKeyboardDefaults[i].name, name) == 0 &&
+                sameBinding(kOldKeyboardDefaults[i].key, value))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Take out the [keyboard] lines an old build wrote at its own defaults, so
+    // those keys follow this build's. A line the player changed is kept. Runs
+    // before the parse, through the same editor iConfigSave uses.
+    void dropOldKeyboardDefaults(const char* path)
+    {
+        iConfigEditFile* file = iConfigEditOpen(path);
+        if (file == NULL)
+        {
+            return;
+        }
+
+        for (size_t i = 0; i < sizeof(kOldKeyboardRows) / sizeof(kOldKeyboardRows[0]); i++)
+        {
+            if (iConfigEditGet(file, kKeyboardSection, kOldKeyboardRows[i]) == NULL)
+            {
+                iConfigEditClose(file);
+                return;
+            }
+        }
+
+        S32 dropped = 0;
+        for (size_t i = 0; i < sizeof(kOldKeyboardDefaults) / sizeof(kOldKeyboardDefaults[0]); i++)
+        {
+            const char* name = kOldKeyboardDefaults[i].name;
+            const char* value;
+            while ((value = iConfigEditGet(file, kKeyboardSection, name)) != NULL &&
+                   isOldKeyboardDefault(name, value))
+            {
+                iConfigEditUnset(file, kKeyboardSection, name);
+                dropped++;
+            }
+        }
+
+        if (dropped > 0)
+        {
+            if (iConfigEditSave(file, path))
+            {
+                printf("bfbb: %s: took out %d [keyboard] line%s holding an old build's "
+                       "default; those keys now follow this build's\n",
+                       path, (int)dropped, dropped == 1 ? "" : "s");
+            }
+            else
+            {
+                printf("bfbb: %s: could not take out the [keyboard] lines holding an old "
+                       "build's defaults\n",
+                       path);
+            }
+            fflush(stdout);
+        }
+        iConfigEditClose(file);
+    }
+
     // [pad] and [keyboard]. One line per game button, and the grammar spelled
     // out once at the top of each -- a comment per binding would be thirty
     // paragraphs all saying the same thing.
@@ -123,8 +263,8 @@ namespace
         fprintf(f, ";\n");
         fprintf(f, ";   %s\n", inputs);
         fprintf(f, ";\n");
-        fprintf(f, "; ',' is either one, '+' is both at once, '!' is NOT held, and nothing\n");
-        fprintf(f, "; at all leaves the button unpressable.\n");
+        fprintf(f, "; ',' is either one, '+' is both at once, '!' is NOT held, and none\n");
+        fprintf(f, "; leaves the button unpressable.\n");
         fprintf(f, ";\n");
         fprintf(f, "%s", extra);
 
@@ -135,22 +275,28 @@ namespace
         // Commented, they are what they should be: a listing of every button
         // and what is on it now, with uncommenting one the way to take it over.
         //
-        // [keyboard] has no preset behind it, so its lines are the values and
-        // are written as values.
+        // [keyboard] is commented for the same reason with the build in place
+        // of the preset: a live line pins that key past any change to the
+        // defaults in a later build.
         bool pad = (section == kPadSection);
 
         if (pad)
         {
             fprintf(f, "; These are what input.preset gives you. Uncomment a line to take that\n");
             fprintf(f, "; one button over; the rest keep following the preset.\n");
-            fprintf(f, ";\n");
         }
+        else
+        {
+            fprintf(f, "; These are the defaults. Uncomment a line to take that one button\n");
+            fprintf(f, "; over; the rest keep the defaults of whichever build reads them.\n");
+        }
+        fprintf(f, ";\n");
 
         for (S32 i = 0; i < kPadBindButtonCount; i++)
         {
             const iPadBindButton* b = &kPadBindButtons[i];
             const char* value = pad ? iPadBindPadDefault(b) : b->key;
-            const char* lead = pad ? "; " : "";
+            const char* lead = "; ";
 
             if (b->does != NULL)
             {
@@ -168,17 +314,19 @@ namespace
         writeBindingSection(
             f, kPadSection, "a b x y lb rb lt rt ls rs back start dpup dpdown dpleft dpright",
             "; The '!' is for the gamecube preset, where l1 and l2 share a trigger and\n"
-            "; rb stands in for Z. ls and rs start bound to nothing. The sticks are\n"
-            "; not remappable: left moves, right turns the camera.\n"
+            "; rb stands in for Z. ls and rs start bound to nothing. Which stick\n"
+            "; moves and which turns the camera is input.sticks.\n"
             ";\n");
 
         writeBindingSection(
             f, kKeyboardSection,
             "any key by name -- letters, digits, space, enter, tab, escape,\n"
             ";   backspace, shift, ctrl, alt, up, down, left, right, f1 to f12,\n"
-            ";   and the numeric keypad as numpad0 to numpad9",
-            "; Only read while nothing is on the controller. WASD moves and IJKL turns\n"
-            "; the camera; those are not remappable.\n"
+            ";   the numeric keypad as numpad0 to numpad9, and the mouse as\n"
+            ";   mouse1 to mouse5, wheelup and wheeldown",
+            "; Read alongside the controller. WASD moves and IJKL turns the camera;\n"
+            "; those are not remappable, and [mouse] turns it too. A wheel notch\n"
+            "; presses its button for one frame, so it suits presses, not holds.\n"
             ";\n");
     }
 
@@ -194,11 +342,30 @@ namespace
         return NULL;
     }
 
-    // What a query should read, in order: the file, then the table's default,
-    // then the caller's fallback for a key that is in neither. The middle step
-    // is what keeps the written defaults and the running defaults the same.
+    S32 findModEntry(const char* key)
+    {
+        for (S32 i = 0; i < sModCount; i++)
+        {
+            if (iHostStrCaseCmp(sModEntries[i].key, key) == 0)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // What a query should read, in order: the mod's mod.ini, the file, then
+    // the table's default, then the caller's fallback for a key that is in
+    // none of them. The table step is what keeps the written defaults and the
+    // running defaults the same.
     const char* valueOf(const char* key)
     {
+        const S32 mod = findModEntry(key);
+        if (mod >= 0)
+        {
+            return sModEntries[mod].value;
+        }
+
         const Entry* e = findEntry(key);
         if (e != NULL)
         {
@@ -301,6 +468,8 @@ namespace
 
     bool readFile(const char* path)
     {
+        dropOldKeyboardDefaults(path);
+
         FILE* f = fopen(path, "rb");
         if (f == NULL)
         {
@@ -367,21 +536,12 @@ namespace
                 missing++;
             }
         }
-        // Only [keyboard]. [pad] is neither counted here nor written below: a
-        // generated file lists the pad bindings COMMENTED, so input.preset
-        // stays in charge of them, and a comment is not an entry -- fileHas
-        // would call all fifteen missing on every run and append fifteen more
-        // commented lines each time. Nothing is lost by leaving them out, since
-        // a pad binding the file does not mention is answered by the preset,
-        // which is what the setting is for.
-        for (S32 i = 0; i < kPadBindButtonCount; i++)
-        {
-            if (!fileHas(kKeyboardSection, kPadBindButtons[i].name))
-            {
-                missing++;
-            }
-        }
-
+        // Neither [pad] nor [keyboard] is counted here or written below: a
+        // generated file lists the bindings COMMENTED, and a comment is not an
+        // entry -- fileHas would call every one missing on every run and append
+        // them again each time. Nothing is lost by leaving them out, since a
+        // binding the file does not mention is answered by the preset or the
+        // build's own default.
         if (missing == 0)
         {
             return;
@@ -416,33 +576,6 @@ namespace
             }
             fprintf(f, "\n; %s\n", kConfigSettings[i].comment);
             fprintf(f, "%s = %s\n", kConfigSettings[i].name, kConfigSettings[i].value);
-        }
-
-        // The keyboard bindings, one line each, carrying their grammar in the
-        // header the file already has further up. [pad] is left alone, for the
-        // reason given where the count is taken.
-        bool wroteHeader = false;
-        for (S32 i = 0; i < kPadBindButtonCount; i++)
-        {
-            const iPadBindButton* b = &kPadBindButtons[i];
-            if (fileHas(kKeyboardSection, b->name))
-            {
-                continue;
-            }
-            if (!wroteHeader)
-            {
-                fprintf(f, "\n[%s]\n", kKeyboardSection);
-                wroteHeader = true;
-            }
-
-            if (b->does != NULL)
-            {
-                fprintf(f, "%-6s = %-9s ; %s\n", b->name, b->key, b->does);
-            }
-            else
-            {
-                fprintf(f, "%-6s = %s\n", b->name, b->key);
-            }
         }
 
         fclose(f);
@@ -508,6 +641,123 @@ bool iConfigWriteDefaults(const char* path)
     return true;
 }
 
+namespace
+{
+    void addModSetting(const char* key, const char* value, void* path)
+    {
+        // The mod folder is chosen by these two; a mod cannot move itself.
+        if (iHostStrCaseCmp(key, "assets.mod") == 0 || iHostStrCaseCmp(key, "assets.path") == 0)
+        {
+            printf("bfbb: %s: %s cannot be set by a mod, ignored\n", (const char*)path, key);
+            return;
+        }
+
+        if (iConfigTableFind(key) == NULL && bindingDefault(key) == NULL)
+        {
+            printf("bfbb: %s: unknown setting '%s', ignored\n", (const char*)path, key);
+            return;
+        }
+
+        // The mods are read highest priority first, so a key one of them
+        // already set stays as it set it.
+        if (findModEntry(key) >= 0)
+        {
+            printf("bfbb: %s: %s is already set by a mod above it, ignored\n", (const char*)path,
+                   key);
+            return;
+        }
+
+        if (sModCount == kMaxModEntries)
+        {
+            printf("bfbb: %s: more than %d settings, the rest are ignored\n", (const char*)path,
+                   (int)kMaxModEntries);
+            return;
+        }
+
+        Entry* e = &sModEntries[sModCount++];
+        snprintf(e->key, sizeof(e->key), "%s", key);
+        snprintf(e->value, sizeof(e->value), "%s", value);
+        printf("bfbb: a mod sets %s = %s\n", key, value);
+    }
+
+    // The settings the mods in use replace, from their mod.ini files. Read
+    // after the file, because the file is what names the mods.
+    void loadModSettings()
+    {
+        sModCount = 0;
+
+        const char* setting = getenv("BFBB_MOD");
+        if (setting == NULL || setting[0] == '\0')
+        {
+            setting = valueOf("assets.mod");
+        }
+
+        iModFolderPath listed[kModFolderMax];
+        const S32 count = iModFolderSplit(setting, listed, kModFolderMax);
+        for (S32 i = 0; i < count; i++)
+        {
+            char folder[kMaxPath];
+            if (!iModFolderResolve(listed[i], folder, sizeof(folder)))
+            {
+                continue;
+            }
+
+            char path[kMaxPath + 16];
+            snprintf(path, sizeof(path), "%s/mod.ini", folder);
+            iModFolderSettings(folder, addModSetting, path);
+        }
+        fflush(stdout);
+    }
+
+    void loadFile()
+    {
+        const char* explicitPath = getenv("BFBB_CONFIG");
+        if (explicitPath != NULL && explicitPath[0] != '\0')
+        {
+            if (!readFile(explicitPath))
+            {
+                // Named explicitly and not there: create it where it was asked
+                // for. A path someone typed is a stronger statement about where
+                // the file belongs than the search order is.
+                if (iConfigWriteDefaults(explicitPath))
+                {
+                    snprintf(sPath, sizeof(sPath), "%s", explicitPath);
+                    sHavePath = 1;
+                    printf("bfbb: BFBB_CONFIG names '%s', which did not exist; wrote the defaults "
+                           "there\n",
+                           explicitPath);
+                }
+                else
+                {
+                    printf("bfbb: BFBB_CONFIG names '%s', which could not be opened or created; "
+                           "using defaults\n",
+                           explicitPath);
+                }
+                fflush(stdout);
+            }
+            return;
+        }
+
+        if (readFile("config.ini"))
+        {
+            return;
+        }
+
+        char beside[kMaxPath];
+        if (iHostExeDir(beside, sizeof(beside)))
+        {
+            char path[kMaxPath];
+            snprintf(path, sizeof(path), "%s/config.ini", beside);
+            if (readFile(path))
+            {
+                return;
+            }
+        }
+
+        createDefaultFile();
+    }
+} // namespace
+
 void iConfigLoad()
 {
     if (sLoaded)
@@ -520,50 +770,8 @@ void iConfigLoad()
     // otherwise recurse.
     sLoaded = 1;
 
-    const char* explicitPath = getenv("BFBB_CONFIG");
-    if (explicitPath != NULL && explicitPath[0] != '\0')
-    {
-        if (!readFile(explicitPath))
-        {
-            // Named explicitly and not there: create it where it was asked
-            // for. A path someone typed is a stronger statement about where
-            // the file belongs than the search order is.
-            if (iConfigWriteDefaults(explicitPath))
-            {
-                snprintf(sPath, sizeof(sPath), "%s", explicitPath);
-                sHavePath = 1;
-                printf("bfbb: BFBB_CONFIG names '%s', which did not exist; wrote the defaults "
-                       "there\n",
-                       explicitPath);
-            }
-            else
-            {
-                printf("bfbb: BFBB_CONFIG names '%s', which could not be opened or created; "
-                       "using defaults\n",
-                       explicitPath);
-            }
-            fflush(stdout);
-        }
-        return;
-    }
-
-    if (readFile("config.ini"))
-    {
-        return;
-    }
-
-    char beside[kMaxPath];
-    if (iHostExeDir(beside, sizeof(beside)))
-    {
-        char path[kMaxPath];
-        snprintf(path, sizeof(path), "%s/config.ini", beside);
-        if (readFile(path))
-        {
-            return;
-        }
-    }
-
-    createDefaultFile();
+    loadFile();
+    loadModSettings();
 }
 
 const char* iConfigPath()
@@ -593,6 +801,19 @@ namespace
                 sRemovedCount--;
                 return;
             }
+        }
+    }
+
+    // A setting the player changes in the game is theirs from then on, even
+    // where the mod's mod.ini named it.
+    void forgetModSetting(const char* key)
+    {
+        const S32 at = findModEntry(key);
+        if (at >= 0)
+        {
+            memmove(&sModEntries[at], &sModEntries[at + 1],
+                    (size_t)(sModCount - at - 1) * sizeof(Entry));
+            sModCount--;
         }
     }
 
@@ -629,6 +850,7 @@ void iConfigUnset(const char* key)
         }
     }
 
+    forgetModSetting(lower);
     forgetRemoved(lower);
     if (sRemovedCount < kMaxRemoved)
     {
@@ -644,6 +866,7 @@ void iConfigSet(const char* key, const char* value)
     snprintf(lower, sizeof(lower), "%s", key);
     lowerInPlace(lower);
     forgetRemoved(lower);
+    forgetModSetting(lower);
 
     for (S32 i = 0; i < sCount; i++)
     {

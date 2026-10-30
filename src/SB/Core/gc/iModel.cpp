@@ -1,3 +1,5 @@
+// Defer this weak helper's definition until after the stream-reader literals.
+#define XMATHINLINES_DEFER_XSQRT
 #include "iModel.h"
 
 #include <stdio.h>
@@ -157,7 +159,11 @@ static RpAtomic* iModelStreamRead(RwStream* stream)
     RwBBox bbox = { { 1000.0f, 1000.0f, 1000.0f }, { -1000.0f, -1000.0f, -1000.0f } };
 
     instance_world = RpWorldCreate(&bbox);
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+    instance_camera = (RwCamera*)iCameraCreate(0x280, 0x210, 0);
+#else
     instance_camera = (RwCamera*)iCameraCreate(0x280, 0x1e0, 0);
+#endif
     RpWorldAddCamera(instance_world, instance_camera);
 
     gLastAtomicCount = 0;
@@ -292,21 +298,28 @@ void iModelQuatToMat(xQuat* q, xVec3* a, RwMatrixTag* t)
     t->pos.z = a->z;
 }
 
+// Emit the existing helper before matrix identity initialization creates its
+// one constant. Its zero constant must precede that one in the shared pool.
+#undef XMATHINLINES_DEFER_XSQRT
+#define XMATHINLINES_WEAK_XSQRT
+#include "xMathInlines.h"
+#undef XMATHINLINES_WEAK_XSQRT
+
 void iModelAnimMatrices(RpAtomic* model, xQuat* quat, xVec3* tran, RwMatrixTag* mat)
 {
     RwMatrixTag* pMatrixArray;
-    RpHAnimNodeInfo* iVar1;
+    RpHAnimNodeInfo* pCurrentFrame;
     RwMatrixTag matrixStack[33];
     U32 pCurrentFrameFlags;
-    RpHAnimNodeInfo* pCurrentFrame;
+    RpHAnimHierarchy* pHierarchy;
+    S32 i;
     S32 numFrames;
     RwMatrixTag* pMatrixStackTop;
 
-    pCurrentFrame = (RpHAnimNodeInfo*)GetHierarchy(model);
+    pHierarchy = (RpHAnimHierarchy*)GetHierarchy(model);
 
-    if (pCurrentFrame != NULL)
+    if (pHierarchy != NULL)
     {
-        // float/sda scheduling
         pMatrixStackTop = &matrixStack[0];
         pMatrixStackTop->at.z = 1.0f;
 
@@ -323,20 +336,19 @@ void iModelAnimMatrices(RpAtomic* model, xQuat* quat, xVec3* tran, RwMatrixTag* 
         matrixStack[0].pos.x = 0.0f;
         matrixStack[0].flags |= 0x20003;
 
-        // non-volatile registers are acting up and their instructions
-        // are being scheduled weirdly
-        matrixStack[1] = matrixStack[0];
-        numFrames = pCurrentFrame->nodeIndex;
-        pMatrixArray = (&matrixStack[1]);
-        iVar1 = (RpHAnimNodeInfo*)pCurrentFrame[1].nodeID;
+        pMatrixArray = matrixStack;
+        *++pMatrixArray = matrixStack[0];
+        numFrames = pHierarchy->numNodes;
+        pCurrentFrame = pHierarchy->pNodeInfo;
 
         pMatrixArray++;
-        for (S32 i = 0; i < numFrames; i++)
+        for (i = 0; i < numFrames; i++)
         {
-            pCurrentFrameFlags = iVar1->flags;
+            pCurrentFrameFlags = pCurrentFrame->flags;
             if ((pCurrentFrameFlags & 2) != 0)
             {
-                *pMatrixArray++ = matrixStack[0];
+                RwMatrixTag& pushedMatrix = *pMatrixArray++;
+                pushedMatrix = matrixStack[0];
             }
 
             RwMatrixTag afStack_8e8;
@@ -359,8 +371,7 @@ void iModelAnimMatrices(RpAtomic* model, xQuat* quat, xVec3* tran, RwMatrixTag* 
             mat++;
             quat++;
             tran++;
-            iVar1++;
-            // r27 and r28 swap
+            pCurrentFrame++;
         }
     }
 }
@@ -468,9 +479,7 @@ S32 iModelCullPlusShadow(RpAtomic* model, RwMatrix* mat, xVec3* shadowVec, S32* 
     frustumPlane = cam->frustumPlanes;
     while (numPlanes--)
     {
-        nDot = worldsph.center.x * frustumPlane->plane.normal.x +
-               worldsph.center.y * frustumPlane->plane.normal.y +
-               worldsph.center.z * frustumPlane->plane.normal.z;
+        nDot = RwV3dDotProductMacro(&worldsph.center, &frustumPlane->plane.normal);
         nDot -= frustumPlane->plane.distance;
 
         if (nDot > worldsph.radius)
@@ -485,9 +494,7 @@ S32 iModelCullPlusShadow(RpAtomic* model, RwMatrix* mat, xVec3* shadowVec, S32* 
     return 0;
 
 shadow_test:
-    sDot = shadowVec->x * frustumPlane->plane.normal.x +
-           shadowVec->y * frustumPlane->plane.normal.y +
-           shadowVec->z * frustumPlane->plane.normal.z;
+    sDot = RwV3dDotProductMacro((RwV3d*)shadowVec, &frustumPlane->plane.normal);
     sDot -= frustumPlane->plane.distance;
 
     if (sDot > worldsph.radius)
@@ -499,14 +506,10 @@ shadow_test:
     frustumPlane++;
     while (numPlanes--)
     {
-        nDot = worldsph.center.x * frustumPlane->plane.normal.x +
-               worldsph.center.y * frustumPlane->plane.normal.y +
-               worldsph.center.z * frustumPlane->plane.normal.z;
+        nDot = RwV3dDotProductMacro(&worldsph.center, &frustumPlane->plane.normal);
         nDot -= frustumPlane->plane.distance;
 
-        sDot = shadowVec->x * frustumPlane->plane.normal.x +
-               shadowVec->y * frustumPlane->plane.normal.y +
-               shadowVec->z * frustumPlane->plane.normal.z;
+        sDot = RwV3dDotProductMacro((RwV3d*)shadowVec, &frustumPlane->plane.normal);
         sDot -= frustumPlane->plane.distance;
 
         if (nDot > worldsph.radius && sDot > worldsph.radius)
@@ -539,14 +542,12 @@ static inline void SkinXform(xVec3* dest, const xVec3* vert, RwMatrix* mat, cons
     {
         for (U32 i = 0; i < 4; i++)
         {
-            U32 r18 = ((*idx >> (i << 3)) >> 5) & 0x7;
-            U32 r29 = 1 << ((*idx >> (i << 3)) & 0x1F);
-            U32 midx = (*idx >> (i << 3)) & 0xFF;
-            if (!(r29 & catMatFlags[r18]))
+            U32 midx = (*idx >> (i * 8)) & 0xFF;
+            if (!(catMatFlags[midx >> 5] & (1 << (midx & 31))))
             {
                 xMat4x3Mul((xMat4x3*)(catmat + midx), (const xMat4x3*)(skinmat + midx),
                            (const xMat4x3*)(mat + midx));
-                catMatFlags[r18] |= r29;
+                catMatFlags[midx >> 5] |= 1 << (midx & 31);
             }
         }
 
@@ -558,9 +559,10 @@ static inline void SkinXform(xVec3* dest, const xVec3* vert, RwMatrix* mat, cons
         U32 wtidx = *idx;
         U32 maxwt = 4;
 
-        while (*fwt != 0.0f && maxwt)
+        while (*fwt && maxwt)
         {
             pMatrix = catmat + (wtidx & 0xFF);
+            wtidx >>= 8;
 
             accumV.x += *fwt * (pMatrix->right.x * vert->x + pMatrix->up.x * vert->y +
                                 pMatrix->at.x * vert->z + pMatrix->pos.x);
@@ -570,7 +572,6 @@ static inline void SkinXform(xVec3* dest, const xVec3* vert, RwMatrix* mat, cons
                                 pMatrix->at.z * vert->z + pMatrix->pos.z);
 
             fwt++;
-            wtidx >>= 8;
             maxwt--;
         }
 
@@ -628,34 +629,18 @@ static inline void SkinNormals(xVec3* dest, const xVec3* normal, const RwMatrix*
     const RwMatrix* rootmat = mat;
     mat++;
 
-    RwV3d right;
-    right.x = rootmat->right.x;
-    right.y = rootmat->right.y;
-    right.z = rootmat->right.z;
-
-    RwV3d up;
-    up.x = rootmat->up.x;
-    up.y = rootmat->up.y;
-    up.z = rootmat->up.z;
-
-    RwV3d at;
-    at.x = rootmat->at.x;
-    at.y = rootmat->at.y;
-    at.z = rootmat->at.z;
-
     while (count != 0)
     {
         for (U32 i = 0; i < 4; i++)
         {
-            U32 r18 = ((*idx >> (i << 3)) >> 5) & 0x7;
-            U32 r29 = 1 << ((*idx >> (i << 3)) & 0x1F);
-            U32 midx = (*idx >> (i << 3)) & 0xFF;
-            if (!(r29 & catMatFlags[r18]))
+            U32 midx = (*idx >> (i * 8)) & 0xFF;
+            if (!(catMatFlags[midx >> 5] & (1 << (midx & 31))))
             {
-                xMat3x3Mul((xMat3x3*)(catmat + midx), (const xMat3x3*)(skinmat + midx),
+                RwMatrix* cm = catmat + midx;
+                xMat3x3Mul((xMat3x3*)cm, (const xMat3x3*)(skinmat + midx),
                            (const xMat3x3*)(mat + midx));
-                xMat3x3Normalize((xMat3x3*)(catmat + midx), (xMat3x3*)(catmat + midx));
-                catMatFlags[r18] |= r29;
+                xMat3x3Normalize((xMat3x3*)cm, (xMat3x3*)cm);
+                catMatFlags[midx >> 5] |= 1 << (midx & 31);
             }
         }
 
@@ -667,9 +652,10 @@ static inline void SkinNormals(xVec3* dest, const xVec3* normal, const RwMatrix*
         U32 wtidx = *idx;
         U32 maxwt = 4;
 
-        while (*fwt != 0.0f && maxwt)
+        while (*fwt && maxwt)
         {
             pMatrix = catmat + (wtidx & 0xFF);
+            wtidx >>= 8;
 
             accumV.x += *fwt * (pMatrix->right.x * normal->x + pMatrix->up.x * normal->y +
                                 pMatrix->at.x * normal->z);
@@ -679,13 +665,12 @@ static inline void SkinNormals(xVec3* dest, const xVec3* normal, const RwMatrix*
                                 pMatrix->at.z * normal->z);
 
             fwt++;
-            wtidx >>= 8;
             maxwt--;
         }
 
-        dest->x = right.x * accumV.x + up.x * accumV.y + at.x * accumV.z;
-        dest->y = right.y * accumV.x + up.y * accumV.y + at.y * accumV.z;
-        dest->z = right.z * accumV.x + up.z * accumV.y + at.z * accumV.z;
+        dest->x = rootmat->right.x * accumV.x + rootmat->up.x * accumV.y + rootmat->at.x * accumV.z;
+        dest->y = rootmat->right.y * accumV.x + rootmat->up.y * accumV.y + rootmat->at.y * accumV.z;
+        dest->z = rootmat->right.z * accumV.x + rootmat->up.z * accumV.y + rootmat->at.z * accumV.z;
 
         normal++;
         idx++;

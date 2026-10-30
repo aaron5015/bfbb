@@ -729,23 +729,16 @@ RwBool RwEngineOpen(RwEngineOpenParams* initParams)
 // setting and stays separate: the picture is scaled onto whatever the display
 // is, so there is nothing to gain by making the monitor match it and a mode set
 // on every launch to lose.
-static void SelectFullscreenVideoMode()
+// The exclusive mode at the desktop's own size, or -1. `desktop` is filled in.
+static rw::int32 FindExclusiveMode(rw::VideoMode* desktop)
 {
-    if (iWindowGetMode() != iWINDOW_FULLSCREEN)
+    // Index 0 is the desktop's own. rw::Engine::getVideoModeInfo rather than
+    // RwEngineGetVideoModeInfo below, which answers for the CURRENT mode with
+    // the virtual screen's size -- true for the game and wrong for choosing a
+    // display mode.
+    if (rw::Engine::getVideoModeInfo(desktop, 0) == NULL)
     {
-        return;
-    }
-
-    // Index 0, read before anything changes the current mode, is the desktop's
-    // own. rw::Engine::getVideoModeInfo rather than RwEngineGetVideoModeInfo
-    // below, which answers for the CURRENT mode with the virtual screen's size
-    // -- true for the game and wrong for choosing a display mode.
-    rw::VideoMode desktop;
-    if (rw::Engine::getVideoModeInfo(&desktop, 0) == NULL)
-    {
-        printf("bfbb: the adapter would not report its desktop mode; staying windowed\n");
-        fflush(stdout);
-        return;
+        return -1;
     }
 
     rw::int32 count = rw::Engine::getNumVideoModes();
@@ -757,20 +750,32 @@ static void SelectFullscreenVideoMode()
             continue;
         }
 
-        if ((mode.flags & rw::VIDEOMODEEXCLUSIVE) == 0)
+        if ((mode.flags & rw::VIDEOMODEEXCLUSIVE) != 0 && mode.width == desktop->width &&
+            mode.height == desktop->height && mode.depth == desktop->depth)
         {
-            continue;
+            return i;
         }
+    }
+    return -1;
+}
 
-        if (mode.width == desktop.width && mode.height == desktop.height &&
-            mode.depth == desktop.depth)
-        {
-            rw::Engine::setVideoMode(i);
-            iWindowSetExclusive(TRUE);
-            printf("bfbb: exclusive fullscreen at %dx%d\n", (int)mode.width, (int)mode.height);
-            fflush(stdout);
-            return;
-        }
+static void SelectFullscreenVideoMode()
+{
+    if (iWindowGetMode() != iWINDOW_FULLSCREEN)
+    {
+        return;
+    }
+
+    // Read before anything changes the current mode.
+    rw::VideoMode desktop;
+    rw::int32 mode = FindExclusiveMode(&desktop);
+    if (mode >= 0)
+    {
+        rw::Engine::setVideoMode(mode);
+        iWindowSetExclusive(TRUE);
+        printf("bfbb: exclusive fullscreen at %dx%d\n", (int)desktop.width, (int)desktop.height);
+        fflush(stdout);
+        return;
     }
 
     // Not fatal, and not silent. A borderless window at the same size is what
@@ -782,6 +787,27 @@ static void SelectFullscreenVideoMode()
 }
 
 #endif
+
+S32 iRwSetExclusive(S32 on)
+{
+#if defined(RW_D3D9) || defined(RW_D3D11)
+    // D3D9 and D3D11 own the display themselves, and librw switches the device
+    // when a mode is set after start. Index 0 is the windowed entry.
+    if (iBackendIsD3D9() || iBackendIsD3D11())
+    {
+        if (!on)
+        {
+            return rw::Engine::setVideoMode(0) ? TRUE : FALSE;
+        }
+
+        rw::VideoMode desktop;
+        rw::int32 mode = FindExclusiveMode(&desktop);
+        return (mode >= 0 && rw::Engine::setVideoMode(mode)) ? TRUE : FALSE;
+    }
+#endif
+    (void)on;
+    return FALSE;
+}
 
 RwBool RwEngineStart(void)
 {

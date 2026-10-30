@@ -29,6 +29,11 @@ void iTimeExit();
 iTime iTimeGet();
 F32 iTimeDiffSec(iTime t0, iTime t1);
 F32 iTimeDiffSec(iTime time);
+
+// What the game seeds xrand with at a level or menu start, and a reseed when
+// play begins. A tour on PC pins both; see pc/iTime.h.
+#define iTimeSeed() iTimeGet()
+#define iTimeSeedPlay()
 void iTimeGameAdvance(F32 elapsed);
 void iTimeSetGame(F32 time);
 void iProfileClear(U32 sceneID);

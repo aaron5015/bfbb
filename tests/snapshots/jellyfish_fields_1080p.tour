@@ -1,0 +1,8 @@
+# Jellyfish Fields at 1920x1080. Booting into jf01 plays the fly-through and
+# Squidward's scene; B leaves his talk box with SpongeBob at the spawn point,
+# beside Squidward, with Jellyfish Rock behind them.
+
+wait 2400
+press b
+wait 120
+shot jellyfish_fields_1080p 0

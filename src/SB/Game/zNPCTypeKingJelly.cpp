@@ -17,6 +17,13 @@ typedef void (*tweak_change_cb)(tweak_info&);
 #include "string.h"
 #include "stdlib.h"
 
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78) || defined(VERSION_SLES_51968) || \
+    defined(VERSION_SLES_51970)
+#define NPC_FRAME_TIME (1.0f / 50.0f)
+#else
+#define NPC_FRAME_TIME (1.0f / 60.0f)
+#endif
+
 #define ANIM_Unknown 0 // 0x0
 #define ANIM_Idle01 1 // 0x04
 #define ANIM_Idle02 2 // 0x08
@@ -38,8 +45,11 @@ typedef void (*tweak_change_cb)(tweak_info&);
 #define ANIM_Attack02End01 18
 #define ANIM_LassoGrab01 19
 
-#define LYT_TYPE_LINE 0
-#define LYT_TYPE_ROTATING 1
+enum
+{
+    LYT_TYPE_LINE,
+    LYT_TYPE_ROTATING
+};
 
 #define SOUND_AMBIENT_RING 0
 #define SOUND_BIRTH 1
@@ -53,72 +63,7 @@ typedef void (*tweak_change_cb)(tweak_info&);
 #define SOUND_TAUNT 9
 #define SOUND_WAVE_RING 10
 
-namespace auto_tweak
-{
-    template <>
-    inline void load_param<iColor_tag, S32>(iColor_tag& value, S32 scale, S32 lo, S32 hi,
-                                     xModelAssetParam* ap, U32 apsize, const char* name)
-    {
-        F32 def[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        F32 result[4];
 
-        def[0] = value.r;
-        def[1] = value.g;
-        def[2] = value.b;
-        def[3] = value.a;
-
-        zParamGetFloatList(ap, apsize, name, 4, def, result);
-
-        value.r = result[0];
-        value.g = result[1];
-        value.b = result[2];
-        value.a = result[3];
-    }
-
-    template <>
-    inline void load_param<bool, S32>(bool& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
-                               U32 apsize, const char* name)
-    {
-        value = zParamGetInt(ap, apsize, name, value);
-    }
-
-    template <>
-    inline void load_param<F32, F32>(F32& value, F32 scale, F32 lo, F32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
-    {
-        value = zParamGetFloat(ap, apsize, name, value);
-
-        if (value < lo)
-        {
-            value = lo;
-        }
-        else if (value > hi)
-        {
-            value = hi;
-        }
-
-        value = value * scale;
-    }
-
-    template <>
-    inline void load_param<S32, S32>(S32& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
-    {
-        S32 v = zParamGetInt(ap, apsize, name, value);
-
-        if (v < lo)
-        {
-            v = lo;
-        }
-        else if (v > hi)
-        {
-            v = hi;
-        }
-
-        v = v * scale;
-        value = v;
-    }
-} // namespace auto_tweak
 
 namespace
 {
@@ -410,6 +355,19 @@ namespace
         sound.time = 0.0f;
     }
 
+    void kill_sound(S32 sound_index)
+    {
+        sound_data_type& sound = sound_data[sound_index];
+
+        if (sound.handle != 0)
+        {
+            xSndStop(sound.handle);
+            sound.handle = 0;
+            sound.playing = -1;
+            sound.delayed = FALSE;
+        }
+    }
+
     void sound_update(F32 dt)
     {
         for (S32 i = 0; i < 11; i++)
@@ -430,6 +388,14 @@ namespace
         }
     }
 
+    void kill_sounds()
+    {
+        for (S32 i = 0; i < 11; i++)
+        {
+            kill_sound(i);
+        }
+    }
+
 } // namespace
 
 namespace
@@ -441,6 +407,8 @@ namespace
         static U8 sclookup_inited = FALSE;
         static F32 sin_lookup[9];
         static F32 cos_lookup[9];
+        // Unreferenced, but present in retail .bss right after the lookup tables.
+        static xVec3 segments[64];
 
         if (!sclookup_inited)
         {
@@ -566,27 +534,6 @@ namespace
         }
     }
     
-    void kill_sound(S32 sound_index)
-    {
-        sound_data_type& sound = sound_data[sound_index];
-
-        if (sound.handle != 0)
-        {
-            xSndStop(sound.handle);
-            sound.handle = 0;
-            sound.playing = -1;
-            sound.delayed = FALSE;
-        }
-    }
-
-    void kill_sounds()
-    {
-        for (S32 i = 0; i < 11; i++)
-        {
-            kill_sound(i);
-        }
-    }
-
 } // namespace
 
 void lightning_ring::create()
@@ -679,8 +626,8 @@ void lightning_ring::refresh()
                 return;
             }
 
-            arcs_size++;
             i += points - 1;
+            arcs_size++;
         }
     }
 }
@@ -863,7 +810,7 @@ void zNPCKingJelly::Reset()
     shock_ring_emitter = zParEmitterFind("PAREMIT_KJ_SHOCK_RING");
     shock_ring_emitter_settings.custom_flags = 0x110;
     shock_ring_emitter_settings.pos = g_O3;
-    shock_ring_emitter_settings.rate.val[0] = 59.999996f;
+    shock_ring_emitter_settings.rate.val[0] = (1.0f / NPC_FRAME_TIME);
     shock_ring_emitter_settings.rate.interp = 0;
     shock_ring_emitter_settings.rate.oofreq = 1.0f;
     shock_ring_emitter_settings.rate.freq = 1.0f;
@@ -871,7 +818,7 @@ void zNPCKingJelly::Reset()
     thump_ring_emitter = zParEmitterFind("PAREMIT_KJ_THUMP_RING");
     thump_ring_emitter_settings.custom_flags = 0x1310;
     thump_ring_emitter_settings.pos = g_O3;
-    thump_ring_emitter_settings.rate.val[0] = 59.999996f;
+    thump_ring_emitter_settings.rate.val[0] = (1.0f / NPC_FRAME_TIME);
     thump_ring_emitter_settings.rate.interp = 0;
     thump_ring_emitter_settings.rate.oofreq = 1.0f;
     thump_ring_emitter_settings.rate.freq = 1.0f;
@@ -2029,6 +1976,58 @@ void zNPCKingJelly::ParseLinks()
     }
 }
 
+void zNPCKingJelly::SelfSetup()
+{
+    xBehaveMgr* bmgr;
+    xPsyche* psy;
+
+    bmgr = xBehaveMgr_GetSelf();
+    psy_instinct = bmgr->Subscribe(this, 0);
+    psy = psy_instinct;
+    psy->BrainBegin();
+    psy->AddGoal(NPC_GOAL_KJIDLE, NULL);
+    psy->AddGoal(NPC_GOAL_KJBORED, NULL);
+    psy->AddGoal(NPC_GOAL_KJSPAWNKIDS, NULL);
+    psy->AddGoal(NPC_GOAL_KJTAUNT, NULL);
+    psy->AddGoal(NPC_GOAL_KJSHOCKGROUND, NULL);
+    psy->AddGoal(NPC_GOAL_KJDAMAGE, NULL);
+    psy->AddGoal(NPC_GOAL_KJDEATH, NULL);
+    psy->AddGoal(NPC_GOAL_LIMBO, NULL);
+    psy->BrainEnd();
+    psy->SetSafety(NPC_GOAL_KJIDLE);
+}
+
+void zNPCKingJelly::Damage(en_NPC_DAMAGE_TYPE damtype, xBase*, const xVec3*)
+{
+    if (!this->flag.fighting || this->flag.died)
+    {
+        return;
+    }
+
+    S32 state = this->psy_instinct->GIDOfActive();
+    switch (damtype)
+    {
+    case DMGTYP_SIDE:
+    case DMGTYP_BUBBOWL:
+    case DMGTYP_BOULDER:
+        if (state == 'NGM5' &&
+            (this->shockstate == SS_RELEASE 
+            || this->shockstate == SS_COOL_DOWN 
+            || this->shockstate == SS_STOP))
+        {
+            set_life(this->life - 1);
+        }
+        break;
+    
+    case DMGTYP_CRUISEBUBBLE:
+        if (state != 'NGM6' && state != 'NGM7')
+        {
+            set_life(this->life - 1);
+        }
+        break;
+    }
+}
+
 U32 zNPCKingJelly::AnimPick(S32 rawgoal, en_NPC_GOAL_SPOT gspot, xGoal* goal)
 {
     U32 hash = 0;
@@ -2068,58 +2067,6 @@ U32 zNPCKingJelly::AnimPick(S32 rawgoal, en_NPC_GOAL_SPOT gspot, xGoal* goal)
     }
 
     return hash;
-}
-
-void zNPCKingJelly::SelfSetup()
-{
-    xBehaveMgr* bmgr;
-    xPsyche* psy;
-
-    bmgr = xBehaveMgr_GetSelf();
-    psy_instinct = bmgr->Subscribe(this, 0);
-    psy = psy_instinct;
-    psy->BrainBegin();
-    psy->AddGoal(NPC_GOAL_KJIDLE, NULL);
-    psy->AddGoal(NPC_GOAL_KJBORED, NULL);
-    psy->AddGoal(NPC_GOAL_KJSPAWNKIDS, NULL);
-    psy->AddGoal(NPC_GOAL_KJTAUNT, NULL);
-    psy->AddGoal(NPC_GOAL_KJSHOCKGROUND, NULL);
-    psy->AddGoal(NPC_GOAL_KJDAMAGE, NULL);
-    psy->AddGoal(NPC_GOAL_KJDEATH, NULL);
-    psy->AddGoal(NPC_GOAL_LIMBO, NULL);
-    psy->BrainEnd();
-    psy->SetSafety(NPC_GOAL_KJIDLE);
-}
-
-void zNPCKingJelly::Damage(en_NPC_DAMAGE_TYPE damtype, xBase*, const xVec3*)
-{
-    if (!this->flag.fighting || this->flag.died)
-    {
-        return;
-    }
-
-    S32 state = this->psy_instinct->GIDOfActive();
-    switch (damtype)
-    {
-    case DMGTYP_SIDE:
-    case DMGTYP_BOULDER:
-    case DMGTYP_BUBBOWL:
-        if (state == 'NGM5' &&
-            (this->shockstate == SS_RELEASE 
-            || this->shockstate == SS_COOL_DOWN 
-            || this->shockstate == SS_STOP))
-        {
-            set_life(this->life - 1);
-        }
-        break;
-    
-    case DMGTYP_CRUISEBUBBLE:
-        if (!(state == 'NGM6') && !(state == 'NGM7') )
-        {
-            set_life(this->life - 1);
-        }
-        break;
-    }
 }
 
 F32 zNPCKingJelly::get_variance() const
@@ -2162,7 +2109,7 @@ void zNPCKingJelly::set_life(S32 life)
     
     this->life = range_limit<S32>(life, 0, tweak.max_life);
     S32 state = this->psy_instinct->GIDOfActive();
-    if (!(state == 'NGM6') && !(state == 'NGM7') && !(this->life >= oldlife))
+    if (state != 'NGM6' && state != 'NGM7' && this->life < oldlife)
     {
         this->psy_instinct->GoalSet('NGM6', GOAL_STAT_PROCESS);
         start_blink();
@@ -2182,6 +2129,17 @@ void zNPCKingJelly::set_life(S32 life)
         update_round();
     }
 
+}
+
+void zNPCKingJelly::update_round()
+{
+    if (life == 0)
+    {
+        round = 0;
+        return;
+    }
+
+    round = 2 - ((life - 1) * 3) / tweak.max_life;
 }
 
 void zNPCKingJelly::add_child(xBase& child, S32 wave)
@@ -2230,7 +2188,7 @@ void zNPCKingJelly::disable_child(zNPCKingJelly::child_data& child)
 
 void zNPCKingJelly::enable_child(zNPCKingJelly::child_data& child)
 {
-    if (child.active == false)
+    if (!child.active)
     {
         child.active = true;
     }
@@ -2302,9 +2260,9 @@ void zNPCKingJelly::taunt()
 {
     switch (psy_instinct->GIDOfActive())
     {
-    case NPC_GOAL_KJTAUNT:
     case NPC_GOAL_KJDAMAGE:
     case NPC_GOAL_KJDEATH:
+    case NPC_GOAL_KJTAUNT:
         return;
     }
 
@@ -2404,10 +2362,11 @@ namespace
 
 xVec3 zNPCKingJelly::get_away() const
 {
+    xEnt& player = globals.player.ent;
     xVec3 dir;
 
-    dir.x = globals.player.ent.bound.sph.center.x - bound.sph.center.x;
-    dir.z = globals.player.ent.bound.sph.center.z - bound.sph.center.z;
+    dir.x = player.bound.sph.center.x - bound.sph.center.x;
+    dir.z = player.bound.sph.center.z - bound.sph.center.z;
     dir.y = 0.0f;
 
     F32 dist2 = dir.x * dir.x + dir.z * dir.z;
@@ -2882,8 +2841,8 @@ void zNPCKingJelly::refresh_tentacle_points(S32 which)
 
     for (S32 j = 0; j < 3; j++)
     {
-        xVec3& start = tentacle_points[which][4 * j];
-        xVec3& end = tentacle_points[which][4 * (j + 1)];
+        const xVec3& start = tentacle_points[which][4 * j];
+        const xVec3& end = tentacle_points[which][4 * (j + 1)];
         F32 pos = 0.25f;
 
         for (S32 k = 1; k < 4; k++)
@@ -2935,7 +2894,7 @@ void zNPCKingJelly::update_rings(F32 dt)
         {
             ring.update(dt);
 
-            if (!ring.property.color.a)
+            if (ring.property.color.a <= 0)
             {
                 ring.destroy();
             }
@@ -3088,7 +3047,7 @@ void zNPCKingJelly::generate_ring_particles(const lightning_ring& ring, F32 dt)
         {
             shock_ring_emitter_settings.pos = ring_segments[j] + offset * xurand();
             shock_ring_emitter_settings.pos.y += tweak.wave_ring.particle_height;
-            xParEmitterEmitCustom(shock_ring_emitter, 1.0f / 60.0f, &shock_ring_emitter_settings);
+            xParEmitterEmitCustom(shock_ring_emitter, NPC_FRAME_TIME, &shock_ring_emitter_settings);
         }
     }
 }
@@ -3109,18 +3068,17 @@ void zNPCKingJelly::generate_thump_particles()
     s.pos = *get_bottom();
     s.pos.y += tweak.thump.voffset;
 
-    s.rate.val[0] = 59.999996f * tweak.thump.particles;
+    s.rate.val[0] = (1.0f / NPC_FRAME_TIME) * tweak.thump.particles;
     s.vel.y = tweak.thump.vel;
+    s.radius = tweak.thump.radius;
 
     F32 drate = s.rate.val[0] * (-tweak.thump.particle_drop_off * iring);
     F32 dvel = s.vel.y * (-tweak.thump.vel_drop_off * iring);
-
     F32 dradius = tweak.thump.width * iring;
-    s.radius = tweak.thump.radius;
 
     for (S32 i = 0; i < tweak.thump.rings; i++)
     {
-        xParEmitterEmitCustom(thump_ring_emitter, 1.0f / 60.0f, &s);
+        xParEmitterEmitCustom(thump_ring_emitter, NPC_FRAME_TIME, &s);
 
         s.rate.val[0] += drate;
         s.vel.y += dvel;
@@ -3157,41 +3115,46 @@ void zNPCKingJelly::start_charge()
 
 void zNPCKingJelly::update_charge(F32 frac)
 {
-    F32 thickness = lerp(frac, tweak.tentacle.thickness, tweak.tentacle.charge.thickness);
-    iColor_tag color = lerp(frac, tweak.tentacle.color, tweak.tentacle.charge.color);
-
-    for (S32 i = 0; i < 7; i++)
     {
-        zLightning*& zap = tentacle_lightning[i];
+        F32 thickness = lerp(frac, tweak.tentacle.thickness, tweak.tentacle.charge.thickness);
+        iColor_tag color = lerp(frac, tweak.tentacle.color, tweak.tentacle.charge.color);
 
-        if (zap != NULL)
+        for (S32 i = 0; i < 7; i++)
         {
-            for (S32 j = 0; j < zap->legacy.total_points - 1; j++)
-            {
-                zap->legacy.thickness[j] = thickness;
-            }
+            zLightning*& zap = tentacle_lightning[i];
 
-            zap->color = color;
-            zap->legacy.rot.degrees =
-                lerp(frac, zap->legacy.rot.degrees, tweak.tentacle.charge.move_degrees);
+            if (zap != NULL)
+            {
+                for (S32 j = 0; j < zap->legacy.total_points - 1; j++)
+                {
+                    zap->legacy.thickness[j] = thickness;
+                }
+
+                zap->color = color;
+                zap->legacy.rot.degrees =
+                    lerp(frac, zap->legacy.rot.degrees, tweak.tentacle.charge.move_degrees);
+            }
         }
     }
 
-    F32 radius = lerp(frac >= 0.25f ? 1.0f : 4.0f * frac, tweak.ambient_ring.radius,
-                      tweak.ambient_ring.charge.radius);
-    F32 max_height =
-        lerp(frac, tweak.ambient_ring.max_height, tweak.ambient_ring.charge.max_height);
-    F32 speed = lerp(frac, tweak.ambient_ring.speed, tweak.ambient_ring.charge.speed);
-    F32 thickness2 = lerp(frac, tweak.ambient_ring.thickness, tweak.ambient_ring.charge.thickness);
-    iColor_tag color2 = lerp(frac, tweak.ambient_ring.color, tweak.ambient_ring.charge.color);
-
-    for (S32 i = 0; i < 3; i++)
     {
-        ambient_rings[i].current.accel = speed;
-        ambient_rings[i].current.radius = radius;
-        ambient_rings[i].max_height = max_height;
-        ambient_rings[i].property.thickness = thickness2;
-        ambient_rings[i].property.color = color2;
+        F32 radius = frac >= 0.25f ? 1.0f : 4.0f * frac;
+        radius = lerp(radius, tweak.ambient_ring.radius, tweak.ambient_ring.charge.radius);
+        F32 max_height =
+            lerp(frac, tweak.ambient_ring.max_height, tweak.ambient_ring.charge.max_height);
+        F32 speed = lerp(frac, tweak.ambient_ring.speed, tweak.ambient_ring.charge.speed);
+        F32 thickness =
+            lerp(frac, tweak.ambient_ring.thickness, tweak.ambient_ring.charge.thickness);
+        iColor_tag color = lerp(frac, tweak.ambient_ring.color, tweak.ambient_ring.charge.color);
+
+        for (S32 i = 0; i < 3; i++)
+        {
+            ambient_rings[i].current.accel = speed;
+            ambient_rings[i].current.radius = radius;
+            ambient_rings[i].max_height = max_height;
+            ambient_rings[i].property.thickness = thickness;
+            ambient_rings[i].property.color = color;
+        }
     }
 }
 
@@ -3231,11 +3194,11 @@ void zNPCKingJelly::end_charge()
 
     for (S32 i = 0; i < 7; i++)
     {
-        if (tentacle_lightning[i] != NULL)
+        zLightning*& l = tentacle_lightning[i];
+        if (l != NULL)
         {
-            tentacle_lightning[i]->flags &= ~0x10;
-            tentacle_lightning[i]->time_left = tentacle_lightning[i]->time_total =
-                tweak.interval.release;
+            l->flags &= ~0x10;
+            l->time_left = l->time_total = tweak.interval.release;
         }
     }
 }
@@ -3373,8 +3336,8 @@ void zNPCKingJelly::update_blink(F32 dt)
         blink.intensity = 0.0f;
     }
 
+    F32 i = 1.0f - blink.intensity;
     F32 ii = blink.intensity;
-    F32 i = 1.0f - ii;
 
     set_model_color(model, ii * tweak.blink.color.r + i, ii * tweak.blink.color.g + i,
                     ii * tweak.blink.color.b + i, ii * tweak.blink.color.a + i);
@@ -3434,13 +3397,13 @@ void zNPCGoalKJIdle::rotate(float dt)
 {
     zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
 
-    xVec3& loc = (xVec3&)kj.model->Mat->pos;
+    xMat4x3& imat = *(xMat4x3*)kj.model->Mat;
     xVec3& target = (xVec3&)globals.player.ent.model->Mat->pos;
 
     xVec3 dir = { 0.0f, 0.0f, 0.0f };
 
-    dir.x = target.x - loc.x;
-    dir.z = target.z - loc.z;
+    dir.x = target.x - imat.pos.x;
+    dir.z = target.z - imat.pos.z;
 
     F32 mag = dir.length2();
 
@@ -3563,17 +3526,17 @@ S32 zNPCGoalKJBored::Process(en_trantype* trantype, float dt, void* updCtxt, xSc
     zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
 
     xAnimState* anim = kj.AnimCurState();
-    bool playing = false;
-    for (S32 i = 0; i < 2; i++)
+    U8 found = false;
+    for (U32 i = 0; i < 2; i++)
     {
         if (anim->ID == g_hash_subbanim[bored_anims[i]])
         {
-            playing = true;
+            found = true;
             break;
         }
     }
 
-    if (!playing || dt > kj.AnimTimeRemain(NULL))
+    if (!found || dt > kj.AnimTimeRemain(NULL))
     {
         *trantype = GOAL_TRAN_SET;
         return NPC_GOAL_KJSHOCKGROUND;
@@ -3695,27 +3658,6 @@ S32 zNPCGoalKJTaunt::Process(en_trantype* trantype, float dt, void* updCtxt, xSc
 //     // 0x44 render
 // }
 
-S32 zNPCGoalKJDamage::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
-{
-    zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
-
-    xAnimState* state = kj.AnimCurState();
-
-    if (state->ID != g_hash_subbanim[ANIM_Damage01] || dt > kj.AnimTimeRemain(NULL))
-    {
-        *trantype = GOAL_TRAN_SET;
-
-        if (kj.life <= 0)
-        {
-            return 'NGM7';
-        }
-
-        return 'NGM3';
-    }
-
-    return xGoal::Process(trantype, dt, updCtxt, xscn);
-}
-
 S32 zNPCGoalKJShockGround::Enter(F32 dt, void* updCtxt)
 {
     zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
@@ -3728,6 +3670,18 @@ S32 zNPCGoalKJShockGround::Enter(F32 dt, void* updCtxt)
     kj.disable_tentacle_damage = 1;
 
     return zNPCGoalCommon::Enter(dt, updCtxt);
+}
+
+S32 zNPCGoalKJShockGround::Exit(F32 dt, void* updCtxt)
+{
+    zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
+    if (kj.flag.charging != 0)
+    {
+        kj.end_charge();
+    }
+    kj.create_ambient_rings();
+    kj.disable_tentacle_damage = 0;
+    return xGoal::Exit(dt, updCtxt);
 }
 
 S32 zNPCGoalKJShockGround::Process(en_trantype* trantype, float dt, void* updCtxt, xScene* xscn)
@@ -3762,18 +3716,6 @@ S32 zNPCGoalKJShockGround::Process(en_trantype* trantype, float dt, void* updCtx
     }
 
     return xGoal::Process(trantype, dt, updCtxt, xscn);
-}
-
-S32 zNPCGoalKJShockGround::Exit(F32 dt, void* updCtxt)
-{
-    zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
-    if (kj.flag.charging != 0)
-    {
-        kj.end_charge();
-    }
-    kj.create_ambient_rings();
-    kj.disable_tentacle_damage = 0;
-    return xGoal::Exit(dt, updCtxt);
 }
 
 S32 zNPCGoalKJShockGround::update_start(F32 dt)
@@ -3918,15 +3860,25 @@ S32 zNPCGoalKJDamage::Exit(F32 dt, void* updCtxt)
     return xGoal::Exit(dt, updCtxt);
 }
 
-void zNPCKingJelly::update_round()
+S32 zNPCGoalKJDamage::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
 {
-    if (life == 0)
+    zNPCKingJelly& kj = *(zNPCKingJelly*)this->psyche->clt_owner;
+
+    xAnimState* state = kj.AnimCurState();
+
+    if (state->ID != g_hash_subbanim[ANIM_Damage01] || dt > kj.AnimTimeRemain(NULL))
     {
-        round = 0;
-        return;
+        *trantype = GOAL_TRAN_SET;
+
+        if (kj.life <= 0)
+        {
+            return 'NGM7';
+        }
+
+        return 'NGM3';
     }
 
-    round = 2 - ((life - 1) * 3) / tweak.max_life;
+    return xGoal::Process(trantype, dt, updCtxt, xscn);
 }
 
 S32 zNPCGoalKJDeath::Enter(float dt, void* updCtxt)
@@ -3947,6 +3899,11 @@ S32 zNPCGoalKJDeath::Process(en_trantype* trantype, float dt, void* updCtxt, xSc
     return xGoal::Process(trantype, dt, updCtxt, xscn);
 }
 
+void zNPCJelly::MeetTheKing(zNPCCommon* king)
+{
+    npc_daddyJelly = king;
+}
+
 void zNPCKingJelly::render_debug()
 {
 }
@@ -3961,7 +3918,8 @@ void zNPCKingJelly::on_change_fade_obstructions(const tweak_info&)
 
 xVec3 zNPCKingJelly::get_center() const
 {
-    return (xVec3&)model->Mat[0].pos + (xVec3&)model->Mat[2].pos + cfg_npc->off_bound;
+    const xMat4x3* mat = (const xMat4x3*)model->Mat;
+    return mat[0].pos + mat[2].pos + cfg_npc->off_bound;
 }
 
 xVec3* zNPCKingJelly::get_bottom() const

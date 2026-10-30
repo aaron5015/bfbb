@@ -28,7 +28,11 @@ void xParGroupInit(xParGroup* ps)
     ps->m_flags |= XPARGROUP_UNK1;
 }
 
-static void xParGroupRegisterInit()
+#if defined(XBOX)
+inline
+#endif
+    static void
+    xParGroupRegisterInit()
 {
     for (S32 i = 0; i < REG_TABLE_SIZE; i++)
     {
@@ -171,6 +175,7 @@ void xParGroupAnimate(xParGroup* ps, F32 dt)
     }
 }
 
+#if !defined(XBOX)
 void xParGroupAddParP(xParGroup* ps, xPar* p)
 {
     ps->m_alive = 1;
@@ -190,6 +195,7 @@ void xParGroupAddParP(xParGroup* ps, xPar* p)
         ps->m_root = p;
     }
 }
+#endif
 
 xPar* xParGroupAddPar(xParGroup* ps)
 {
@@ -285,6 +291,7 @@ void xParGroupKillPar(xParGroup* ps, xPar* p)
     }
 }
 
+#if !defined(XBOX)
 void xParGroupAddParToDeadList(xParGroup* ps, xPar* p)
 {
     if (ps->m_dead)
@@ -297,3 +304,4 @@ void xParGroupAddParToDeadList(xParGroup* ps, xPar* p)
 
     ps->m_dead = p;
 }
+#endif

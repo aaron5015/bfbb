@@ -208,8 +208,7 @@ void xEntBoulder_AddInstantForce(xEntBoulder* ent, xVec3* force)
 {
     if (ent->update != NULL)
     {
-        xVec3* frcptr = &ent->instForce;
-        xVec3AddTo(frcptr, force);
+        xVec3AddTo(&ent->instForce, force);
     }
 }
 
@@ -217,8 +216,7 @@ void xEntBoulder_AddForce(xEntBoulder* ent, xVec3* force)
 {
     if (ent->update != NULL)
     {
-        xVec3* frcptr = &ent->force;
-        xVec3AddTo(frcptr, force);
+        xVec3AddTo(&ent->force, force);
     }
 }
 
@@ -1742,9 +1740,11 @@ void xBoulderGenerator_GenBoulder(xBoulderGenerator* bg)
     BoulderGen_GiveBirth(bg, i);
 }
 
+#if !defined(PS2)
 WEAK F32 xVec3LengthFast(const xVec3* v)
 {
     F32 len;
     xsqrtfast(len, SQR(v->x) + SQR(v->y) + SQR(v->z));
     return len;
 }
+#endif

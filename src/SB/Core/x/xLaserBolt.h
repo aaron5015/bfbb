@@ -10,7 +10,17 @@
 #include "xVec3.h"
 
 #include <rwcore.h>
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
 #include <types.h>
+
+// Defined in xLaserBolt.inl only for units that retain the zero initializer.
+// The method body stays in the class to preserve retail inline emission order.
+namespace
+{
+    extern const xVec3 laser_bolt_zero;
+}
 
 enum fx_type_enum
 {
@@ -157,7 +167,7 @@ struct xLaserBoltEmitter
 
     void perturb_dir(xVec3& dir, F32 rand_angle)
     {
-        xVec3 temp = { 0.0f, 0.0f, 0.0f };
+        xVec3 temp = laser_bolt_zero;
         xMat3x3 mat;
 
         temp.x = (xurand() - 0.5f) * rand_angle;
@@ -205,7 +215,16 @@ struct xLaserBoltEmitter
     {
         RwIm3DVertexSetPos(&vert, loc.x, loc.y, loc.z);
         RwIm3DVertexSetUV(&vert, u, v);
+#if defined(PS2)
+        RwRGBA color;
+        color.red = 255;
+        color.green = 255;
+        color.blue = 255;
+        color.alpha = alpha;
+        RxObjSpace3DVertexSetPreLitColor(&vert, &color);
+#else
         RwIm3DVertexSetRGBA(&vert, 255, 255, 255, alpha);
+#endif
     }
 
     void set_bolt_verts(RxObjSpace3DVertex* vert, const xVec3& pointA, const xVec3& pointB,

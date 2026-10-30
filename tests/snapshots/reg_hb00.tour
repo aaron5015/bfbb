@@ -1,0 +1,5 @@
+# The opening cutscene (hb00) at 640x480 on Direct3D 9, booted straight into the scene.
+# Plankton in the Chum Bucket, at 1200.
+
+wait 1200
+shot reg_hb00 0

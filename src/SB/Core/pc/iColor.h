@@ -4,6 +4,10 @@
 #include <types.h>
 #include <xHud.h>
 
+// The assignment below is defined in the class, so xFont.h must not define it
+// again; the GameCube's comes from xFont.h.
+#define ICOLOR_ASSIGN_IN_CLASS
+
 struct iColor_tag
 {
     U8 r;

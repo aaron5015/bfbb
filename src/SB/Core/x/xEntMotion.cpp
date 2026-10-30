@@ -32,6 +32,8 @@ static U32 xEntSldMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
 static U32 xEntRotMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame);
 char* xbtoa(U32 param);
 
+inline void xEntMotionDebugAdd(xEntMotion*);
+
 void xEntMotionInit(xEntMotion* motion, xEnt* owner, xEntMotionAsset* asset)
 {
     motion->asset = asset;
@@ -87,31 +89,32 @@ void xEntMotionInit(xEntMotion* motion, xEnt* owner, xEntMotionAsset* asset)
     }
     else if (motion->type == XENTMOTION_TYPE_MECH)
     {
-        if (asset->mp.speed < 1e-5f)
+        xEntMotionMechData* mkasst = &asset->mech;
+        if (mkasst->sld_tm < 1e-5f)
         {
-            asset->mp.speed = 1.0f;
+            mkasst->sld_tm = 1.0f;
         }
 
-        if (asset->mech.sld_acc_tm + asset->mech.sld_dec_tm > asset->mech.sld_tm)
+        if (mkasst->sld_acc_tm + mkasst->sld_dec_tm > mkasst->sld_tm)
         {
-            asset->mech.sld_dec_tm = asset->mech.sld_acc_tm = asset->mech.sld_tm * 0.5f;
+            mkasst->sld_dec_tm = mkasst->sld_acc_tm = mkasst->sld_tm * 0.5f;
         }
 
-        if (asset->mech.rot_tm < 1e-5f)
+        if (mkasst->rot_tm < 1e-5f)
         {
-            asset->mech.rot_tm = 1.0f;
+            mkasst->rot_tm = 1.0f;
         }
 
-        if (asset->mech.type == 2)
+        if (mkasst->type == 2)
         {
-            if (asset->mech.rot_tm != asset->mech.sld_tm)
+            if (mkasst->rot_tm != mkasst->sld_tm)
             {
-                asset->mech.rot_tm = asset->mech.sld_tm;
+                mkasst->rot_tm = mkasst->sld_tm;
             }
         }
-        if (asset->mech.rot_acc_tm + asset->mech.rot_dec_tm > asset->mech.rot_tm)
+        if (mkasst->rot_acc_tm + mkasst->rot_dec_tm > mkasst->rot_tm)
         {
-            asset->mech.rot_dec_tm = asset->mech.rot_acc_tm = asset->mech.rot_tm * 0.5f;
+            mkasst->rot_dec_tm = mkasst->rot_acc_tm = mkasst->rot_tm * 0.5f;
         }
     }
 
@@ -277,8 +280,12 @@ void xEntMotionMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
 
 static void xEntERMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
 {
+#if defined(PS2)
+    F32 newt = motion->t - motion->er.p;
+#else
     F32 newt = motion->er.p;
     newt = motion->t - newt;
+#endif
 
     if (newt > 0.0f)
     {
@@ -398,6 +405,10 @@ void xEntMPGetNext(xEntMotion* motion, xMovePoint* prev, xScene* sc)
 
 U32 xQuatEquals(const xQuat* a, const xQuat* b); // Should be linked weakly
 
+#if defined(PS2)
+// The banking expression expands through four levels of vector helpers.
+#pragma inline_depth(4)
+#endif
 static void xEntMPMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
 {
     xEntMPData* mp = &motion->mp;
@@ -473,7 +484,7 @@ static void xEntMPMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
             {
                 xVec3 gravity = { 0.0f, -sc->gravity, 0.0f };
 
-                bank = bank * mp->speed * 0.01f + gravity;
+                bank = bank * motion->mp.speed * 0.01f + gravity;
                 dir.normalize();
                 bank -= dir * bank.dot(dir);
                 bank.normalize();
@@ -529,6 +540,9 @@ static void xEntMPMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
     frame->dpos.z = tgt.z - frame->mat.pos.z;
 }
 
+#if defined(PS2)
+#pragma inline_depth reset
+#endif
 static void xEntPenMove(xEntMotion* motion, xScene* sc, F32 dt, xEntFrame* frame)
 {
     xEntPenData* pen = &motion->pen;
@@ -975,7 +989,7 @@ void xEntMotionDebugCB();
 // Non-matching: scheduling
 void xEntMotionDebugInit(U16 num_xems)
 {
-    if (num_xems != 0)
+    if (num_xems > 0)
     {
         xDebugModeAdd("DBG_XENTMOTION", xEntMotionDebugCB);
         dbg_num = 0;
@@ -993,7 +1007,7 @@ void xEntMotionDebugExit()
     dbg_idx = -1;
 }
 
-void xEntMotionDebugAdd(xEntMotion* motion)
+inline void xEntMotionDebugAdd(xEntMotion* motion)
 {
     if (dbg_num < dbg_num_allocd)
     {
@@ -1231,6 +1245,15 @@ static void xEntMotionDebugWrite(const xEntMotion* xem)
     }
 }
 
+inline char* xbtoa(U32 param)
+{
+    if (param != 0)
+    {
+        return "true ";
+    }
+    return "false";
+}
+
 static void xEntMotionDebugDraw(const xEntMotion* xem)
 {
     if (xem->owner && xem->target)
@@ -1258,18 +1281,17 @@ static void xEntMotionDebugDraw(const xEntMotion* xem)
         xMovePoint* xmp = xem->mp.dest;
         if (xmp)
         {
-            xMovePoint* src = xem->mp.src;
             for (U16 idx = 0; idx < xMovePointGetNumPoints(xmp); idx++)
             {
                 xMovePoint* omp = xMovePointGetPoint(xmp, idx);
-                if (omp != src)
+                if (omp != xem->mp.src)
                 {
                     xDrawLine(xMovePointGetPos(xmp), xMovePointGetPos(omp));
                 }
                 for (U16 jdx = 0; jdx < xMovePointGetNumPoints(omp); jdx++)
                 {
-                    xMovePoint* pmp = xMovePointGetPoint(omp, jdx);
-                    xDrawLine(xMovePointGetPos(omp), xMovePointGetPos(pmp));
+                    xDrawLine(xMovePointGetPos(omp),
+                              xMovePointGetPos(xMovePointGetPoint(omp, jdx)));
                 }
             }
         }
@@ -1291,70 +1313,27 @@ static void xEntMotionDebugDraw(const xEntMotion* xem)
             xDrawLine(&xem->pen.top, xEntGetPos(xem->owner));
         }
         break;
+    case k_XENTMOTIONTYPE_SPLINE:
+        break;
     }
-}
-
-void xEntMotionDebugDraw(const xEntMotion*);
-
-void xQuatCopy(xQuat* a, const xQuat* b)
-{
-    a->s = b->s;
-    a->v.x = b->v.x;
-    a->v.y = b->v.y;
-    a->v.z = b->v.z;
-}
-
-U32 xVec3Equals(const xVec3* a, const xVec3* b)
-{
-    // Epsilon test with epsilon of... 0.0f lol.
-    return xabs(a->x - b->x) <= 0.0f && xabs(a->y - b->y) <= 0.0f && xabs(a->z - b->z) <= 0.0f;
-}
-
-U32 xQuatEquals(const xQuat* a, const xQuat* b)
-{
-    return (a->s == b->s) && xVec3Equals(&a->v, &b->v);
-}
-
-void xQuatFlip(xQuat* a, const xQuat* b)
-{
-    a->s = -b->s;
-    xVec3Inv(&a->v, &b->v);
-}
-
-F32 xQuatDot(const xQuat* a, const xQuat* b)
-{
-    return xVec3Dot(&a->v, &b->v) + a->s * b->s;
-}
-
-void xDrawSetColor(iColor_tag color)
-{
-}
-
-char* xbtoa(U32 param)
-{
-    if (param != 0)
-    {
-        return "true ";
-    }
-    return "false";
 }
 
 static void xEntMotionDebugIPad(xEntMotion* xem)
 {
     if (gDebugPad->pressed & 0x20)
     {
-        *(volatile S16*)(&dbg_idx) = *(volatile S16*)(&dbg_idx) + 1;
-        if (*(volatile S16*)(&dbg_idx) >= *(volatile U16*)(&dbg_num))
+        dbg_idx = dbg_idx + 1;
+        if (dbg_idx >= dbg_num)
         {
-            *(volatile S16*)(&dbg_idx) = 0;
+            dbg_idx = 0;
         }
     }
     if (gDebugPad->pressed & 0x80)
     {
-        *(volatile S16*)(&dbg_idx) = *(volatile S16*)(&dbg_idx) - 1;
-        if (*(volatile S16*)(&dbg_idx) < 0)
+        dbg_idx = dbg_idx - 1;
+        if (dbg_idx < 0)
         {
-            *(volatile S16*)(&dbg_idx) = *(volatile U16*)(&dbg_num) - 1;
+            dbg_idx = dbg_num - 1;
         }
     }
     if (gDebugPad->pressed & 0x10000)
@@ -1376,4 +1355,10 @@ static void xEntMotionDebugIPad(xEntMotion* xem)
             xEntMotionStop(xem);
         }
     }
+}
+
+inline U32 xVec3Equals(const xVec3* a, const xVec3* b)
+{
+    // Epsilon test with epsilon of... 0.0f lol.
+    return xabs(a->x - b->x) <= 0.0f && xabs(a->y - b->y) <= 0.0f && xabs(a->z - b->z) <= 0.0f;
 }

@@ -10,6 +10,8 @@
 // this file reads or writes config.ini.
 
 #include "config_model.h"
+#include "mods_model.h"
+#include "saves_model.h"
 
 #include "iConfigTable.h"
 #include "iPadTokens.h"
@@ -19,15 +21,26 @@
 #include <wx/wx.h>
 
 #include <wx/dirdlg.h>
+#include <wx/ffile.h>
 #include <wx/filedlg.h>
+#include <wx/filename.h>
+#include <wx/mstream.h>
 #include <wx/collpane.h>
 #include <wx/gbsizer.h>
+#include <wx/checklst.h>
 #include <wx/listbox.h>
+#include <wx/progdlg.h>
 #include <wx/scrolwin.h>
 #include <wx/settings.h>
+#include <wx/textdlg.h>
+#include <wx/utils.h>
+#include <wx/wfstream.h>
+#include <wx/zipstrm.h>
 
+#include <memory>
 #include <string.h>
 
+#include <map>
 #include <vector>
 
 namespace
@@ -51,14 +64,24 @@ namespace
         kIdSections = wxID_HIGHEST + 1,
         kIdResetSection,
         kIdStartGame,
+        kIdModList,
+        kIdModInstall,
+        kIdModAddFolder,
+        kIdModOpen,
+        kIdModUp,
+        kIdModDown,
+        kIdModRemove,
+        kIdSaveImport,
+        kIdSaveOpen,
         kIdRowBase
     };
 
-    // A binding row uses the Browse slot for Set and one more for Add.
-    const int kIdsPerRow = 3;
+    // A binding row uses the Browse slot for Set and two more for Add and Clear.
+    const int kIdsPerRow = 4;
     const int kIdRowValue = 0;
     const int kIdRowBrowse = 1;
     const int kIdRowAdd = 2;
+    const int kIdRowClear = 3;
 
     // One setting's controls.
     //
@@ -99,19 +122,334 @@ namespace
         }
     };
 
-    // The pages after the settings' sections: one per device.
+    // The pages after the settings' sections: one per device, then mods and
+    // saves.
     ConfigModelDevice DeviceOfSection(int section)
     {
         return (ConfigModelDevice)(section - ConfigModelSectionCount());
     }
 
-    bool IsBindSection(int section)
+    int ModsPage()
     {
-        return section >= ConfigModelSectionCount();
+        return ConfigModelSectionCount() + CONFIG_MODEL_DEVICE_COUNT;
     }
 
-    // What a binding row says under its box: what the button does, and what
-    // an empty box means.
+    int SavesPage()
+    {
+        return ModsPage() + 1;
+    }
+
+    int PageCount()
+    {
+        return SavesPage() + 1;
+    }
+
+    bool IsBindSection(int section)
+    {
+        return section >= ConfigModelSectionCount() && section < ModsPage();
+    }
+
+    // A path for the models, which take '/'-separated UTF-8.
+    wxString ModelPath(const wxString& path)
+    {
+        wxString out = path;
+        out.Replace("\\", "/");
+        return out;
+    }
+
+    // An archive entry's name as a path that stays inside the folder it is
+    // unpacked into, or "" for one that would not.
+    wxString SafeEntryPath(const wxString& name)
+    {
+        wxString path = name;
+        path.Replace("\\", "/");
+        if (path.StartsWith("/") || path.Find(':') != wxNOT_FOUND)
+        {
+            return "";
+        }
+
+        wxArrayString parts = wxSplit(path, '/', '\0');
+        for (size_t i = 0; i < parts.size(); i++)
+        {
+            if (parts[i] == "..")
+            {
+                return "";
+            }
+        }
+        return path;
+    }
+
+    // Unpack every file of a zip into `dest`, which exists. False fills in
+    // `why`; what was unpacked so far is left for the caller to delete.
+    bool UnpackZip(wxWindow* parent, const wxString& zipPath, const wxString& dest, wxString& why)
+    {
+        wxFFileInputStream file(zipPath);
+        if (!file.IsOk())
+        {
+            why = "Could not open " + zipPath + ".";
+            return false;
+        }
+
+        wxZipInputStream zip(file);
+        const int total = zip.GetTotalEntries();
+        wxProgressDialog progress("Installing a mod", "Unpacking...", total > 0 ? total : 1, parent,
+                                  wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_CAN_ABORT);
+
+        int done = 0;
+        std::unique_ptr<wxZipEntry> entry;
+        while (entry.reset(zip.GetNextEntry()), entry != NULL)
+        {
+            const wxString rel = SafeEntryPath(entry->GetName(wxPATH_UNIX));
+            if (rel.empty())
+            {
+                why = "The archive names a file outside its own folder: " + entry->GetName();
+                return false;
+            }
+
+            const wxString path = dest + "/" + rel;
+            if (entry->IsDir())
+            {
+                wxFileName::Mkdir(path, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+            }
+            else
+            {
+                wxFileName::Mkdir(wxFileName(path).GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+                wxFFileOutputStream out(path);
+                if (!out.IsOk() || !out.Write(zip).IsOk() || !out.Close())
+                {
+                    why = "Could not unpack " + rel + ".";
+                    return false;
+                }
+            }
+
+            if (!progress.Update(done < total ? ++done : done, rel))
+            {
+                why = "Cancelled.";
+                return false;
+            }
+        }
+
+        if (zip.GetLastError() != wxSTREAM_EOF)
+        {
+            why = zipPath + " is not a zip file this program can read.";
+            return false;
+        }
+        return true;
+    }
+
+    // One Xbox save, as found in what the player picked: the save file and
+    // the SaveMeta.xbx beside it, when there is one.
+    struct FoundXboxSave
+    {
+        wxString source;
+        wxMemoryBuffer xsv;
+        wxMemoryBuffer meta;
+    };
+
+    bool ReadFileInto(const wxString& path, wxMemoryBuffer& out)
+    {
+        wxFFile file(path, "rb");
+        if (!file.IsOpened())
+        {
+            return false;
+        }
+        const wxFileOffset size = file.Length();
+        if (size <= 0 || size > 16 * 1024 * 1024)
+        {
+            return false;
+        }
+        const size_t got = file.Read(out.GetWriteBuf((size_t)size), (size_t)size);
+        out.UngetWriteBuf(got);
+        return got == (size_t)size;
+    }
+
+    // Every GameData.xsv in a zip, each paired with the SaveMeta.xbx in its
+    // folder. An Xbox save download is usually a zip of save folders.
+    bool FindXboxSavesInZip(const wxString& zipPath, std::vector<FoundXboxSave>& out, wxString& why)
+    {
+        wxFFileInputStream file(zipPath);
+        if (!file.IsOk())
+        {
+            why = "Could not open " + zipPath + ".";
+            return false;
+        }
+
+        std::map<wxString, FoundXboxSave> byFolder;
+        wxZipInputStream zip(file);
+        std::unique_ptr<wxZipEntry> entry;
+        while (entry.reset(zip.GetNextEntry()), entry != NULL)
+        {
+            if (entry->IsDir())
+            {
+                continue;
+            }
+
+            const wxFileName name(entry->GetName(wxPATH_UNIX), wxPATH_UNIX);
+            const bool isSave = name.GetExt().IsSameAs("xsv", false);
+            const bool isMeta = name.GetFullName().IsSameAs("SaveMeta.xbx", false);
+            if (!isSave && !isMeta)
+            {
+                continue;
+            }
+
+            wxMemoryOutputStream bytes;
+            bytes.Write(zip);
+            wxMemoryBuffer& to =
+                isSave ? byFolder[name.GetPath()].xsv : byFolder[name.GetPath()].meta;
+            to.AppendData(bytes.GetOutputStreamBuffer()->GetBufferStart(), bytes.GetSize());
+            if (isSave)
+            {
+                byFolder[name.GetPath()].source = entry->GetName(wxPATH_UNIX);
+            }
+        }
+
+        for (std::map<wxString, FoundXboxSave>::iterator it = byFolder.begin();
+             it != byFolder.end(); ++it)
+        {
+            if (it->second.xsv.GetDataLen() > 0)
+            {
+                out.push_back(it->second);
+            }
+        }
+
+        if (out.empty())
+        {
+            why = "There is no Xbox save (a .xsv file) in " + zipPath + ".";
+            return false;
+        }
+        return true;
+    }
+
+    // Opens a folder in the host's file manager.
+    void OpenFolder(const wxString& folder)
+    {
+        wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        wxLaunchDefaultApplication(folder);
+    }
+
+    wxString DescribeGame(S32 game, bool* full)
+    {
+        iSaveFileLeader leader;
+        wxString text = wxString::Format("Game %d: ", (int)game + 1);
+        const bool have = SavesModelRead(game, &leader);
+        if (full != NULL)
+        {
+            *full = have;
+        }
+        if (!have)
+        {
+            return text + "empty";
+        }
+        return text +
+               wxString::Format("%s, %d%%", wxString::FromUTF8(leader.label), (int)leader.progress);
+    }
+
+    // Choose where each found Xbox save goes. One row per save: whether to
+    // import it, and which of the three games it replaces.
+    class ImportDialog : public wxDialog
+    {
+    public:
+        ImportDialog(wxWindow* parent, const std::vector<SavesModelXbox>& saves)
+            : wxDialog(parent, wxID_ANY, "Import Xbox saves")
+        {
+            wxString folder;
+            {
+                char path[kSavesModelMaxPath];
+                SavesModelFolder(path, sizeof(path));
+                folder = wxString::FromUTF8(path);
+            }
+
+            wxStaticText* intro =
+                new wxStaticText(this, wxID_ANY,
+                                 "Each save goes into one of the three games in\n" + folder +
+                                     "\nA save it replaces is kept beside it as SpongeBob0N.bak.");
+
+            wxArrayString targets;
+            bool full[kSaveFileGames];
+            for (S32 g = 0; g < kSaveFileGames; g++)
+            {
+                targets.Add(DescribeGame(g, &full[g]));
+            }
+
+            wxFlexGridSizer* grid = new wxFlexGridSizer(2, FromDIP(6), FromDIP(12));
+            grid->AddGrowableCol(0, 1);
+
+            for (size_t i = 0; i < saves.size(); i++)
+            {
+                const SavesModelXbox& save = saves[i];
+                wxString label = wxString::Format("%s, %d%%", wxString::FromUTF8(save.leader.label),
+                                                  (int)save.leader.progress);
+                label << "\n" << wxString::FromUTF8(save.source);
+
+                wxCheckBox* use = new wxCheckBox(this, wxID_ANY, label);
+                use->SetValue(true);
+
+                wxChoice* target =
+                    new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, targets);
+
+                // Where it was on the Xbox, else the first empty game, else
+                // the first.
+                int pick = save.game;
+                for (S32 g = 0; pick < 0 && g < kSaveFileGames; g++)
+                {
+                    if (!full[g])
+                    {
+                        pick = g;
+                    }
+                }
+                target->SetSelection(pick >= 0 ? pick : 0);
+
+                grid->Add(use, wxSizerFlags().CenterVertical());
+                grid->Add(target, wxSizerFlags().CenterVertical());
+                mUse.push_back(use);
+                mTarget.push_back(target);
+            }
+
+            wxBoxSizer* outer = new wxBoxSizer(wxVERTICAL);
+            outer->Add(intro, wxSizerFlags().Border(wxALL, FromDIP(kMargin)));
+            outer->Add(grid, wxSizerFlags(1).Expand().Border(wxLEFT | wxRIGHT, FromDIP(kMargin)));
+            outer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL),
+                       wxSizerFlags().Expand().Border(wxALL, FromDIP(kMargin)));
+            SetSizerAndFit(outer);
+            CenterOnParent();
+
+            Bind(wxEVT_BUTTON, &ImportDialog::OnOk, this, wxID_OK);
+        }
+
+        // The game each save goes to, or -1 for one left out.
+        int TargetOf(size_t i) const
+        {
+            return mUse[i]->GetValue() ? mTarget[i]->GetSelection() : -1;
+        }
+
+    private:
+        void OnOk(wxCommandEvent& event)
+        {
+            bool taken[kSaveFileGames] = {};
+            for (size_t i = 0; i < mUse.size(); i++)
+            {
+                const int g = TargetOf(i);
+                if (g < 0)
+                {
+                    continue;
+                }
+                if (taken[g])
+                {
+                    wxMessageBox(wxString::Format("Two saves are going into game %d.", g + 1),
+                                 "Import Xbox saves", wxOK | wxICON_WARNING, this);
+                    return;
+                }
+                taken[g] = true;
+            }
+            event.Skip();
+        }
+
+        std::vector<wxCheckBox*> mUse;
+        std::vector<wxChoice*> mTarget;
+    };
+
+    // What a binding row says under its box: what the button does, what an
+    // empty box means, and which other rows the same press sets.
     wxString DescribeBinding(ConfigModelDevice device, S32 row)
     {
         char def[256];
@@ -124,6 +462,13 @@ namespace
             text << does << ". ";
         }
         text << "Default: " << def << ".";
+
+        char shared[256];
+        ConfigModelBindDescribeOverlaps(device, row, shared, sizeof(shared));
+        if (shared[0] != '\0')
+        {
+            text << " Shares an input with " << shared << ".";
+        }
         return text;
     }
 
@@ -462,6 +807,15 @@ namespace
         void Capture(Row& row, bool add);
         int GroupSize(S32 master) const;
         void BuildRows();
+        void BuildModsPage();
+        void BuildSavesPage();
+        wxStaticText* AddText(int& line, const wxString& text, bool grey);
+        void FillModList(S32 select);
+        S32 SelectedMod() const;
+        void ShowModDetail();
+        void MoveMod(S32 delta);
+        void InstallZip(const wxString& path);
+        void ImportSaves(std::vector<FoundXboxSave>& found);
         void ShowSection(int which);
         bool RewrapDescriptions();
         int WrapWidthOf(const Row& row) const;
@@ -490,13 +844,37 @@ namespace
         void OnClose(wxCloseEvent& event);
         void OnPaneSize(wxSizeEvent& event);
         void OnGroupToggled(wxCollapsiblePaneEvent& event);
+        void OnModPicked(wxCommandEvent& event);
+        void OnModChecked(wxCommandEvent& event);
+        void OnModUp(wxCommandEvent& event);
+        void OnModDown(wxCommandEvent& event);
+        void OnModInstall(wxCommandEvent& event);
+        void OnModAddFolder(wxCommandEvent& event);
+        void OnModOpen(wxCommandEvent& event);
+        void OnModRemove(wxCommandEvent& event);
+        void OnSaveImport(wxCommandEvent& event);
+        void OnSaveOpen(wxCommandEvent& event);
 
         wxListBox* mSections;
         wxScrolled<wxPanel>* mPane;
         wxGridBagSizer* mGrid;
+        wxButton* mReset;
         wxButton* mApply;
 
+        // The mods page's controls, NULL on every other page.
+        wxCheckListBox* mModList;
+        wxStaticText* mModDetail;
+        wxButton* mModUp;
+        wxButton* mModDown;
+        wxButton* mModRemove;
+
+        // The mods page's rows, as mods_model entries.
+        std::vector<S32> mModRows;
+
         std::vector<Row> mRows;
+
+        // Text on the mods and saves pages, wrapped with the descriptions.
+        std::vector<std::pair<wxStaticText*, wxString> > mTexts;
         int mSection;
 
         // The width the descriptions were last wrapped at. A resize changes
@@ -508,7 +886,8 @@ namespace
 
     ConfigFrame::ConfigFrame()
         : wxFrame(NULL, wxID_ANY, "Battle for Bikini Bottom - Settings"), mSections(NULL),
-          mPane(NULL), mGrid(NULL), mApply(NULL), mSection(0), mWrappedAt(0)
+          mPane(NULL), mGrid(NULL), mReset(NULL), mApply(NULL), mModList(NULL), mModDetail(NULL),
+          mModUp(NULL), mModDown(NULL), mModRemove(NULL), mSection(0), mWrappedAt(0)
     {
         wxPanel* root = new wxPanel(this);
 
@@ -521,6 +900,8 @@ namespace
         {
             mSections->Append(ConfigModelDeviceSection((ConfigModelDevice)d));
         }
+        mSections->Append("mods");
+        mSections->Append("saves");
         mSections->SetSelection(0);
         mSections->SetMinSize(FromDIP(wxSize(kLabelWidth, 100)));
 
@@ -548,7 +929,7 @@ namespace
                              wxST_ELLIPSIZE_MIDDLE);
         status->SetToolTip(ConfigModelPath());
 
-        wxButton* reset = new wxButton(root, kIdResetSection, "Reset section");
+        wxButton* reset = mReset = new wxButton(root, kIdResetSection, "Reset section");
         wxButton* start = new wxButton(root, kIdStartGame, "Start Game");
         mApply = new wxButton(root, wxID_APPLY, "Apply");
         wxButton* cancel = new wxButton(root, wxID_CANCEL, "Cancel");
@@ -605,6 +986,19 @@ namespace
         Bind(wxEVT_BUTTON, &ConfigFrame::OnSave, this, wxID_SAVE);
         Bind(wxEVT_BUTTON, &ConfigFrame::OnCancel, this, wxID_CANCEL);
         Bind(wxEVT_CLOSE_WINDOW, &ConfigFrame::OnClose, this);
+
+        // The mods and saves pages' controls carry ids below kIdRowBase, so
+        // the pane's handlers pass them up to these.
+        Bind(wxEVT_LISTBOX, &ConfigFrame::OnModPicked, this, kIdModList);
+        Bind(wxEVT_CHECKLISTBOX, &ConfigFrame::OnModChecked, this, kIdModList);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModUp, this, kIdModUp);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModDown, this, kIdModDown);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModInstall, this, kIdModInstall);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModAddFolder, this, kIdModAddFolder);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModOpen, this, kIdModOpen);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnModRemove, this, kIdModRemove);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnSaveImport, this, kIdSaveImport);
+        Bind(wxEVT_BUTTON, &ConfigFrame::OnSaveOpen, this, kIdSaveOpen);
 
         mPane->Bind(wxEVT_SIZE, &ConfigFrame::OnPaneSize, this);
         mPane->Bind(wxEVT_CHECKBOX, &ConfigFrame::OnValueChanged, this);
@@ -736,7 +1130,8 @@ namespace
 
     // One button's binding: its name, a box holding the binding as the file has
     // it (the default shows as grey hint text when it is empty), Set to replace
-    // it with one captured input and Add to append one as an alternative.
+    // it with one captured input, Add to append one as an alternative and Clear
+    // to bind nothing.
     void ConfigFrame::AddBindRow(int& line, ConfigModelDevice device, S32 bind)
     {
         Row row;
@@ -759,12 +1154,16 @@ namespace
                                      wxDefaultSize, wxBU_EXACTFIT);
         wxButton* add = new wxButton(mPane, id + kIdRowAdd, "Add...", wxDefaultPosition,
                                      wxDefaultSize, wxBU_EXACTFIT);
+        wxButton* clear = new wxButton(mPane, id + kIdRowClear, "Clear", wxDefaultPosition,
+                                       wxDefaultSize, wxBU_EXACTFIT);
         set->SetToolTip("Replace the binding with the next key or button you press");
         add->SetToolTip("Add another key or button for this action");
+        clear->SetToolTip("Bind nothing, so no key or button presses this");
 
         wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
         buttons->Add(set, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
-        buttons->Add(add);
+        buttons->Add(add, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(clear);
 
         mGrid->Add(label, wxGBPosition(line, 0), wxGBSpan(1, 1), wxALIGN_CENTER_VERTICAL);
         mGrid->Add(text, wxGBPosition(line, 1), wxGBSpan(1, 1), wxEXPAND);
@@ -791,8 +1190,9 @@ namespace
         }
 
         wxString value = dialog.Token();
-        const wxString have = row.entry->GetValue();
-        if (add && !have.empty())
+        wxString have = row.entry->GetValue();
+        have.Trim(true).Trim(false);
+        if (add && !have.empty() && !have.IsSameAs("none", false))
         {
             value = have + ", " + value;
         }
@@ -829,9 +1229,37 @@ namespace
 
         mGrid->Clear(true);
         mRows.clear();
+        mTexts.clear();
+        mModList = NULL;
+        mModDetail = NULL;
+        mModUp = NULL;
+        mModDown = NULL;
+        mModRemove = NULL;
+        mModRows.clear();
         mWrappedAt = 0;
 
         int line = 0;
+
+        mReset->Enable(mSection < ModsPage());
+
+        if (mSection == ModsPage() || mSection == SavesPage())
+        {
+            if (mSection == ModsPage())
+            {
+                BuildModsPage();
+            }
+            else
+            {
+                BuildSavesPage();
+            }
+
+            mPane->Scroll(0, 0);
+            mPane->Layout();
+            RewrapDescriptions();
+            mPane->FitInside();
+            mPane->Thaw();
+            return;
+        }
 
         if (IsBindSection(mSection))
         {
@@ -845,7 +1273,7 @@ namespace
                       "(WASD) and camera (IJKL) keys are fixed."
                     : "Controller inputs for each game button, by position: a is the bottom "
                       "face button on any controller. ',', '+' and '!' work as on the keyboard "
-                      "page. Empty: follow input.preset.");
+                      "page. Empty: follow input.preset. none: nothing presses it.");
             intro->Wrap(FromDIP(520));
             mGrid->Add(intro, wxGBPosition(line, 0), wxGBSpan(1, 3), wxEXPAND | wxBOTTOM,
                        FromDIP(12));
@@ -876,6 +1304,12 @@ namespace
 
             // Details are drawn by the master they belong to, below.
             if (ConfigModelGroupOf(i) >= 0)
+            {
+                continue;
+            }
+
+            // The mods page is assets.mod's control.
+            if (strcmp(s->section, "assets") == 0 && strcmp(s->name, "mod") == 0)
             {
                 continue;
             }
@@ -943,6 +1377,12 @@ namespace
             mRows[i].description->Wrap(WrapWidthOf(mRows[i]));
         }
 
+        for (size_t i = 0; i < mTexts.size(); i++)
+        {
+            mTexts[i].first->SetLabel(mTexts[i].second);
+            mTexts[i].first->Wrap(width);
+        }
+
         return true;
     }
 
@@ -963,15 +1403,17 @@ namespace
     // under the caret while a path is being typed.
     void ConfigFrame::RefreshRow(Row& row)
     {
-        // A binding's description says what the default is, which the value
-        // does not change.
+        wxString text;
         if (row.bindRow >= 0)
         {
-            return;
+            text = DescribeBinding(row.device, row.bindRow);
         }
-
-        char text[768];
-        ConfigModelDescribe(row.setting, text, sizeof(text));
+        else
+        {
+            char described[768];
+            ConfigModelDescribe(row.setting, described, sizeof(described));
+            text = described;
+        }
 
         if (row.descriptionText == text)
         {
@@ -1043,7 +1485,7 @@ namespace
         // the selection is cleared -- and -1 would index the section table off
         // its front.
         const int which = event.GetSelection();
-        if (which < 0 || which >= ConfigModelSectionCount() + CONFIG_MODEL_DEVICE_COUNT)
+        if (which < 0 || which >= PageCount())
         {
             return;
         }
@@ -1067,6 +1509,17 @@ namespace
             value.Trim(true).Trim(false);
             ConfigModelBindSetText(row->device, row->bindRow, value.utf8_str());
             RefreshApply();
+
+            // Every row on the page, not just this one: a description names
+            // the other rows its input sets, and this change can add or take
+            // away this row from any of theirs.
+            for (size_t i = 0; i < mRows.size(); i++)
+            {
+                if (mRows[i].bindRow >= 0)
+                {
+                    RefreshRow(mRows[i]);
+                }
+            }
             return;
         }
 
@@ -1086,8 +1539,14 @@ namespace
 
         if (row->bindRow >= 0)
         {
-            const bool add = (event.GetId() - kIdRowBase) % kIdsPerRow == kIdRowAdd;
-            Capture(*row, add);
+            const int which = (event.GetId() - kIdRowBase) % kIdsPerRow;
+            if (which == kIdRowClear)
+            {
+                // SetValue sends the change event, which records it.
+                row->entry->SetValue("none");
+                return;
+            }
+            Capture(*row, which == kIdRowAdd);
             return;
         }
 
@@ -1133,6 +1592,11 @@ namespace
 
     void ConfigFrame::OnResetSection(wxCommandEvent&)
     {
+        if (mSection >= ModsPage())
+        {
+            return;
+        }
+
         if (IsBindSection(mSection))
         {
             ConfigModelBindResetAll(DeviceOfSection(mSection));
@@ -1265,6 +1729,720 @@ namespace
         mPane->Layout();
         mPane->FitInside();
         event.Skip();
+    }
+
+    // -----------------------------------------------------------------
+    // Mods and saves
+
+    wxStaticText* ConfigFrame::AddText(int& line, const wxString& text, bool grey)
+    {
+        wxStaticText* label = new wxStaticText(mPane, wxID_ANY, text);
+        if (grey)
+        {
+            label->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+        }
+        mGrid->Add(label, wxGBPosition(line, 0), wxGBSpan(1, 3), wxEXPAND | wxBOTTOM, FromDIP(10));
+        line++;
+        mTexts.push_back(std::make_pair(label, text));
+        return label;
+    }
+
+    void ConfigFrame::BuildModsPage()
+    {
+        int line = 0;
+        ModsModelScan();
+
+        AddText(line,
+                "The mods the game starts with. A mod is a folder laid out like the game's own "
+                "files, and its files are read in place of the originals. Checked mods are used "
+                "from the top down: where two have the same file, the higher one's is read. "
+                "None checked is the original game. Each set of mods keeps its own saves.\n\n"
+                "Installed mods are in " +
+                    wxString::FromUTF8(ModsModelLibrary()) +
+                    ". The list is saved as [assets] mod in config.ini.",
+                false);
+
+        mModList =
+            new wxCheckListBox(mPane, kIdModList, wxDefaultPosition, FromDIP(wxSize(-1, 160)));
+        mGrid->Add(mModList, wxGBPosition(line, 0), wxGBSpan(1, 3), wxEXPAND | wxBOTTOM,
+                   FromDIP(8));
+        line++;
+
+        wxButton* install = new wxButton(mPane, kIdModInstall, "Install from zip...");
+        wxButton* folder = new wxButton(mPane, kIdModAddFolder, "Add a folder...");
+        wxButton* open = new wxButton(mPane, kIdModOpen, "Open folder");
+        mModUp = new wxButton(mPane, kIdModUp, "Move up");
+        mModDown = new wxButton(mPane, kIdModDown, "Move down");
+        mModRemove = new wxButton(mPane, kIdModRemove, "Remove...");
+        install->SetToolTip("Unpack a mod's zip into the mods folder");
+        folder->SetToolTip("Copy a mod's folder into the mods folder, or use it where it is");
+        open->SetToolTip("Show the selected mod's folder, or the mods folder");
+        mModUp->SetToolTip("Read this mod's files before the ones below it");
+        mModDown->SetToolTip("Read this mod's files after the ones above it");
+        mModRemove->SetToolTip("Delete the selected mod from the mods folder");
+
+        wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
+        buttons->Add(install, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(folder, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(open, wxSizerFlags().Border(wxRIGHT, FromDIP(12)));
+        buttons->Add(mModUp, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(mModDown, wxSizerFlags().Border(wxRIGHT, FromDIP(12)));
+        buttons->Add(mModRemove);
+        mGrid->Add(buttons, wxGBPosition(line, 0), wxGBSpan(1, 3), wxBOTTOM, FromDIP(12));
+        line++;
+
+        mModDetail = AddText(line, "", false);
+        FillModList(-1);
+    }
+
+    // The checked mods in load order, then the rest. `select` is the entry to
+    // leave selected, or -1 for none.
+    void ConfigFrame::FillModList(S32 select)
+    {
+        mModRows.clear();
+        for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+        {
+            mModRows.push_back(ModsModelEnabledAt(r));
+        }
+        for (S32 i = 0; i < ModsModelCount(); i++)
+        {
+            if (ModsModelRankOf(i) < 0)
+            {
+                mModRows.push_back(i);
+            }
+        }
+
+        mModList->Clear();
+        for (size_t row = 0; row < mModRows.size(); row++)
+        {
+            const ModsModelEntry* e = ModsModelAt(mModRows[row]);
+            wxString label = wxString::FromUTF8(e->info.name);
+            if (e->info.version[0] != '\0')
+            {
+                label << "  " << wxString::FromUTF8(e->info.version);
+            }
+            if (e->missing)
+            {
+                label << "  (not found: " << wxString::FromUTF8(e->setting) << ")";
+            }
+            else if (!e->inLibrary)
+            {
+                label << "  (" << wxString::FromUTF8(e->folder) << ")";
+            }
+
+            mModList->Append(label);
+            mModList->Check((unsigned int)row, ModsModelRankOf(mModRows[row]) >= 0);
+            if (mModRows[row] == select)
+            {
+                mModList->SetSelection((int)row);
+            }
+        }
+
+        ShowModDetail();
+    }
+
+    S32 ConfigFrame::SelectedMod() const
+    {
+        const int row = mModList != NULL ? mModList->GetSelection() : wxNOT_FOUND;
+        return row == wxNOT_FOUND ? -1 : mModRows[(size_t)row];
+    }
+
+    namespace
+    {
+        // A mod.ini's settings, each marked when a mod higher in the load
+        // order sets the same key, since that one's value is used.
+        struct SettingsText
+        {
+            wxString text;
+            const std::map<wxString, wxString>* above;
+        };
+
+        void AppendSetting(const char* key, const char* value, void* context)
+        {
+            SettingsText* s = (SettingsText*)context;
+            s->text << "\n    " << key << " = " << wxString::FromUTF8(value);
+
+            std::map<wxString, wxString>::const_iterator it = s->above->find(key);
+            if (it != s->above->end())
+            {
+                s->text << "  (" << it->second << "'s value is used)";
+            }
+        }
+
+        struct OwnerOfSettings
+        {
+            std::map<wxString, wxString>* into;
+            wxString name;
+        };
+
+        void NoteSetting(const char* key, const char*, void* context)
+        {
+            OwnerOfSettings* o = (OwnerOfSettings*)context;
+            if (o->into->find(key) == o->into->end())
+            {
+                (*o->into)[key] = o->name;
+            }
+        }
+    } // namespace
+
+    // What the selection is: who made it, where it sits in the load order,
+    // which files it shares with the other checked mods and which of them
+    // wins, the settings it sets, and where the saves are. With nothing
+    // selected, the load order as a whole.
+    void ConfigFrame::ShowModDetail()
+    {
+        const S32 pick = SelectedMod();
+        wxString text;
+
+        char saves[kSavesModelMaxPath];
+        SavesModelFolder(saves, sizeof(saves));
+
+        if (pick < 0)
+        {
+            if (ModsModelEnabledCount() == 0)
+            {
+                text << "No mods are checked: the game runs as it shipped.";
+            }
+            else
+            {
+                text << "Load order:";
+                for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+                {
+                    text << "\n    " << r + 1 << ". "
+                         << wxString::FromUTF8(ModsModelAt(ModsModelEnabledAt(r))->info.name);
+                }
+            }
+            text << "\n\nSaves: " << wxString::FromUTF8(saves);
+        }
+        else
+        {
+            const ModsModelEntry* e = ModsModelAt(pick);
+            const S32 rank = ModsModelRankOf(pick);
+
+            text << wxString::FromUTF8(e->info.name);
+            if (e->info.version[0] != '\0')
+            {
+                text << " " << wxString::FromUTF8(e->info.version);
+            }
+            if (e->info.author[0] != '\0')
+            {
+                text << ", by " << wxString::FromUTF8(e->info.author);
+            }
+            if (e->info.description[0] != '\0')
+            {
+                text << "\n\n" << wxString::FromUTF8(e->info.description);
+            }
+
+            if (e->missing)
+            {
+                text << "\n\n"
+                     << wxString::FromUTF8(e->setting)
+                     << " is not there, so the game skips it. Uncheck it to take it out of "
+                        "[assets] mod.";
+            }
+            else if (rank < 0)
+            {
+                text << "\n\nOff.";
+            }
+            else
+            {
+                text << wxString::Format("\n\nOn, %d of %d in the load order.", (int)rank + 1,
+                                         (int)ModsModelEnabledCount());
+
+                wxBusyCursor busy;
+                for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+                {
+                    const S32 other = ModsModelEnabledAt(r);
+                    if (other == pick)
+                    {
+                        continue;
+                    }
+
+                    char examples[512];
+                    const S32 n = ModsModelOverlap(pick, other, examples, sizeof(examples));
+                    if (n == 0)
+                    {
+                        continue;
+                    }
+
+                    const wxString name = wxString::FromUTF8(ModsModelAt(other)->info.name);
+                    if (r < rank)
+                    {
+                        text << wxString::Format("\n%d of its files are read from ", (int)n) << name
+                             << " instead: ";
+                    }
+                    else
+                    {
+                        text << wxString::Format("\nIts copy of %d file%s is read instead of ",
+                                                 (int)n, n == 1 ? "" : "s")
+                             << name << "'s: ";
+                    }
+                    text << wxString::FromUTF8(examples) << (n > 5 ? ", ..." : "");
+                }
+            }
+
+            if (!e->missing)
+            {
+                std::map<wxString, wxString> above;
+                for (S32 r = 0; rank > 0 && r < rank; r++)
+                {
+                    const ModsModelEntry* o = ModsModelAt(ModsModelEnabledAt(r));
+                    OwnerOfSettings owner = { &above, wxString::FromUTF8(o->info.name) };
+                    iModFolderSettings(o->folder, NoteSetting, &owner);
+                }
+
+                SettingsText settings = { wxString(), &above };
+                if (iModFolderSettings(e->folder, AppendSetting, &settings) > 0)
+                {
+                    text << "\n\nWhile it is on, it sets:" << settings.text;
+                }
+
+                text << "\n\nFolder: " << wxString::FromUTF8(e->folder);
+            }
+            text << "\nSaves for the checked mods: " << wxString::FromUTF8(saves);
+        }
+
+        const S32 rank = pick >= 0 ? ModsModelRankOf(pick) : -1;
+        mModUp->Enable(rank > 0);
+        mModDown->Enable(rank >= 0 && rank + 1 < ModsModelEnabledCount());
+        mModRemove->Enable(pick >= 0 && ModsModelAt(pick)->inLibrary);
+
+        for (size_t i = 0; i < mTexts.size(); i++)
+        {
+            if (mTexts[i].first == mModDetail)
+            {
+                mTexts[i].second = text;
+            }
+        }
+        mModDetail->SetLabel(text);
+        if (mWrappedAt > 0)
+        {
+            mModDetail->Wrap(mWrappedAt);
+        }
+        mPane->Layout();
+        mPane->FitInside();
+    }
+
+    void ConfigFrame::OnModPicked(wxCommandEvent&)
+    {
+        ShowModDetail();
+    }
+
+    void ConfigFrame::OnModChecked(wxCommandEvent& event)
+    {
+        const int row = event.GetInt();
+        if (row < 0 || (size_t)row >= mModRows.size())
+        {
+            return;
+        }
+
+        const S32 entry = mModRows[(size_t)row];
+        const wxString folder = wxString::FromUTF8(ModsModelAt(entry)->folder);
+        ModsModelSetEnabled(entry, mModList->IsChecked((unsigned int)row));
+
+        // The scan drops a missing folder taken out of the setting, which can
+        // move the entries after it; the selection follows the folder.
+        ModsModelScan();
+        S32 select = -1;
+        for (S32 i = 0; i < ModsModelCount(); i++)
+        {
+            if (folder == wxString::FromUTF8(ModsModelAt(i)->folder))
+            {
+                select = i;
+            }
+        }
+
+        RefreshApply();
+        FillModList(select);
+    }
+
+    void ConfigFrame::MoveMod(S32 delta)
+    {
+        const S32 entry = SelectedMod();
+        if (entry < 0)
+        {
+            return;
+        }
+
+        ModsModelMove(entry, delta);
+        RefreshApply();
+        FillModList(entry);
+    }
+
+    void ConfigFrame::OnModUp(wxCommandEvent&)
+    {
+        MoveMod(-1);
+    }
+
+    void ConfigFrame::OnModDown(wxCommandEvent&)
+    {
+        MoveMod(1);
+    }
+
+    void ConfigFrame::InstallZip(const wxString& path)
+    {
+        char stagedBuf[kModsModelMaxPath];
+        char why[kModsModelMaxPath + 256];
+        if (!ModsModelStage(stagedBuf, sizeof(stagedBuf), why, sizeof(why)))
+        {
+            wxMessageBox(wxString::FromUTF8(why), "Could not install", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        const wxString staged = wxString::FromUTF8(stagedBuf);
+
+        wxString failure;
+        bool unpacked;
+        {
+            wxBusyCursor busy;
+            unpacked = UnpackZip(this, path, staged, failure);
+        }
+        if (!unpacked)
+        {
+            ModsModelRemoveTree(stagedBuf);
+            if (failure != "Cancelled.")
+            {
+                wxMessageBox(failure, "Could not install", wxOK | wxICON_ERROR, this);
+            }
+            return;
+        }
+
+        char suggested[256];
+        ModsModelSuggestName(stagedBuf, ModelPath(path).utf8_str(), suggested, sizeof(suggested));
+        wxString name = wxString::FromUTF8(suggested);
+
+        S32 index = -1;
+        for (;;)
+        {
+            wxTextEntryDialog ask(this,
+                                  "Name of the mod's folder. Its saves are kept under this name.",
+                                  "Install a mod", name);
+            if (ask.ShowModal() != wxID_OK)
+            {
+                ModsModelRemoveTree(stagedBuf);
+                return;
+            }
+            name = ask.GetValue().Trim(true).Trim(false);
+
+            if (ModsModelInstall(stagedBuf, name.utf8_str(), &index, why, sizeof(why)))
+            {
+                break;
+            }
+
+            wxMessageBox(wxString::FromUTF8(why), "Could not install", wxOK | wxICON_WARNING, this);
+
+            // A name already taken can be changed; anything else cannot.
+            char nameWhy[256];
+            if (ModsModelNameOk(name.utf8_str(), nameWhy, sizeof(nameWhy)))
+            {
+                ModsModelRemoveTree(stagedBuf);
+                return;
+            }
+        }
+
+        ModsModelSetEnabled(index, true);
+        RefreshApply();
+        // Deferred: the button clicked is in the pane BuildRows rebuilds.
+        CallAfter(&ConfigFrame::BuildRows);
+    }
+
+    void ConfigFrame::OnModInstall(wxCommandEvent&)
+    {
+        wxFileDialog dialog(this, "Install a mod", wxEmptyString, wxEmptyString,
+                            "Zip archives (*.zip)|*.zip|All files (*.*)|*.*",
+                            wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (dialog.ShowModal() != wxID_OK)
+        {
+            return;
+        }
+        InstallZip(dialog.GetPath());
+    }
+
+    void ConfigFrame::OnModAddFolder(wxCommandEvent&)
+    {
+        wxDirDialog dialog(this, "A mod's folder", wxEmptyString,
+                           wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+        if (dialog.ShowModal() != wxID_OK)
+        {
+            return;
+        }
+        const wxString source = ModelPath(dialog.GetPath());
+
+        wxMessageDialog how(this,
+                            "Copy this folder into the mods folder, or use it where it is?\n\n" +
+                                dialog.GetPath(),
+                            "Add a mod", wxYES_NO | wxCANCEL | wxICON_QUESTION);
+        how.SetYesNoCancelLabels("Copy", "Use where it is", "Cancel");
+        const int answer = how.ShowModal();
+        if (answer == wxID_CANCEL)
+        {
+            return;
+        }
+
+        if (answer == wxID_NO)
+        {
+            ModsModelUseFolder(source.utf8_str());
+            RefreshApply();
+            // Deferred: the button clicked is in the pane BuildRows rebuilds.
+            CallAfter(&ConfigFrame::BuildRows);
+            return;
+        }
+
+        char why[kModsModelMaxPath + 256];
+        char leaf[256];
+        iSaveFileLeaf(source.utf8_str(), leaf, sizeof(leaf));
+        wxString name = wxString::FromUTF8(leaf);
+
+        S32 index = -1;
+        for (;;)
+        {
+            wxTextEntryDialog ask(this,
+                                  "Name of the mod's folder. Its saves are kept under this name.",
+                                  "Add a mod", name);
+            if (ask.ShowModal() != wxID_OK)
+            {
+                return;
+            }
+            name = ask.GetValue().Trim(true).Trim(false);
+
+            bool copied;
+            {
+                wxBusyCursor busy;
+                copied =
+                    ModsModelCopyIn(source.utf8_str(), name.utf8_str(), &index, why, sizeof(why));
+            }
+            if (copied)
+            {
+                break;
+            }
+
+            wxMessageBox(wxString::FromUTF8(why), "Could not add the mod", wxOK | wxICON_WARNING,
+                         this);
+            char nameWhy[256];
+            if (ModsModelNameOk(name.utf8_str(), nameWhy, sizeof(nameWhy)))
+            {
+                return;
+            }
+        }
+
+        ModsModelSetEnabled(index, true);
+        RefreshApply();
+        // Deferred: the button clicked is in the pane BuildRows rebuilds.
+        CallAfter(&ConfigFrame::BuildRows);
+    }
+
+    void ConfigFrame::OnModOpen(wxCommandEvent&)
+    {
+        const S32 pick = SelectedMod();
+        const bool there = pick >= 0 && !ModsModelAt(pick)->missing;
+        OpenFolder(wxString::FromUTF8(there ? ModsModelAt(pick)->folder : ModsModelLibrary()));
+    }
+
+    void ConfigFrame::OnModRemove(wxCommandEvent&)
+    {
+        const S32 pick = SelectedMod();
+        if (pick < 0)
+        {
+            return;
+        }
+
+        const ModsModelEntry* e = ModsModelAt(pick);
+        const wxString message = "Delete " + wxString::FromUTF8(e->folder) +
+                                 " and everything in it?\n\nIts saves are not deleted.";
+        if (wxMessageBox(message, "Remove a mod", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) !=
+            wxYES)
+        {
+            return;
+        }
+
+        char why[kModsModelMaxPath + 256];
+        bool removed;
+        {
+            wxBusyCursor busy;
+            removed = ModsModelRemove(pick, why, sizeof(why));
+        }
+        if (!removed)
+        {
+            wxMessageBox(wxString::FromUTF8(why), "Could not remove the mod", wxOK | wxICON_ERROR,
+                         this);
+        }
+
+        RefreshApply();
+        // Deferred: the button clicked is in the pane BuildRows rebuilds.
+        CallAfter(&ConfigFrame::BuildRows);
+    }
+
+    void ConfigFrame::BuildSavesPage()
+    {
+        int line = 0;
+
+        char folder[kSavesModelMaxPath];
+        SavesModelFolder(folder, sizeof(folder));
+
+        ModsModelScan();
+        wxString whose;
+        for (S32 r = 0; r < ModsModelEnabledCount(); r++)
+        {
+            const ModsModelEntry* e = ModsModelAt(ModsModelEnabledAt(r));
+            if (!e->missing)
+            {
+                whose << (whose.empty() ? "" : " + ") << wxString::FromUTF8(e->info.name);
+            }
+        }
+        if (whose.empty())
+        {
+            whose = "the original game";
+        }
+
+        AddText(line,
+                "The three games for " + whose + ", in " + wxString::FromUTF8(folder) +
+                    ". The mods page picks whose saves these are.",
+                false);
+
+        for (S32 g = 0; g < kSaveFileGames; g++)
+        {
+            AddText(line, DescribeGame(g, NULL), false);
+        }
+
+        wxButton* import = new wxButton(mPane, kIdSaveImport, "Import Xbox save...");
+        wxButton* open = new wxButton(mPane, kIdSaveOpen, "Open folder");
+        import->SetToolTip("Copy a save from the original Xbox game into one of these games");
+
+        wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
+        buttons->Add(import, wxSizerFlags().Border(wxRIGHT, FromDIP(4)));
+        buttons->Add(open);
+        mGrid->Add(buttons, wxGBPosition(line, 0), wxGBSpan(1, 3), wxBOTTOM, FromDIP(12));
+        line++;
+
+        AddText(line,
+                "An Xbox save is a folder holding GameData.xsv and SaveMeta.xbx, copied off the "
+                "console's hard disk or out of an emulator's. Pick the GameData.xsv, or a zip "
+                "holding one or more save folders. Importing writes the save at once; it does not "
+                "wait for Apply.",
+                true);
+    }
+
+    void ConfigFrame::ImportSaves(std::vector<FoundXboxSave>& found)
+    {
+        std::vector<SavesModelXbox> saves;
+        wxString rejected;
+        for (size_t i = 0; i < found.size(); i++)
+        {
+            SavesModelXbox save;
+            char why[256];
+            const bool hasMeta = found[i].meta.GetDataLen() > 0;
+            if (SavesModelReadXbox((const U8*)found[i].xsv.GetData(), found[i].xsv.GetDataLen(),
+                                   hasMeta ? (const U8*)found[i].meta.GetData() : NULL,
+                                   found[i].meta.GetDataLen(), found[i].source.utf8_str(), &save,
+                                   why, sizeof(why)))
+            {
+                saves.push_back(save);
+            }
+            else
+            {
+                rejected << "\n" << found[i].source << ": " << wxString::FromUTF8(why);
+            }
+        }
+
+        if (saves.empty())
+        {
+            wxMessageBox("No save could be imported." + rejected, "Import Xbox saves",
+                         wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        ImportDialog dialog(this, saves);
+        if (dialog.ShowModal() == wxID_OK)
+        {
+            wxString report;
+            for (size_t i = 0; i < saves.size(); i++)
+            {
+                const int game = dialog.TargetOf(i);
+                if (game < 0)
+                {
+                    continue;
+                }
+
+                char why[kSavesModelMaxPath + 128];
+                if (SavesModelImport(&saves[i], game, why, sizeof(why)))
+                {
+                    report << wxString::Format("\nGame %d: ", game + 1)
+                           << wxString::FromUTF8(saves[i].leader.label);
+                }
+                else
+                {
+                    report << wxString::Format("\nGame %d: ", game + 1) << wxString::FromUTF8(why);
+                }
+            }
+
+            if (!rejected.empty())
+            {
+                report << "\n\nNot imported:" << rejected;
+            }
+            if (!report.empty())
+            {
+                wxMessageBox("Imported:" + report, "Import Xbox saves", wxOK | wxICON_INFORMATION,
+                             this);
+            }
+        }
+
+        for (size_t i = 0; i < saves.size(); i++)
+        {
+            SavesModelFreeXbox(&saves[i]);
+        }
+
+        // Deferred: the button clicked is in the pane BuildRows rebuilds.
+        CallAfter(&ConfigFrame::BuildRows);
+    }
+
+    void ConfigFrame::OnSaveImport(wxCommandEvent&)
+    {
+        wxFileDialog dialog(this, "Import an Xbox save", wxEmptyString, wxEmptyString,
+                            "Xbox saves (*.xsv;*.zip)|*.xsv;*.zip|All files (*.*)|*.*",
+                            wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (dialog.ShowModal() != wxID_OK)
+        {
+            return;
+        }
+
+        const wxString path = dialog.GetPath();
+        std::vector<FoundXboxSave> found;
+        wxString why;
+
+        if (wxFileName(path).GetExt().IsSameAs("zip", false))
+        {
+            if (!FindXboxSavesInZip(path, found, why))
+            {
+                wxMessageBox(why, "Import Xbox saves", wxOK | wxICON_ERROR, this);
+                return;
+            }
+        }
+        else
+        {
+            FoundXboxSave save;
+            save.source = path;
+            if (!ReadFileInto(path, save.xsv))
+            {
+                wxMessageBox("Could not read " + path + ".", "Import Xbox saves",
+                             wxOK | wxICON_ERROR, this);
+                return;
+            }
+
+            const wxString meta = wxFileName(path).GetPathWithSep() + "SaveMeta.xbx";
+            if (wxFileName::FileExists(meta))
+            {
+                ReadFileInto(meta, save.meta);
+            }
+            found.push_back(save);
+        }
+
+        ImportSaves(found);
+    }
+
+    void ConfigFrame::OnSaveOpen(wxCommandEvent&)
+    {
+        char folder[kSavesModelMaxPath];
+        SavesModelFolder(folder, sizeof(folder));
+        OpenFolder(wxString::FromUTF8(folder));
     }
 
 } // namespace

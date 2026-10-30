@@ -8,8 +8,8 @@ Three references, three different questions:
 | `codewarrior.md` | "what source shape should I *write* to move a number" |
 | `measuring.md` | "which number means what, and how has this project fooled itself" |
 
-Everything below was either **measured against our own compiler** (`GC/2.0p1a`,
-the patched one, under the real cflags) or **read off a target object in this
+Everything below was either **measured against a patched 2.0 compiler**
+(`GC/2.0p1a`, which `GC/2.0p2` replaced, under the real cflags) or **read off a target object in this
 repo**. Nothing here comes from the internet. CodeWarrior lore for other
 consoles and other major versions is mostly wrong for us, and a claim you
 cannot reproduce is worse than no claim — this project has twice built on a
@@ -380,7 +380,7 @@ state and takes a couple of seconds.
 
 ```sh
 SP=<your scratchpad>            # unique prefix per agent
-./build/tools/sjiswrap.exe "./build/compilers/GC/2.0p1a/mwcceppc.exe" \
+./build/tools/sjiswrap.exe "./build/compilers/GC/2.0p2/mwcceppc.exe" \
   -nodefaults -proc gekko -align powerpc -enum int -fp hardware \
   -Cpp_exceptions off -W err -O4,p -inline auto -maxerrors 1 -nosyspath \
   -RTTI off -fp_contract on -lang=c++ -common on -char unsigned \

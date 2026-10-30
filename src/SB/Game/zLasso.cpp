@@ -11,6 +11,10 @@
 #include "iModel.h"
 #include "xstransvc.h"
 #include "iParMgr.h"
+#include "iModPatch.h"
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
 
 #include <types.h>
 
@@ -19,7 +23,7 @@ static U32 sNumGuideLists;
 static zLassoGuide* sCurrentGuide;
 static RxObjSpace3DVertex* lnverts;
 
-static zLassoGuideList sGuideList[64];
+static zLassoGuideList sGuideList[IMODPATCH_MAX_LASSO_TARGETS];
 
 static S32 negativeHondaX = 1;
 
@@ -45,9 +49,14 @@ static void nonfizzicalHonda(zLasso* lasso, f32 arg1, xVec3* arg2);
 static void fizzicalSlack(zLasso* lasso, f32 arg1, xVec3* arg2);
 static void initVertMap(zLassoGuide* guide);
 static void bakeMorphAnim(RpGeometry* geom, void* anim);
+#if defined(PS2)
+static void vec2vecMat(xMat4x3* m, const xVec3* v1, const xVec3* v2);
+#else
 static void vec2vecMat(xMat4x3* m, xVec3* v1, xVec3* v2);
+#endif
 
-void xMat4x3Rot(xMat4x3* m, const xVec3* v, F32 f);
+inline void xMat4x3RotC(xMat4x3* m, F32 f1, F32 f2, F32 f3, F32 f4);
+inline void xMat4x3Rot(xMat4x3* m, const xVec3* v, F32 f);
 
 void zLasso_Init(zLasso* lasso, xModelInstance* model, F32 x, F32 y, F32 z)
 {
@@ -115,8 +124,8 @@ void zLasso_SetGuide(xEnt* ent, xAnimState* lassoAnim)
         return;
     }
 
-    U32 guideListIdx = 0;
-    for (U32 i = 0; i < sNumGuideLists; i++, guideListIdx++)
+    U32 i;
+    for (i = 0; i < sNumGuideLists; i++)
     {
         if (sGuideList[i].target == ent)
         {
@@ -124,20 +133,20 @@ void zLasso_SetGuide(xEnt* ent, xAnimState* lassoAnim)
         }
     }
 
-    if (guideListIdx < sNumGuideLists)
+    if (i < sNumGuideLists)
     {
-        U32 guideIdx = 0;
-        for (U32 i = 0; i < sGuideList[guideListIdx].numGuides; i++, guideIdx++)
+        U32 j;
+        for (j = 0; j < sGuideList[i].numGuides; j++)
         {
-            if (sGuideList[guideListIdx].guide[i].lassoAnim == lassoAnim)
+            if (sGuideList[i].guide[j].lassoAnim == lassoAnim)
             {
                 break;
             }
         }
 
-        if (guideIdx < sGuideList[guideListIdx].numGuides)
+        if (j < sGuideList[i].numGuides)
         {
-            sCurrentGuide = &sGuideList[guideListIdx].guide[guideIdx];
+            sCurrentGuide = &sGuideList[i].guide[j];
         }
     }
 
@@ -152,20 +161,20 @@ void zLasso_InterpToGuide(zLasso* lasso)
     xVec3 rad1;
     xVec3 rad2;
 
+    RpGeometry* geom;
     RwV3d* v;
     S32 numVerts;
 
     if (sCurrentGuide != NULL)
     {
-        numVerts = sCurrentGuide->poly->Data->geometry->numTriangles;
-        v = sCurrentGuide->poly->Data->geometry->morphTarget->verts;
+        geom = sCurrentGuide->poly->Data->geometry;
+        v = geom->morphTarget->verts;
+        numVerts = geom->numTriangles;
         xVec3Init(&lasso->tgCenter, 0.0f, 0.0f, 0.0f);
 
-        S32 vertMapIdx = 0;
         for (S32 i = 0; i < numVerts; i++)
         {
-            xVec3AddTo(&lasso->tgCenter, (xVec3*)v + sCurrentGuide->vertMap[vertMapIdx]);
-            vertMapIdx += 1;
+            xVec3AddTo(&lasso->tgCenter, (xVec3*)v + sCurrentGuide->vertMap[i]);
         }
 
         xVec3SMul(&lasso->tgCenter, &lasso->tgCenter, 1.0f / (f32)numVerts);
@@ -210,74 +219,74 @@ void zLasso_Render(zLasso* lasso)
     xVec3 tan1;
     xVec3 tan0;
 
-    RxObjSpace3DVertex* vp;
-    RpGeometry* geom;
-    RwV3d* v0;
-    RwV3d* v1;
+    U8 useGuide;
     S32 i;
+    RwV3d* v1;
+    RwV3d* v0;
     S32 j;
     S32 k;
     S32 strandIdx;
-    S32 fi;
     S32 numPts;
-    S32 numPrims;
+    RxObjSpace3DVertex* vp;
     S32 curRing;
     S32 prevRing;
     S32 pending;
     U32 numVerts;
-    F32 frame;
-    F32 fr;
-    F32 ifr;
+    S32 numPrims;
+    F32 u;
+    F32 interp;
+    S32 numMorphs;
+    RpGeometry* geom;
+    S32 mIndx1;
     F32 bestDist;
     F32 segLen;
     F32 t;
-    F32 d;
     F32 ropeLen;
     F32 ropeDist;
+    F32 du;
     F32 travelled;
     F32 stepLen;
-    F32 lenSq;
+    F32 xDisp;
+    F32 yDisp;
     F32 ang;
+    F32 third;
+    F32 twoThirds;
     F32 c0;
     F32 c1;
     F32 c2;
     F32 s0;
     F32 s1;
     F32 s2;
-    F32 u;
     F32 v;
-    F32 du;
     S32 jc;
     S32 j1;
     S32 jm;
     S32 i0;
     S32 i1;
-    F32 px;
-    F32 py;
-    F32 pz;
-    U8 useGuide;
+    F32 mu;
+    F32 mdu;
 
     useGuide = ((((lasso->flags & 0x800) != 0) && ((lasso->flags & 0x4000) != 0)) ||
-                (((lasso->flags & 0x800) == 0) && ((lasso->flags & 0x2000) != 0)));
+                (!(lasso->flags & 0x800) && ((lasso->flags & 0x2000) != 0)));
 
     if (useGuide)
     {
-        strandIdx = 0;
         geom = sCurrentGuide->poly->Data->geometry;
-        frame = 30.0f * sCurrentGuide->poly->Anim->Single->Time;
-        fi = (S32)frame;
-        fr = frame - fi;
-        ifr = 1.0f - fr;
+        numMorphs = geom->numMorphTargets;
+        mIndx1 = (S32)(30.0f * sCurrentGuide->poly->Anim->Single->Time);
+        interp = 30.0f * sCurrentGuide->poly->Anim->Single->Time - mIndx1;
         numPts = geom->numTriangles;
         ropeLen = 0.0f;
-        fi = fi % geom->numMorphTargets;
-        v0 = geom->morphTarget[fi].verts;
-        v1 = geom->morphTarget[(fi + 1) % geom->numMorphTargets].verts;
+        mIndx1 = mIndx1 % numMorphs;
+        const RpMorphTarget& firstMorph = geom->morphTarget[mIndx1];
+        const RpMorphTarget& nextMorph = geom->morphTarget[(mIndx1 + 1) % numMorphs];
+        v0 = firstMorph.verts;
+        v1 = nextMorph.verts;
 
         for (i = 0; i < numPts; i++)
         {
-            xVec3SMul(&pts[i], (xVec3*)(v0 + sCurrentGuide->vertMap[i]), ifr);
-            xVec3AddScaled(&pts[i], (xVec3*)(v1 + sCurrentGuide->vertMap[i]), fr);
+            xVec3SMul(&pts[i], (xVec3*)(v0 + sCurrentGuide->vertMap[i]), 1.0f - interp);
+            xVec3AddScaled(&pts[i], (xVec3*)(v1 + sCurrentGuide->vertMap[i]), interp);
             xMat4x3Toworld(&pts[i], (xMat4x3*)sCurrentGuide->poly->Mat, &pts[i]);
         }
 
@@ -308,11 +317,11 @@ void zLasso_Render(zLasso* lasso)
             }
 
             xVec3Sub(&delta, &target, &closest);
-            d = xVec3Dot(&delta, &delta);
-            if (d < bestDist)
+            segLen = xVec3Dot(&delta, &delta);
+            if (segLen < bestDist)
             {
                 xVec3Copy(&best, &closest);
-                bestDist = d;
+                bestDist = segLen;
             }
 
             ropeLen += xVec3Dist(&pts[i], &pts[(i + 1) % numPts]);
@@ -322,7 +331,6 @@ void zLasso_Render(zLasso* lasso)
     }
     else
     {
-        strandIdx = 0;
         ropeLen = 2.0f * PI * lasso->crRadius;
     }
 
@@ -332,6 +340,7 @@ void zLasso_Render(zLasso* lasso)
     curRing = 3;
     prevRing = 0;
     numPrims = 0;
+    travelled = 0.0f;
 
     xVec3Sub(&dir, &lasso->lastRefs[lasso->reindex[0]], &lasso->honda);
     ropeDist = xVec3Normalize(&dir, &dir);
@@ -344,24 +353,27 @@ void zLasso_Render(zLasso* lasso)
     xVec3Normalize(&perp, &perp);
     xVec3Cross(&side, &perp, &dir);
 
-    ang = 2.0f * (PI * strandIdx) / 3.0f;
-    c0 = icos(ang);
-    c1 = icos(ang + 2.0f * PI / 3.0f);
-    c2 = icos(ang + 4.0f * PI / 3.0f);
-    s0 = isin(ang);
-    s1 = isin(ang + 2.0f * PI / 3.0f);
-    s2 = isin(ang + 4.0f * PI / 3.0f);
+    third = 2.0f * PI / 3.0f;
+    twoThirds = 4.0f * PI / 3.0f;
+    for (strandIdx = 0; strandIdx < 1; strandIdx++)
+    {
+        ang = 2.0f * (PI * strandIdx) / 3.0f;
+        c0 = icos(ang);
+        c1 = icos(ang + third);
+        c2 = icos(ang + twoThirds);
+        s0 = isin(ang);
+        s1 = isin(ang + third);
+        s2 = isin(ang + twoThirds);
 
-    xVec3SMul(&strand[0], &perp, 0.025f * s0);
-    xVec3AddScaled(&strand[0], &side, 0.025f * c0);
-    strandIdx++;
-    xVec3SMul(&strand[strandIdx], &perp, 0.025f * s1);
-    xVec3AddScaled(&strand[strandIdx], &side, 0.025f * c1);
-    strandIdx++;
-    xVec3SMul(&strand[strandIdx], &perp, 0.025f * s2);
-    xVec3AddScaled(&strand[strandIdx], &side, 0.025f * c2);
-
-    travelled = 0.0f;
+        xVec3SMul(&strand[strandIdx], &perp, 0.025f * s0);
+        xVec3AddScaled(&strand[strandIdx], &side, 0.025f * c0);
+        strandIdx++;
+        xVec3SMul(&strand[strandIdx], &perp, 0.025f * s1);
+        xVec3AddScaled(&strand[strandIdx], &side, 0.025f * c1);
+        strandIdx++;
+        xVec3SMul(&strand[strandIdx], &perp, 0.025f * s2);
+        xVec3AddScaled(&strand[strandIdx], &side, 0.025f * c2);
+    }
 
     xVec3Add(&hondaPos, &lasso->honda, &lasso->anchor);
     xVec3Copy(&cur, &hondaPos);
@@ -378,18 +390,17 @@ void zLasso_Render(zLasso* lasso)
     }
     xVec3SMul(&step, &dir, stepLen);
 
-    u = ropeLen;
+    mu = ropeLen;
     vp = lnverts;
-    du = stepLen;
+    mdu = stepLen;
     v = 0.0f;
-    lenSq = ropeDist * ropeDist;
     numVerts = 0;
 
     while (travelled < ropeDist && numVerts + 10 <= 480)
     {
-        if (u > 1.0f)
+        if (mu > 1.0f)
         {
-            u -= 1.0f;
+            mu -= 1.0f;
         }
 
         travelled += stepLen;
@@ -399,15 +410,17 @@ void zLasso_Render(zLasso* lasso)
             xVec3AddTo(&cur, &step);
             xVec3Copy(&pos, &cur);
             ang = PI * (0.75f * travelled);
-            t = (ropeDist - travelled) * (travelled * (lasso->crSlack * isin(ang))) / lenSq;
-            segLen = (ropeDist - travelled) * (travelled * (lasso->crSlack * icos(ang))) / lenSq;
-            xVec3AddScaled(&pos, &perp, t);
-            xVec3AddScaled(&pos, &side, segLen);
+            xDisp = (ropeDist - travelled) * (travelled * (lasso->crSlack * isin(ang))) /
+                    (ropeDist * ropeDist);
+            yDisp = (ropeDist - travelled) * (travelled * (lasso->crSlack * icos(ang))) /
+                    (ropeDist * ropeDist);
+            xVec3AddScaled(&pos, &perp, xDisp);
+            xVec3AddScaled(&pos, &side, yDisp);
         }
         else
         {
             xVec3Add(&pos, &lasso->anchor, &lasso->lastRefs[lasso->reindex[0]]);
-            du = ropeDist + (stepLen - travelled);
+            mdu = ropeDist + (stepLen - travelled);
         }
 
         for (i = 0; i < 3; i++)
@@ -416,83 +429,40 @@ void zLasso_Render(zLasso* lasso)
         }
 
         i0 = prevRing + 2;
-        py = vtx[i0].y;
-        pz = vtx[i0].z;
-        px = vtx[i0].x;
-        vp[0].x = px;
-        vp[0].y = py;
-        vp[0].z = pz;
-        vp[0].r = 255;
-        vp[0].g = 255;
-        vp[0].b = 255;
-        vp[0].a = 255;
-        vp[0].u = u;
-        vp[0].v = 2.0f / 3.0f;
+        RwIm3DVertexSetPos(&vp[0], vtx[i0].x, vtx[i0].y, vtx[i0].z);
+        RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+        RwIm3DVertexSetUV(&vp[0], mu, 2.0f / 3.0f);
         i1 = curRing + 2;
-        py = vtx[i1].y;
-        pz = vtx[i1].z;
-        px = vtx[i1].x;
-        vp[1].x = px;
-        vp[1].y = py;
-        vp[1].z = pz;
-        vp[1].r = 255;
-        vp[1].g = 255;
-        vp[1].b = 255;
-        vp[1].a = 255;
-        vp[1].u = u + du;
-        vp[1].v = 2.0f / 3.0f;
+        RwIm3DVertexSetPos(&vp[1], vtx[i1].x, vtx[i1].y, vtx[i1].z);
+        RwIm3DVertexSetRGBA(&vp[1], 255, 255, 255, 255);
+        RwIm3DVertexSetUV(&vp[1], mu + mdu, 2.0f / 3.0f);
         numVerts += 2;
         vp += 2;
 
         for (k = 0; k < 3; k++)
         {
-            v = k * (1.0f / 3.0f);
-            py = vtx[prevRing + k].y;
-            pz = vtx[prevRing + k].z;
-            px = vtx[prevRing + k].x;
-            vp[0].x = px;
-            vp[0].y = py;
-            vp[0].z = pz;
-            vp[0].r = 255;
-            vp[0].g = 255;
-            vp[0].b = 255;
-            vp[0].a = 255;
-            vp[0].u = u;
-            vp[0].v = v;
-            py = vtx[curRing + k].y;
-            pz = vtx[curRing + k].z;
-            px = vtx[curRing + k].x;
-            vp[1].x = px;
-            vp[1].y = py;
-            vp[1].z = pz;
-            vp[1].r = 255;
-            vp[1].g = 255;
-            vp[1].b = 255;
-            vp[1].a = 255;
-            vp[1].u = u + du;
-            vp[1].v = v;
+            v = k;
+            v *= (1.0f / 3.0f);
+            RwIm3DVertexSetPos(&vp[0], vtx[prevRing + k].x, vtx[prevRing + k].y,
+                               vtx[prevRing + k].z);
+            RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+            RwIm3DVertexSetUV(&vp[0], mu, v);
+            RwIm3DVertexSetPos(&vp[1], vtx[curRing + k].x, vtx[curRing + k].y, vtx[curRing + k].z);
+            RwIm3DVertexSetRGBA(&vp[1], 255, 255, 255, 255);
+            RwIm3DVertexSetUV(&vp[1], mu + mdu, v);
             numVerts += 2;
             vp += 2;
         }
 
         prevRing = curRing;
         curRing = curRing ? 0 : 3;
-        u += du;
+        mu += mdu;
         numPrims++;
     }
 
-    py = vtx[prevRing + 2].y;
-    pz = vtx[prevRing + 2].z;
-    px = vtx[prevRing + 2].x;
-    vp[0].x = px;
-    vp[0].y = py;
-    vp[0].z = pz;
-    vp[0].r = 255;
-    vp[0].g = 255;
-    vp[0].b = 255;
-    vp[0].a = 255;
-    vp[0].u = u;
-    vp[0].v = v;
+    RwIm3DVertexSetPos(&vp[0], vtx[prevRing + 2].x, vtx[prevRing + 2].y, vtx[prevRing + 2].z);
+    RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+    RwIm3DVertexSetUV(&vp[0], mu, v);
     numVerts += 1;
     vp += 1;
     pending = 1;
@@ -524,7 +494,7 @@ void zLasso_Render(zLasso* lasso)
         du = 2.0f * (PI * lasso->crRadius) / 15.0f;
         u = 0.0f;
 
-        for (j = 0; j < 15 && numVerts + pending + 8 <= 480; j++)
+        for (j = 0; j < 15 && numVerts + 8 + pending <= 480; j++)
         {
             if (u > 1.0f)
             {
@@ -543,79 +513,37 @@ void zLasso_Render(zLasso* lasso)
             if (pending)
             {
                 i0 = prevRing + 2;
-                py = vtx[i0].y;
-                pz = vtx[i0].z;
-                px = vtx[i0].x;
-                vp[0].x = px;
-                vp[0].y = py;
-                vp[0].z = pz;
-                vp[0].r = 255;
-                vp[0].g = 255;
-                vp[0].b = 255;
-                vp[0].a = 255;
-                vp[0].u = u;
-                vp[0].v = 2.0f / 3.0f;
+                RwIm3DVertexSetPos(&vp[0], vtx[i0].x, vtx[i0].y, vtx[i0].z);
+                RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+                RwIm3DVertexSetUV(&vp[0], u, 2.0f / 3.0f);
                 pending = 0;
                 numVerts += 1;
                 vp += 1;
             }
 
             i0 = prevRing + 2;
-            py = vtx[i0].y;
-            pz = vtx[i0].z;
-            px = vtx[i0].x;
-            vp[0].x = px;
-            vp[0].y = py;
-            vp[0].z = pz;
-            vp[0].r = 255;
-            vp[0].g = 255;
-            vp[0].b = 255;
-            vp[0].a = 255;
-            vp[0].u = u;
-            vp[0].v = 2.0f / 3.0f;
+            RwIm3DVertexSetPos(&vp[0], vtx[i0].x, vtx[i0].y, vtx[i0].z);
+            RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+            RwIm3DVertexSetUV(&vp[0], u, 2.0f / 3.0f);
             i1 = curRing + 2;
-            py = vtx[i1].y;
-            pz = vtx[i1].z;
-            px = vtx[i1].x;
-            vp[1].x = px;
-            vp[1].y = py;
-            vp[1].z = pz;
-            vp[1].r = 255;
-            vp[1].g = 255;
-            vp[1].b = 255;
-            vp[1].a = 255;
-            vp[1].u = u + du;
-            vp[1].v = 2.0f / 3.0f;
+            RwIm3DVertexSetPos(&vp[1], vtx[i1].x, vtx[i1].y, vtx[i1].z);
+            RwIm3DVertexSetRGBA(&vp[1], 255, 255, 255, 255);
+            RwIm3DVertexSetUV(&vp[1], u + du, 2.0f / 3.0f);
             numVerts += 2;
             vp += 2;
 
             for (k = 0; k < 3; k++)
             {
-                v = k * (1.0f / 3.0f);
-                py = vtx[prevRing + k].y;
-                pz = vtx[prevRing + k].z;
-                px = vtx[prevRing + k].x;
-                vp[0].x = px;
-                vp[0].y = py;
-                vp[0].z = pz;
-                vp[0].r = 255;
-                vp[0].g = 255;
-                vp[0].b = 255;
-                vp[0].a = 255;
-                vp[0].u = u;
-                vp[0].v = v;
-                py = vtx[curRing + k].y;
-                pz = vtx[curRing + k].z;
-                px = vtx[curRing + k].x;
-                vp[1].x = px;
-                vp[1].y = py;
-                vp[1].z = pz;
-                vp[1].r = 255;
-                vp[1].g = 255;
-                vp[1].b = 255;
-                vp[1].a = 255;
-                vp[1].u = u + du;
-                vp[1].v = v;
+                v = k;
+                v *= (1.0f / 3.0f);
+                RwIm3DVertexSetPos(&vp[0], vtx[prevRing + k].x, vtx[prevRing + k].y,
+                                   vtx[prevRing + k].z);
+                RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+                RwIm3DVertexSetUV(&vp[0], u, v);
+                RwIm3DVertexSetPos(&vp[1], vtx[curRing + k].x, vtx[curRing + k].y,
+                                   vtx[curRing + k].z);
+                RwIm3DVertexSetRGBA(&vp[1], 255, 255, 255, 255);
+                RwIm3DVertexSetUV(&vp[1], u + du, v);
                 numVerts += 2;
                 vp += 2;
             }
@@ -648,7 +576,7 @@ void zLasso_Render(zLasso* lasso)
 
         u = 0.0f;
 
-        for (j = 1; j <= numPts && numVerts + pending + 8 <= 480; j++)
+        for (j = 1; j <= numPts && numVerts + 8 + pending <= 480; j++)
         {
             jc = j % numPts;
             j1 = (j + 1) % numPts;
@@ -675,79 +603,37 @@ void zLasso_Render(zLasso* lasso)
             if (pending)
             {
                 i0 = prevRing + 2;
-                py = vtx[i0].y;
-                pz = vtx[i0].z;
-                px = vtx[i0].x;
-                vp[0].x = px;
-                vp[0].y = py;
-                vp[0].z = pz;
-                vp[0].r = 255;
-                vp[0].g = 255;
-                vp[0].b = 255;
-                vp[0].a = 255;
-                vp[0].u = u;
-                vp[0].v = 2.0f / 3.0f;
+                RwIm3DVertexSetPos(&vp[0], vtx[i0].x, vtx[i0].y, vtx[i0].z);
+                RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+                RwIm3DVertexSetUV(&vp[0], u, 2.0f / 3.0f);
                 pending = 0;
                 numVerts += 1;
                 vp += 1;
             }
 
             i0 = prevRing + 2;
-            py = vtx[i0].y;
-            pz = vtx[i0].z;
-            px = vtx[i0].x;
-            vp[0].x = px;
-            vp[0].y = py;
-            vp[0].z = pz;
-            vp[0].r = 255;
-            vp[0].g = 255;
-            vp[0].b = 255;
-            vp[0].a = 255;
-            vp[0].u = u;
-            vp[0].v = 2.0f / 3.0f;
+            RwIm3DVertexSetPos(&vp[0], vtx[i0].x, vtx[i0].y, vtx[i0].z);
+            RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+            RwIm3DVertexSetUV(&vp[0], u, 2.0f / 3.0f);
             i1 = curRing + 2;
-            py = vtx[i1].y;
-            pz = vtx[i1].z;
-            px = vtx[i1].x;
-            vp[1].x = px;
-            vp[1].y = py;
-            vp[1].z = pz;
-            vp[1].r = 255;
-            vp[1].g = 255;
-            vp[1].b = 255;
-            vp[1].a = 255;
-            vp[1].u = u + du;
-            vp[1].v = 2.0f / 3.0f;
+            RwIm3DVertexSetPos(&vp[1], vtx[i1].x, vtx[i1].y, vtx[i1].z);
+            RwIm3DVertexSetRGBA(&vp[1], 255, 255, 255, 255);
+            RwIm3DVertexSetUV(&vp[1], u + du, 2.0f / 3.0f);
             numVerts += 2;
             vp += 2;
 
             for (k = 0; k < 3; k++)
             {
-                v = k * (1.0f / 3.0f);
-                py = vtx[prevRing + k].y;
-                pz = vtx[prevRing + k].z;
-                px = vtx[prevRing + k].x;
-                vp[0].x = px;
-                vp[0].y = py;
-                vp[0].z = pz;
-                vp[0].r = 255;
-                vp[0].g = 255;
-                vp[0].b = 255;
-                vp[0].a = 255;
-                vp[0].u = u;
-                vp[0].v = v;
-                py = vtx[curRing + k].y;
-                pz = vtx[curRing + k].z;
-                px = vtx[curRing + k].x;
-                vp[1].x = px;
-                vp[1].y = py;
-                vp[1].z = pz;
-                vp[1].r = 255;
-                vp[1].g = 255;
-                vp[1].b = 255;
-                vp[1].a = 255;
-                vp[1].u = u + du;
-                vp[1].v = v;
+                v = k;
+                v *= (1.0f / 3.0f);
+                RwIm3DVertexSetPos(&vp[0], vtx[prevRing + k].x, vtx[prevRing + k].y,
+                                   vtx[prevRing + k].z);
+                RwIm3DVertexSetRGBA(&vp[0], 255, 255, 255, 255);
+                RwIm3DVertexSetUV(&vp[0], u, v);
+                RwIm3DVertexSetPos(&vp[1], vtx[curRing + k].x, vtx[curRing + k].y,
+                                   vtx[curRing + k].z);
+                RwIm3DVertexSetRGBA(&vp[1], 255, 255, 255, 255);
+                RwIm3DVertexSetUV(&vp[1], u + du, v);
                 numVerts += 2;
                 vp += 2;
             }
@@ -827,7 +713,7 @@ void zLasso_Update(zLasso* lasso, xEnt* ent, F32 dt)
                 xVec3AddScaled(&lasso->crCenter, &lasso->tgCenter, interp);
                 xVec3SubFrom(&lasso->crCenter, &lasso->anchor);
             }
-            
+
             if (lasso->flags & 0x4)
             {
                 fizzicalNormal(lasso, dt, &newPoint);
@@ -980,7 +866,7 @@ void zLasso_ResetTimer(zLasso* lasso, F32 interpTime)
 
 static void fizzicalRadius(zLasso* lasso, F32 dt, xVec3* newPoint)
 {
-    lasso->crRadius = -((2.0f * (0.75f - lasso->crSlack) * dt) - lasso->crRadius);
+    lasso->crRadius -= 2.0f * (0.75f - lasso->crSlack) * dt;
     if (lasso->crRadius < 0.0f)
     {
         lasso->crRadius = 0.0f;
@@ -1000,7 +886,8 @@ static void fizzicalNormal(zLasso* lasso, F32 dt, xVec3* newPoint)
 
     xVec3Sub(&sp8, &lasso->lastRefs[lasso->reindex[0]], &lasso->lastRefs[lasso->reindex[1]]);
     temp_f31 = xVec3Dot(&lasso->crNormal, &sp8);
-    xVec3AddScaled(&lasso->crNormal, &sp8, 1.1f * (-temp_f31 / xVec3Length(&sp8)));
+    F32 len = xVec3Length(&sp8);
+    xVec3AddScaled(&lasso->crNormal, &sp8, 1.1f * (-temp_f31 / len));
     xVec3Normalize(&lasso->crNormal, &lasso->crNormal);
 }
 
@@ -1013,19 +900,19 @@ static void fizzicalHonda(zLasso* lasso, F32 dt, xVec3* newPoint)
     xVec3AddScaled(&lasso->honda, &lasso->crNormal, -xVec3Dot(&lasso->crNormal, &lasso->honda));
     xVec3Normalize(&lasso->honda, &lasso->honda);
     xVec3SMulBy(&lasso->honda, lasso->crRadius);
-    
+
     if ((negativeHondaX != 0) && (lasso->honda.x > 0.0f))
     {
         xSndPlay3D(xStrHash("sound_rope_windup"), 0.77f, 0.0f, 0U, 0x10000U, &lasso->anchor, 100.0f,
                    SND_CAT_GAME, 0.0f);
         negativeHondaX = 0;
     }
-    
+
     if (lasso->honda.x < 0.0f)
     {
         negativeHondaX = 1;
     }
-    
+
     xVec3AddTo(&lasso->honda, &lasso->crCenter);
 }
 
@@ -1073,17 +960,6 @@ void zLasso_scenePrepare()
 {
     sNumGuideLists = 0;
     sCurrentGuide = NULL;
-}
-
-void xMat4x3RotC(xMat4x3* m, F32 f1, F32 f2, F32 f3, F32 f4)
-{
-    xMat3x3RotC(m, f1, f2, f3, f4);
-    xVec3Copy(&m->pos, &g_O3);
-}
-
-void xMat4x3Rot(xMat4x3* m, const xVec3* v, F32 f)
-{
-    xMat4x3RotC(m, v->x, v->y, v->z, f);
 }
 
 static void initVertMap(zLassoGuide* guide)
@@ -1155,7 +1031,11 @@ static void initVertMap(zLassoGuide* guide)
     } while (curr != init);
 }
 
+#if defined(PS2)
+static void vec2vecMat(xMat4x3* m, const xVec3* v1, const xVec3* v2)
+#else
 static void vec2vecMat(xMat4x3* m, xVec3* v1, xVec3* v2)
+#endif
 {
     xVec3 v3;
     xVec3Cross(&v3, v1, v2);
@@ -1191,4 +1071,15 @@ static void bakeMorphAnim(RpGeometry* geom, void* anim)
             xMat4x3Toworld(&v[j], &mat, &v[j]);
         }
     }
+}
+
+inline void xMat4x3Rot(xMat4x3* m, const xVec3* v, F32 f)
+{
+    xMat4x3RotC(m, v->x, v->y, v->z, f);
+}
+
+inline void xMat4x3RotC(xMat4x3* m, F32 f1, F32 f2, F32 f3, F32 f4)
+{
+    xMat3x3RotC(m, f1, f2, f3, f4);
+    xVec3Copy(&m->pos, &g_O3);
 }

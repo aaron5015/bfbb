@@ -388,6 +388,16 @@ bool iHostSetChildEnv(const char* name, const char* value)
     return iHostSetEnv(name, value);
 }
 
+FILE* iHostPipeOpen(const char* command)
+{
+    return popen(command, "w");
+}
+
+int iHostPipeClose(FILE* pipe)
+{
+    return pclose(pipe);
+}
+
 bool iHostRunDetached(const char* exe, const char* workingDir)
 {
 #ifdef __ANDROID__

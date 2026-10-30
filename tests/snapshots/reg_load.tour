@@ -1,0 +1,58 @@
+# Loading a game from the pause menu at 640x480 on Direct3D 9. The case saves
+# in Jellyfish Fields first, into the empty scratch save folder, then takes
+# the taxi to Downtown (all_warps: Down picks it on the pause page, A twice
+# rides). From there Load Game, three down in the options, lists that one save;
+# A asks to confirm, Up picks Yes, and the game comes back in Jellyfish Fields
+# at the spawn point.
+#
+# The list and the question show the save's date and the disk's free space.
+
+wait 2400
+press b
+wait 120
+press start
+wait 60
+press x
+wait 60
+press down
+wait 30
+press down
+wait 30
+press a
+wait 90
+press a
+wait 240
+press b
+wait 60
+press start
+wait 60
+press down
+wait 30
+press a
+wait 30
+press a
+wait 900
+press b
+wait 60
+press start
+wait 60
+press x
+wait 60
+press down
+wait 30
+press down
+wait 30
+press down
+wait 30
+shot reg_load_options 0
+press a
+wait 90
+shot reg_load_list 0
+press a
+wait 60
+press up
+wait 30
+shot reg_load_confirm 0
+press a
+wait 1200
+shot reg_load_loaded 0

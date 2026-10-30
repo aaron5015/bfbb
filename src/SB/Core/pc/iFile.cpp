@@ -1,6 +1,10 @@
 #include "iFile.h"
 #include "iConfig.h"
+#include "iGCMem.h"
+#include "iGCSwap.h"
 #include "iHost.h"
+#include "iModFolder.h"
+#include "iSaveFile.h"
 
 #include "xFile.h"
 
@@ -45,10 +49,11 @@ static S32 sOpenedAny;
 // what it means on the console, and an absolute one is honoured as given.
 static char sAssetRoot[512];
 
-// The mod folder, with a trailing slash, or "" when there is none. A file here
-// is read in place of the asset root's file of the same relative name. See
-// iModOverride.
-static char sModRoot[512];
+// The mod folders that were found, highest priority first, each with a
+// trailing slash. A file in one is read in place of the asset root's file of
+// the same relative name. See iModOverride.
+static iModFolderPath sModRoots[kModFolderMax];
+static S32 sModCount;
 
 // Where the game's files are. No trailing slash is added -- the callers that
 // print it want the folder someone named and not a decorated version of it,
@@ -107,22 +112,19 @@ const char* iFileModRoot()
 
 const char* iFileModName()
 {
-    static char sName[256];
-
-    size_t n = strlen(sModRoot);
-    while (n > 0 && sModRoot[n - 1] == '/')
-    {
-        n--;
-    }
-
-    size_t start = n;
-    while (start > 0 && sModRoot[start - 1] != '/' && sModRoot[start - 1] != ':')
-    {
-        start--;
-    }
-
-    snprintf(sName, sizeof(sName), "%.*s", (int)(n - start), sModRoot + start);
+    static char sName[512];
+    iModFolderSaveName(sModRoots, sModCount, sName, sizeof(sName));
     return sName;
+}
+
+S32 iFileModCount()
+{
+    return sModCount;
+}
+
+const char* iFileModFolder(S32 i)
+{
+    return sModRoots[i];
 }
 
 static bool iPathIsAbsolute(const char* path)
@@ -175,24 +177,24 @@ void iFileInit()
         iFileSetPath((char*)assets);
     }
 
-    sModRoot[0] = 0;
+    sModCount = 0;
 
-    const char* mod = iFileModRoot();
-    if (mod[0] != 0)
+    iModFolderPath listed[kModFolderMax];
+    const S32 count = iModFolderSplit(iFileModRoot(), listed, kModFolderMax);
+    for (S32 i = 0; i < count; i++)
     {
-        if (!iHostPathExists(mod))
+        char folder[kModFolderMaxPath];
+        if (!iModFolderResolve(listed[i], folder, sizeof(folder) - 1))
         {
-            printf("bfbb: mod folder not found, ignored: %s\n", mod);
-            fflush(stdout);
+            printf("bfbb: mod folder not found, ignored: %s\n", listed[i]);
         }
         else
         {
-            size_t n = strlen(mod);
-            snprintf(sModRoot, sizeof(sModRoot), "%s%s", mod, mod[n - 1] == '/' ? "" : "/");
-            printf("bfbb: mod folder: %s\n", mod);
-            fflush(stdout);
+            snprintf(sModRoots[sModCount++], kModFolderMaxPath, "%s/", folder);
+            printf("bfbb: mod folder: %s\n", folder);
         }
     }
+    fflush(stdout);
 
     for (S32 i = 0; i < 4; i++)
     {
@@ -407,13 +409,10 @@ const char* iFileMissingAssetPath()
 
 // Which console's packer wrote the assets, out of boot.HIP's own header.
 //
-// The port reads the Xbox release. A GameCube or PS2 set does not announce
+// The port reads the Xbox and GameCube releases. A PS2 set does not announce
 // itself -- it loads, and then fails somewhere far from the cause, because the
 // packer's container is the same on every platform and only what is inside it
-// differs. A GameCube boot.HIP gets as far as the animation tables before
-// zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a big-endian count of 74
-// as 1,241,513,984 and walks off the end of memory. That crash says nothing
-// about what is actually wrong.
+// differs.
 //
 // HIPA holds PACK, PACK holds PLAT, and PLAT is a run of NUL-terminated
 // strings: a two-letter id, then the long name, then the video standard, the
@@ -498,6 +497,13 @@ static bool iHipPlatform(const char* path, char* id, size_t idsize, char* name, 
     return false;
 }
 
+bool iFileIsGameCubePackage(const char* path)
+{
+    char id[8];
+    char name[32];
+    return iHipPlatform(path, id, sizeof(id), name, sizeof(name)) && strcmp(name, "GameCube") == 0;
+}
+
 const char* iFileAssetPlatform(const char** longName)
 {
     static char sId[8];
@@ -564,20 +570,20 @@ static bool iHasPackageExtension(const char* path)
            (iHostStrCaseCmp(path + n - 4, ".HIP") == 0 || iHostStrCaseCmp(path + n - 4, ".HOP") == 0);
 }
 
-// The mod folder's copy of a file under the asset root. When the mod has one,
-// its path is written over `path` and the result is true.
+// The first mod folder's copy of a file under the asset root. When a mod has
+// one, its path is written over `path` and the result is true.
 //
-// Matched on the path relative to the asset root, so `gl/gl01.HIP` in the mod
+// Matched on the path relative to the asset root, so `gl/gl01.HIP` in a mod
 // folder replaces `gl/gl01.HIP` in the assets, and whatever SB.INI's PATH= did
 // to the base path applies to both. A path outside the asset root is left
-// alone.
+// alone. The mods are asked in priority order.
 //
-// A package from another console's release is refused and the original is
-// read: the port only understands the Xbox layout, and a GameCube HIP loads
-// and then crashes far from the cause. See iFileAssetPlatform.
+// A package from a release other than the Xbox's or the GameCube's is refused
+// and the next mod, or the original, is read: it would load and then crash far
+// from the cause. See iFileAssetPlatform.
 static bool iModOverride(char* path, size_t pathsize)
 {
-    if (sModRoot[0] == 0)
+    if (sModCount == 0)
     {
         return false;
     }
@@ -606,50 +612,59 @@ static bool iModOverride(char* path, size_t pathsize)
         rel += 2;
     }
 
-    char candidate[512];
-    if (snprintf(candidate, sizeof(candidate), "%s%s", sModRoot, rel) >= (int)sizeof(candidate))
+    for (S32 m = 0; m < sModCount; m++)
     {
-        return false;
-    }
-
-    if (!iResolveCaseInsensitive(candidate, sizeof(candidate)))
-    {
-        return false;
-    }
-
-    if (iHasPackageExtension(candidate))
-    {
-        char id[8];
-        char longName[32];
-        if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
-            strcmp(id, "XB") != 0)
+        char candidate[512];
+        if (snprintf(candidate, sizeof(candidate), "%s%s", sModRoots[m], rel) >=
+            (int)sizeof(candidate))
         {
-            if (iModFirstReport(rel))
+            continue;
+        }
+
+        if (!iResolveCaseInsensitive(candidate, sizeof(candidate)))
+        {
+            continue;
+        }
+
+        char leaf[256];
+        iSaveFileLeaf(sModRoots[m], leaf, sizeof(leaf));
+
+        if (iHasPackageExtension(candidate))
+        {
+            char id[8];
+            char longName[32];
+            if (iHipPlatform(candidate, id, sizeof(id), longName, sizeof(longName)) &&
+                strcmp(id, "XB") != 0 && strcmp(id, "GC") != 0)
             {
-                printf("bfbb: mod: %s is from the %s release, not the Xbox one; using the "
-                       "original\n",
-                       rel, longName[0] != '\0' ? longName : id);
-                fflush(stdout);
+                if (iModFirstReport(rel))
+                {
+                    printf("bfbb: mod: %s in %s is from the %s release, not the Xbox or "
+                           "GameCube one; passed over\n",
+                           rel, leaf, longName[0] != '\0' ? longName : id);
+                    fflush(stdout);
+                }
+                continue;
             }
+        }
+
+        // `rel` points into `path`, so it is reported before path is overwritten.
+        size_t len = strlen(candidate);
+        if (len >= pathsize)
+        {
             return false;
         }
+
+        if (iModFirstReport(rel))
+        {
+            printf("bfbb: mod: %s from %s\n", rel, leaf);
+            fflush(stdout);
+        }
+
+        memcpy(path, candidate, len + 1);
+        return true;
     }
 
-    // `rel` points into `path`, so it is reported before path is overwritten.
-    size_t len = strlen(candidate);
-    if (len >= pathsize)
-    {
-        return false;
-    }
-
-    if (iModFirstReport(rel))
-    {
-        printf("bfbb: mod: %s\n", rel);
-        fflush(stdout);
-    }
-
-    memcpy(path, candidate, len + 1);
-    return true;
+    return false;
 }
 
 bool iFileModReplaces(const char* rel)
@@ -789,6 +804,110 @@ static void reportMissingFile(const char* name, const char* path)
     }
 
     fflush(stdout);
+}
+
+// Which packages are the GameCube's, keyed by the packer's read data, which
+// lives as long as its package. Every package's PLAT chunk sets or clears its
+// own entry, so a read-data address reused by a later package is corrected
+// before any of that package's assets arrive.
+static st_PACKER_READ_DATA* sGCPackages[64];
+
+void iFilePackagePlatform(st_PACKER_READ_DATA* pr, const char* platname)
+{
+    const S32 kSlots = (S32)(sizeof(sGCPackages) / sizeof(sGCPackages[0]));
+    bool gc = platname != NULL && strcmp(platname, "GameCube") == 0;
+
+    S32 free = -1;
+    for (S32 i = 0; i < kSlots; i++)
+    {
+        if (sGCPackages[i] == pr)
+        {
+            if (!gc)
+            {
+                sGCPackages[i] = NULL;
+            }
+            return;
+        }
+        if (sGCPackages[i] == NULL && free < 0)
+        {
+            free = i;
+        }
+    }
+
+    if (gc && free >= 0)
+    {
+        sGCPackages[free] = pr;
+        printf("bfbb: a GameCube package: its assets are byte-swapped as they load\n");
+        fflush(stdout);
+    }
+}
+
+// Once per type, what could not be swapped. RenderWare streams and audio are
+// not byte-swapped by design and are not reported.
+static void iFileReportGCType(U32 type, const char* what)
+{
+    static U32 sReported[32];
+    static S32 sCount;
+
+    for (S32 i = 0; i < sCount; i++)
+    {
+        if (sReported[i] == type)
+        {
+            return;
+        }
+    }
+    if (sCount < (S32)(sizeof(sReported) / sizeof(sReported[0])))
+    {
+        sReported[sCount++] = type;
+    }
+
+    printf("bfbb: GameCube asset type '%c%c%c%c' %s\n", (char)(type >> 24), (char)(type >> 16),
+           (char)(type >> 8), (char)type, what);
+    fflush(stdout);
+}
+
+void iFileAssetRead(st_PACKER_READ_DATA* pr, U32 type, void* data, S32 size)
+{
+    if (data == NULL || size <= 0 || pr == NULL)
+    {
+        return;
+    }
+
+    bool gc = false;
+    for (size_t i = 0; i < sizeof(sGCPackages) / sizeof(sGCPackages[0]); i++)
+    {
+        gc = gc || sGCPackages[i] == pr;
+    }
+    if (!gc)
+    {
+        return;
+    }
+
+    switch (iGCSwapAsset(type, data, (U32)size, iGCMemLink))
+    {
+    case IGCSWAP_DONE:
+        break;
+    case IGCSWAP_MALFORMED:
+        iFileReportGCType(type, "was shorter than its layout; partly swapped");
+        break;
+    case IGCSWAP_UNKNOWN:
+        switch (type)
+        {
+        case 'MODL':
+        case 'RWTX':
+        case 'JSP ':
+        case 'BSP ':
+        case 'SND ':
+        case 'SNDS':
+        case 'CSN ':
+        case 'RAW ':
+            break;
+        default:
+            iFileReportGCType(type, "has no swap rule; left as it is");
+            break;
+        }
+        break;
+    }
 }
 
 U32 iFileOpen(const char* name, S32 flags, tag_xFile* file)

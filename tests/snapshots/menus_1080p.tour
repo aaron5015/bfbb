@@ -1,0 +1,14 @@
+# Title screen, main menu and the settings screen at 1920x1080, HUD at the
+# screen edges. Intro movies are off, so the title is up by frame 660.
+
+wait 900
+shot title_1080p 0
+press start
+wait 180
+shot main_menu_1080p 0
+press down
+press down
+press down
+press a
+wait 120
+shot settings_1080p 0

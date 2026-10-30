@@ -5,14 +5,14 @@
 #include "zScene.h"
 #include "zTextBox.h"
 
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <string.h>
+#include <new.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cstring>
-#else
-#include <cstring>
-#endif
-#ifdef __MWERKS__
 #include <PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new.h>
 #else
+#include <cstring>
 #include <new>
 #endif
 #include <types.h>

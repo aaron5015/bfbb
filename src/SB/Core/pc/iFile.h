@@ -47,13 +47,19 @@ U32 iFileOpen(const char* name, S32 flags, tag_xFile* file);
 // working directory. Separators are slashes whichever was typed.
 const char* iFileAssetRoot();
 
-// PC-only. The mod folder: `[assets] mod` from config.ini, or BFBB_MOD when
-// that is set. "" when there is none. A file under it is read in place of the
-// asset root's file at the same relative path; the asset root is never
-// written to.
+// PC-only. The mod folders: `[assets] mod` from config.ini, or BFBB_MOD when
+// that is set, as written -- one folder, or several separated by '|' with the
+// highest priority first (iModFolder.h). "" when there is none. A file under
+// one is read in place of the asset root's file at the same relative path;
+// the asset root is never written to.
 const char* iFileModRoot();
 
-// PC-only. The last component of the mod folder iFileInit accepted, like
+// PC-only. The mod folders iFileInit found, highest priority first, each with
+// a trailing slash.
+S32 iFileModCount();
+const char* iFileModFolder(S32 i);
+
+// PC-only. The last components of those folders joined with '+', like
 // "BFBBMix", or "" when no mod is in use. isavegame keeps a mod's saves apart
 // under this name.
 const char* iFileModName();
@@ -89,6 +95,21 @@ void iFileMissingPackage(const char* subdirPath, const char* rootPath);
 // they are.
 struct st_PACKER_READ_FUNCS;
 st_PACKER_READ_FUNCS* iFilePackageReadFuncs(st_PACKER_READ_FUNCS* funcs);
+
+// PC-only. The packer's hooks for packages from another console's release.
+// xpkrsvc.cpp calls iFilePackagePlatform with each package's PLAT name as it
+// reads the header, and iFileAssetRead with every asset before it is
+// transformed or used. An asset from a "GameCube" package is byte-swapped in
+// place there; see iGCSwap.h. Macros on the GameCube, where there is nothing
+// to do.
+struct st_PACKER_READ_DATA;
+void iFilePackagePlatform(st_PACKER_READ_DATA* pr, const char* platname);
+void iFileAssetRead(st_PACKER_READ_DATA* pr, U32 type, void* data, S32 size);
+
+// PC-only. Whether the package at `path`, a resolved host path such as an
+// open tag_iFile's, is from the GameCube release. For data read straight from
+// a package rather than through the packer: a cutscene's stream.
+bool iFileIsGameCubePackage(const char* path);
 
 S32 iFileSeek(tag_xFile* file, S32 offset, S32 whence);
 U32 iFileRead(tag_xFile* file, void* buf, U32 size);

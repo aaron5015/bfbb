@@ -73,6 +73,15 @@
 #define xScreenUIBleedBoxed(tex) iScreenUIBleedBoxed(tex)
 #define xScreenUIDrawBleed(x1, y1, x2, y2, z, uv) iScreenUIDrawBleed(x1, y1, x2, y2, z, uv)
 
+// The recip camera z zUI gives its sprites, from the near screen z.
+//
+// The console computes 1/z and drops it: RwIm2DVertexSetRecipCameraZ is a
+// no-op there. On PC the macro writes the vertex's w, which librw's im2d
+// shaders use as the clip w. The near screen z is -1 on GL3, and a negative w
+// clips the whole sprite. 1 is the default w on PC; see RwIm2DVertex in
+// rwplcore.h.
+#define xScreenUIRecipZ(z) 1.0f
+
 // Is this normalized UI-space rect entirely off the screen?
 //
 // One macro rather than four bounds, so that the console compiles the exact
@@ -116,7 +125,9 @@
 #define xScreenAnchorX(x) (x)
 #define xScreenAnchorY(y) (y)
 
-#define xScreenUIRectOffscreen(r)                                                             \
+#define xScreenUIRecipZ(z) (1.0f / (z))
+
+#define xScreenUIRectOffscreen(r)                                                           \
     ((r).x + (r).w < 0.0f || (r).x > 1.0f || (r).y + (r).h < 0.0f || (r).y > 1.0f)
 
 #define xScreenWidenToScreen(r) ((void)0)

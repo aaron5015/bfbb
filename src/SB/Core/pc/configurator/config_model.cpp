@@ -7,6 +7,7 @@
 #include "iHost.h"
 #include "iPadTokens.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +62,14 @@ namespace
                 const char* have =
                     iConfigEditGet(gModel.file, kDeviceSections[d], kPadBindButtons[i].name);
                 gModel.binds[d][i].present = (have != NULL);
+
+                // A line with nothing after the '=' is a button bound to
+                // nothing. An empty box here means the default, so it is shown
+                // as the word that says so; saving would otherwise drop it.
+                if (have != NULL && have[0] == '\0')
+                {
+                    have = "none";
+                }
                 snprintf(gModel.binds[d][i].text, kConfigModelMaxValue, "%s",
                          have != NULL ? have : "");
             }
@@ -298,6 +307,19 @@ const iConfigSetting* ConfigModelSetting(S32 i)
     return &kConfigSettings[i];
 }
 
+S32 ConfigModelFind(const char* section, const char* name)
+{
+    for (S32 i = 0; i < kConfigSettingCount; i++)
+    {
+        if (strcmp(kConfigSettings[i].section, section) == 0 &&
+            strcmp(kConfigSettings[i].name, name) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
 S32 ConfigModelSectionCount()
 {
     return gModel.sectionCount;
@@ -492,6 +514,79 @@ void ConfigModelBindDescribeDefault(ConfigModelDevice device, S32 row, char* out
 const iPadBindToken* ConfigModelBindTokens(ConfigModelDevice device, S32* count)
 {
     return device == CONFIG_MODEL_KEYBOARD ? iPadKeyTokens(count) : iPadPadTokens(count);
+}
+
+namespace
+{
+    // What a row runs with: the box, or the default when the box is empty. A
+    // preset's printed letter is placed where an Xbox pad prints it, as the
+    // default's description does for "auto".
+    void parseInForce(ConfigModelDevice device, S32 row, iPadBind* out)
+    {
+        const char* text = gModel.binds[device][row].text;
+        char letter[2];
+
+        if (text[0] == '\0')
+        {
+            if (device == CONFIG_MODEL_KEYBOARD)
+            {
+                text = kPadBindButtons[row].key;
+            }
+            else
+            {
+                const char* preset = modelPreset();
+                const bool automatic = iHostStrCaseCmp(preset, "auto") == 0;
+                text = iPadBindPresetEntry(automatic ? "xbox" : preset, row);
+                if (text == NULL)
+                {
+                    text = kPadBindButtons[row].pad;
+                }
+                else if (text[0] == '#')
+                {
+                    letter[0] = (char)tolower((unsigned char)text[1]);
+                    letter[1] = '\0';
+                    text = letter;
+                }
+            }
+        }
+
+        S32 count;
+        const iPadBindToken* tokens = ConfigModelBindTokens(device, &count);
+        iPadBindParse(text, tokens, count, kPadBindButtons[row].name, out);
+    }
+} // namespace
+
+void ConfigModelBindDescribeOverlaps(ConfigModelDevice device, S32 row, char* out, size_t outSize)
+{
+    out[0] = '\0';
+
+    iPadBind mine;
+    parseInForce(device, row, &mine);
+
+    size_t have = 0;
+    for (S32 i = 0; i < ConfigModelBindCount(); i++)
+    {
+        if (i == row)
+        {
+            continue;
+        }
+
+        iPadBind other;
+        parseInForce(device, i, &other);
+        if (!iPadBindOverlap(mine, other))
+        {
+            continue;
+        }
+
+        const int n = snprintf(out + have, outSize - have, "%s%s", have == 0 ? "" : ", ",
+                               kPadBindButtons[i].name);
+        if (n < 0 || (size_t)n >= outSize - have)
+        {
+            out[have] = '\0';
+            break;
+        }
+        have += (size_t)n;
+    }
 }
 
 bool ConfigModelBindResetAll(ConfigModelDevice device)

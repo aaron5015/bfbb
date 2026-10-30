@@ -1,10 +1,20 @@
 #include "iPad.h"
+#include "iConfig.h"
+#include "iPadBind.h"
 #include "iPadHost.h"
+#include "iPadStick.h"
 
 #include <types.h>
 
 #include "xPad.h"
 #include "xTRC.h"
+
+static iPadMenuHookFn sMenuHook;
+
+void iPadSetMenuHook(iPadMenuHookFn fn)
+{
+    sMenuHook = fn;
+}
 
 S32 iPadInit()
 {
@@ -130,14 +140,45 @@ S32 iPadUpdate(_tagxPad* pad, U32* on)
     // wants four. A host controller has four, so nothing has to be shared.
     *on = host->buttons;
 
+    // xPadUpdate sets this flag just before calling here while a menu reads
+    // both sticks as a d-pad, which is exactly while one is on screen.
+    const U32 kAnalogIsDigital = 0x10;
+
+    if (pad->port == 0 && sMenuHook != NULL)
+    {
+        *on |= sMenuHook((pad->flags & kAnalogIsDigital) != 0);
+    }
+
     F32 x;
     F32 y;
 
     iPadShapeStick(host->stick_x, host->stick_y, IPAD_STICK_MAX, IPAD_STICK_XY, &x, &y);
+
+    // Holding walk puts the stick in the game's walk bracket, which for
+    // SpongeBob is the tiptoe and its xylophone loop. SB.INI walks below 0.8 of
+    // full, measured past G.AnalogMin's 32 of 127. Each axis is clamped to
+    // iPadConvStick's 40 before the scale, so a push along an axis, which the
+    // octagon takes to 72, reads the same as a diagonal: half of 40 is 64 of
+    // 127, 0.41 of full on every heading.
+    if (host->buttons & XPAD_BUTTON_WALK)
+    {
+        const F32 kWalk = 0.5f;
+        x = kWalk * (x > 40.0f ? 40.0f : (x < -40.0f ? -40.0f : x));
+        y = kWalk * (y > 40.0f ? 40.0f : (y < -40.0f ? -40.0f : y));
+    }
+
     pad->analog1.x = iPadConvStick(x);
     pad->analog1.y = -iPadConvStick(y);
 
-    iPadShapeStick(host->substick_x, host->substick_y, IPAD_SUBSTICK_MAX, IPAD_SUBSTICK_XY, &x, &y);
+    // Only the camera gets the inverted axes, not a menu.
+    F32 camX = host->substick_x;
+    F32 camY = host->substick_y;
+    if (!(pad->flags & kAnalogIsDigital))
+    {
+        iPadStickInvertCamera(&camX, &camY);
+    }
+
+    iPadShapeStick(camX, camY, IPAD_SUBSTICK_MAX, IPAD_SUBSTICK_XY, &x, &y);
     pad->analog2.x = iPadConvStick(x);
     pad->analog2.y = -iPadConvStick(y);
 
@@ -210,4 +251,9 @@ U32 iPadTalkBoxButtons(U32 pressed)
         swapped |= XPAD_BUTTON_O;
     }
     return swapped;
+}
+
+U8 iPadVibrationDefault()
+{
+    return iConfigGetBool("input.vibration", TRUE) ? 1 : 0;
 }

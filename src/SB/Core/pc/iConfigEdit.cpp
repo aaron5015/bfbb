@@ -327,6 +327,31 @@ const char* iConfigEditGet(const iConfigEditFile* file, const char* section, con
     return value;
 }
 
+bool iConfigEditKeyAt(const iConfigEditFile* file, S32 index, const char** section,
+                      const char** name)
+{
+    if (file == NULL || index < 0)
+    {
+        return false;
+    }
+
+    for (S32 i = 0; i < file->count; i++)
+    {
+        const Line* line = &file->lines[i];
+        if (line->key[0] == '\0')
+        {
+            continue;
+        }
+        if (index-- == 0)
+        {
+            *section = line->section;
+            *name = line->key;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool iConfigEditSet(iConfigEditFile* file, const char* section, const char* name,
                     const char* value)
 {

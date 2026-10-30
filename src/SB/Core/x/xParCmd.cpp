@@ -4,6 +4,15 @@
 #include "xVec3Inlines.h"
 #include "xMath.h"
 #include "xMathInlines.h"
+#if defined(XBOX)
+#include "xMath3.h"
+static inline F32 xParCmdRandom()
+{
+    return xrand() * 2.3283064e-10f;
+}
+#else
+#define xParCmdRandom xurand
+#endif
 
 struct xCmdInfo
 {
@@ -54,7 +63,11 @@ void xParCmdInit()
                     xParCmd_DampenSpeed_Update);
 }
 
-void xParCmdRegister(U32 parType, U32 size, xParCmdUpdateFunc func)
+#if defined(XBOX)
+inline
+#endif
+    void
+    xParCmdRegister(U32 parType, U32 size, xParCmdUpdateFunc func)
 {
     sCmdInfo[parType].type = parType;
     sCmdInfo[parType].size = size;
@@ -89,7 +102,9 @@ xParCmdUpdateFunc xParCmdGetUpdateFunc(U32 parType)
 
 void xParCmdKillSlow_Update(xParCmd* c, xParGroup* ps, F32 dt)
 {
+#if !defined(XBOX) && !defined(PS2)
     xPar* p = ps->m_root;
+#endif
     xParCmdKillSlow* cmd = (xParCmdKillSlow*)c->tasset;
 
     // The test is against m_vel, a displacement per FRAME, whose square shrinks
@@ -99,6 +114,9 @@ void xParCmdKillSlow_Update(xParCmd* c, xParGroup* ps, F32 dt)
     F32 speedLimit = cmd->speedLimitSqr * dt * (60.0f * dt);
 #else
     F32 speedLimit = cmd->speedLimitSqr * dt;
+#endif
+#if defined(XBOX) || defined(PS2)
+    xPar* p = ps->m_root;
 #endif
 
     if (cmd->kill_less_than)
@@ -129,8 +147,13 @@ void xParCmdKillSlow_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
 void xParCmdAge_Update(xParCmd* c, xParGroup* ps, F32 dt)
 {
+#if !defined(XBOX) && !defined(PS2)
     xPar* p = ps->m_root;
+#endif
     F32 age_rate = ((xParCmdAge*)c->tasset)->unknown * dt;
+#if defined(XBOX) || defined(PS2)
+    xPar* p = ps->m_root;
+#endif
 
     while (p)
     {
@@ -141,7 +164,11 @@ void xParCmdAge_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
 void xParCmdFollow_Update(xParCmd* c, xParGroup* ps, F32 dt)
 {
+#if defined(XBOX)
+    xPar* p;
+#else
     xPar* p = ps->m_root;
+#endif
     xParCmdFollow* cmd = (xParCmdFollow*)c->tasset;
 
     // xPar::m_vel is a displacement per FRAME -- xParCmdVelocityApply_Update
@@ -152,6 +179,9 @@ void xParCmdFollow_Update(xParCmd* c, xParGroup* ps, F32 dt)
     F32 mdt = cmd->gravity * dt * (60.0f * dt);
 #else
     F32 mdt = cmd->gravity * dt;
+#endif
+#if defined(XBOX)
+    p = ps->m_root;
 #endif
 
     while (p && p->m_next)
@@ -175,7 +205,7 @@ void xParCmdFollow_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
 void xParCmdOrbitPoint_Update(xParCmd* c, xParGroup* ps, F32 dt)
 {
-    xPar* p = ps->m_root;
+    xPar* p;
     xParCmdOrbitPoint* cmd = (xParCmdOrbitPoint*)c->tasset;
 
     // An acceleration on a per-frame displacement. See xParCmdFollow_Update.
@@ -184,6 +214,7 @@ void xParCmdOrbitPoint_Update(xParCmd* c, xParGroup* ps, F32 dt)
 #else
     F32 mdt = cmd->gravity * dt;
 #endif
+    p = ps->m_root;
 
     while (p)
     {
@@ -210,7 +241,7 @@ void xParCmdOrbitPoint_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
 void xParCmdOrbitLine_Update(xParCmd* c, xParGroup* ps, F32 dt)
 {
-    xPar* p = ps->m_root;
+    xPar* p;
     xParCmdOrbitLine* cmd = (xParCmdOrbitLine*)c->tasset;
 
     // An acceleration on a per-frame displacement. See xParCmdFollow_Update.
@@ -219,6 +250,7 @@ void xParCmdOrbitLine_Update(xParCmd* c, xParGroup* ps, F32 dt)
 #else
     F32 mdt = cmd->gravity * dt;
 #endif
+    p = ps->m_root;
 
     while (p)
     {
@@ -301,9 +333,9 @@ void xParCmdMoveRandom_Update(xParCmd* c, xParGroup* ps, F32 dt)
     xVec3 var_28;
     var_28 = cmd->dir;
 
-    var_28.x *= 2.0f * xurand();
-    var_28.y *= 2.0f * xurand();
-    var_28.z *= 2.0f * xurand();
+    var_28.x *= 2.0f * xParCmdRandom();
+    var_28.y *= 2.0f * xParCmdRandom();
+    var_28.z *= 2.0f * xParCmdRandom();
 
     xVec3Sub(&var_28, &var_28, &cmd->dir);
     xVec3SMulBy(&var_28, dt);
@@ -336,17 +368,19 @@ void xParCmdMoveRandomPar_Update(xParCmd* c, xParGroup* ps, F32 dt)
     }
 
     F32 rate_scale = 1.0f / xsqrt(60.0f * dt);
-    F32 f31 = cmd->dim.x * (dt / 2.0f) * rate_scale;
-    F32 f30 = cmd->dim.z * (dt / 2.0f) * rate_scale;
+    dt *= 0.5f;
+    F32 f31 = cmd->dim.x * dt * rate_scale;
+    F32 f30 = cmd->dim.z * dt * rate_scale;
 #else
-    F32 f31 = cmd->dim.x * (dt / 2.0f);
-    F32 f30 = cmd->dim.z * (dt / 2.0f);
+    dt *= 0.5f;
+    F32 f31 = cmd->dim.x * dt;
+    F32 f30 = cmd->dim.z * dt;
 #endif
 
     while (p)
     {
-        p->m_pos.x += f31 * (xurand() - 0.5f);
-        p->m_pos.z += f30 * (xurand() - 0.5f);
+        p->m_pos.x += f31 * (xParCmdRandom() - 0.5f);
+        p->m_pos.z += f30 * (xParCmdRandom() - 0.5f);
 
         p = p->m_next;
     }
@@ -380,9 +414,9 @@ void xParCmdRandomVelocityPar_Update(xParCmd* c, xParGroup* ps, F32 dt)
     {
         xMat3x3 var_88;
 
-        F32 y = 2.0f * (f31 * xurand()) - f31;
-        F32 x = 2.0f * (f30 * xurand()) - f30;
-        F32 z = 2.0f * (f29 * xurand()) - f29;
+        F32 y = 2.0f * (f31 * xParCmdRandom()) - f31;
+        F32 x = 2.0f * (f30 * xParCmdRandom()) - f30;
+        F32 z = 2.0f * (f29 * xParCmdRandom()) - f29;
 
         xMat3x3Euler(&var_88, x, y, z);
         xMat3x3LMulVec(&p->m_vel, &var_88, &p->m_vel);
@@ -397,8 +431,14 @@ void xParCmdApplyWind_Update(xParCmd* c, xParGroup* ps, F32 dt)
     xParCmdApplyWind* cmd = (xParCmdApplyWind*)c->tasset;
 
     // The wind direction is hardcoded to (1, _, 1); only its magnitude is data-driven.
+#if defined(XBOX)
+    xVec3 wind;
+    wind.x = 1.0f;
+    wind.z = 1.0f;
+#else
     F32 wind_x = 1.0f;
     F32 wind_z = 1.0f;
+#endif
 
     // An acceleration on a per-frame displacement. See xParCmdFollow_Update.
 #ifdef PLATFORM_PC
@@ -407,15 +447,25 @@ void xParCmdApplyWind_Update(xParCmd* c, xParGroup* ps, F32 dt)
     F32 mag = cmd->unknown * dt;
 #endif
 
+#if defined(XBOX)
+    wind.x *= mag;
+    wind.z *= mag;
+#else
     wind_x *= mag;
     wind_z *= mag;
+#endif
 
     p = ps->m_root;
 
     while (p)
     {
+#if defined(XBOX)
+        p->m_vel.x += wind.x;
+        p->m_vel.z += wind.z;
+#else
         p->m_vel.x += wind_x;
         p->m_vel.z += wind_z;
+#endif
 
         p = p->m_next;
     }
@@ -457,13 +507,13 @@ void xParCmdRotPar_Update(xParCmd* c, xParGroup* ps, F32 dt)
         // turn is a small number, so a shorter frame rounds it to zero and the
         // particle stops turning: a 255-a-second spin holds still above 255
         // fps and runs at half speed from 128.
-        p->m_rotdeg[0] += rot_step((f30 * xurand() + f27) * (1.0f / 60.0f), dt);
-        p->m_rotdeg[1] += rot_step((f29 * xurand() + f26) * (1.0f / 60.0f), dt);
-        p->m_rotdeg[2] += rot_step((f28 * xurand() + f25) * (1.0f / 60.0f), dt);
+        p->m_rotdeg[0] += rot_step((f30 * xParCmdRandom() + f27) * (1.0f / 60.0f), dt);
+        p->m_rotdeg[1] += rot_step((f29 * xParCmdRandom() + f26) * (1.0f / 60.0f), dt);
+        p->m_rotdeg[2] += rot_step((f28 * xParCmdRandom() + f25) * (1.0f / 60.0f), dt);
 #else
-        p->m_rotdeg[0] += (U8)(dt * (f30 * xurand() + f27));
-        p->m_rotdeg[1] += (U8)(dt * (f29 * xurand() + f26));
-        p->m_rotdeg[2] += (U8)(dt * (f28 * xurand() + f25));
+        p->m_rotdeg[0] += (U8)(dt * (f30 * xParCmdRandom() + f27));
+        p->m_rotdeg[1] += (U8)(dt * (f29 * xParCmdRandom() + f26));
+        p->m_rotdeg[2] += (U8)(dt * (f28 * xParCmdRandom() + f25));
 #endif
 
         p = p->m_next;
@@ -837,10 +887,15 @@ void xParCmd_DampenSpeed_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
     if (cmd->enabled)
     {
+#if !defined(XBOX)
         p = ps->m_root;
+#endif
 
         F32 damp = dt * cmd->dampSpeed;
 
+#if defined(XBOX)
+        p = ps->m_root;
+#endif
         while (p)
         {
             xVec3AddScaled(&p->m_vel, &p->m_vel, damp);
@@ -857,8 +912,6 @@ void xParCmd_SizeInOut_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
     if (cmd->enabled)
     {
-        p = ps->m_root;
-
         S32 i, seg;
         F32 slope_size[3];
         F32 frac;
@@ -866,6 +919,8 @@ void xParCmd_SizeInOut_Update(xParCmd* c, xParGroup* ps, F32 dt)
         slope_size[0] = 3.0f * (cmd->custSize[1] - cmd->custSize[0]);
         slope_size[1] = 3.0f * (cmd->custSize[2] - cmd->custSize[1]);
         slope_size[2] = 3.0f * (cmd->custSize[3] - cmd->custSize[2]);
+
+        p = ps->m_root;
 
         while (p)
         {
@@ -885,7 +940,7 @@ void xParCmd_SizeInOut_Update(xParCmd* c, xParGroup* ps, F32 dt)
                 seg = 2;
             }
 
-            for (i = seg; i > 0; i--)
+            for (i = seg; i-- > 0;)
             {
                 frac -= 0.33333334f;
             }
@@ -904,8 +959,6 @@ void xParCmd_AlphaInOut_Update(xParCmd* c, xParGroup* ps, F32 dt)
 
     if (cmd->enabled)
     {
-        p = ps->m_root;
-
         S32 i, seg;
         F32 slope_alfa[3];
         F32 frac;
@@ -914,6 +967,8 @@ void xParCmd_AlphaInOut_Update(xParCmd* c, xParGroup* ps, F32 dt)
         slope_alfa[0] = 3.0f * (cmd->custAlpha[1] - cmd->custAlpha[0]);
         slope_alfa[1] = 3.0f * (cmd->custAlpha[2] - cmd->custAlpha[1]);
         slope_alfa[2] = 3.0f * (cmd->custAlpha[3] - cmd->custAlpha[2]);
+
+        p = ps->m_root;
 
         while (p)
         {
@@ -933,7 +988,7 @@ void xParCmd_AlphaInOut_Update(xParCmd* c, xParGroup* ps, F32 dt)
                 seg = 2;
             }
 
-            for (i = seg; i > 0; i--)
+            for (i = seg; i-- > 0;)
             {
                 frac -= 0.33333334f;
             }
@@ -1018,7 +1073,7 @@ void xParCmd_Shaper_Update(xParCmd* c, xParGroup* ps, F32 dt)
                 seg = 2;
             }
 
-            for (i = seg; i > 0; i--)
+            for (i = seg; i-- > 0;)
             {
                 frac -= 0.33333334f;
             }
@@ -1038,11 +1093,4 @@ void xParCmd_Shaper_Update(xParCmd* c, xParGroup* ps, F32 dt)
             p = p->m_next;
         }
     }
-}
-
-WEAK F32 xVec3LengthFast(F32 x, F32 y, F32 z)
-{
-    F32 len;
-    xsqrtfast(len, SQR(x) + SQR(y) + SQR(z));
-    return len;
 }

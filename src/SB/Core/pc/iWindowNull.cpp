@@ -21,6 +21,7 @@ static S32 sHeight;
 static iWindowMode sMode = iWINDOW_WINDOWED;
 static S32 sFrameRate = 60;
 static S32 sVSync = TRUE;
+static S32 sShouldClose;
 
 S32 iWindowOpen(const iWindowParams* params)
 {
@@ -92,11 +93,16 @@ S32 iWindowGetVSync()
     return sVSync;
 }
 
-// Nothing can ask, so the answer never changes. A headless run ends when the
-// game ends or when the process is killed.
+// Only the game can ask: there is no window to close. A headless run otherwise
+// ends when the game ends or when the process is killed.
 S32 iWindowShouldClose()
 {
-    return FALSE;
+    return sShouldClose;
+}
+
+void iWindowRequestClose()
+{
+    sShouldClose = TRUE;
 }
 
 void iWindowGetSize(S32* width, S32* height)

@@ -4,7 +4,11 @@
 #include <types.h>
 
 #include "xMath.h"
+#if defined(PS2)
+#include "xSceneLookup.h"
+#else
 #include "xScene.h"
+#endif
 #include "xMemMgr.h"
 
 inline F32 xVec3Hdng(xVec3* a, const xVec3* b, const xVec3* c);
@@ -20,7 +24,7 @@ void xMovePointInit(xMovePoint* ent, xMovePointAsset* asset)
     ent->delay = asset->delay;
     ent->spl = NULL;
 
-    if (asset->numPoints != 0)
+    if (asset->numPoints > 0)
     {
         ent->nodes = (xMovePoint**)xMemAllocSize(asset->numPoints * sizeof(xMovePoint*));
     }
@@ -61,14 +65,6 @@ void xMovePointSetup(xMovePoint* m, xScene* sc)
     }
 }
 
-void xMovePointSplineDestroy(xMovePoint* m)
-{
-    if (m->spl != NULL)
-    {
-        m->spl = NULL;
-    }
-}
-
 void xMovePointSplineSetup(xMovePoint* m)
 {
     xMovePoint *w0, *w1, *w2, *w3;
@@ -85,7 +81,7 @@ void xMovePointSplineSetup(xMovePoint* m)
     w2 = m->nodes[0];
 
     points[0] = *w0->pos;
-    if (w2->asset->bezIndex > 0)
+    if (w2->asset->bezIndex != 0)
     {
         w3 = w2->nodes[0];
         p1 = *w1->pos;
@@ -107,6 +103,14 @@ void xMovePointSplineSetup(xMovePoint* m)
     xSpline3_ArcInit(m->spl, 20);
 }
 
+void xMovePointSplineDestroy(xMovePoint* m)
+{
+    if (m->spl != NULL)
+    {
+        m->spl = NULL;
+    }
+}
+
 F32 xMovePointGetNext(const xMovePoint* m, const xMovePoint* prev, xMovePoint** next, xVec3* hdng)
 {
     if (m->asset->numPoints < 1)
@@ -115,20 +119,15 @@ F32 xMovePointGetNext(const xMovePoint* m, const xMovePoint* prev, xMovePoint** 
         return 0.0f;
     }
 
-    xMovePoint* previousOption = NULL;
-
-    xMovePoint** n;
-    xMovePointAsset* a;
     S32 rnd;
+    U16 idx;
+    xMovePoint* previousOption = NULL;
 
     rnd = xrand() % m->node_wt_sum;
 
-    n = m->nodes;
-    a = m->asset;
-
-    for (U16 idx = 0; idx < a->numPoints; idx++)
+    for (idx = 0; idx < m->asset->numPoints; idx++)
     {
-        *next = n[idx];
+        *next = m->nodes[idx];
         rnd -= (*next)->asset->wt;
         if ((*next)->on == 0)
         {
@@ -182,13 +181,14 @@ inline F32 xVec3Hdng(xVec3* a, const xVec3* b, const xVec3* c)
     F32 dz = c->z - b->z;
     F32 len2 = dx * dx + dy * dy + dz * dz;
     F32 len, invLen, ret;
+    F32 one = 1.0f;
 
-    if (xeq(len2, 1.0f, 0.00001f))
+    if (xeq(len2, one, 0.00001f))
     {
         a->x = dx;
         a->y = dy;
         a->z = dz;
-        ret = 1.0f;
+        ret = one;
     }
     else if (xeq(len2, 0.0f, 0.00001f))
     {

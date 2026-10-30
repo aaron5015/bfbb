@@ -59,9 +59,9 @@ void MNU4_BuildGroup(iAssetPkg& p)
         p.Begin('GRUP', H("PAUSE OPTIONS GROUP"), a);
         p.Item(H("PAUSE OPTION MGR UIF"));
         p.Item(H("PAUSE OPTION QUIT UIF"));
-        p.Item(H("PAUSE OPTION CONTROLS UIF"));
         p.Item(H(ISETTINGS_PAUSE_ENTRY));
         p.Item(H("PAUSE OPTION SAVE UIF"));
+        p.Item(H(ISAVESCREEN_PAUSE_LOAD));
         p.Item(H("PAUSE OPTIONS PRESSX UIF"));
         p.Item(H("PAUSE OPTIONS PRESS TRI UIF"));
         p.End();
@@ -429,6 +429,7 @@ void MNU4_BuildGroup(iAssetPkg& p)
         p.Begin('GRUP', H("MNU4 PAUSE EXIT GAME GROUP"), a);
         p.Item(H("MNU4 EXIT GAME NO UIF"));
         p.Item(H("MNU4 EXIT GAME YES UIF"));
+        p.Item(H(IQUIT_DESKTOP_YES));
         p.Item(H("MNU4 EXIT GAME PROMPT UIF"));
         p.Item(H("BLUE ALPHA 1 UI"));
         p.Item(H("PAUSE OPTIONS PRESS TRI UIF"));
@@ -1518,6 +1519,32 @@ void MNU4_BuildPortal(iAssetPkg& p)
             p.Item(H(name));
         }
         p.Item(H(ISETTINGS_HELP));
+        p.Item(H(ISETTINGS_BACK));
+        p.Item(H(ISETTINGS_SCROLL_TRACK));
+        p.Item(H(ISETTINGS_SCROLL_THUMB));
+        for (S32 s = 0; s < ISETTINGS_SLIDERS; s++)
+        {
+            char name[48];
+            for (S32 n = 0; n < ISETTINGS_SLIDER_LEVELS; n++)
+            {
+                sprintf(name, ISETTINGS_SLIDER_ON, (int)s, (int)n);
+                p.Item(H(name));
+                sprintf(name, ISETTINGS_SLIDER_OFF, (int)s, (int)n);
+                p.Item(H(name));
+            }
+        }
+        for (S32 row = 0; row < ISETTINGS_ROWS; row++)
+        {
+            char name[48];
+            sprintf(name, ISETTINGS_ARROW_LEFT, (int)row);
+            p.Item(H(name));
+            sprintf(name, ISETTINGS_ARROW_RIGHT, (int)row);
+            p.Item(H(name));
+            sprintf(name, ISETTINGS_ARROW_LEFT_GLOW, (int)row);
+            p.Item(H(name));
+            sprintf(name, ISETTINGS_ARROW_RIGHT_GLOW, (int)row);
+            p.Item(H(name));
+        }
         p.End();
     }
 }

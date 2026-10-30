@@ -4,15 +4,45 @@
 
 #define PAR_POOL_SIZE 2000
 
-// volatile is a matching device: the original re-reads gParDead at the top of
-// every pool iteration instead of forwarding the value it just stored, and it
-// keeps the two NULL stores ahead of that read.
+// On GameCube, volatile is a matching device: the original re-reads gParDead
+// at the top of every pool iteration instead of forwarding its stored value,
+// and keeps the two NULL stores ahead of that read.
+#if defined(XBOX) || defined(PS2)
+// Xbox keeps the pool head in a register across initialization iterations; PS2 re-reads
+// it through the plain globals, which its DWARF types confirm.
+xPar gParPool[PAR_POOL_SIZE];
+xPar* gParDead;
+#else
 volatile xPar gParPool[PAR_POOL_SIZE];
 xPar* volatile gParDead;
+#endif
 
+#if defined(PS2)
 void xParMemInit()
 {
+    S32 i;
+
+    for (i = 0; i < PAR_POOL_SIZE; i++)
+    {
+        gParPool[i].m_next = NULL;
+        gParPool[i].m_prev = NULL;
+
+        if (gParDead != NULL)
+        {
+            gParDead->m_prev = &gParPool[i];
+            gParPool[i].m_next = gParDead;
+        }
+        gParDead = &gParPool[i];
+    }
+}
+#else
+void xParMemInit()
+{
+#if defined(XBOX)
+    xPar* curr;
+#else
     volatile xPar* curr;
+#endif
     xPar* dead;
     S32 i;
 
@@ -31,7 +61,9 @@ void xParMemInit()
         gParDead = (xPar*)curr;
     }
 }
+#endif
 
+#if !defined(XBOX)
 xPar* xParAlloc()
 {
     xPar* dead = gParDead;
@@ -49,7 +81,9 @@ xPar* xParAlloc()
     dead->m_prev = NULL;
     return dead;
 }
+#endif
 
+#if !defined(XBOX)
 void xParFree(xPar* par)
 {
     if (par->m_next != NULL)
@@ -69,6 +103,7 @@ void xParFree(xPar* par)
     par->m_prev = NULL;
     gParDead = par;
 }
+#endif
 
 void xParInit(xPar* p)
 {

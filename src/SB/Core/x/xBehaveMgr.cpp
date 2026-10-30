@@ -1,6 +1,9 @@
 #include "xBehaveMgr.h"
 #include "xBehaveGoalSimple.h"
 #include "xutil.h"
+#include "xMemMgr.h"
+
+#include <string.h>
 
 static S32 g_modinit;
 static xBehaveMgr* g_behavmgr;
@@ -152,10 +155,19 @@ void xPsyche::FreshWipe()
     this->gid_safegoal = 0;
     this->pendgoal = 0;
     this->pendtype = PEND_TRAN_NONE;
+#if defined(PS2)
+    S32 i = 0;
+    do
+    {
+        this->tmr_stack[0][i] = 0.0f;
+        ++i;
+    } while (i < 5);
+#else
     for (S32 i = 0; i < 5; ++i)
     {
         this->tmr_stack[0][i] = 0.0f;
     }
+#endif
     this->clt_owner = NULL;
     this->userContext = NULL;
     this->fun_remap = NULL;
@@ -202,7 +214,11 @@ void xPsyche::Amnesia(S32 i)
     while (g != NULL)
     {
         xGoal* thisg = g;
+#if defined(PS2)
+        g = thisg->next;
+#else
         g = thisg->Next();
+#endif
 
         if ((i != 0) || (this->GIDInStack(thisg->GetID()) == 0))
         {
@@ -211,13 +227,11 @@ void xPsyche::Amnesia(S32 i)
     }
 }
 
-// Non-matching: Loop/alloc issue
 S32 xPsyche::IndexInStack(S32 gid) const
 {
-    S32 top = this->staktop;
     S32 da_idx = -1;
 
-    for (S32 i = 0; i <= top; i++)
+    for (S32 i = 0; i <= this->staktop; i++)
     {
         xGoal* tmpgoal = this->goalstak[i];
 
@@ -242,15 +256,13 @@ xGoal* xPsyche::GetCurGoal() const
     }
 }
 
-// Non-matching: Loop/alloc issue
 xGoal* xPsyche::GIDInStack(S32 gid) const
 {
-    S32 top = this->staktop;
     xGoal* da_goal = NULL;
     xGoal* tmpgoal;
     S32 i;
 
-    for (i = 0; i <= top; i++)
+    for (i = 0; i <= this->staktop; i++)
     {
         tmpgoal = this->goalstak[i];
 
@@ -431,6 +443,9 @@ S32 xPsyche::GoalPush(S32 gid, S32 unk)
     return result;
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 S32 xPsyche::GoalPopToBase(S32 overpend)
 {
     if (this->flg_psyche & 4)
@@ -451,6 +466,9 @@ S32 xPsyche::GoalPopToBase(S32 overpend)
         return 1;
     }
 }
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 S32 xPsyche::GoalPopRecover(S32 overpend)
 {
@@ -679,7 +697,11 @@ xGoal* xPsyche::FindGoal(S32 gid)
             break;
         }
 
+#if defined(PS2)
+        goal = goal->next;
+#else
         goal = goal->Next();
+#endif
     }
     if (goal == NULL)
     {
@@ -1034,91 +1056,25 @@ void xPsyche::TimerClear()
     this->tmr_stack[0][this->staktop] = 0.0f;
 }
 
-// Non-matching: Needs an extra branch that does the same `+= dt`
 void xPsyche::TimerUpdate(F32 dt)
 {
-    F32* p;
     if (this->staktop < 0)
     {
         return;
     }
 
-    p = &this->tmr_stack[0][this->staktop];
-    *p += dt;
-}
-
-// NOTE: these belong in xListItem.h. They are template members, so the
-// compiler emits a weak out-of-line copy into every translation unit that
-// instantiates them.
-template <class T> T* xListItem<T>::Next()
-{
-    return next;
-}
-
-template <class T> void xListItem<T>::Insert(T* list)
-{
-    prev = list;
-    next = list->next;
-
-    if (list->next != NULL)
+    // One timer per en_xpsytime. The loop unrolls to the single CURGOAL timer, but the
+    // compiler keeps the (dead) default arm's copy of the body, as retail does.
+    for (S32 i = 0; i < XPSY_TYMR_NOMORE; i++)
     {
-        list->next->prev = (T*)this;
+        switch (i)
+        {
+        case XPSY_TYMR_CURGOAL:
+            this->tmr_stack[i][this->staktop] += dt;
+            break;
+        default:
+            this->tmr_stack[i][this->staktop] += dt;
+            break;
+        }
     }
-
-    list->next = (T*)this;
-}
-
-template <class T> T* xListItem<T>::RemHead(T** listhead)
-{
-    if (*listhead == NULL)
-    {
-        return NULL;
-    }
-
-    T* head = (*listhead)->Head();
-
-    if (head == NULL)
-    {
-        *listhead = NULL;
-    }
-    else
-    {
-        *listhead = head->Next();
-        head->Remove();
-    }
-
-    return head;
-}
-
-template <class T> T* xListItem<T>::Head()
-{
-    T* item = (T*)this;
-
-    if (item == NULL)
-    {
-        return item;
-    }
-
-    while (item->prev != NULL)
-    {
-        item = item->prev;
-    }
-
-    return item;
-}
-
-template <class T> void xListItem<T>::Remove()
-{
-    if (next != NULL)
-    {
-        next->prev = prev;
-    }
-
-    if (prev != NULL)
-    {
-        prev->next = next;
-    }
-
-    next = NULL;
-    prev = NULL;
 }

@@ -21,6 +21,33 @@
 #define ISETTINGS_HELP_TEXT "PC SET HELP TXT"
 #define ISETTINGS_GROUP "PC SETTINGS GROUP"
 
+// "Back", beside the help line: a hint like the pause menu's, so the pointer
+// can leave the screen as the cancel button does.
+#define ISETTINGS_BACK "PC SET BACK UIF"
+#define ISETTINGS_BACK_TEXT "PC SET BACK TXT"
+
+// The scrollbar beside the rows: a faint track and the thumb on it, drawn
+// only while a tab has more rows than fit.
+#define ISETTINGS_SCROLL_TRACK "PC SET SCROLL TRACK UIF"
+#define ISETTINGS_SCROLL_THUMB "PC SET SCROLL THUMB UIF"
+
+// The retail Options page's arrows either side of each row's value, and their
+// glow for the one under the pointer. "%d" is the row.
+#define ISETTINGS_ARROW_LEFT "PC SET ARROW %d LEFT"
+#define ISETTINGS_ARROW_RIGHT "PC SET ARROW %d RIGHT"
+#define ISETTINGS_ARROW_LEFT_GLOW "PC SET ARROW %d LEFT GLOW"
+#define ISETTINGS_ARROW_RIGHT_GLOW "PC SET ARROW %d RIGHT GLOW"
+#define ISETTINGS_ARROW_SIZE 20
+
+// The volume sliders, in the same page's bamboo: a notch per level from 0 to
+// 10, yellow up to the level and plain past it, between the row's arrows. Two
+// sets, which is as many slider rows as a tab shows; each is placed on its row
+// as the screen is drawn. "%d" is the set, then the notch.
+#define ISETTINGS_SLIDERS 2
+#define ISETTINGS_SLIDER_LEVELS 11
+#define ISETTINGS_SLIDER_ON "PC SET SLIDER %d ON %d"
+#define ISETTINGS_SLIDER_OFF "PC SET SLIDER %d OFF %d"
+
 // The menu entries that open it.
 #define ISETTINGS_TITLE_ENTRY "MNU3 START SETTINGS UIF"
 #define ISETTINGS_PAUSE_ENTRY "PAUSE OPTION SETTINGS UIF"
@@ -36,5 +63,16 @@ S32 iSettingsRequested(S32 fromPause);
 // Run the screen until the player backs out, then put back the menu it came
 // from.
 void iSettingsRun(S32 fromPause);
+
+// What the retail Options page set -- the volumes, the sound mode and
+// vibration -- which retail kept in each save file and the PC keeps in
+// config.ini, one for the install. Levels are 0 to 10, as the page showed them.
+void iSettingsApplyMusicVolume(S32 level);
+void iSettingsApplySFXVolume(S32 level);
+void iSettingsApplySoundMode(S32 stereo);
+void iSettingsApplyVibration(S32 on, S32 pulse);
+
+// The three sound ones from config.ini, once the sound system is up.
+void iSettingsApplyAudio();
 
 #endif

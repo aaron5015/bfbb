@@ -1,5 +1,6 @@
 #include "iSystem.h"
 #include "iBoot.h"
+#include "iCheats.h"
 #include "iConfig.h"
 #include "iDrawDist.h"
 #include "iFile.h"
@@ -16,6 +17,8 @@
 #include "iTRC.h"
 #include "iSnapshot.h"
 #include "iPadGlyph.h"
+#include "menu/iMenuMouse.h"
+#include "menu/iSettingsScreen.h"
 #include "iHipoly.h"
 #include "iSoundtrack.h"
 #include "iTextPatch.h"
@@ -78,6 +81,18 @@ static U64 sNextVSync;
 
 void iVSync()
 {
+    // Callers wait out a duration in vsyncs without presenting; under
+    // iTimeFixedStep each one is a step of the game clock.
+    iTimeStep();
+
+    // A tour's clock moves only by these steps, so there is no deadline to
+    // sleep to: the wait is the step.
+    U64 fixed;
+    if (iTimeFixedNs(&fixed))
+    {
+        return;
+    }
+
     U64 now = iHostMonotonicNs();
 
     if (!sVSyncStarted)
@@ -821,6 +836,26 @@ static void ApplyConfig()
     // and why it has a switch at all.
     iFixSetMenuRope(iConfigGetBool("fixes.menu_rope", TRUE));
     iFixSetSkyClip(iConfigGetBool("fixes.sky_clip", TRUE));
+    iFixSetMeleeOnce(iConfigGetBool("fixes.melee_once", TRUE));
+    iFixSetSpatulaSpin(iConfigGetBool("fixes.spatula_spin", TRUE));
+
+    iCheatSetAllWarps(iConfigGetBool("cheats.all_warps", FALSE));
+    iCheatSetBubbleBowl(iConfigGetBool("cheats.bubble_bowl", FALSE));
+    iCheatSetCruiseBubble(iConfigGetBool("cheats.cruise_bubble", FALSE));
+    iCheatSetUnlimitedShinies(iConfigGetBool("cheats.unlimited_shinies", FALSE));
+    iCheatSetUnlimitedSpatulas(iConfigGetBool("cheats.unlimited_spatulas", FALSE));
+    iCheatSetUnlimitedHealth(iConfigGetBool("cheats.unlimited_health", FALSE));
+    iCheatSetGameFlag(ICHEAT_EXPERT, iConfigGetBool("cheats.expert_mode", FALSE));
+    iCheatSetGameFlag(ICHEAT_SHRAPBOB, iConfigGetBool("cheats.shrapbob", FALSE));
+    iCheatSetGameFlag(ICHEAT_NO_PANTS, iConfigGetBool("cheats.no_pants", FALSE));
+    iCheatSetGameFlag(ICHEAT_CRUISE_CONTROL, iConfigGetBool("cheats.cruise_control", FALSE));
+    iCheatSetGameFlag(ICHEAT_BIG_PLANK, iConfigGetBool("cheats.big_plank", FALSE));
+    iCheatSetGameFlag(ICHEAT_SMALL_VILLAGERS, iConfigGetBool("cheats.small_villagers", FALSE));
+    iCheatSetGameFlag(ICHEAT_SMALL_COSTARS, iConfigGetBool("cheats.small_costars", FALSE));
+    iCheatSetGameFlag(ICHEAT_MEDICS, iConfigGetBool("cheats.medics", FALSE));
+    iCheatSetGameFlag(ICHEAT_DOG_TRICKS, iConfigGetBool("cheats.dog_tricks", FALSE));
+    iCheatSetGameFlag(ICHEAT_RICH_VILLAGERS, iConfigGetBool("cheats.rich_villagers", FALSE));
+    iCheatSetGameFlag(ICHEAT_PANHANDLE, iConfigGetBool("cheats.panhandle", FALSE));
 
     // How much slack a stick has. auto is the controller's own -- XInput
     // publishes two different numbers for the two sticks, and a player who
@@ -842,6 +877,10 @@ static void ApplyConfig()
         }
         iPadStickSetDeadzone(percent);
     }
+
+    iPadStickSetSwap(iHostStrCaseCmp(iConfigGetString("input.sticks", "normal"), "swapped") == 0);
+    iPadStickSetInvert(iConfigGetBool("input.invert_camera_x", FALSE),
+                       iConfigGetBool("input.invert_camera_y", FALSE));
 
     // Where the music may be replaced from. Pushed rather than read, like the
     // text patch: nothing under here knows what config.ini is. The folder is
@@ -1023,6 +1062,9 @@ void iSystemInit(U32 options)
     iConfigLoad();
     ApplyConfig();
 
+    // The menu pointer needs the game's UI, which iPad.cpp cannot reach.
+    iPadSetMenuHook(iMenuMouseUpdate);
+
     xDebugInit();
     xMemInit();
     iFileInit();
@@ -1113,17 +1155,13 @@ void iSystemInit(U32 options)
 
     // **Whose assets these are.**
     //
-    // The port reads the Xbox release, and a set from another console does not
-    // announce itself: the packer's container is the same everywhere and only
-    // what is inside it differs, so a GameCube set opens, reads, and then
-    // fails a long way from the cause. It gets as far as boot.HIP's animation
-    // tables, where zAssetTypes.cpp's `(xAnimAssetTable*)indata` reads a
-    // big-endian count of 74 as 1,241,513,984 and walks off the end of memory.
+    // The port reads the Xbox and GameCube releases. A set from another console
+    // does not announce itself: the packer's container is the same everywhere
+    // and only what is inside it differs, so a PS2 set opens, reads, and then
+    // fails a long way from the cause. Say what it is instead.
     //
-    // Nothing about that crash says "these are the wrong assets", and it is
-    // the first thing anyone will try: the GameCube release is the one this
-    // code was decompiled from, so reaching for its files is the obvious move.
-    // Say what they are and what is missing instead.
+    // A GameCube package is turned around as it loads: game data by iGCSwap,
+    // textures and geometry by librw's GameCube readers, sound by iSnd.
     //
     // Only when the header actually names a platform. An unreadable or absent
     // PLAT chunk is not an accusation, and the check above has already settled
@@ -1132,37 +1170,51 @@ void iSystemInit(U32 options)
         const char* longName = NULL;
         const char* plat = iFileAssetPlatform(&longName);
 
-        if (plat != NULL && strcmp(plat, "XB") != 0)
+        if (plat != NULL && strcmp(plat, "XB") != 0 && strcmp(plat, "GC") != 0)
         {
             const char* who = (longName != NULL) ? longName : plat;
 
             char message[1536];
             snprintf(message, sizeof(message),
-                     "These are %s assets, and the port reads the Xbox release's.\n\n"
-                     "The two differ in more than byte order. The %s packs store their "
-                     "textures in the console's own formats, their models and level "
-                     "geometry as display lists for its graphics hardware, and every "
-                     "number in an entity or animation asset the other way round from "
-                     "the way this build reads one.\n\n"
-                     "Extract the Xbox disc instead, and point [assets] path at the "
-                     "folder holding boot.HIP.",
+                     "These are %s assets, and the port reads the Xbox and GameCube "
+                     "releases'.\n\n"
+                     "The %s packs store their textures, models and level geometry in "
+                     "that console's own formats, which this build does not read.\n\n"
+                     "Extract the Xbox or GameCube disc instead, and point [assets] path "
+                     "at the folder holding boot.HIP.",
                      who, who);
 
-            printf("bfbb: FATAL -- these are %s assets; the port reads the Xbox release's.\n", who);
-            printf("bfbb:   textures, models and level geometry are in that console's own\n");
-            printf("bfbb:   formats, and the entity and animation assets are byte-swapped\n");
-            printf("bfbb:   against what this build reads.\n");
-            printf("bfbb:   [assets] path has to name an extracted Xbox disc.\n");
+            printf("bfbb: FATAL -- these are %s assets; the port reads the Xbox and\n", who);
+            printf("bfbb:   GameCube releases'. [assets] path has to name one of those.\n");
             fflush(stdout);
 
             iHostErrorBox("SpongeBob SquarePants: Battle for Bikini Bottom", message);
             exit(1);
         }
+
+        if (plat != NULL && strcmp(plat, "GC") == 0)
+        {
+            printf("bfbb: reading the GameCube release\n");
+            fflush(stdout);
+        }
     }
 
     iTimeInit();
+
+    // A tour's clock, before the sound starts: the sound host decides at init
+    // whether to open a device or play voices out on this clock (iSndHostSDL).
+    if (iTourActive())
+    {
+        iTimeFixedStep(60);
+    }
+
     xPadInit();
     xSndInit();
+
+    // Over xSndInit's defaults: the volumes and sound mode live in config.ini
+    // here, not in the save file.
+    iSettingsApplyAudio();
+
     TRCInit();
 
     iPadHostSetHotkey(iHipolyHotkey);
@@ -1184,10 +1236,12 @@ void iSystemInit(U32 options)
         exit(1);
     }
 
-    // A tour counts in frames; see iTour.h.
+    // A tour counts in frames on its own clock (iTour.h), so it runs as fast as
+    // the machine draws them.
     if (iTourActive())
     {
-        iWindowSetFrameRate(60);
+        iWindowSetFrameRate(0);
+        iWindowSetVSync(FALSE);
     }
 
     // The reference every alpha test is measured against, which librw leaves

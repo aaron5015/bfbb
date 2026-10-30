@@ -1,5 +1,9 @@
 #include "zNPCTypeVillager.h"
 
+#if defined(PS2)
+#include <rwim3d.h>
+#endif
+
 #include "xBehaveMgr.h"
 #include "xJaw.h"
 #include "xMathInlines.h"
@@ -20,9 +24,6 @@
 // which offsets every later .rodata relocation.
 void __deadstripped_zNPCTypeVillager_head()
 {
-    const char _405[0x0C] = {};
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
     const char _441[0x0C] = {};
 
     const char _607[0x28] = {};
@@ -399,18 +400,20 @@ U8 zNPCVillager::ColPenFlags() const
 U8 zNPCVillager::PhysicsFlags() const
 {
     S32 flags = 0;
-    S32 pflags = 0;
     if (flg_move & 0x6)
     {
         flags |= 3;
     }
-    pflags = flags * -5;
     if (flg_move & 0x2)
     {
-        pflags = flags |= 4;
+        flags |= 4;
+    }
+    else
+    {
+        flags *= -5;
     }
 
-    return pflags;
+    return flags;
 }
 
 void zNPCVillager::Init(xEntAsset* asset)
@@ -431,10 +434,9 @@ void zNPCVillager::Reset()
         this->psy_instinct->GoalSet(NPC_GOAL_IDLE, 1);
     }
 
-    cfg = this->cfg_npc;
-    if (cfg->dst_castShadow < 0.0f)
+    if (this->cfg_npc->dst_castShadow < 0.0f)
     {
-        cfg->dst_castShadow = 0.25f;
+        this->cfg_npc->dst_castShadow = 0.25f;
     }
 
     cfg = this->cfg_npc;
@@ -521,12 +523,12 @@ void zNPCVillager::ChkCheatSize()
         }
         break;
 
+    case NPC_TYPE_VILLAGER:
     case NPC_TYPE_FISH:
     case NPC_TYPE_FISH_MALE:
     case NPC_TYPE_FISH_FEMALE:
     case NPC_TYPE_FISH_ELDER:
     case NPC_TYPE_FISH_ELDESS:
-    case NPC_TYPE_VILLAGER:
         if ((cheats & 0x40000) != 0)
         {
             this->cfg_npc->scl_model.assign(0.7f);
@@ -553,9 +555,11 @@ void zNPCVillager::ChkCheatSize()
         }
         break;
 
-    case NPC_TYPE_GARY:
-    case NPC_TYPE_SANDYBIKINI:
     case NPC_TYPE_MERMANCHAIR:
+    case NPC_TYPE_SANDYBIKINI:
+    case NPC_TYPE_BALLOONBOY:
+    case NPC_TYPE_FISH_BOY:
+    case NPC_TYPE_FISH_GIRL:
         break;
     }
 }
@@ -601,10 +605,10 @@ U32 zNPCVillager::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* goal)
 
     switch (gid)
     {
-    case NPC_GOAL_IDLE:
-    case NPC_GOAL_WAITING:
     case NPC_GOAL_NOMANLAND:
     case NPC_GOAL_LIMBO:
+    case NPC_GOAL_IDLE:
+    case NPC_GOAL_WAITING:
     {
         S32 superfolk = !strcmp("zNPCSuperFriend", this->model->Anim->Table->Name);
         static S32 choices[4] = { 1, 0x11, 0x12, 0x13 };
@@ -773,7 +777,7 @@ S32 zNPCVillager::FolkHandleMail(NPCMsg* mail)
     case 1:
         if (mail->sysevent.toEvent == 0x20e)
         {
-            psy->GoalSet(NPC_GOAL_TALK, 0);
+            psy_instinct->GoalSet(NPC_GOAL_TALK, 0);
         }
         else if (mail->sysevent.toEvent == 0x1d9)
         {
@@ -918,22 +922,22 @@ void zNPCVillager::AddTalking(xPsyche* psy,
 {
     xGoal* goal;
     goal = psy->AddGoal(NPC_GOAL_PLAYERNEAR, NULL);
-    if (eval_plyrnear)
+    if (eval_plyrnear != NULL)
     {
         goal->SetCallbacks(eval_plyrnear, NULL, NULL, NULL);
     }
     goal = psy->AddGoal(NPC_GOAL_TALK, NULL);
-    if (eval_talking)
+    if (eval_talking != NULL)
     {
         goal->SetCallbacks(eval_talking, NULL, NULL, NULL);
     }
     goal = psy->AddGoal(NPC_GOAL_CHATTER, NULL);
-    if (eval_chatter)
+    if (eval_chatter != NULL)
     {
         goal->SetCallbacks(eval_chatter, NULL, NULL, NULL);
     }
     goal = psy->AddGoal(NPC_GOAL_SPEAK, NULL);
-    if (eval_speak)
+    if (eval_speak != NULL)
     {
         goal->SetCallbacks(eval_speak, NULL, NULL, NULL);
     }
@@ -945,6 +949,7 @@ void zNPCVillager::FindMyConverse()
     if ((gCurrentPlayer == eCurrentPlayerSpongeBob) && (nass->taskWidgetPrime != 0))
     {
         this->converse = (ztaskbox*)zSceneFindObject(nass->taskWidgetPrime);
+#if !defined(PS2)
         if (this->converse == NULL)
         {
             this->converse = (ztaskbox*)zSceneFindObject((((U8*)&nass->taskWidgetPrime)[3] << 24) |
@@ -952,10 +957,12 @@ void zNPCVillager::FindMyConverse()
                                                          (((U8*)&nass->taskWidgetPrime)[1] << 8) |
                                                          ((U8*)&nass->taskWidgetPrime)[0]);
         }
+#endif
     }
     else if ((gCurrentPlayer != eCurrentPlayerSpongeBob) && (nass->taskWidgetSecond != 0))
     {
         this->converse = (ztaskbox*)zSceneFindObject(nass->taskWidgetSecond);
+#if !defined(PS2)
         if (this->converse == NULL)
         {
             this->converse = (ztaskbox*)zSceneFindObject((((U8*)&nass->taskWidgetSecond)[3] << 24) |
@@ -963,6 +970,7 @@ void zNPCVillager::FindMyConverse()
                                                          (((U8*)&nass->taskWidgetSecond)[1] << 8) |
                                                          ((U8*)&nass->taskWidgetSecond)[0]);
         }
+#endif
     }
     else
     {
@@ -991,6 +999,12 @@ void zNPCFish::Init(xEntAsset* asset)
     this->flg_vuln = -1;
     this->flg_vuln &= ~0x61000000;
     return;
+}
+
+// Layout-only reference preserves the shared literal order from stripped code.
+F32 __deadstripped_zNPCTypeVillager_half()
+{
+    return 0.5f;
 }
 
 void zNPCFish::Reset()
@@ -1352,8 +1366,8 @@ U32 zNPCMerManChair::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
 
     switch (gid)
     {
-    case NPC_GOAL_FIDGET:
     case NPC_GOAL_IDLE:
+    case NPC_GOAL_FIDGET:
     case NPC_GOAL_HURT:
     case NPC_GOAL_PLAYERNEAR:
         if (flg_mermanchair & 1)
@@ -1369,7 +1383,7 @@ U32 zNPCMerManChair::AnimPick(S32 gid, en_NPC_GOAL_SPOT gspot, xGoal* rawgoal)
     case NPC_GOAL_TALK:
     case NPC_GOAL_CHATTER:
     case NPC_GOAL_SPEAK:
-        superfolk = (strcmp("zNPCSuperFriend", model->Anim->Table->Name) == 0);
+        superfolk = !strcmp("zNPCSuperFriend", model->Anim->Table->Name);
 
         if (flg_mermanchair & 1)
         {
@@ -1474,7 +1488,7 @@ void zNPCNewsFish::Init(xEntAsset* asset)
 
 void zNPCNewsFish::PostSetup()
 {
-    xUpdateCull_SetCB(globals.updateMgr, this, xUpdateCull_AlwaysTrueCB, NULL);
+    xUpdateCull_SetCB(globals.updateMgr, (xEnt*)this, xUpdateCull_AlwaysTrueCB, NULL);
 }
 
 // One more unreferenced all-zero xVec3 template, ahead of the one
@@ -1646,7 +1660,7 @@ void zNPCNewsFish::SpeakStop()
 
 S32 zNPCNewsFish::IsTalking()
 {
-    return (soundHandle) ? xSndIsPlayingByHandle(soundHandle) : false;
+    return (soundHandle) ? xSndIsPlayingByHandle(soundHandle) : 0;
 }
 
 void zNPCNewsFish::TalkOnScreen(S32 talkOnScreen)
@@ -1735,7 +1749,7 @@ U8 zNPCNewsFish::say(say_enum s, S32 flags)
     return 1;
 }
 
-S32 zNPCNewsFish::say(const say_enum* s, unsigned long size, S32 flags, S32 max_say)
+S32 zNPCNewsFish::say(const say_enum* s, size_t size, S32 flags, S32 max_say)
 {
     if (size == 0)
     {
@@ -2225,9 +2239,15 @@ void zNPCBubbleBuddy::RenderExtra()
 
 void zNPCBubbleBuddy_AlphaUpdate(F32 dt)
 {
-    static F32 tmr_pulseAlpha = 0.0f; // non-matching: stfs too late
+    static F32 tmr_pulseAlpha = 0.0f; // GC non-matching: stfs too late
+#ifdef PS2
+    F32 angle = NPCC_TmrCycle(&tmr_pulseAlpha, dt, 1.5f);
+    zNPCBubbleBuddy::alf_currBubBud =
+        LERP(MAX(0.0f, MIN(xabs(isin(PI * angle)), 1.0f)), 0.5f, 0.5f);
+#else
     F32 angle = NPCC_TmrCycle(&tmr_pulseAlpha, dt, 1.5f) * PI;
     zNPCBubbleBuddy::alf_currBubBud = LERP(MAX(0.0f, MIN(xabs(isin(angle)), 1.0f)), 0.5f, 0.5f);
+#endif
 }
 
 static U32 bb_env_texture = 0;
@@ -2242,7 +2262,7 @@ RpAtomic* NPC_BubBud_RenderCB(RpAtomic* atomic)
 
     if (zNPCBubbleBuddy::rast_fresnel != 0)
     {
-        iModelSetMaterialAlpha(atomic, fade * 127.5f + 0.5f);
+        iModelSetMaterialAlpha(atomic, (S32)(fade * 127.5f + 0.5f));
         gFXSurfaceFlags = 0x10;
         xFXAtomicEnvMapSetup(atomic, bb_fresnel_texture, fade);
         gFXSurfaceFlags = 0;
@@ -2251,7 +2271,7 @@ RpAtomic* NPC_BubBud_RenderCB(RpAtomic* atomic)
 
     if (zNPCBubbleBuddy::rast_enviro != 0)
     {
-        iModelSetMaterialAlpha(atomic, fade * 127.5f + 0.5f);
+        iModelSetMaterialAlpha(atomic, (S32)(fade * 127.5f + 0.5f));
         AtomicDisableMatFX(atomic);
         gFXSurfaceFlags = 0x10;
         xFXAtomicEnvMapSetup(atomic, bb_env_texture, fade);

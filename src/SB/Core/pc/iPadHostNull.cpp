@@ -55,6 +55,21 @@ const char* iPadHostBoundInput(U32)
     return NULL;
 }
 
+S32 iPadHostKeyboardIsLive()
+{
+    return FALSE;
+}
+
+S32 iPadHostSetPointer(S32, S32)
+{
+    return FALSE;
+}
+
+S32 iPadHostPointer(F32*, F32*, S32*, S32*, S32*)
+{
+    return FALSE;
+}
+
 const char* iPadHostPadKind()
 {
     return NULL;
@@ -69,7 +84,16 @@ void iPadHostReloadBindings()
 {
 }
 
+const iPadBind* iPadHostBindings(S32)
+{
+    return NULL;
+}
+
 void iPadHostScript(S32, U32)
+{
+}
+
+void iPadHostScriptSticks(F32, F32, F32, F32)
 {
 }
 

@@ -14,10 +14,6 @@ int __fpclassifyd(double);
 
 #ifndef MATH_INLINE
 #define MATH_INLINE inline
-#else
-// math_ppc.c pre-defines MATH_INLINE to nothing so that this header emits the
-// out-of-line library copies. Only that translation unit owns them.
-#define MATH_API_OUT_OF_LINE
 #endif
 
 MATH_INLINE float powf(float __x, float __y)
@@ -40,11 +36,6 @@ MATH_INLINE float atanf(float __x)
     return atan((double)__x);
 }
 
-// Declaration-only outside math_ppc.c: the retail objects call this one
-// out-of-line (xBound.o and xCollide.o both reference it and neither defines
-// it), so an inline body here would emit a competing weak copy per TU. The
-// double variant below is left inline because no retail object references it.
-#ifdef MATH_API_OUT_OF_LINE
 MATH_INLINE int __fpclassifyf(f32 x)
 {
     switch ((*(s32*)&x) & 0x7f800000)
@@ -68,8 +59,8 @@ MATH_INLINE int __fpclassifyf(f32 x)
     }
     return 4;
 }
-#endif
 
+#ifndef MATH_API_SKIP_FPCLASSIFYD
 MATH_INLINE int __fpclassifyd(f64 x)
 {
     switch (__HI(x) & 0x7ff00000)
@@ -93,6 +84,7 @@ MATH_INLINE int __fpclassifyd(f64 x)
     }
     return 4;
 }
+#endif
 
 #define fpclassify(x)                                                                              \
     ((sizeof(x) == sizeof(float)) ? __fpclassifyf((float)(x)) : __fpclassifyd((double)(x)))

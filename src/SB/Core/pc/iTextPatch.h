@@ -57,6 +57,26 @@ S32 iTextPatchEnabled();
 // capacity, or the switch being off are all "nothing changed", not errors.
 S32 iTextPatchAsset(U32 assetID, char* text, U32 capacity);
 
+// A copy of the TEXT asset with its override in it, for an override too long
+// to fit in place -- the GameCube's strings are often shorter than the Xbox's
+// the overrides were written against. `asset` is the whole asset, `headerSize`
+// bytes of xTextAsset and then the string, `size` long. The copy's xTextAsset
+// len is the override's length. NULL when there is no override for the asset
+// or it fits, which iTextPatchAsset then writes in place.
+//
+// The copy belongs to this file and lives as long as the process: one per
+// override, reused by every later load of the same asset, so the packer has
+// nothing to free.
+void* iTextPatchGrown(U32 assetID, const void* asset, U32 headerSize, U32 size, U32* outsize);
+
+// The text to draw in place of the TEXT asset an {i:...} include names, or NULL
+// to draw the asset. Asked as the include is drawn rather than as it loads,
+// for the prompts whose wording follows the device in the player's hands: the
+// talk and exit prompts say "Pull the R Trigger" on a trigger and "Press C" on
+// a key. Some of the names it answers have no asset at all; the load-time
+// patch writes them into the text.
+const char* iTextPatchInsert(U32 assetID);
+
 // The asset id for a name -- xStrHash, reproduced. Public for pc_selftest,
 // which pins it against ids read out of the retail archives.
 U32 iTextPatchAssetID(const char* name);

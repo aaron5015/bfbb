@@ -16,21 +16,12 @@
 #include <types.h>
 
 #include "xMath.h"
+#include "xMathInlines.h"
 
 // xMath.cpp's leaf math, which the game gets from iMath.cpp and from the weak
-// inlines CodeWarrior scattered across xCamera.cpp and xHudMeter.cpp. Only
-// xpow is reached by anything under test; the rest are here because they are
-// referenced by the other half of xMath.cpp's object file.
-F32 xpow(F32 x, F32 y)
-{
-    return powf(x, y);
-}
-
-F32 xsqrt(F32 x)
-{
-    return sqrtf(x);
-}
-
+// inlines CodeWarrior scattered across xCamera.cpp and xHudMeter.cpp. These
+// are referenced by the other half of xMath.cpp's object file. xpow and xsqrt
+// are not here: xMath.cpp defines those itself.
 F32 xatan2(F32 y, F32 x)
 {
     return atan2f(y, x);

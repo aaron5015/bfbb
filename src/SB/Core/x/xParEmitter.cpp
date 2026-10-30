@@ -10,7 +10,10 @@
 #include <zGlobals.h>
 #include <xDebug.h>
 #include <xEvent.h>
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <xParSys.h>
+#include <math.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
 #else
 #include <cmath>
@@ -209,29 +212,30 @@ void xParEmitterReset(xParEmitter* t)
 S32 xParEmitterEventCB(xBase* to, xBase* from, U32 toEvent, const F32* toParam,
                        xBase* toParamWidget)
 {
+    xParEmitter* emitter = (xParEmitter*)from;
     xParEmitterCustomSettings sp8;
 
     switch ((S32)toEvent)
     {
     case eEventReset:
-        xParEmitterReset((xParEmitter*)from);
+        xParEmitterReset(emitter);
         break;
     case eEventOn:
-        ((xParEmitter*)from)->emit_flags |= 1;
+        emitter->emit_flags |= 1;
         break;
     case eEventOff:
-        if (((xParEmitter*)from)->emit_flags & 1)
+        if (emitter->emit_flags & 1)
         {
-            ((xParEmitter*)from)->emit_flags ^= 1;
+            emitter->emit_flags ^= 1;
         }
         break;
     case eEventEmit:
         memset(&sp8, 0, sizeof(sp8));
         // A thirtieth of a second's worth: two console frames.
 #ifdef PLATFORM_PC
-        xParEmitterEmitCustom((xParEmitter*)from, 0.033333335f, &sp8, 2.0f);
+        xParEmitterEmitCustom(emitter, 0.033333335f, &sp8, 2.0f);
 #else
-        xParEmitterEmitCustom((xParEmitter*)from, 0.033333335f, &sp8);
+        xParEmitterEmitCustom(emitter, 0.033333335f, &sp8);
 #endif
         break;
     }
@@ -381,7 +385,10 @@ F32 xParInterpCompute(S32 interp_mode, xParInterp* r, F32 time, S32 time_has_ela
 {
     F32 val;
 
+#if !defined(PS2)
     val = time;
+#endif
+    // PS2 assigns val only for the interpolation modes handled below.
     switch (interp_mode)
     {
     case 0:
@@ -407,19 +414,19 @@ F32 xParInterpCompute(S32 interp_mode, xParInterp* r, F32 time, S32 time_has_ela
         }
         else
         {
-            val = ((r->val[1] - r->val[0]) * (val / r->freq)) + r->val[0];
+            val = ((r->val[1] - r->val[0]) * (time / r->freq)) + r->val[0];
         }
         break;
     case 4:
-        val = ((r->val[1] - r->val[0]) * (0.5f * isin(6.2831855f * (val * r->oofreq)) + 0.5f)) +
+        val = ((r->val[1] - r->val[0]) * (0.5f * isin(6.2831855f * (time * r->oofreq)) + 0.5f)) +
               r->val[0];
         break;
     case 5:
-        val = ((r->val[1] - r->val[0]) * (0.5f * icos(6.2831855f * (val * r->oofreq)) + 0.5f)) +
+        val = ((r->val[1] - r->val[0]) * (0.5f * icos(6.2831855f * (time * r->oofreq)) + 0.5f)) +
               r->val[0];
         break;
     case 7:
-        if ((val * r->freq) >= 0.5f)
+        if ((time * r->freq) >= 0.5f)
         {
             val = r->val[1];
         }
@@ -482,30 +489,28 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
     // stands for, so xParFrameStep below is applied there rather than here.
 #endif
 
-    xParEmitterAsset* pea;
-    xParEmitterPropsAsset* prop;
+    F32 life;
     S32 rate_has_elapsed;
     F32 rate;
-    S32 count;
     xParSys* ps;
+    S32 count;
+    xParEmitterPropsAsset* prop;
+    xParEmitterAsset* pea;
     xPar* p;
-    F32 life;
     F32 size_birth;
     F32 size_death;
     xVec3 emitPosition;
-    S32 attachGroupIndex;
-    S32 attachGroupTotal;
-    S32 emitAgain;
-    S32 marker;
-    U32 get_rnd_group_idx;
+    S32 attachGroupIndex, attachGroupTotal;
     xEnt* attach_ent;
+    S32 c;
+    S32 emitAgain;
     xMat4x3* bone_mat;
     xVec3 bone_vel;
     xVec3 emitvel;
     S32 i;
-    S32 c;
-    F32 fc1;
-    F32 fc2;
+    U32 get_rnd_group_idx;
+    F32 fc2, fc1;
+    S32 marker;
 
     if (pe->parSys == NULL)
     {
@@ -526,7 +531,7 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
 
     while (pe->rate_time > prop->rate.freq)
     {
-        pe->rate_time = pe->rate_time - prop->rate.freq;
+        pe->rate_time -= prop->rate.freq;
     }
 
     rate = xParInterpCompute(pe->rate_mode, &prop->rate, pe->rate_time, rate_has_elapsed, pe->rate);
@@ -558,17 +563,29 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
         return NULL;
     }
 
+#if defined(PS2)
+    if (((S32)ps->tasset->maxPar > 0) && (ps->group->m_num_of_particles >= (S32)ps->tasset->maxPar))
+#else
     if ((ps->tasset->maxPar != 0) && (ps->group->m_num_of_particles >= (S32)ps->tasset->maxPar))
+#endif
     {
         return NULL;
     }
 
+#if defined(PS2)
+    if (((S32)ps->tasset->maxPar > 0) && (ps->group->m_num_of_particles >= (S32)ps->tasset->maxPar))
+#else
     if ((ps->tasset->maxPar != 0) && (ps->group->m_num_of_particles >= (S32)ps->tasset->maxPar))
+#endif
     {
         return NULL;
     }
 
+#if defined(PS2)
+    if (((S32)ps->tasset->maxPar > 0) &&
+#else
     if ((ps->tasset->maxPar != 0) &&
+#endif
         (ps->group->m_num_of_particles + rate_has_elapsed >= (S32)ps->tasset->maxPar))
     {
         rate_has_elapsed = ps->tasset->maxPar - ps->group->m_num_of_particles;
@@ -584,55 +601,58 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
         xBase* attachObject = NULL;
         marker = 0;
 
-        if ((emitObj != NULL) && (emitObj->baseType == eBaseTypeGroup))
+        if (emitObj != NULL)
         {
-            xGroup* g = (xGroup*)emitObj;
-
-            if (count == -1)
+            if (emitObj->baseType == eBaseTypeGroup)
             {
-                attachGroupTotal = xGroupGetCount(g);
-                count = 0;
-            }
+                xGroup* g = (xGroup*)emitObj;
 
-            if (g->asset->groupFlags & 1)
-            {
-                get_rnd_group_idx = xrand() % attachGroupTotal;
-                attachObject = xGroupGetItemPtr(g, get_rnd_group_idx);
-                emitAgain = 0;
-
-                if (attachObject == NULL)
+                if (count == -1)
                 {
-                    attachGroupIndex = xGroupGetItem(g, get_rnd_group_idx);
-                    attachObject = (xBase*)xSTFindAsset(attachGroupIndex, NULL);
+                    attachGroupTotal = xGroupGetCount(g);
+                    count = 0;
+                }
 
-                    if (attachObject != NULL)
+                if (g->asset->groupFlags & 1)
+                {
+                    get_rnd_group_idx = xrand() % attachGroupTotal;
+                    attachObject = xGroupGetItemPtr(g, get_rnd_group_idx);
+                    emitAgain = 0;
+
+                    if (attachObject == NULL)
                     {
-                        marker = 1;
+                        attachGroupIndex = xGroupGetItem(g, get_rnd_group_idx);
+                        attachObject = (xBase*)xSTFindAsset(attachGroupIndex, NULL);
+
+                        if (attachObject != NULL)
+                        {
+                            marker = 1;
+                        }
                     }
+                }
+                else
+                {
+                    attachObject = xGroupGetItemPtr(g, count);
+
+                    if (attachObject == NULL)
+                    {
+                        attachGroupIndex = xGroupGetItem(g, count);
+                        attachObject = (xBase*)xSTFindAsset(attachGroupIndex, NULL);
+
+                        if (attachObject != NULL)
+                        {
+                            marker = 1;
+                        }
+                    }
+
+                    count++;
+                    emitAgain = count < attachGroupTotal;
                 }
             }
             else
             {
-                attachObject = xGroupGetItemPtr(g, count);
-
-                if (attachObject == NULL)
-                {
-                    attachGroupIndex = xGroupGetItem(g, count);
-                    attachObject = (xBase*)xSTFindAsset(attachGroupIndex, NULL);
-
-                    if (attachObject != NULL)
-                    {
-                        marker = 1;
-                    }
-                }
-
-                count++;
-                emitAgain = count < attachGroupTotal;
+                attachObject = emitObj;
             }
-        }
-        else
-        {
-            attachObject = emitObj;
         }
 
         attach_ent = (xEnt*)attachObject;
@@ -656,8 +676,8 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
                     if (!xEntValidType(attachObject->baseType) ||
                         (((xEnt*)attachObject)->model == NULL))
                     {
-                        emitPosition = 0.0f;
                         attach_ent = NULL;
+                        emitPosition = 0.0f;
                     }
                     else
                     {
@@ -697,7 +717,8 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
                 emitvel = 0.0f;
             }
 
-            for (i = 0; i < rate_has_elapsed; i++)
+            i = 0;
+            while (i < rate_has_elapsed)
             {
                 p = xParGroupAddPar(ps->group);
 
@@ -747,6 +768,7 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
 
                     switch (pea->emit_type)
                     {
+                        xBase* obj;
                     case eParEmitterPoint:
                         xParEmitterEmitPoint(p, pea, par_dt);
                         break;
@@ -779,7 +801,7 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
                         break;
                     case eParEmitterVolume:
                     {
-                        xBase* obj = (xBase*)pe->emit_volume;
+                        obj = (xBase*)pe->emit_volume;
 
                         if (obj != NULL)
                         {
@@ -834,6 +856,7 @@ xPar* xParEmitterEmit(xParEmitter* pe, F32 emit_dt, F32 par_dt)
                 {
                     emitAgain = 0;
                 }
+                i++;
             }
         }
     } while (emitAgain);
@@ -855,6 +878,7 @@ void xParEmitterDestroy()
     xDebugRemoveTweak("Particle Emitters");
 }
 
+#if !defined(PS2)
 SHARED_INLINE xPar* xParEmitterEmit(xParEmitter* pe, F32 dt)
 {
 #ifdef PLATFORM_PC
@@ -863,3 +887,4 @@ SHARED_INLINE xPar* xParEmitterEmit(xParEmitter* pe, F32 dt)
     return xParEmitterEmit(pe, dt, dt);
 #endif
 }
+#endif

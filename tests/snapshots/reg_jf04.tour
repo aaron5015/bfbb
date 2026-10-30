@@ -1,0 +1,8 @@
+# Spork Mountain (jf04) at 640x480 on Direct3D 9, booted straight into the scene.
+# SpongeBob's talk box at the King Jellyfish sign is up by 240. B leaves it;
+# the shot is 120 frames later.
+
+wait 600
+press b
+wait 120
+shot reg_jf04 0

@@ -1,4 +1,8 @@
+#if defined(PS2)
+#include "xEnt.h"
+#endif
 #include "zNPCMgr.h"
+
 #include "xLightKit.h"
 #include "xRMemData.h"
 #include "zNPCTypeCommon.h"
@@ -20,6 +24,12 @@
 #include "xstransvc.h"
 
 #include <types.h>
+
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+#define NPC_MGR_FRAME_TIME (1.0f / 50.0f)
+#else
+#define NPC_MGR_FRAME_TIME (1.0f / 60.0f)
+#endif
 
 static S32 g_modinit;
 static zNPCMgr* g_npcmgr;
@@ -512,7 +522,7 @@ void zNPCMgr::SceneReset()
     zNPCVillager_SceneReset();
     zNPCMsg_SceneReset();
     xBehaveMgr_SceneReset();
-    BackdoorUpdateAllNPCsOnce(globals.sceneCur, 1.0f / 60.0f);
+    BackdoorUpdateAllNPCsOnce(globals.sceneCur, NPC_MGR_FRAME_TIME);
 }
 
 void zNPCMgr::ScenePostInit()
@@ -629,7 +639,7 @@ void zNPCMgr::BackdoorUpdateAllNPCsOnce(xScene* xscn, F32 dt)
 
         if (npc->baseFlags & 0x40 && npc->update != NULL)
         {
-            npc->update(npc, xscn, 1.0f / 60);
+            npc->update(npc, xscn, NPC_MGR_FRAME_TIME);
         }
     }
 }

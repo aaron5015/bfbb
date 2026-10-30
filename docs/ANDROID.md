@@ -68,21 +68,19 @@ Each is an `if(ANDROID)` block in `CMakeLists.txt`.
 ## CI
 
 `.github/workflows/android.yml` runs `gradle assembleDebug` for arm64-v8a on
-pushes and pull requests that touch `android/`, `CMakeLists.txt`,
-`src/SB/Core/pc/android/`, `iHostPosix.cpp`, `bfbb_main.cpp`,
-`compat/intrin.h`, `tools/android/`, the workflow itself or `.gitmodules`.
-It can also be started by hand.
+pull requests, and on pushes to branches other than treedome, that touch
+`android/`, `CMakeLists.txt`, `src/SB/Core/pc/android/`, `iHostPosix.cpp`,
+`bfbb_main.cpp`, `compat/intrin.h`, `tools/android/`, the workflow itself or
+`.gitmodules`. It can also be started by hand.
 
 It checks that the APK contains `lib/arm64-v8a/libmain.so`. Nothing is run.
 
-On a push it publishes the APK to a rolling prerelease, `android-latest`,
-deleted and recreated each run so the tag points at the built commit:
+On a push to treedome or a `v*` tag, `pc-port.yml` calls it and it uploads
+`bfbb-arm64-v8a.apk` to that run's release, next to the desktop builds:
 
 ```
-.../releases/download/android-latest/bfbb-arm64-v8a.apk
+https://github.com/joeyballentine/bfbb/releases/download/latest/bfbb-arm64-v8a.apk
 ```
-
-The job needs `permissions: contents: write`.
 
 ## First launch
 
@@ -346,12 +344,6 @@ Avoid the x86_64 emulator: its SwiftShader GPU pins the host CPU.
 
 ## Known issues
 
-- The CI job fails. `android.yml` initialises only `third_party/librw` and
-  `third_party/SDL`, and the default `GL3;VULKAN` build needs the three Vulkan
-  submodules. `android-latest` does not currently exist.
-- The release notes `android.yml` writes are out of date: they describe the
-  assets folder as the only import route and mention the arena question as
-  open.
 - GL3 has no recovery if the driver loses the EGL context (see above).
 - `video.profile` in `config.ini` has no effect when the game is started from
   the launcher, because `BFBB_PROFILE` is always set. `custom` cannot be

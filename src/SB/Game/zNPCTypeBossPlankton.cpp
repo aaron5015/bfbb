@@ -1,4 +1,16 @@
+#include <types.h>
+
+struct xModelAssetParam;
+
+// Retail retains private copies of these parameter loaders.
+namespace auto_tweak
+{
+    template <class T1, class T2>
+    static void load_param(T1&, T2, T2, T2, xModelAssetParam*, U32, const char*);
+}
+
 #include "zNPCTypeBossPlankton.h"
+#include "xLaserBolt.inl"
 #include "xDebug.h"
 #include "xGroup.h"
 #include "xMathInlines.h"
@@ -7,6 +19,7 @@
 
 #include <types.h>
 #include <string.h>
+#include "auto_tweak.h"
 
 U32 xSndPlay3DFade(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, const xVec3* pos,
                    F32 innerRadius, F32 outerRadius, sound_category category, F32 fade, F32 delay);
@@ -15,7 +28,7 @@ U32 xSndPlay3DFade(U32 id, F32 vol, F32 pitch, U32 priority, U32 flags, const xV
 // re-declares the one this file uses. A host has them in the global namespace
 // with an exception specification that makes this a conflicting declaration;
 // compat/cmath brings the global name into std instead.
-#ifdef __MWERKS__
+#if defined(__MWERKS__) && !defined(PS2)
 namespace std
 {
     float fabsf(float x);
@@ -37,6 +50,12 @@ namespace std
 #define ANIM_attack_wall_end 75 //0x4b
 #define ANIM_attack_missle 76 //0x4c
 #define ANIM_attack_bomb 77 //0x4d
+
+#if defined(PS2)
+#define PLANKTON_SIGN_BIT(x) ((*(const U32*)&(x) & 0x80000000) >> 31)
+#else
+#define PLANKTON_SIGN_BIT(x) ((x) < 0.0f)
+#endif
 
 #define SOUND_HOVER 0
 #define SOUND_HIT 1
@@ -61,62 +80,15 @@ inline F32 range_limit<F32>(F32 v, F32 minv, F32 maxv)
     return v;
 }
 
-namespace auto_tweak
-{
-    template <>
-    inline void load_param<S32, S32>(S32& value, S32 scale, S32 lo, S32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
-    {
-        S32 v = zParamGetInt(ap, apsize, name, value);
-        if (v < lo)
-        {
-            v = lo;
-        }
-        else if (v > hi)
-        {
-            v = hi;
-        }
-        v = v * scale;
-        value = v;
-    }
-
-    template <>
-    inline void load_param<xVec3, S32>(xVec3& value, S32, S32, S32, xModelAssetParam* ap, U32 apsize,
-                                const char* name)
-    {
-        xVec3 def = value;
-        zParamGetVector(ap, apsize, name, def, &value);
-    }
-
-    template <>
-    inline void load_param<F32, F32>(F32& value, F32 scale, F32 lo, F32 hi, xModelAssetParam* ap,
-                              U32 apsize, const char* name)
-    {
-        value = zParamGetFloat(ap, apsize, name, value);
-        if (value < lo)
-        {
-            value = lo;
-        }
-        else if (value > hi)
-        {
-            value = hi;
-        }
-        value = value * scale;
-    }
-}
-
 // These structs were used in deadstripped functions.
 // This function is here to force the symbols to be linked.
 //
 // The target opens .rodata with the same unreferenced all-zero templates other
-// units carry -- three more of 0x0C, seven of 0x28, one more 0x0C and one of
+// units carry -- four of 0x0C (xVec3::create/cross's initializer templates from
+// xVec3.h, then laser_bolt_zero), seven of 0x28, one more 0x0C and one of
 // 0x10 -- which offsets every later .rodata relocation.
 void __deadstripped_zNPCTypeBossPlankton_head()
 {
-    const char _406[0x0C] = {};
-    const char _410[0x0C] = {};
-    const char _441[0x0C] = {};
-
     const char _607[0x28] = {};
     const char _608[0x28] = {};
     const char _609[0x28] = {};
@@ -307,13 +279,6 @@ namespace
         { 5, "B101_SC_jump", 0, 0 },        { 5, "KJ_Charge", 0, 0 },
         { 5, "Laser_med_pwrup1", 0, 0 }
     };
-
-    // One more unreferenced all-zero xVec3 template the target holds between
-    // sound_assets and beam_ring_curve.
-    void __deadstripped_zNPCTypeBossPlankton_sound()
-    {
-        const char _896[0x0C] = {};
-    }
 
     static const xDecalEmitter::curve_node beam_ring_curve[2] = {
         { 0.0f, { 255, 255, 255, 255 }, 0.0f },
@@ -512,96 +477,6 @@ namespace
 
 } // namespace
 
-inline xVec3& zNPCBPlankton::location() const
-{
-    return reinterpret_cast<xVec3&>(this->model->Mat->pos);
-}
-
-inline void zNPCBPlankton::face_player()
-{
-    flag.face_player = true;
-}
-
-inline void zNPCBPlankton::render_debug()
-{
-}
-
-inline bool zNPCBPlankton::turning() const
-{
-    const xVec2 at = { model->Mat->at.x, model->Mat->at.z };
-
-    return !xfeq0(turn.vel) ||
-           (!xfeq0(turn.accel) &&
-            !(turn.dir.x > turn.dir.y && xabs(turn.dir.x - at.x) < 0.001f) &&
-            !(turn.dir.x < turn.dir.y && xabs(turn.dir.y - at.y) < 0.001f));
-}
-
-inline void zNPCBPlankton::take_control()
-{
-    if (crony != NULL)
-    {
-        crony->HoldUpDude();
-    }
-}
-
-inline F32 zNPCBPlankton::get_orbit_yaw(const xVec3& loc) const
-{
-    return xatan2(loc.x - orbit.center.x, loc.z - orbit.center.z);
-}
-
-inline void zNPCBPlankton::set_location(const xVec3& loc)
-{
-    reinterpret_cast<xVec3&>(model->Mat->pos) = frame->mat.pos = loc;
-}
-
-inline void zNPCBPlankton::give_control()
-{
-    if (crony != NULL)
-    {
-        crony->ThanksImDone();
-    }
-}
-
-inline void zNPCBPlankton::enable_emitter(xParEmitter& p1) const
-{
-    p1.emit_flags |= 1;
-}
-
-inline void zNPCBPlankton::disable_emitter(xParEmitter& p1) const
-{
-    p1.emit_flags &= 0xFE;
-}
-
-inline U8 zNPCBPlankton::ColChkFlags() const
-{
-    return 0;
-}
-
-inline U8 zNPCBPlankton::ColPenFlags() const
-{
-    return 0;
-}
-
-inline U8 zNPCBPlankton::ColChkByFlags() const
-{
-    return 16;
-}
-
-inline U8 zNPCBPlankton::ColPenByFlags() const
-{
-    return 16;
-}
-
-inline U8 zNPCBPlankton::PhysicsFlags() const
-{
-    return 3;
-}
-
-inline S32 zNPCBPlankton::IsAlive()
-{
-    return 1;
-}
-
 xAnimTable* ZNPC_AnimTable_BossPlankton()
 {
     S32 anim_list[32]; //dwarf says it should be 32, matches less with 15
@@ -737,7 +612,7 @@ void zNPCBPlankton::Setup()
 
 void zNPCBPlankton::PostSetup()
 {
-    xUpdateCull_SetCB(globals.updateMgr, this, xUpdateCull_AlwaysTrueCB, NULL);
+    xUpdateCull_SetCB(globals.updateMgr, (xEnt*)this, xUpdateCull_AlwaysTrueCB, NULL);
 }
 
 void zNPCBPlankton::Reset()
@@ -875,7 +750,7 @@ void zNPCBPlankton::Render()
 
 void zNPCBPlankton::RenderExtraPostParticles()
 {
-    if ((beam.visible() & 0xff) != 0)
+    if (beam.visible())
     {
         RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)5);
         RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)2);
@@ -1714,6 +1589,18 @@ void zNPCBPlankton::refresh_orbit()
     else
     {
         territory_data& t = territory[active_territory];
+
+#if defined(NON_MATCHING) || defined(PLATFORM_PC)
+        // The Plankton in b301, a scrapped level, has no territory links and no
+        // Robo-SpongeBob body to ride with, so he reaches here with no
+        // territory at all and would read origin->asset through NULL. The
+        // orbit stays where it was.
+        if (t.origin == NULL)
+        {
+            return;
+        }
+#endif
+
         xMovePointAsset& mp = *t.origin->asset;
 
         orbit.center = mp.pos;
@@ -1780,6 +1667,11 @@ namespace
         xAccelStop(loc.z, move.vel.z, move.accel.z, dt);
     }
 
+    // Keep the aggregate templates at their retail positions while the helpers
+    // below retain their original function order.
+    extern const xVec3 ring_velocity_zero = {};
+    extern const xVec3 ring_location_zero = {};
+
     void update_move_orbit(xVec3& loc, zNPCBPlankton::move_info& move, const xVec3& center, F32 dt,
                            bool xfree)
     {
@@ -1831,28 +1723,29 @@ namespace
 
 void zNPCBPlankton::update_turn(F32 dt)
 {
-    location();
-
-    xVec2 at = { model->Mat->at.x, model->Mat->at.z };
+    xVec3& loc3 = location();
+    xVec3& start3 = (xVec3&)model->Mat->at;
+    xVec2 loc = { loc3.x, loc3.z };
+    xVec2 start_dir = { start3.x, start3.z };
 
     if (turning())
     {
-        F32 cur_yaw = xatan2(at.x, at.y);
-        F32 target_yaw = xatan2(turn.dir.x, turn.dir.y);
-        F32 diff = target_yaw - cur_yaw;
+        F32 start = xatan2(start_dir.x, start_dir.y);
+        F32 end = xatan2(turn.dir.x, turn.dir.y);
+        F32 diff = end - start;
 
         if (diff > PI)
         {
-            diff -= 6.2831855f;
+            diff -= 2.0f * PI;
         }
         else if (diff < -PI)
         {
-            diff += 6.2831855f;
+            diff += 2.0f * PI;
         }
 
-        F32 new_yaw = cur_yaw;
-        xAccelMove(new_yaw, turn.vel, turn.accel, dt, new_yaw + diff, turn.max_vel);
-        set_yaw_matrix(frame->mat, new_yaw);
+        F32 yaw = start;
+        xAccelMove(yaw, turn.vel, turn.accel, dt, yaw + diff, turn.max_vel);
+        set_yaw_matrix(frame->mat, yaw);
     }
 }
 
@@ -1888,10 +1781,7 @@ namespace
         xVec2 dir = offset / dist;
         xVec2 perp = { -dir.y, dir.x };
 
-        F32 radial = vel2.dot(dir);
-        F32 tangential = vel2.dot(perp);
-
-        return xVec3::create(tangential, world_vel.y, radial);
+        return xVec3::create(vel2.dot(perp), world_vel.y, vel2.dot(dir));
     }
 
     xVec3 ring_to_world_vel(const xVec3& ring_vel, const xVec3& loc, const xVec3& center)
@@ -1900,11 +1790,19 @@ namespace
         xVec2 dir = offset.normal();
         xVec2 perp = { -dir.y, dir.x };
 
-        xVec3 out = { ring_vel.x * perp.x + ring_vel.z * perp.y, ring_vel.y,
-                      ring_vel.x * dir.x + ring_vel.z * dir.y };
+#if defined(PS2)
+        xVec3 out = {};
+#else
+        // GC layout workaround for the zero template; see ring_velocity_zero.
+        xVec3 out = ring_velocity_zero;
+#endif
+        out.x = ring_vel.x * perp.x + ring_vel.z * perp.y;
+        out.y = ring_vel.y;
+        out.z = ring_vel.x * dir.x + ring_vel.z * dir.y;
 
         return out;
     }
+
 } // namespace
 
 void zNPCBPlankton::reset_territories()
@@ -2386,7 +2284,15 @@ void zNPCBPlankton::impart_velocity(const xVec3& vel)
 
         add.y = 0.0f;
 
-        const xVec2 diff = { location().x - orbit.center.x, location().z - orbit.center.z };
+        // Layout workaround: keep this initializer after the returned velocity copy.
+        struct orbit_offset
+        {
+            xVec2 value;
+        } __attribute__((aligned(8)));
+        const orbit_offset offset = {
+            { location().x - orbit.center.x, location().z - orbit.center.z }
+        };
+        const xVec2& diff = offset.value;
         const F32 max_dist = orbit.radius + tweak.hit_max_dist;
 
         if (diff.length2() > max_dist * max_dist)
@@ -2397,8 +2303,6 @@ void zNPCBPlankton::impart_velocity(const xVec3& vel)
         move.vel += add;
         break;
     }
-    case MOVE_NONE:
-    case MOVE_ACCEL:
     case MOVE_STOP:
     default:
     {
@@ -2430,18 +2334,19 @@ U8 zNPCBPlankton::have_cronies() const
 
 U8 zNPCBPlankton::move_to_player_territory()
 {
-    xEntCollis* coll = globals.player.ent.collis;
+    xCollis& coll = globals.player.ent.collis->colls[0];
 
-    if (!(coll->colls[0].flags & 1) || coll->colls[0].optr == NULL)
+    if (!(coll.flags & 1) || coll.optr == NULL)
     {
         return 0;
     }
 
-    xEnt* platform = (xEnt*)coll->colls[0].optr;
+    xEnt* platform = (xEnt*)coll.optr;
 
     for (S32 i = 0; i < territory_size; i++)
     {
-        if (!(territory[i].crony_size > 0) && platform == territory[i].platform)
+        territory_data& t = territory[i];
+        if (!(t.crony_size > 0) && platform == t.platform)
         {
             active_territory = i;
             return 1;
@@ -2453,9 +2358,11 @@ U8 zNPCBPlankton::move_to_player_territory()
 
 U8 zNPCBPlankton::player_left_territory() const
 {
-    const territory_data& t = territory[active_territory];
+    xEnt* platform;
+    const S32 active = active_territory;
+    const territory_data& t = territory[active];
     const xCollis& coll = globals.player.ent.collis->colls[0];
-    xEnt* platform = (xEnt*)coll.optr;
+    platform = (xEnt*)coll.optr;
 
     if (t.crony_size > 0 || t.platform == platform || !(coll.flags & 1) || platform == NULL)
     {
@@ -2466,7 +2373,7 @@ U8 zNPCBPlankton::player_left_territory() const
     {
         const territory_data& t = territory[i];
 
-        if (!(t.crony_size > 0) && platform == t.platform && i != active_territory)
+        if (!(t.crony_size > 0) && platform == t.platform && i != active)
         {
             return 1;
         }
@@ -2548,7 +2455,7 @@ void zNPCBPlankton::halt(F32 accel)
     flag.move = MOVE_STOP;
 
     F32 ax;
-    if (move.vel.x < 0.0f)
+    if (PLANKTON_SIGN_BIT(move.vel.x))
     {
         ax = accel;
     }
@@ -2559,7 +2466,7 @@ void zNPCBPlankton::halt(F32 accel)
     move.accel.x = ax;
 
     F32 ay;
-    if (move.vel.y < 0.0f)
+    if (PLANKTON_SIGN_BIT(move.vel.y))
     {
         ay = accel;
     }
@@ -2570,7 +2477,7 @@ void zNPCBPlankton::halt(F32 accel)
     move.accel.y = ay;
 
     F32 az;
-    if (move.vel.z < 0.0f)
+    if (PLANKTON_SIGN_BIT(move.vel.z))
     {
         az = accel;
     }
@@ -2627,6 +2534,12 @@ S32 zNPCGoalBPlanktonIdle::Enter(F32 dt, void* updCtxt)
     return zNPCGoalCommon::Enter(dt, updCtxt);
 }
 
+S32 zNPCGoalBPlanktonIdle::Exit(F32 dt, void* ctxt)
+{
+    owner.refresh_orbit();
+    return xGoal::Exit(dt, ctxt);
+}
+
 S32 zNPCGoalBPlanktonIdle::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
 {
     F32 yaw;
@@ -2647,12 +2560,6 @@ S32 zNPCGoalBPlanktonIdle::Process(en_trantype* trantype, F32 dt, void* updCtxt,
     }
 
     return 0;
-}
-
-S32 zNPCGoalBPlanktonIdle::Exit(F32 dt, void* ctxt)
-{
-    owner.refresh_orbit();
-    return xGoal::Exit(dt, ctxt);
 }
 
 void zNPCGoalBPlanktonIdle::get_yaw(F32& optimal, F32& dist) const
@@ -2805,9 +2712,7 @@ S32 zNPCGoalBPlanktonFlank::Exit(F32 dt, void* updCtxt)
 
 S32 zNPCGoalBPlanktonFlank::Process(en_trantype* trantype, F32 dt, void* updCtxt, xScene* xscn)
 {
-    xVec3& loc = owner.location();
-
-    if (xabs(loc.y - owner.orbit.center.y) <= 0.1f)
+    if (xeq(owner.location().y, owner.orbit.center.y, 0.1f))
     {
         owner.beam_duration = tweak.beam.time_fire;
         *trantype = GOAL_TRAN_SET;
@@ -2901,20 +2806,29 @@ namespace
                              ring.z * icos(ang) + center.z);
     }
 
+
     xVec3 world_to_ring_loc(const xVec3& loc, const xVec3& center)
     {
         xVec2 offset = { loc.x - center.x, loc.z - center.z };
         F32 dist = offset.length();
-        xVec3 out = { dist * xatan2(offset.x, offset.y), loc.y - center.y, dist };
+#if defined(PS2)
+        xVec3 out = {};
+#else
+        // GC layout workaround for the zero template; see ring_location_zero.
+        xVec3 out = ring_location_zero;
+#endif
+        out.x = dist * xatan2(offset.x, offset.y);
+        out.y = loc.y - center.y;
+        out.z = dist;
 
         return out;
     }
-} // namespace
+}
 
-// The last unreferenced all-zero xVec3 template, after the one
-// world_to_ring_loc creates.
+// Two unreferenced all-zero xVec3 templates precede the hunt goal in retail.
 void __deadstripped_zNPCTypeBossPlankton_tail()
 {
+    const char _2633[0x0C] = {};
     const char _2634[0x0C] = {};
 }
 

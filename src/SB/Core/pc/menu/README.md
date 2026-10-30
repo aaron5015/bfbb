@@ -107,6 +107,27 @@ To add a setting, add a row to `kSettings`: the label, the config key, its
 words and what to call them, when it takes effect, one line of help, and the
 function that applies it.
 
+## Load Game from the pause menu
+
+Retail built a pause Load Game entry (`PAUSE OPTION LOAD UIF`) but left it out
+of the pause group, and no game loop answers its dispatcher event. On PC it
+sits under Save Game. It switches to Save mode and stays selected, as the
+Settings entry does, and `iSGSaveLoop` shows the save screen's widgets as a
+list of saves to load. Picking one asks first, through the overwrite question
+with its text rewritten. Yes leaves the level the way Quit to Main Menu does.
+The main loop then calls `iSGShowMenu` where it would show the title. That
+reads the save and sends the loop straight into its scene, skipping the title.
+The save is read only after the level is gone, because leaving a level wipes
+the serial buffer the save is read into.
+
+## Quit Game
+
+Retail's Quit Game question asks where to: Quit to Main Menu (retail's Yes),
+Quit to Desktop, or Cancel (retail's No, selected first). Quit to Desktop
+(`iQuitDesktop.h`) switches to Save mode and stays selected, as the Settings
+entry does. `iSGSaveLoop` sees that and calls `iWindowRequestClose`, which
+exits the way the window's close button does.
+
 ## Checking
 
 `BFBB_ASSET_VERIFY=1` compares every built asset with the HIP's after each

@@ -1,0 +1,14 @@
+# [cheats] unlimited_shinies, unlimited_spatulas and all_warps in Jellyfish
+# Fields. The HUD button shows the counters at 99999 and 100; the pause menu
+# then offers the taxi to every spatula.
+
+wait 2400
+press b
+wait 120
+hold 30 hud
+wait 30
+shot reg_cheat_counters 0
+wait 300
+press start
+wait 60
+shot reg_cheat_all_warps 0

@@ -3,7 +3,9 @@
 #include "xMathInlines.h"
 #include "xDebug.h"
 
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <new.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support/MSL_C++/MSL_Common/Include/new.h>
 #else
 #include <new>
@@ -18,7 +20,7 @@
 // build supplies this one's body. A host has it globally, with an exception
 // specification that makes a redeclaration here a conflict; compat/cmath
 // brings the global name into std instead.
-#ifdef __MWERKS__
+#if defined(__MWERKS__) && !defined(XBOX)
 namespace std
 {
     extern inline float fmodf(float x, float y)
@@ -28,10 +30,12 @@ namespace std
 }
 #endif
 
+#if !defined(XBOX) && !defined(PS2)
 SHARED_INLINE F32 xfmod(F32 a, F32 b)
 {
     return std::fmodf(a, b);
 }
+#endif
 
 namespace xhud
 {
@@ -56,9 +60,9 @@ xhud::unit_meter_widget::unit_meter_widget(const xhud::unit_meter_asset& a)
 
     for (i = 0; i < 2; i++)
     {
-        for (j = 0; j < 6; j++)
+        for (j = 0; j < 6;)
         {
-            model[j][i] = load_model(res.model[i].id);
+            model[j++][i] = load_model(res.model[i].id);
         }
     }
 

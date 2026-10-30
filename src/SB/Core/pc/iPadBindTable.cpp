@@ -27,23 +27,37 @@
 // it happens to name are an Xbox pad's.
 //
 // A preset overrides it by LETTER. See kPadBindPresets below.
+//
+// The `key` column is the keyboard and the mouse, laid out the way a PC game
+// would be: E to talk and use, Escape to pause, Space and Enter to confirm,
+// Backspace to go back, Tab for the HUD. The attacks lead with a mouse button
+// and name a key after it, so either works and the prompt draws the mouse.
+// Under the Xbox layout, which the keyboard gets with no pad plugged in, that
+// puts Bubble Spin on the left button, Bubble Bounce on the right and Bubble
+// Bash on the middle.
 const iPadBindButton kPadBindButtons[] = {
-    { "a", XPAD_BUTTON_X, "a", "space", "jump, confirm" },
-    { "b", XPAD_BUTTON_TRIANGLE, "b", "lctrl", "cancel; Bubble Spin on gamecube" },
-    { "x", XPAD_BUTTON_O, "x", "e", "options; Bubble Bounce on gamecube" },
-    { "y", XPAD_BUTTON_SQUARE, "y", "q", "Bubble Bash" },
-    { "z", XPAD_BUTTON_Z, "lb", "f", "pull the camera in close" },
-    { "hud", XPAD_BUTTON_HUD, "rb", "g", "show the HUD" },
-    { "l1", XPAD_BUTTON_L1, "lt", "z", "camera left" },
-    { "r1", XPAD_BUTTON_R1, "rt", "c", "camera right" },
-    { "l2", XPAD_BUTTON_L2, "lb", "x", NULL },
-    { "r2", XPAD_BUTTON_R2, "rb", "v", NULL },
-    { "start", XPAD_BUTTON_START, "start", "enter", "pause" },
-    { "select", XPAD_BUTTON_SELECT, "back", "backspace", NULL },
+    { "a", XPAD_BUTTON_X, "a", "space, enter", "jump, confirm" },
+    { "b", XPAD_BUTTON_TRIANGLE, "b", "mouse2, backspace", "cancel; Bubble Spin on gamecube" },
+    { "x", XPAD_BUTTON_O, "x", "mouse1, f", "options; Bubble Bounce on gamecube" },
+    { "y", XPAD_BUTTON_SQUARE, "y", "q, mouse3", "Bubble Bash" },
+    { "z", XPAD_BUTTON_Z, "lb", "v", "pull the camera in close" },
+    { "hud", XPAD_BUTTON_HUD, "rb", "tab", "show the HUD" },
+    { "l1", XPAD_BUTTON_L1, "lt", "r", "launch the cruise bubble" },
+    { "r1", XPAD_BUTTON_R1, "rt", "e", "talk, call the bus" },
+    { "l2", XPAD_BUTTON_L2, "lb", "pageup", "no move; menus and dialogue can read it" },
+    { "r2", XPAD_BUTTON_R2, "rb", "pagedown", "no move; menus and dialogue can read it" },
+    { "start", XPAD_BUTTON_START, "start", "escape", "pause" },
+    { "select", XPAD_BUTTON_SELECT, "back", "m", NULL },
     { "up", XPAD_BUTTON_UP, "dpup", "up", "d-pad; also walks" },
     { "down", XPAD_BUTTON_DOWN, "dpdown", "down", NULL },
     { "left", XPAD_BUTTON_LEFT, "dpleft", "left", NULL },
     { "right", XPAD_BUTTON_RIGHT, "dpright", "right", NULL },
+
+    // Last so the presets, which line up with this table by position, need no
+    // entry for them. Walk is unbound on a pad, whose stick is already every
+    // speed.
+    { "walk", XPAD_BUTTON_WALK, "", "shift", "hold to sneak" },
+    { "view", XPAD_BUTTON_VIEW, "rs", "c", "first person on or off" },
 };
 
 const S32 kPadBindButtonCount = (S32)(sizeof(kPadBindButtons) / sizeof(kPadBindButtons[0]));
@@ -236,6 +250,14 @@ namespace
         }
         return -1;
     }
+
+    // The whole binding is the word `none`, in any case.
+    bool isNone(const char* s)
+    {
+        char word[8];
+        takeToken(s, '\0', word, (S32)sizeof(word));
+        return iHostStrCaseCmp(word, "none") == 0;
+    }
 } // namespace
 
 bool iPadBindParse(const char* text, const iPadBindToken* tokens, S32 tokenCount, const char* what,
@@ -254,7 +276,7 @@ bool iPadBindParse(const char* text, const iPadBindToken* tokens, S32 tokenCount
     memset(&built, 0, sizeof(built));
 
     const char* s = skipSpace(text);
-    if (*s == '\0')
+    if (*s == '\0' || isNone(s))
     {
         // Deliberately empty. Not an error: it is how a button is turned off.
         *out = built;
@@ -405,6 +427,63 @@ bool iPadBindHeld(const iPadBind& bind, bool (*held)(S16 id))
         }
 
         if (all)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+namespace
+{
+    // Does holding exactly the positive inputs of `presser`'s alternative
+    // `alt` satisfy `other`?
+    bool pressSets(const iPadBind& presser, S32 alt, const iPadBind& other)
+    {
+        for (S32 o = 0; o < other.alts; o++)
+        {
+            bool all = true;
+            for (S32 i = 0; i < other.length[o] && all; i++)
+            {
+                bool down = false;
+                for (S32 j = 0; j < presser.length[alt]; j++)
+                {
+                    if (!presser.negate[alt][j] && presser.id[alt][j] == other.id[o][i])
+                    {
+                        down = true;
+                    }
+                }
+
+                if (down == (other.negate[o][i] != 0))
+                {
+                    all = false;
+                }
+            }
+
+            if (all)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+} // namespace
+
+bool iPadBindOverlap(const iPadBind& a, const iPadBind& b)
+{
+    for (S32 alt = 0; alt < a.alts; alt++)
+    {
+        if (pressSets(a, alt, b))
+        {
+            return true;
+        }
+    }
+
+    for (S32 alt = 0; alt < b.alts; alt++)
+    {
+        if (pressSets(b, alt, a))
         {
             return true;
         }

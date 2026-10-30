@@ -15,9 +15,6 @@
 // as zVar.cpp, which uses this idiom in a Matching unit.
 void __deadstripped_xParEmitterType()
 {
-    const char _427[0x0C] = {};
-    const char _428[0x0C] = {};
-    const char _432[0x0C] = {};
     const char _463[0x0C] = {};
 
     const char _617[0x28] = {};
@@ -42,8 +39,10 @@ void xParEmitterAngleVariation(xPar* p, xParEmitterAsset* a)
     {
         xMat3x3 mat_rot = { 0 };
         F32 ang_debrisCone = a->vel_angle_variation;
-        F32 ang[3] = { ang_debrisCone * (xurand() - 0.5f), ang_debrisCone * (xurand() - 0.5f),
-                       ang_debrisCone * (xurand() - 0.5f) };
+        F32 ang[3] = { 0 };
+        ang[0] = ang_debrisCone * (xurand() - 0.5f);
+        ang[1] = ang_debrisCone * (xurand() - 0.5f);
+        ang[2] = ang_debrisCone * (xurand() - 0.5f);
 
         xMat3x3Euler(&mat_rot, ang[0], ang[1], ang[2]);
         xMat3x3LMulVec(&p->m_vel, &mat_rot, &p->m_vel);
@@ -118,7 +117,7 @@ void xParEmitterEmitCircle(xPar* p, xParEmitterAsset* a, F32 dt)
         xVec2 dir = { 0.0f, 1.0f };
         F32 rad = xurand();
 
-        rad = -((rad * rad) - 1.0f);
+        rad = 1.0f - rad * rad;
 
         dir.y = rad * a->e_circle.radius;
 
@@ -216,7 +215,7 @@ void xParEmitterEmitLine(xPar* p, xParEmitterAsset* a, F32 dt)
         xVec3 off = { -sy, cy * sp, cy * cp };
 
         rad = xurand();
-        rad = -((rad * (rad * rad)) - 1.0f);
+        rad = 1.0f - rad * (rad * rad);
 
         p->m_pos += off * (a->e_line.radius * rad);
     }
@@ -404,8 +403,12 @@ void xParEmitterEmitVCylEdge(xPar* p, xParEmitterAsset* a, F32 dt)
 
 namespace
 {
-    void ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius);
-}
+#if defined(PS2)
+    inline
+#endif
+        void
+        ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius);
+} // namespace
 
 void xParEmitterEmitOCircleEdge(xPar* p, xParEmitterAsset* a, F32 dt)
 {
@@ -414,7 +417,11 @@ void xParEmitterEmitOCircleEdge(xPar* p, xParEmitterAsset* a, F32 dt)
 
 namespace
 {
-    void ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius)
+#if defined(PS2)
+    inline
+#endif
+        void
+        ocircle_emit(xPar& p, xParEmitterAsset& a, F32 dt, F32 radius)
     {
         xMat3x3 mat;
 
@@ -442,12 +449,12 @@ namespace
 
         p.m_vel *= dt;
     }
-}
+} // namespace
 
 void xParEmitterEmitOCircle(xPar* p, xParEmitterAsset* a, F32 dt)
 {
     F32 rr = xurand();
-    F32 scale = -((rr * rr) - 1.0f);
+    F32 scale = 1.0f - rr * rr;
 
     scale *= a->e_circle.radius;
 
@@ -456,9 +463,12 @@ void xParEmitterEmitOCircle(xPar* p, xParEmitterAsset* a, F32 dt)
 
 namespace
 {
-    void transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
-                            const xMat4x3& mat);
-}
+#if defined(PS2)
+    inline
+#endif
+        void
+        transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a, const xMat4x3& mat);
+} // namespace
 
 xMat4x3* xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
                                      const xEnt& ent)
@@ -486,10 +496,15 @@ xMat4x3* xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAs
 
 namespace
 {
-    void transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
-                            const xMat4x3& mat)
+#if defined(PS2)
+    inline
+#endif
+        void
+        transform_ent_bone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a, const xMat4x3& mat)
     {
-        if (a.e_entbone.flags & 0x1)
+        const xPEEntBone& eb = a.e_entbone;
+
+        if (eb.flags & 0x1)
         {
             xMat3x3RMulVec(&vel, &mat, &a.vel);
         }
@@ -498,36 +513,36 @@ namespace
             vel = a.vel;
         }
 
-        if (a.e_entbone.flags & 0x2)
+        if (eb.flags & 0x2)
         {
-            if (a.e_entbone.flags & 0x4)
+            if (eb.flags & 0x4)
             {
-                xVec3 flat = { a.e_entbone.offset.x, 0.0f, a.e_entbone.offset.z };
+                xVec3 flat = { eb.offset.x, 0.0f, eb.offset.z };
 
                 xMat4x3Toworld(&loc, &mat, &flat);
-                loc.y = a.e_entbone.offset.y;
+                loc.y = eb.offset.y;
             }
             else
             {
-                xMat4x3Toworld(&loc, &mat, &a.e_entbone.offset);
+                xMat4x3Toworld(&loc, &mat, &eb.offset);
             }
         }
         else
         {
-            loc = mat.pos + a.e_entbone.offset;
+            loc = mat.pos + eb.offset;
 
-            if (a.e_entbone.flags & 0x4)
+            if (eb.flags & 0x4)
             {
-                loc.y = a.e_entbone.offset.y;
+                loc.y = eb.offset.y;
             }
         }
 
-        if (a.e_entbone.flags & 0x4)
+        if (eb.flags & 0x4)
         {
-            loc.y = a.e_entbone.offset.y;
+            loc.y = eb.offset.y;
         }
     }
-}
+} // namespace
 
 void xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAsset& a,
                                  const xMat4x3& mat)
@@ -537,8 +552,12 @@ void xParEmitterTransformEntBone(xVec3& loc, xVec3& vel, const xParEmitterAsset&
 
 namespace
 {
-    xVec3 get_random_offset(const xPEEntBone& eb, const xMat4x3& mat);
-}
+#if defined(PS2)
+    inline
+#endif
+        xVec3
+        get_random_offset(const xPEEntBone& eb, const xMat4x3& mat);
+} // namespace
 
 void xParEmitterEmitEntBone(xPar* p, xParEmitterAsset* a, F32 dt, const xMat4x3& mat)
 {
@@ -557,7 +576,11 @@ void xParEmitterEmitEntBone(xPar* p, xParEmitterAsset* a, F32 dt, const xMat4x3&
 
 namespace
 {
-    xVec3 get_random_offset(const xPEEntBone& eb, const xMat4x3& mat)
+#if defined(PS2)
+    inline
+#endif
+        xVec3
+        get_random_offset(const xPEEntBone& eb, const xMat4x3& mat)
     {
         xVec3 off;
 
@@ -574,7 +597,7 @@ namespace
             F32 rad;
             F32 ang = 6.2831855f * xurand();
             F32 z = 2.0f * xurand() - 1.0f;
-            F32 up = xsqrt(-((z * z) - 1.0f));
+            F32 up = xsqrt(1.0f - z * z);
             F32 rr = xurand();
 
             rad = -((rr * (rr * rr)) - 1.0f);
@@ -621,7 +644,7 @@ namespace
         {
             F32 ang = 6.2831855f * xurand();
             F32 z = 2.0f * xurand() - 1.0f;
-            F32 sc = eb.radius * xsqrt(-((z * z) - 1.0f));
+            F32 sc = eb.radius * xsqrt(1.0f - z * z);
 
             off.assign(sc * icos(ang), sc * isin(ang), z * eb.radius);
             break;
@@ -661,33 +684,38 @@ namespace
 
         return off;
     }
-}
+} // namespace
 
 namespace
 {
-    xVec3 get_random_offset(const xBound& b, F32 expand, U32 subtype);
-}
+#if defined(PS2)
+    inline
+#endif
+        xVec3
+        get_random_offset(const xBound& b, F32 expand, U32 subtype);
+} // namespace
 
 void xParEmitterEmitEntBound(xPar* p, xParEmitterAsset* a, F32 dt, const xEnt* ent)
 {
-    xMat4x3* mat = (xMat4x3*)ent->model->Mat;
+    xPEEntBound& eb = a->e_entbound;
+    xMat4x3& mat = *(xMat4x3*)ent->model->Mat;
 
-    if (a->e_entbound.flags & 0x1)
+    if (eb.flags & 0x1)
     {
-        xMat3x3RMulVec(&p->m_vel, mat, &a->vel);
+        xMat3x3RMulVec(&p->m_vel, &mat, &a->vel);
     }
     else
     {
         p->m_vel = a->vel;
     }
 
-    xVec3 off = get_random_offset(ent->bound, a->e_entbound.expand, a->e_entbound.type);
+    xVec3 off = get_random_offset(ent->bound, eb.expand, eb.type);
 
-    p->m_pos = mat->pos + off;
+    p->m_pos = mat.pos + off;
 
-    if (a->e_entbound.deflection != 0.0f)
+    if (eb.deflection != 0.0f)
     {
-        p->m_vel += off * a->e_entbound.deflection;
+        p->m_vel += off * eb.deflection;
     }
 
     p->m_vel *= dt;
@@ -697,7 +725,11 @@ void xParEmitterEmitEntBound(xPar* p, xParEmitterAsset* a, F32 dt, const xEnt* e
 
 namespace
 {
-    xVec3 get_random_offset(const xBound& b, F32 expand, U32 subtype)
+#if defined(PS2)
+    inline
+#endif
+        xVec3
+        get_random_offset(const xBound& b, F32 expand, U32 subtype)
     {
         xVec3 off;
 
@@ -709,10 +741,10 @@ namespace
             F32 rad;
             F32 ang = 6.2831855f * xurand();
             F32 z = 2.0f * xurand() - 1.0f;
-            F32 up = xsqrt(-((z * z) - 1.0f));
+            F32 up = xsqrt(1.0f - z * z);
             F32 rr = xurand();
 
-            rad = -((rr * (rr * rr)) - 1.0f);
+            rad = 1.0f - rr * (rr * rr);
             rad *= b.sph.r + expand;
 
             sc = rad * up;
@@ -727,10 +759,6 @@ namespace
             off.x *= 2.0f * xurand() - 1.0f;
             off.y *= 2.0f * xurand() - 1.0f;
             off.z *= 2.0f * xurand() - 1.0f;
-            break;
-        }
-        case (0 << 3) | XBOUND_TYPE_CYL:
-        {
             break;
         }
         case (0 << 3) | XBOUND_TYPE_OBB:
@@ -780,10 +808,6 @@ namespace
             off = ((b.box.box.upper - b.box.center) + expand) * face;
             break;
         }
-        case (1 << 3) | XBOUND_TYPE_CYL:
-        {
-            break;
-        }
         case (1 << 3) | XBOUND_TYPE_OBB:
         {
             xVec3 face;
@@ -813,12 +837,13 @@ namespace
 
         return off;
     }
-}
+} // namespace
 
 // These three land as weak symbols in this unit's split
 // (.text:0x8011A7E4/0x8011A848/0x8011A87C), in this order. The target's own
 // call graph shows operator* calling operator*= and operator+ calling
 // operator+=, which is the xBound.cpp idiom.
+#if !defined(PS2)
 xVec3 xVec3::operator*(const xVec3& v) const
 {
     xVec3 temp = *this;
@@ -840,3 +865,18 @@ xVec3 xVec3::operator+(F32 f) const
     temp += f;
     return temp;
 }
+#endif
+
+#if defined(PS2)
+// These vector helpers inline in the original circle emitters.
+inline F32 xVec2Dot(const xVec2* a, const xVec2* b)
+{
+    return a->x * b->x + a->y * b->y;
+}
+
+inline void xVec2Init(xVec2* v, F32 _x, F32 _y)
+{
+    v->x = _x;
+    v->y = _y;
+}
+#endif

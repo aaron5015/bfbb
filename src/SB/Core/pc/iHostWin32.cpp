@@ -308,6 +308,28 @@ bool iHostSetChildEnv(const char* name, const char* value)
     return SetEnvironmentVariableA(name, value) != 0;
 }
 
+FILE* iHostPipeOpen(const char* command)
+{
+    // _popen runs `cmd /c <command>`, and cmd strips the first and last quote
+    // of a line that starts with one -- so "C:\a b\x.exe" "out" would lose
+    // both ends. One more pair around the whole line is what it strips instead.
+    size_t n = strlen(command) + 3;
+    char* wrapped = (char*)malloc(n);
+    if (wrapped == NULL)
+    {
+        return NULL;
+    }
+    snprintf(wrapped, n, "\"%s\"", command);
+    FILE* f = _popen(wrapped, "wb");
+    free(wrapped);
+    return f;
+}
+
+int iHostPipeClose(FILE* pipe)
+{
+    return _pclose(pipe);
+}
+
 bool iHostRunDetached(const char* exe, const char* workingDir)
 {
     STARTUPINFOA startup;

@@ -895,22 +895,7 @@ struct rwGameCube2DVertex
     RwReal v;
 
 #ifdef __cplusplus
-    rwGameCube2DVertex& operator=(const rwGameCube2DVertex& rhs)
-    {
-        this->x = rhs.x;
-        this->y = rhs.y;
-        this->z = rhs.z;
-
-        this->emissiveColor.red = rhs.emissiveColor.red;
-        this->emissiveColor.green = rhs.emissiveColor.green;
-        this->emissiveColor.blue = rhs.emissiveColor.blue;
-        this->emissiveColor.alpha = rhs.emissiveColor.alpha;
-
-        this->u = rhs.u;
-        this->v = rhs.v;
-
-        return *this;
-    }
+    rwGameCube2DVertex& operator=(const rwGameCube2DVertex& rhs);
 #endif
 };
 
@@ -1319,10 +1304,9 @@ struct RwEngineOpenParams
 
 struct RwGameCubeDeviceConfig
 {
-    /* unknown */
-#ifndef __cplusplus
-    RwUInt8 pad; /* C has no empty struct */
-#endif
+    void* renderMode;
+    RwInt32 pixFmt;
+    RwUInt32 fifoSize;
 };
 
 typedef RwBool (*RwSystemFunc)(RwInt32 nOption, void* pOut, void* pInOut, RwInt32 nIn);
@@ -1528,6 +1512,8 @@ extern RwReal _rwMatrixOrthogonalError(const RwMatrix* matrix);
 extern RwReal _rwMatrixNormalError(const RwMatrix* matrix);
 extern RwBool RwEngineSetMatrixTolerances(const RwMatrixTolerance* const tolerance);
 extern RwMatrix* RwMatrixOptimize(RwMatrix* matrix, const RwMatrixTolerance* tolerance);
+extern RwMatrix* RwMatrixCreate(void);
+extern RwBool RwMatrixDestroy(RwMatrix* mpMat);
 extern RwMatrix* RwMatrixUpdate(RwMatrix* matrix);
 extern RwMatrix* RwMatrixMultiply(RwMatrix* matrixOut, const RwMatrix* MatrixIn1,
                                   const RwMatrix* matrixIn2);

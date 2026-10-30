@@ -40,6 +40,10 @@ void ZNPC_Duplotron_Shutdown()
 {
 }
 
+void zNPCDuplotron_ScenePrepare()
+{
+}
+
 void zNPCDuplotron_SceneFinish()
 {
     DUPO_KillEffects();
@@ -48,10 +52,6 @@ void zNPCDuplotron_SceneFinish()
 void zNPCDuplotron_ScenePostInit()
 {
     DUPO_InitEffects();
-}
-
-void zNPCDuplotron_ScenePrepare()
-{
 }
 
 xFactoryInst* ZNPC_Create_Duplotron(S32 who, RyzMemGrow* grow, void*)
@@ -468,8 +468,10 @@ void zNPCDuplotron::VFXSmokeStack(F32 dt)
         F32 ds2_cam = NPCC_ds2_toCam(this->Pos(), 0x0);
         if (!(ds2_cam > SQ(25.0f)))
         {
-            // temp var needed for .sdata2 match
-            F32 s = isin(this->tmr_smokeCycle * 2.0f * PI);
+            // Keep the phase and scale separate for the original FP temporaries.
+            const F32 phase = this->tmr_smokeCycle;
+            F32 cycleScale = 2.0f;
+            F32 s = isin(phase * cycleScale * PI);
             S32 npar = 5.0f * s;
             if (npar >= 1)
             {
@@ -483,11 +485,9 @@ void zNPCDuplotron::VFXSmokeStack(F32 dt)
                 for (S32 i = 0; i < npar; i++)
                 {
                     xVec3Copy(&g_parf_smoky.pos, &pos_emit);
-                    F32 rand = xurand();
+                    g_parf_smoky.pos.x += 0.1f * (2.0f * (xurand() - 0.5f));
                     g_parf_smoky.pos.y += 0.1f;
-                    g_parf_smoky.pos.x += 0.1f * (2.0f * (rand - 0.5f));
-                    rand = xurand();
-                    g_parf_smoky.pos.z += 0.1f * (2.0f * (rand - 0.5f));
+                    g_parf_smoky.pos.z += 0.1f * (2.0f * (xurand() - 0.5f));
                     xParEmitterEmitCustom(g_pemit_smoky, dt, &g_parf_smoky);
                 }
             }
@@ -501,7 +501,6 @@ void zNPCDuplotron::VFXOverheat(F32 dt, F32)
     static S32 idx_steam[2] = { 12, -1 };
     static S32 idx_smoke[4] = { 7, 8, 9, -1 };
 
-    S32* rc;
     xVec3 pos_emit;
     xVec3 dir_emit;
 
@@ -511,38 +510,39 @@ void zNPCDuplotron::VFXOverheat(F32 dt, F32)
         {
             static S32 skip = 5;
 
-            if (--skip <= 0)
+            if (--skip > 0)
             {
-                skip = 5;
+                return;
+            }
 
-                for (rc = idx_smoke; *rc >= 0; rc++)
+            skip = 5;
+
+            for (S32 i = 0; idx_smoke[i] >= 0; i++)
+            {
+                if (this->GetVertPos((en_mdlvert)idx_smoke[i], &pos_emit))
                 {
-                    if (this->GetVertPos((en_mdlvert)*rc, &pos_emit))
-                    {
-                        xVec3Copy(&g_parf_overheat.pos, &pos_emit);
-                        xVec3Sub(&dir_emit, &pos_emit, xEntGetCenter(this));
-                        xVec3Normalize(&dir_emit, &dir_emit);
-                        xVec3SMul(&g_parf_overheat.vel, &dir_emit,
-                                  xVec3Length(&(g_pemit_overheat->tasset)->vel));
-                    }
+                    xVec3Copy(&g_parf_overheat.pos, &pos_emit);
+                    xVec3Sub(&dir_emit, &pos_emit, xEntGetCenter(this));
+                    xVec3Normalize(&dir_emit, &dir_emit);
+                    xVec3SMul(&g_parf_overheat.vel, &dir_emit,
+                              xVec3Length(&(g_pemit_overheat->tasset)->vel));
                 }
+            }
 
-                for (rc = idx_steam; *rc >= 0; rc++)
+            for (S32 i = 0; idx_steam[i] >= 0; i++)
+            {
+                if (this->GetVertPos((en_mdlvert)idx_steam[i], &pos_emit))
                 {
-                    if (this->GetVertPos((en_mdlvert)*rc, &pos_emit))
-                    {
-                        xVec3Copy(&g_parf_steam.pos, &pos_emit);
-                        xVec3Sub(&dir_emit, &pos_emit, xEntGetCenter(this));
-                        xVec3Normalize(&dir_emit, &dir_emit);
-                        xVec3SMul(&g_parf_steam.vel, &dir_emit,
-                                  xVec3Length(&(g_pemit_steam->tasset)->vel));
-                        xParEmitterEmitCustom(g_pemit_steam, dt, &g_parf_steam);
-                    }
+                    xVec3Copy(&g_parf_steam.pos, &pos_emit);
+                    xVec3Sub(&dir_emit, &pos_emit, xEntGetCenter(this));
+                    xVec3Normalize(&dir_emit, &dir_emit);
+                    xVec3SMul(&g_parf_steam.vel, &dir_emit,
+                              xVec3Length(&(g_pemit_steam->tasset)->vel));
+                    xParEmitterEmitCustom(g_pemit_steam, dt, &g_parf_steam);
                 }
             }
         }
     }
-    return;
 }
 
 void zNPCDuplotron::VFXCycleLights(F32 dt, S32 fastpace)
@@ -619,37 +619,4 @@ void zNPCDuplotron::VFXCycleLights(F32 dt, S32 fastpace)
     }
 
     return;
-}
-
-zNPCDuplotron::zNPCDuplotron(S32 myType) : zNPCCommon(myType)
-{
-}
-
-void zNPCDuplotron::Move(xScene*, F32, xEntFrame*)
-{
-}
-
-U8 zNPCDuplotron::ColChkFlags() const
-{
-    return 0;
-}
-
-U8 zNPCDuplotron::ColPenFlags() const
-{
-    return 0;
-}
-
-U8 zNPCDuplotron::ColChkByFlags() const
-{
-    return XENT_COLLTYPE_PLYR | XENT_COLLTYPE_NPC;
-}
-
-U8 zNPCDuplotron::ColPenByFlags() const
-{
-    return XENT_COLLTYPE_PLYR | XENT_COLLTYPE_NPC;
-}
-
-U8 zNPCDuplotron::PhysicsFlags() const
-{
-    return 0;
 }

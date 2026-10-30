@@ -1,0 +1,4 @@
+# [cheats] big_plank in Bikini Bottom: Plankton's talk box is up by 480.
+
+wait 600
+shot reg_cheat_big_plank 0

@@ -21,10 +21,9 @@
 //
 // The GameCube build decodes Bink through RAD's rad3d straight into a GX
 // framebuffer, and none of that ports: Bink is proprietary middleware that
-// cannot be redistributed. It also is not needed. The port's assets are the
-// Xbox release's, and the Xbox shipped its movies as .xmv -- an XMV container
-// carrying WMV2 video with IMA ADPCM audio -- so there is no Bink file here to
-// decode in the first place.
+// cannot be redistributed. The Xbox shipped its movies as .xmv -- an XMV
+// container carrying WMV2 video with IMA ADPCM audio -- and the GameCube as
+// .bik. The decoder behind iFMVDecoder.h reads both.
 //
 // What decodes WMV2 is behind iFMVDecoder.h, and what plays the sound is behind
 // iFMVAudio.h. This file is the part that is the same whatever answers those
@@ -40,8 +39,9 @@ namespace
 {
     // zFMV.cpp:35 does sprintf(fullname, "%s%s", filename, ".bik") before
     // calling here, and that file is shared with the console, so the extension
-    // cannot be fixed at the call site. It is swapped here instead.
-    const char* const kWantedExtension = ".xmv";
+    // cannot be fixed at the call site. Each of these is tried in turn: the
+    // Xbox release's, then the GameCube's.
+    const char* const kExtensions[] = { ".xmv", ".bik" };
 
     // Movies live beside the rest of the assets. The name arrives as
     // "FMV\HILogo.bik" -- a DOS separator, because that is what the asset table
@@ -50,13 +50,14 @@ namespace
 
     bool sReportedNoDecoder;
 
-    // Build "<assets>/fmv/<name>.xmv" out of what the game passed.
+    // Build "<assets>/fmv/<name><ext>" out of what the game passed.
     //
     // Three things have to be undone. The backslash separator is not one on a
     // host that takes paths seriously; the directory part of the game's name is
     // dropped rather than translated, because every movie is in one place; and
     // the extension is swapped.
-    void buildPath(char* out, size_t outsize, const char* root, const char* game_name)
+    void buildPath(char* out, size_t outsize, const char* root, const char* game_name,
+                   const char* ext)
     {
         // The leaf, after the last separator of either kind.
         const char* leaf = game_name;
@@ -77,7 +78,7 @@ namespace
             *dot = 0;
         }
 
-        snprintf(out, outsize, "%s%s%s%s", root, kMovieDirectory, stem, kWantedExtension);
+        snprintf(out, outsize, "%s%s%s%s", root, kMovieDirectory, stem, ext);
     }
 
     // Open the first spelling of the name that exists.
@@ -87,10 +88,10 @@ namespace
     // case-sensitive filesystem does, and the port is meant to reach one. Three
     // spellings cover every mismatch in the shipped set without reading the
     // directory, which needs an API this file otherwise does not.
-    iFMVDecoder* openAnyCase(char* path, size_t pathsize, const char* root,
-                             const char* game_name, iFMVDecoderInfo* info)
+    iFMVDecoder* openAnyCase(char* path, size_t pathsize, const char* root, const char* game_name,
+                             const char* ext, iFMVDecoderInfo* info)
     {
-        buildPath(path, pathsize, root, game_name);
+        buildPath(path, pathsize, root, game_name, ext);
 
         iFMVDecoder* dec = iFMVDecoderOpen(path, info);
         if (dec != NULL)
@@ -270,18 +271,18 @@ U32 iFMVPlay(char* filename, U32 buttons, F32 time, bool skippable, bool lockCon
     iFMVDecoderInfo info;
     iFMVDecoder* dec = NULL;
 
-    const char* mod = iFileModRoot();
-    if (mod[0] != 0)
+    for (size_t e = 0; dec == NULL && e < sizeof(kExtensions) / sizeof(kExtensions[0]); e++)
     {
-        char modbuf[512];
-        size_t n = strlen(mod);
-        snprintf(modbuf, sizeof(modbuf), "%s%s", mod, mod[n - 1] == '/' ? "" : "/");
-        dec = openAnyCase(path, sizeof(path), modbuf, filename, &info);
-    }
+        for (S32 m = 0; dec == NULL && m < iFileModCount(); m++)
+        {
+            dec =
+                openAnyCase(path, sizeof(path), iFileModFolder(m), filename, kExtensions[e], &info);
+        }
 
-    if (dec == NULL)
-    {
-        dec = openAnyCase(path, sizeof(path), rootbuf, filename, &info);
+        if (dec == NULL)
+        {
+            dec = openAnyCase(path, sizeof(path), rootbuf, filename, kExtensions[e], &info);
+        }
     }
 
     if (dec == NULL)

@@ -35,7 +35,9 @@ extern "C" int sprintf(char*, const char*, ...);
 #include "zScene.h"
 #include "zGameState.h"
 // Only zMainMemCardSpaceQuery reaches for these, and its body is gated below.
-#ifdef GAMECUBE
+#if defined(PS2)
+#include <libpad.h>
+#elif defined(GAMECUBE)
 #include <dolphin/card.h>
 #include <dolphin/os.h>
 #endif
@@ -68,6 +70,36 @@ void zAssetShutdown();
 #include "iTextPatch.h"
 
 #include <string.h>
+#endif
+
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+enum
+{
+    MAIN_SCREEN_WIDTH = 640,
+    MAIN_SCREEN_HEIGHT = 528,
+    MAIN_VBLANKS_PER_SECOND = 50
+};
+#elif defined(VERSION_SLES_51968) || defined(VERSION_SLES_51970)
+enum
+{
+    MAIN_SCREEN_WIDTH = 512,
+    MAIN_SCREEN_HEIGHT = 512,
+    MAIN_VBLANKS_PER_SECOND = 50
+};
+#elif defined(PS2)
+enum
+{
+    MAIN_SCREEN_WIDTH = 640,
+    MAIN_SCREEN_HEIGHT = 448,
+    MAIN_VBLANKS_PER_SECOND = 60
+};
+#else
+enum
+{
+    MAIN_SCREEN_WIDTH = 640,
+    MAIN_SCREEN_HEIGHT = 480,
+    MAIN_VBLANKS_PER_SECOND = 60
+};
 #endif
 
 static const basic_rect<F32> screen_bounds = { 0.0f, 0.0f, 1.0f, 1.0f };
@@ -117,6 +149,15 @@ void zGameInit(U32 theSceneID);
 void zGameSetup();
 void zGameLoop();
 void zGameExit();
+#if defined(PS2)
+// SB/Core/p2/iException.cpp; declared in no header this unit includes.
+void iExceptionInit();
+void iExceptionRwDMAInit();
+// SB/Core/p2/iSystem.cpp, SB/Core/x/xModelBucket.cpp and zEntPickup.cpp.
+void iSystem_GapTrackReport();
+void xModelBucket_PreAllocModelPipe(RpAtomic* m);
+void zEntPickup_ShinySparklyInit(RpAtomic* data);
+#endif
 
 #ifdef GAMECUBE
 void main(S32 argc, char** argv)
@@ -131,9 +172,40 @@ int main(S32 argc, char** argv)
     S32 i;
     char* tmpStr;
 
+#if defined(PS2)
+    iExceptionInit();
+#endif
     memset(&globals, 0, sizeof(globals));
     globals.firstStartPressed = TRUE;
+#if defined(PS2)
+    options = 0;
+    options |= 2;
+    for (i = 1; i < argc; i++)
+    {
+        if (!stricmp(argv[i], "-hostio"))
+        {
+            options |= 1;
+        }
+        else if (!stricmp(argv[i], "-cdrom"))
+        {
+            options &= ~1;
+        }
+        else if (!stricmp(argv[i], "-rebootiop"))
+        {
+            options |= 2;
+        }
+        else if (!stricmp(argv[i], "-norebootiop"))
+        {
+            options &= ~2;
+        }
+    }
+    iRenderWareInit();
+    zMainFirstScreen(1);
+    iExceptionRwDMAInit();
+    iSystemInit(options);
+#else
     iSystemInit(FALSE); // 0x6d2
+#endif
     zMainOutputMgrSetup();
     xMemRegisterBaseNotifyFunc(zMainMemLvlChkCB);
     zMainInitGlobals();
@@ -141,7 +213,9 @@ int main(S32 argc, char** argv)
     zAssetStartup();
     zMainLoadFontHIP();
     xfont::init();
+#if !defined(PS2)
     zMainFirstScreen(1);
+#endif
     zMainShowProgressBar();
     xTRCInit();
     zMainReadINI();
@@ -157,7 +231,7 @@ int main(S32 argc, char** argv)
     iEnvStartup();
     zEntPickup_Startup();
     zCameraTweakGlobal_Init();
-    globals.option_vibration = 1; // 0x6c0
+    globals.option_vibration = iPadVibrationDefault(); // 0x6c0
     globals.pad0 = xPadEnable(globals.currentActivePad); // 0x6d1
     globals.pad1 = 0;
     gDebugPad = 0;
@@ -184,14 +258,21 @@ int main(S32 argc, char** argv)
 #endif
 }
 
+#if defined(PS2)
+#pragma dont_inline on
+#endif
 void zMainOutputMgrSetup()
 {
     iTime tim = iTimeGet();
     __FUNCTION__; // stands in for the (NDEBUG'd) load-timing report; retail's object
-                  // carries the __FUNCTION__ string object this evaluation emits
+    // carries the __FUNCTION__ string object this evaluation emits
     iTimeDiffSec(tim);
     iTimeGet();
 }
+
+#if defined(PS2)
+#pragma dont_inline reset
+#endif
 
 void zMainInitGlobals()
 {
@@ -199,7 +280,7 @@ void zMainInitGlobals()
     globals.sceneFirst = 1;
     iTime tim = iTimeGet();
     __FUNCTION__; // stands in for the (NDEBUG'd) load-timing report; retail's object
-                  // carries the __FUNCTION__ string object this evaluation emits
+    // carries the __FUNCTION__ string object this evaluation emits
     iTimeDiffSec(tim);
     iTimeGet();
 }
@@ -694,10 +775,18 @@ void zMainMemLvlChkCB()
     zSceneMemLvlChkCB();
 }
 
+#if defined(VERSION_SLES_51970)
+#pragma dont_inline on
+#endif
 void zMainShowProgressBar()
 {
     S32 progBar;
+#if defined(VERSION_SLES_51970)
+    // Original German buffer is smaller than the localized string.
+    char loadingText[11];
+#else
     char loadingText[12];
+#endif
     char auStack_cc[64];
     char acStack_8c[64];
     char formattedStr[64];
@@ -708,8 +797,15 @@ void zMainShowProgressBar()
         {
             percentageDone = 100;
         }
+#if defined(VERSION_SLES_51970)
+        char* loadingst = "LADEVORGANG...";
+        U32 loadlen = strlen(loadingst);
+        progBar = (S32)((percentageDone / 100.0f) * loadlen);
+        strcpy(loadingText, loadingst);
+#else
         progBar = percentageDone / 10;
         strcpy(loadingText, "Loading...");
+#endif
         memset(auStack_cc, 0, 64);
         memset(formattedStr, 0, 64);
         strcpy(acStack_8c, loadingText);
@@ -722,6 +818,10 @@ void zMainShowProgressBar()
     }
 }
 
+#if defined(VERSION_SLES_51970)
+#pragma dont_inline reset
+#endif
+
 void zMainLoop()
 {
     iTime time;
@@ -729,6 +829,12 @@ void zMainLoop()
     RpAtomic* modl;
     U32 newGameSceneID;
 
+#if defined(PS2)
+    static U32 preinit_ADC_models[] = { 0x11949923, 0xafcd6aa4, 0x83a6fc77, 0x0f952b9e, 0x26d24cde,
+                                        0x5c009d14, 0x2dc4fe5a, 0xe3f5a64c, 0xc35d47e3, 0x00000000 };
+    static U32 preinit_shiny_models[] = { 0x567cd99a, 0xc74af06a, 0x814e75dd, 0x644e22ac,
+                                          0xf6b5f5a8, 0x73316a84, 0xb34862e7, 0x00000000 };
+#endif
     static U32 preinit_bubble_matfx[] = { 0xdbd033bc, 0x452279a2, 0xc17f4bcc,
                                           0x0cf9267a, 0x5c009d14, 0x00000000 };
 
@@ -813,6 +919,26 @@ void zMainLoop()
     xModelPoolInit(0x28, 8);
     xModelPoolInit(0x38, 1);
 
+#if defined(PS2)
+    for (preinit = preinit_ADC_models; *preinit != 0; preinit++)
+    {
+        modl = (RpAtomic*)xSTFindAsset(*preinit, NULL);
+        if (modl)
+        {
+            xModelBucket_PreAllocModelPipe(modl);
+        }
+    }
+
+    for (preinit = preinit_shiny_models; *preinit != 0; preinit++)
+    {
+        modl = (RpAtomic*)xSTFindAsset(*preinit, NULL);
+        if (modl)
+        {
+            zEntPickup_ShinySparklyInit(modl);
+        }
+    }
+#endif
+
     for (preinit = preinit_bubble_matfx; *preinit != 0; preinit++)
     {
         modl = (RpAtomic*)xSTFindAsset(*preinit, NULL);
@@ -824,14 +950,24 @@ void zMainLoop()
 
     {
         static U32 menuModeID = 'MNU3';
-        static U32 gameSceneID = (globals.sceneStart[0] << 24) |
-                                 (globals.sceneStart[1] << 16) |
+        static U32 gameSceneID = (globals.sceneStart[0] << 24) | (globals.sceneStart[1] << 16) |
                                  (globals.sceneStart[2] << 8) | globals.sceneStart[3];
 
         newGameSceneID = gameSceneID;
         xUtil_idtag2string(gameSceneID, 0);
         xMemPushBase();
         zMainShowProgressBar();
+#if defined(PS2)
+        {
+            U32 iconDataSize = 0;
+            void* iconData = xSTFindAsset(xStrHash("SpongeIcon"), &iconDataSize);
+            if (iconData)
+            {
+                iSGIconInit(iconData, iconDataSize);
+            }
+        }
+        iSystem_GapTrackReport();
+#endif
         zMainMemCardSpaceQuery();
 
         while (1)
@@ -841,7 +977,7 @@ void zMainLoop()
             zCutSceneNamesTable_clearAll();
             zMainShowProgressBar();
 
-            if (sShowMenuOnBoot)
+            if (iSGShowMenu(sShowMenuOnBoot, &newGameSceneID))
             {
                 zMenuInit(menuModeID);
                 zMainShowProgressBar();
@@ -973,16 +1109,39 @@ void zMainReadINI()
 
     iTime tim = iTimeGet();
     __FUNCTION__; // stands in for the (NDEBUG'd) load-timing report; retail's object
-                  // carries the __FUNCTION__ string object this evaluation emits
+    // carries the __FUNCTION__ string object this evaluation emits
     iTimeDiffSec(tim);
     iTimeGet();
 
     RwFree(buf);
 }
 
+#if defined(PS2)
+#if defined(VERSION_SLES_51968)
+extern U32 RlePalette[104];
+extern U8 RleData[49821];
+#elif defined(VERSION_SLES_51970)
+extern U32 RlePalette[104];
+extern U8 RleData[51445];
+#else
+extern U32 RlePalette[101];
+extern U8 RleData[52247];
+#endif
+extern "C" {
+RwRaster* RwRasterSetFromImage(RwRaster* raster, RwImage* image);
+RwRaster* RwRasterPushContext(RwRaster* raster);
+RwRaster* RwRasterPopContext();
+RwRaster* RwRasterRender(RwRaster* raster, RwInt32 x, RwInt32 y);
+}
+#endif
+
 void zMainFirstScreen(S32 mode)
 {
+#ifdef PLATFORM_PC
     RwCamera* cam = iCameraCreate(xScreenWidth(), xScreenHeight(), 0);
+#else
+    RwCamera* cam = iCameraCreate(MAIN_SCREEN_WIDTH, MAIN_SCREEN_HEIGHT, 0);
+#endif
     RwRGBA bg = {};
     S32 i;
 #ifndef GAMECUBE
@@ -998,6 +1157,52 @@ void zMainFirstScreen(S32 mode)
 
         if (mode)
         {
+#if defined(PS2)
+            RwImage* image = RwImageCreate(MAIN_SCREEN_WIDTH, MAIN_SCREEN_HEIGHT, 32);
+            RwImageAllocatePixels(image);
+            U8* pixels = image->cpPixels;
+            S32 stride = (image->stride - MAIN_SCREEN_WIDTH * 4) & ~3;
+            S32 remaining = MAIN_SCREEN_WIDTH * 4;
+            for (U32 index = 0; index < sizeof(RleData); index++)
+            {
+                U32 entry = RleData[index];
+                if (entry & 0x80)
+                {
+                    S32 count = RleData[index + 1] + 2;
+                    entry = RlePalette[entry & 0x7f];
+                    for (S32 repeat = 0; repeat < count; repeat++)
+                    {
+                        *(U32*)pixels = entry;
+                        pixels += sizeof(U32);
+                        remaining -= 4;
+                        if (remaining <= 0)
+                        {
+                            remaining = MAIN_SCREEN_WIDTH * 4;
+                            pixels += stride;
+                        }
+                    }
+                    index++;
+                }
+                else
+                {
+                    *(U32*)pixels = RlePalette[entry];
+                    pixels += sizeof(U32);
+                    remaining -= 4;
+                    if (remaining <= 0)
+                    {
+                        remaining = MAIN_SCREEN_WIDTH * 4;
+                        pixels += stride;
+                    }
+                }
+            }
+            RwRaster* raster =
+                RwRasterSetFromImage(RwRasterCreate(image->width, image->height, 0, 0), image);
+            RwImageDestroy(image);
+            RwRasterPushContext(RwCameraGetRaster(cam));
+            RwRasterRender(raster, 0, 0);
+            RwRasterPopContext();
+            RwRasterDestroy(raster);
+#else
 #ifdef PLATFORM_PC
             // Longer than retail's, which is the notice exactly: the line the
             // port swaps in below does not fit the one it replaces.
@@ -1042,9 +1247,9 @@ void zMainFirstScreen(S32 mode)
 #endif
 
             iColor_tag color = { 255, 230, 0, 200 };
-            xtextbox tb = xtextbox::create(
-                xfont::create(1, NSCREENX(19.0f), NSCREENY(22.0f), 0.0f, color, screen_bounds),
-                screen_bounds, 2, 0.0f, 0.0f, 0.0f, 0.0f);
+            xtextbox tb = xtextbox::create(xfont::create(1, NSCREENX(19.0f), NSCREENY(22.0f), 0.0f,
+                                                         color, screen_bounds),
+                                           screen_bounds, 2, 0.0f, 0.0f, 0.0f, 0.0f);
 
             tb.set_text(text);
             tb.bounds = screen_bounds;
@@ -1052,6 +1257,7 @@ void zMainFirstScreen(S32 mode)
             tb.bounds.h = tb.yextent(1);
             tb.bounds.y = 0.5f - 0.5f * tb.bounds.h;
             tb.render(1);
+#endif
         }
 
         RwCameraEndUpdate(cam);
@@ -1076,10 +1282,16 @@ void zMainFirstScreen(S32 mode)
         iVSync();
     }
 #else
-    vbl = 180;
+#if defined(PS2)
+    vbl = 5 * MAIN_VBLANKS_PER_SECOND;
+#else
+    vbl = 3 * MAIN_VBLANKS_PER_SECOND;
+#endif
     while (--vbl)
     {
+#if !defined(PS2)
         iTRCDisk::CheckDVDAndResetState();
+#endif
         iVSync();
     }
 #endif
@@ -1087,20 +1299,115 @@ void zMainFirstScreen(S32 mode)
     iCameraDestroy(cam);
 }
 
-// non-matching at 97.051% (121 differing rows of 416; our object carries three
-// extra `mr` copies).  Pure REGS: the callee-saved set is r20-r31 in both, the
-// instruction structure matches, and only the colouring differs.  Splitting the
-// declarations from the initialisations and reordering them permutes the
-// colours - the best of ~120 orders measured, `startBytes, formatFailed,
-// formatInProgress, do_chk, fullCard, workArea, status, startupError`, reaches
-// 97.888% / 53 rows with five of the nine registers exactly right - but it can
-// never close, because our allocator pins the function's two anonymous temps
-// (the hoisted `globals` base and the `result` of CARDGetResultCode) to r30 and
-// r31 in every one of the 15 declaration orders sampled, while retail puts them
-// in r28/r29 and gives r30/r31 to startBytes and workArea.  Reverted to the
-// readable form; hoisting `result` to function scope (9 positions) and binding
-// `zGlobals& g = globals;` (9 positions) were also measured - the first changes
-// nothing at all, the second costs 1.4 points.
+#if defined(PS2)
+void zMainMemCardSpaceQuery()
+{
+    S32 bytesNeeded = 0;
+    S32 availOnDisk = 0;
+    S32 neededFiles = 0;
+    S32 do_chk = 1;
+    S32 fullCard = 1;
+    U8 formatInProgress = 0;
+    U8 formatFailed = 0;
+    eStartupErrors startupError = eNoError;
+    S32 status;
+
+    while (1)
+    {
+        if (do_chk)
+        {
+            fullCard = zMenuCardCheckStartup(&bytesNeeded, &availOnDisk, &neededFiles);
+        }
+
+        status = scePadGetState(globals.currentActivePad, 0);
+        while (status == scePadStateExecCmd)
+        {
+            status = scePadGetState(globals.currentActivePad, 0);
+        }
+        if (status != scePadStateStable)
+        {
+            startupError = eNoController;
+            mPad[globals.currentActivePad].state = ePad_Disabled;
+            globals.pad0 = NULL;
+        }
+        else if (startupError == eNoError)
+        {
+            if (bytesNeeded == -3 && availOnDisk == -3 && neededFiles == -3)
+            {
+                startupError = eNoCards;
+                bad_card_needed = 248;
+            }
+        }
+        else if (status == scePadStateStable && startupError == eNoController && !globals.pad0)
+        {
+            gTrcPad[globals.currentActivePad].state = TRC_PadInserted;
+            globals.pad0 = xPadEnable(globals.currentActivePad);
+        }
+
+        if (fullCard == 0 && startupError == eNoError)
+        {
+            break;
+        }
+        do_chk = 0;
+        if (!formatInProgress && !formatFailed && startupError == eNoError)
+        {
+            zSceneCardCheckStartup_set(bytesNeeded, availOnDisk, neededFiles);
+            zMainMemCardQueryPost(bytesNeeded, availOnDisk, neededFiles, 1);
+        }
+        else if (!formatInProgress)
+        {
+            switch (startupError)
+            {
+            case eNoFormat:
+                if (!formatFailed)
+                    zMainMemCardRenderText("{i:text_mem_card_no_format}", 1);
+                break;
+            case eDamagedCard:
+                zMainMemCardRenderText("{i:text_mem_card_damaged_card}", 1);
+                break;
+            case eWrongDevice:
+                zMainMemCardRenderText("{i:text_mem_card_wrong_device}", 1);
+                break;
+            case eNoCards:
+                zMainMemCardRenderText("{i:text_mem_card_no_card}", 1);
+                break;
+            case eCorruptFile:
+                zMainMemCardRenderText("{i:text_mem_card_corrupt_file}", 1);
+                break;
+            case eNoController:
+#if defined(VERSION_SLES_51968) || defined(VERSION_SLES_51970)
+                zMainMemCardRenderText("{i:text_no_controller_pal}", 1);
+#else
+                zMainMemCardRenderText("{i:text_no_controller}", 1);
+#endif
+                break;
+            }
+        }
+        if (globals.pad0)
+        {
+            xPadUpdate(globals.currentActivePad, 1.0f / MAIN_VBLANKS_PER_SECOND);
+        }
+        // Original PS2 iPadUpdate routes Triangle to bit 18.
+        if (globals.pad0 && (globals.pad0->pressed & 0x40000))
+        {
+            do_chk = 1;
+            startupError = eNoError;
+            formatInProgress = 0;
+            formatFailed = 0;
+            zMainMemCardRenderText("{i:text_retry}", 1);
+        }
+        else if (globals.pad0 && (globals.pad0->pressed & XPAD_BUTTON_X))
+        {
+            if (startupError != eNoController)
+                break;
+            do_chk = 1;
+            startupError = eNoError;
+        }
+    }
+    zMainMemCardQueryPost(0, 0, 0, 0);
+}
+#else
+// GameCube memory-card (CARD/OS) startup check.
 void zMainMemCardSpaceQuery()
 {
 #ifdef GAMECUBE
@@ -1113,9 +1420,11 @@ void zMainMemCardSpaceQuery()
     U8 formatFailed = 0;
     eStartupErrors startupError = eNoError;
     S32 fullCard = -1;
+    void* workArea;
     S32 startBytes = 0;
-    void* workArea = RwMalloc(CARD_WORKAREA_SIZE);
+    S32 result;
 
+    workArea = RwMalloc(CARD_WORKAREA_SIZE);
     while (1)
     {
         iTRCDisk::CheckDVDAndResetState();
@@ -1159,13 +1468,14 @@ void zMainMemCardSpaceQuery()
         {
             char bar[16];
             char msg[256];
-            S32 result = CARDGetResultCode(fullCard);
+            result = CARDGetResultCode(fullCard);
             F32 pct;
 
             memset(bar, 0, sizeof(bar));
             strcpy(bar, "oooooooo");
             pct = (F32)(CARDGetXferredBytes(fullCard) - startBytes) / CARD_WORKAREA_SIZE;
-            bar[(S32)(pct * strlen(bar))] = 'O';
+            S32 idx = pct * strlen(bar);
+            bar[idx] = 'O';
             sprintf(msg, "{i:text_mem_card_formatting}{n}[%s]", bar);
             zMainMemCardRenderText(msg, 1);
 
@@ -1239,7 +1549,7 @@ void zMainMemCardSpaceQuery()
 
         if (globals.pad0)
         {
-            xPadUpdate(globals.currentActivePad, 1.0f / 60);
+            xPadUpdate(globals.currentActivePad, 1.0f / MAIN_VBLANKS_PER_SECOND);
         }
 
         if (globals.pad0 && (globals.pad0->pressed & XPAD_BUTTON_TRIANGLE))
@@ -1302,8 +1612,6 @@ void zMainMemCardSpaceQuery()
 
                 for (i = 0; i < fileCount; i++)
                 {
-                    S32 result;
-
                     zMainMemCardRenderText("{i:text_mem_card_deleting_file}", 1);
                     result = CARDDelete(fullCard, files[i]);
 
@@ -1376,6 +1684,7 @@ void zMainMemCardSpaceQuery()
 
 #endif
 }
+#endif
 
 static void zMainMemCardQueryPost(S32 needed, S32 available, S32 neededFiles, S32 unk0)
 {
@@ -1383,7 +1692,11 @@ static void zMainMemCardQueryPost(S32 needed, S32 available, S32 neededFiles, S3
     RwRGBA colour = {};
     RwInt32 clearMode = 3;
 
+#ifdef PLATFORM_PC
     cam = iCameraCreate(xScreenWidth(), xScreenHeight(), 0);
+#else
+    cam = iCameraCreate(MAIN_SCREEN_WIDTH, MAIN_SCREEN_HEIGHT, 0);
+#endif
     RwCameraClear(cam, &colour, clearMode);
     RwCameraBeginUpdate(cam);
     render_mem_card_no_space(needed, available, neededFiles, unk0 != 0);
@@ -1398,7 +1711,11 @@ void zMainMemCardRenderText(const char* a, bool enabled)
     RwRGBA colour = {};
     RwInt32 clearMode = 3;
 
+#ifdef PLATFORM_PC
     cam = iCameraCreate(xScreenWidth(), xScreenHeight(), 0);
+#else
+    cam = iCameraCreate(MAIN_SCREEN_WIDTH, MAIN_SCREEN_HEIGHT, 0);
+#endif
     RwCameraClear(cam, &colour, clearMode);
     RwCameraBeginUpdate(cam);
     RenderText(a, enabled);
@@ -1434,6 +1751,8 @@ void zMainLoadFontHIP()
     iTimeDiffSec(time);
 }
 
+#if !defined(PS2)
 void iEnvStartup()
 {
 }
+#endif

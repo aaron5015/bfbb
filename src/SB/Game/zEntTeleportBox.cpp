@@ -562,9 +562,6 @@ void zEntTeleportBox_Update(xEnt* rawent, xScene* sc, F32 dt)
 
             sTeleportCamPitch = PI * ((ent->tasset->camAngle + 180) % 360) / 180.0f;
 
-            // COMPILER CEILING: the target re-loads sTeleportCamPitch here before
-            // storing it into the camera; mwcceppc 2.0p1a forwards the value it
-            // just stored, so we are one `lfs` short of byte-exact.
             globals.camera.pgoal = sTeleportCamPitch;
             globals.camera.pcur = sTeleportCamPitch;
 
@@ -668,7 +665,7 @@ U32 zEntTeleportBox_isOpen(_zEntTeleportBox* ent)
 
 U32 zEntTeleportBox_isClosed(_zEntTeleportBox* ent)
 {
-    return zEntTeleportBox_isOpen(ent) == 0;
+    return !zEntTeleportBox_isOpen(ent);
 }
 
 S32 zEntTeleportBox_playerIn()

@@ -2,8 +2,12 @@
 #define ZCAMERA_H
 
 #include "xCamera.h"
+#include "zCameraTuning.h"
+#include "zCameraControl.h"
 
-#ifdef __MWERKS__
+#if defined(PS2)
+#include <math.h>
+#elif defined(__MWERKS__)
 #include <PowerPC_EABI_Support\MSL_C\MSL_Common\cmath>
 #else
 #include <cmath>
@@ -38,7 +42,6 @@ struct zFlyKey
 };
 
 extern F32 zcam_overrot_tmr;
-extern S32 zcam_near;
 extern S32 zcam_mode;
 extern S32 zcam_bbounce;
 extern S32 zcam_lbbounce;
@@ -67,12 +70,6 @@ extern xQuat zcam_quat;
 
 extern F32 zcam_pad_pyaw_scale;
 extern F32 zcam_pad_pitch_scale;
-extern F32 zcam_near_d;
-extern F32 zcam_near_h;
-extern F32 zcam_near_pitch;
-extern F32 zcam_far_d;
-extern F32 zcam_far_h;
-extern F32 zcam_far_pitch;
 extern F32 zcam_wall_d;
 extern F32 zcam_wall_h;
 extern F32 zcam_wall_pitch;
@@ -103,8 +100,6 @@ void zCameraSetBbounce(S32 bbouncing);
 void zCameraSetHighbounce(S32 hbounce);
 void zCameraSetLongbounce(S32 hbounce);
 void zCameraSetPlayerVel(xVec3* vel);
-void zCameraSetConvers(int on);
-void zCameraDoTrans(xCamAsset* asset, float ttime);
 U32 zCamera_FlyOnly();
 void zCameraTranslate(xCamera* camera, F32 dposx, F32 dposy, F32 dposz);
 void zCameraTranslate(xCamera* camera, xVec3* v);

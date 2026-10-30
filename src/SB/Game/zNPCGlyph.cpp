@@ -54,13 +54,11 @@ void zNPCGlyph_Shutdown()
 // Nonmatching
 void zNPCGlyph_ScenePrepare()
 {
-    RpAtomic* mdl_raw;
     NPCGlyph* glyph;
-    U32 aid;
     S32 i;
     S32 k;
-    S32 cnt;
     NPCGlyph* list = NULL;
+    U32 aid;
 
     for (i = 0; i < 10; i++)
     {
@@ -69,6 +67,9 @@ void zNPCGlyph_ScenePrepare()
 
     for (i = NPC_GLYPH_SHINYONE; i < NPC_GLYPH_NOMORE; i++)
     {
+        RpAtomic* mdl_raw;
+        S32 cnt;
+
         cnt = zNPCGlyph_TypeToList((en_npcglyph)i, &list);
 
         if (list == NULL || cnt < 1)
@@ -258,14 +259,14 @@ S32 zNPCGlyph_TypeNeedsLightKit(en_npcglyph gtyp)
     }
 }
 
-// Nonmatching
 void zNPCCommon_Glyphs_RenderAll(S32 doOpaqueStuff)
 {
+    NPCGlyph* glyph;
+    en_npcglyph gtyp;
+    NPCGlyph* list = NULL;
+    S32 cnt;
     S32 k;
     S32 i;
-    NPCGlyph* glyph;
-    S32 cnt;
-    NPCGlyph* list = NULL;
     _SDRenderState old_rendstat = zRenderStateCurrent();
 
     if (doOpaqueStuff)
@@ -282,7 +283,8 @@ void zNPCCommon_Glyphs_RenderAll(S32 doOpaqueStuff)
         if ((!doOpaqueStuff || zNPCGlyph_TypeIsOpaque((en_npcglyph)i)) &&
             (doOpaqueStuff || !zNPCGlyph_TypeIsOpaque((en_npcglyph)i)))
         {
-            if (zNPCGlyph_TypeNeedsLightKit((en_npcglyph)i))
+            gtyp = (en_npcglyph)i;
+            if (zNPCGlyph_TypeNeedsLightKit(gtyp))
             {
                 xLightKit_Enable(globals.player.ent.lightKit, globals.currWorld);
             }
@@ -291,20 +293,22 @@ void zNPCCommon_Glyphs_RenderAll(S32 doOpaqueStuff)
                 xLightKit_Enable(NULL, globals.currWorld);
             }
 
-            cnt = zNPCGlyph_TypeToList((en_npcglyph)i, &list);
+            cnt = zNPCGlyph_TypeToList(gtyp, &list);
 
             if (list == NULL || cnt < 1 || g_cnt_activeGlyphs[i] < 1)
             {
                 continue;
             }
 
-            for (k = 0; k < cnt; k++)
+            k = 0;
+            while (cnt > k)
             {
                 glyph = &list[k];
                 if (glyph->flg_glyph & (1 << 0) && glyph->flg_glyph & (1 << 1))
                 {
                     glyph->Render();
                 }
+                k++;
             }
         }
     }
@@ -398,6 +402,8 @@ void NPCGlyph::Render()
         return;
     }
 
+    iPadGlyphModelBegin(model, typ_glyph == NPC_GLYPH_TALK || typ_glyph == NPC_GLYPH_TALKOTHER);
+
 #ifdef PLATFORM_PC
     // A floating sign, not a surface. Marked on the model rather than bracketed
     // around this call, because xModelRender only queues it and the draw itself
@@ -415,6 +421,8 @@ void NPCGlyph::Render()
     {
         xModelRender(model);
     }
+
+    iPadGlyphModelEnd(model);
 }
 
 void NPCGlyph::Enable(S32 ison)

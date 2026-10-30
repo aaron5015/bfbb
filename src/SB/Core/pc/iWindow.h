@@ -137,6 +137,10 @@ S32 iWindowGetVSync();
 // to hook, and inventing one needs a seam in zMainLoop.
 S32 iWindowShouldClose();
 
+// Close as if the window's close button had been pressed: the next present
+// exits. The pause menu's Quit to Desktop.
+void iWindowRequestClose();
+
 void iWindowGetSize(S32* width, S32* height);
 
 // The primary display's size in pixels, usable before the window is opened.
@@ -148,17 +152,26 @@ S32 iWindowGetDisplaySize(S32* width, S32* height);
 // it rather than one that would put the device into exclusive fullscreen.
 iWindowMode iWindowGetMode();
 
-// Switches between WINDOWED and BORDERLESS while the game runs. Both are plain
-// windows to the renderer, so this is a change of frame and size and nothing
-// else. FALSE, with nothing changed, when it cannot be done live: exclusive
-// fullscreen belongs to the device (see above), and Android has one mode.
+// Switches between the three while the game runs. WINDOWED and BORDERLESS are
+// plain windows to the renderer, so between them this is a change of frame and
+// size. Into or out of FULLSCREEN the renderer switches too: D3D9 and D3D11
+// reset the device for the mode (iRwSetExclusive), and GL3's window is SDL's to
+// put into the display mode. FALSE, with the window as it was, when it cannot
+// be done live: Vulkan's exclusive fullscreen is set at startup only, a mode
+// the display refuses, and Android, which has one mode.
 //
-// Alt+Enter and F11 call this through the event pump, toggling.
+// Alt+Enter and F11 call this through the event pump, toggling between
+// WINDOWED and whichever fullscreen the window was last in.
 S32 iWindowSetMode(iWindowMode mode);
 
 // Called by rw/engine_start.cpp once the renderer has taken exclusive
 // fullscreen. FULLSCREEN without it is the borderless fallback.
 void iWindowSetExclusive(S32 on);
+
+// rw/engine_start.cpp's: puts a D3D9 or D3D11 device into exclusive
+// fullscreen at the desktop's size, or back to windowed, while it runs. FALSE
+// for another backend, or when the device refuses.
+S32 iRwSetExclusive(S32 on);
 
 // The backend's handle. See the note above: only the RenderWare shim may
 // interpret this, and what it means depends on which backend was linked.

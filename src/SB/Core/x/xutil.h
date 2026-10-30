@@ -12,7 +12,7 @@ U32 xUtil_crc_update(U32 crc_accum, char* data, S32 datasize);
 S32 xUtil_yesno(F32 wt_yes);
 void xUtil_wtadjust(F32* wts, S32 cnt, F32 arbref);
 
-template <typename T> T* xUtil_select(T** data, S32 size, const F32* arg2)
+template <typename T> inline T* xUtil_select(T** data, S32 size, const F32* arg2)
 {
     T* selected = NULL;
     S32 selectIdx = 0;
@@ -65,7 +65,7 @@ template <typename T> T* xUtil_select(T** data, S32 size, const F32* arg2)
     return data[selectIdx];
 }
 
-template <typename T> T xUtil_choose(T const* list, S32 size, F32 const* float_list)
+template <typename T> inline T xUtil_choose(T const* list, S32 size, F32 const* float_list)
 {
     if (list == NULL)
         return NULL;
@@ -96,5 +96,12 @@ template <typename T> T xUtil_choose(T const* list, S32 size, F32 const* float_l
         idx = 0;
     return list[idx];
 }
+
+#if defined(PS2)
+void strtosjis(U8* string, U8* dest);
+U8 BCDtoi(U8 hex);
+U8 itoBCD(U16 dec);
+U8 itoBCD(U8 dec);
+#endif
 
 #endif

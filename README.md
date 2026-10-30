@@ -15,13 +15,17 @@ compiled from decompiled game code and librw. Not an emulator or a wrapper.
 Upstream decomp: [bfbbdecomp/bfbb](https://github.com/bfbbdecomp/bfbb) Â·
 [Docs](docs/README.md)
 
+![The title screen at 1920x1080](tests/snapshots/title_1080p.png)
+
 ## Status
 
 - The game can be played start to finish. Known bugs remain.
 - Not ready for speedrunning. Many console tricks and glitches still work.
-- No downloads or releases. You build it yourself.
-- Needs the game files from the **Xbox** release. GameCube and PS2 files are not
-  supported.
+- Builds for Windows, Linux, macOS and Android are on the
+  [Releases page](https://github.com/joeyballentine/bfbb/releases). They
+  contain no game data.
+- Needs the game files from the **Xbox** or **GameCube** release. PS2 files are
+  not supported.
 - The goal is a modern port with optional extras, not a period-accurate one.
   Every extra can be turned off.
 - This project is written with an LLM. I am not a C++ or RenderWare expert, so
@@ -32,18 +36,23 @@ Upstream decomp: [bfbbdecomp/bfbb](https://github.com/bfbbdecomp/bfbb) Â·
 
 ## Quick start (Windows)
 
-1. Install Visual Studio Build Tools (C++ workload), clang, CMake, Ninja and Git.
-2. `git clone --recurse-submodules -b treedome https://github.com/joeyballentine/bfbb.git`
-3. Optionally install FFmpeg and libusb through vcpkg.
-4. Run `build-release.bat`.
-5. Run `bin\bfbb.exe` once. It writes `bin\config.ini` and stops.
-6. Set `[assets] path` in `config.ini` to your extracted Xbox files. Run it again.
+1. Download `bfbb-windows-x86.zip` from the
+   [latest build](https://github.com/joeyballentine/bfbb/releases/tag/latest)
+   and extract it.
+2. Run `bfbb.exe` once. It writes `config.ini` beside itself and stops.
+3. Set `[assets] path` in `config.ini` to your extracted Xbox or GameCube files.
+   Run it again.
+
+The macOS download has no libusb, so Switch 2 controllers and the GameCube
+adapter do not work on it.
 
 ## Getting the assets
 
-No assets are included. Extract the Xbox disc image yourself, for example with
-[extract-xiso](https://github.com/XboxDev/extract-xiso). Point `[assets] path`
-at the folder that directly contains `boot.HIP`, `font.HIP`, `fmv/` and `hb/`:
+No assets are included. Extract the Xbox or GameCube disc image yourself. For
+the Xbox, use [extract-xiso](https://github.com/XboxDev/extract-xiso). For the
+GameCube, use Dolphin: right-click the game, Properties, Filesystem, right-click
+the disc, Extract Entire Disc. Point `[assets] path` at the folder that directly
+contains `boot.HIP`, `font.HIP`, `fmv/` and `hb/` (the GameCube's is `files/`):
 
 ```ini
 [assets]
@@ -214,13 +223,15 @@ were recovered from the Xbox `.xbe`.
 | Control presets | `[input] preset` | Xbox, PS2 or GameCube layout. `auto` follows the connected controller. |
 | Button prompts | `[input] button_icons` | Xbox, GameCube, PS2 or custom icons from `buttons/`. Icons follow your bindings. |
 | Touch controls | `[input] touch_controls` | On-screen controls. On by default on Android. |
+| First person | `[keyboard] view`, `[pad] view` | C or the right-stick click puts the camera at the character's eyes. Cutscenes, dialogue and the Cruise Bubble keep their own cameras. |
 | Boot into a level | `[game] boot` | Starts in the named scene, skipping the menu. Overrides `SB.INI`. |
 | Skip the logos | `[game] intro_movies` | Goes straight to the title screen. |
 | Save folder | `[game] save_folder` | Where saves go. Empty means the per-user data folder. |
 | Six save slots | none | The unused second memory-card slot is now a second folder with three more slots. |
 | Save sizes | none | The save screens show KB/MB instead of memory-card blocks. |
 | Custom font | `[font] face`, `sans` | Draws text from TrueType fonts at the render size instead of the 640x480 atlases. `tools/getfont.py` fetches one. The other `[font]` keys tune the fit. |
-| Mod folder | `[assets] mod` | Loads an Xbox mod's files in place of the originals without modifying the asset folder. Modded games use separate saves. |
+| Mod folder | `[assets] mod` | Loads an Xbox or GameCube mod's files in place of the originals without modifying the asset folder. A GameCube mod's GivePowerUp memory writes land on the same fields they do on the GameCube. BFBB Deluxe's DOL patch (floaty bubble spin, free bubble bowl aim) is built in. Modded games use separate saves. bfbb_config's mods page installs mods from a zip into `mods/`, turns them on and orders them; where two mods have the same file, the higher one's is read. A `mod.ini` in a mod can set config.ini settings while it is in use. |
+| Xbox saves | none | bfbb_config's saves page imports saves from the original Xbox game (`GameData.xsv`, or a zip of save folders). |
 | PC wording | `[assets] platform_wording` | Rewrites Xbox-specific text (dashboard, memory card) as it loads. |
 
 ### Experimental
@@ -231,9 +242,36 @@ were recovered from the Xbox `.xbe`.
 | Toon shading | `[experimental] toon` | Cel shading with ink outlines. `solid_flat_props` gives flat props thickness for the outlines. The other `toon_` keys tune it. Shader pipeline only. |
 | World lighting | `[experimental] world_lighting` | Lights the level at runtime instead of using baked vertex colours. `world_light_shadows` and `day_night_cycle` extend it. |
 
+### Cheats
+
+All off by default. The power-ups, shinies and spatulas are saved with the game
+and stay after the cheat is turned off. The warps do not.
+
+| Cheat | Setting | What it does |
+| --- | --- | --- |
+| All warps | `[cheats] all_warps` | The pause menu's taxi goes to every spatula, found or not. |
+| Bubble Bowl | `[cheats] bubble_bowl` | Unlocks the Bubble Bowl. |
+| Cruise Bubble | `[cheats] cruise_bubble` | Unlocks the Cruise Bubble. |
+| Unlimited shinies | `[cheats] unlimited_shinies` | Holds shiny objects at 99999. |
+| Unlimited spatulas | `[cheats] unlimited_spatulas` | Holds golden spatulas at 100. |
+| Unlimited health | `[cheats] unlimited_health` | Hits knock you back but take no health. Goo and bottomless falls still kill. |
+| Expert mode | `[cheats] expert_mode` | BombBots, Chucks, Slicks, Ham-mers and Tar-Tars move and fire faster. Saved with the game. |
+| ShrapBob | `[cheats] shrapbob` | SpongeBob bursts into pieces every time he dies. |
+| No pants | `[cheats] no_pants` | SpongeBob without his pants. |
+| Cruise control | `[cheats] cruise_control` | A faster, more agile Cruise Bubble with twice the blast radius. |
+| Big Plankton | `[cheats] big_plank` | Plankton at 2.5 times his size. |
+| Small villagers | `[cheats] small_villagers` | Fish villagers at 0.7 times their size. |
+| Small co-stars | `[cheats] small_costars` | Named characters at 0.6 times their size. |
+| Medics | `[cheats] medics` | Villagers sometimes restore one health when you walk up to them. |
+| Dog tricks | `[cheats] dog_tricks` | Villagers cheer and drop shinies when you do a trick in front of them. |
+| Rich villagers | `[cheats] rich_villagers` | Villagers drop shinies when you hit them. |
+| Panhandle | `[cheats] panhandle` | Villagers beg 500 shinies at a time while you have more than 75000. |
+
+Expert mode through panhandle are the cheats from the original button codes.
+
 ### Fixed bugs
 
-The port fixes these bugs from the original game. The two with a setting can be
+The port fixes these bugs from the original game. The ones with a setting can be
 turned off for console-accurate behaviour.
 
 | Bug | Fix | Setting |
@@ -241,6 +279,8 @@ turned off for console-accurate behaviour.
 | 3D sound is panned to the wrong side on GameCube. | Swaps left and right, as the community's Action Replay code does. | none |
 | The pause menu's bamboo frame has no rope at its corners. The rope is drawn on the horizontal poles, and the vertical poles are drawn over it. | Draws the vertical poles first. | `[fixes] menu_rope` |
 | The sky is missing on Goo Lagoon's pier. The skydome sits beyond the far clip plane, which that level sets at the fog distance. | Shrinks the dome around the camera until it fits. It looks the same on screen. | `[fixes] sky_clip` |
+| Hitting a Goo Lagoon beach umbrella plays a low, buzzing sound. A melee attack hits its target again on every frame of contact, and each hit starts another copy of the sound. | Hits a target once per contact. | `[fixes] melee_once` |
+| The pause menu's task spatulas spin out of step. A spatula stops turning while the world page on screen does not show it. | Keeps all of them at the same point in the spin. | `[fixes] spatula_spin` |
 
 ## How it works
 
@@ -275,3 +315,6 @@ behind build flags.
 - Platform layer: [SDL](https://github.com/libsdl-org/SDL).
 - Movie and music decoding: [FFmpeg](https://ffmpeg.org/).
 - Settings program: [wxWidgets](https://www.wxwidgets.org/).
+- Menu pointer: the
+  [SpongeBob Sponge Arrow & Hand Cursor](https://sweezy-cursors.com/cursor/spongebob-sponge-arrow-hand-cursor/)
+  from Sweezy Cursors.

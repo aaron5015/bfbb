@@ -285,7 +285,7 @@ U32 iSGTgtState(st_ISGSESSION* isgdata, S32 tgtidx, const char* dpath)
         return 0;
     }
 
-    if (data->unk_12c != 0)
+    if (data->cardIsIll != 0)
     {
         return state | 0x1000000;
     }
@@ -547,8 +547,13 @@ char* iSGFileModDate(st_ISGSESSION* isgdata, const char* fname, S32* sec, S32* m
     if (iSG_get_fmoddate(&isgdata->mcdata[isgdata->slot], fname, &sec_str, &min_str, &hr_str,
                          &mon_str, &day_str, &yr_str) != 0)
     {
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+        sprintf(datestr, "%02d.%02d.%04d %02d:%02d:%02d", day_str, mon_str, yr_str, hr_str, min_str,
+                sec_str);
+#else
         sprintf(datestr, "%02d/%02d/%04d %02d:%02d:%02d", mon_str, day_str, yr_str, hr_str, min_str,
                 sec_str);
+#endif
 
         if (sec != NULL)
         {
@@ -587,8 +592,13 @@ void iSGMakeTimeStamp(char* str)
     OSCalendarTime calendar_time = { 0 };
     OSTime time = OSGetTime();
     OSTicksToCalendarTime(time, &calendar_time);
+#if defined(VERSION_GQPP78) || defined(VERSION_GU4Y78)
+    sprintf(str, "%02d.%02d.%04d %02d:%02d:%02d", calendar_time.mday, calendar_time.mon + 1,
+            calendar_time.year, calendar_time.hour, calendar_time.min, calendar_time.sec);
+#else
     sprintf(str, "%02d/%02d/%04d %02d:%02d:%02d", calendar_time.mon + 1, calendar_time.mday,
             calendar_time.year, calendar_time.hour, calendar_time.min, calendar_time.sec);
+#endif
 }
 
 S32 iSGSelectGameDir(st_ISGSESSION* isgdata, const char* dname)
@@ -655,16 +665,16 @@ S32 iSGSaveFile(st_ISGSESSION* isgdata, const char* fname, char* data, S32 n, S3
     ResetButton::DisableReset();
     if (isgdata->slot < 0)
     {
-        isgdata->unk_26c = ISG_OPSTAT_FAILURE;
-        isgdata->unk_268 = ISG_OPERR_NOCARD;
+        isgdata->as_opstat = ISG_OPSTAT_FAILURE;
+        isgdata->as_operr = ISG_OPERR_NOCARD;
         return 0;
     }
 
     st_ISG_MEMCARD_DATA* mcdata = &isgdata->mcdata[isgdata->slot];
-    if (mcdata->unk_12c != 0)
+    if (mcdata->cardIsIll != 0)
     {
-        isgdata->unk_26c = ISG_OPSTAT_FAILURE;
-        isgdata->unk_268 = ISG_OPERR_DAMAGE;
+        isgdata->as_opstat = ISG_OPSTAT_FAILURE;
+        isgdata->as_operr = ISG_OPERR_DAMAGE;
         return 0;
     }
 
@@ -722,7 +732,7 @@ S32 iSGSaveFile(st_ISGSESSION* isgdata, const char* fname, char* data, S32 n, S3
     }
     xMemPopTemp(alloc);
 
-    if (writeret == 0 && mcdata->unk_12c == 0)
+    if (writeret == 0 && mcdata->cardIsIll == 0)
     {
         iSG_mc_fdel(mcdata, fname);
     }
@@ -730,21 +740,21 @@ S32 iSGSaveFile(st_ISGSESSION* isgdata, const char* fname, char* data, S32 n, S3
     ResetButton::EnableReset();
     iTRCDisk::CheckDVDAndResetState();
 
-    isgdata->unk_268 = ISG_OPERR_NONE;
+    isgdata->as_operr = ISG_OPERR_NONE;
     if (writeret != 0)
     {
-        isgdata->unk_26c = ISG_OPSTAT_SUCCESS;
+        isgdata->as_opstat = ISG_OPSTAT_SUCCESS;
     }
     else
     {
-        isgdata->unk_26c = ISG_OPSTAT_FAILURE;
+        isgdata->as_opstat = ISG_OPSTAT_FAILURE;
         if (operr != ISG_OPERR_NONE)
         {
-            isgdata->unk_268 = operr;
+            isgdata->as_operr = operr;
         }
         else
         {
-            isgdata->unk_268 = ISG_OPERR_UNKNOWN;
+            isgdata->as_operr = ISG_OPERR_UNKNOWN;
         }
     }
     return writeret;
@@ -761,8 +771,9 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
 {
     char* readbuf;
     S32 iconsize;
-    S32 bufsize;
+    S32 tmpsize;
     S32 allocsize;
+    S32 bufsize;
 
     S32 readret = 0;
     st_ISG_MEMCARD_DATA* data;
@@ -771,16 +782,16 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
     en_ASYNC_OPERR operr = ISG_OPERR_NONE;
     if (isgdata->slot < 0)
     {
-        isgdata->unk_26c = ISG_OPSTAT_FAILURE;
-        isgdata->unk_268 = ISG_OPERR_NOCARD;
+        isgdata->as_opstat = ISG_OPSTAT_FAILURE;
+        isgdata->as_operr = ISG_OPERR_NOCARD;
         return 0;
     }
     data = &isgdata->mcdata[isgdata->slot];
 
-    if (data->unk_12c != 0)
+    if (data->cardIsIll != 0)
     {
-        isgdata->unk_26c = ISG_OPSTAT_FAILURE;
-        isgdata->unk_268 = ISG_OPERR_DAMAGE;
+        isgdata->as_opstat = ISG_OPSTAT_FAILURE;
+        isgdata->as_operr = ISG_OPERR_DAMAGE;
         return 0;
     }
 
@@ -789,7 +800,7 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
     S32 sectorsize200 = ALIGN_THING(data->sectorSize, 0x200);
     if ((S32)databuf % 32 != 0 || numbytes % sectorsize200 != 0)
     {
-        S32 tmpsize = (numbytes + 0x1ff & ~0x1ff);
+        tmpsize = (numbytes + 0x1ff & ~0x1ff);
         allocsize = tmpsize + 0x1f;
         alloc = xMemPushTemp(allocsize);
         memset(alloc, 0, allocsize);
@@ -806,7 +817,14 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
 
     if (iSG_mc_fopen(data, fname, -1, ISG_IOMODE_READ, &operr) != 0)
     {
-        readret = (bool)iSG_mc_fread(data, (char*)readbuf, bufsize, iconsize);
+        if (iSG_mc_fread(data, readbuf, bufsize, iconsize) != 0)
+        {
+            readret = 1;
+        }
+        else
+        {
+            readret = 0;
+        }
         iSG_mc_fclose(data);
     }
 
@@ -819,21 +837,21 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
         xMemPopTemp(alloc);
     }
 
-    isgdata->unk_268 = ISG_OPERR_NONE;
+    isgdata->as_operr = ISG_OPERR_NONE;
     if (readret != 0)
     {
-        isgdata->unk_26c = ISG_OPSTAT_SUCCESS;
+        isgdata->as_opstat = ISG_OPSTAT_SUCCESS;
     }
     else
     {
-        isgdata->unk_26c = ISG_OPSTAT_FAILURE;
-        if (data->unk_12c != 0)
+        isgdata->as_opstat = ISG_OPSTAT_FAILURE;
+        if (data->cardIsIll != 0)
         {
-            isgdata->unk_268 = ISG_OPERR_DAMAGE;
+            isgdata->as_operr = ISG_OPERR_DAMAGE;
         }
         else
         {
-            isgdata->unk_268 = ISG_OPERR_OTHER;
+            isgdata->as_operr = ISG_OPERR_OTHER;
         }
     }
     return readret;
@@ -841,7 +859,7 @@ S32 iSGReadLeader(st_ISGSESSION* isgdata, const char* fname, char* databuf, S32 
 
 en_ASYNC_OPSTAT iSGPollStatus(st_ISGSESSION* isgdata, en_ASYNC_OPCODE* curop, S32 block)
 {
-    return isgdata->unk_26c;
+    return isgdata->as_opstat;
 }
 
 en_ASYNC_OPERR iSGOpError(st_ISGSESSION* isgdata, char* errmsg)
@@ -874,19 +892,19 @@ en_ASYNC_OPERR iSGOpError(st_ISGSESSION* isgdata, char* errmsg)
     en_ASYNC_OPERR err;
     if (errmsg == NULL)
     {
-        return isgdata->unk_268;
+        return isgdata->as_operr;
     }
 
-    if (isgdata->unk_268 < ISG_OPERR_NOMORE)
+    if (isgdata->as_operr < ISG_OPERR_NOMORE)
     {
-        strncpy(errmsg, errmsgs[isgdata->unk_268], 0x80);
+        strncpy(errmsg, errmsgs[isgdata->as_operr], 0x80);
     }
     else
     {
         strncpy(errmsg, errmsgs[ISG_OPERR_UNKNOWN], 0x80);
     }
     errmsg[0x7f] = NULL;
-    return isgdata->unk_268;
+    return isgdata->as_operr;
 }
 
 static S32 iSG_start_your_engines()
@@ -895,15 +913,15 @@ static S32 iSG_start_your_engines()
     return 1;
 }
 
-// Looks equivalent. Can't get variable initializtions to match.
+// The remaining difference is in the initialization schedule.
 S32 iSG_mcidx2slot(S32 param1, S32* out_slot, S32* param3)
 {
-    *out_slot = -1;
-    s32 cardReady[ISG_NUM_SLOTS] = {};
     S32 ret = 0;
     S32 idk = 0;
     s32 memSize = 0;
+    *out_slot = -1;
     s32 sectorSize = 0;
+    s32 cardReady[ISG_NUM_SLOTS] = {};
 
     for (S32 i = 0; i < ISG_NUM_SLOTS; i++)
     {
@@ -980,7 +998,7 @@ static S32 iSG_mc_tryRepair(st_ISG_MEMCARD_DATA* mcdata)
         rc = 0;
     }
 
-    else if (mcdata->unk_12c)
+    else if (mcdata->cardIsIll)
     {
         rc = 0;
     }
@@ -1003,7 +1021,7 @@ static S32 iSG_mc_tryRepair(st_ISG_MEMCARD_DATA* mcdata)
         {
             if (result != CARD_RESULT_BROKEN)
             {
-                mcdata->unk_12c = 1;
+                mcdata->cardIsIll = 1;
             }
             rc = 0;
         }
@@ -1021,7 +1039,7 @@ static S32 iSG_mc_isformatted(st_ISG_MEMCARD_DATA* mcdata)
     {
         rc = 0;
     }
-    else if (mcdata->unk_12c)
+    else if (mcdata->cardIsIll)
     {
         rc = 0;
     }
@@ -1073,7 +1091,7 @@ static S32 iSG_mc_isGCcard(st_ISG_MEMCARD_DATA* mcdata, int* param2, int* param3
     {
         return 0;
     }
-    if (mcdata->unk_12c)
+    if (mcdata->cardIsIll)
     {
         return 0;
     }
@@ -1601,7 +1619,7 @@ static void iSG_cb_unmount(s32 chan, s32 result)
 
 static S32 iSG_mc_format(st_ISG_MEMCARD_DATA* mcdata, S32, S32* canRecover)
 {
-    if (mcdata->unk_12c != 0)
+    if (mcdata->cardIsIll != 0)
     {
         if (canRecover != NULL)
         {
@@ -1633,7 +1651,7 @@ static S32 iSG_mc_format(st_ISG_MEMCARD_DATA* mcdata, S32, S32* canRecover)
         switch (result)
         {
         case CARD_RESULT_IOERROR:
-            mcdata->unk_12c = 1;
+            mcdata->cardIsIll = 1;
             if (canRecover != NULL)
             {
                 *canRecover = 0;
@@ -1646,9 +1664,10 @@ static S32 iSG_mc_format(st_ISG_MEMCARD_DATA* mcdata, S32, S32* canRecover)
             }
             ret = -1;
             break;
-        case CARD_RESULT_FATAL_ERROR:
-        case CARD_RESULT_WRONGDEVICE:
+        case CARD_RESULT_READY:
+        case CARD_RESULT_BUSY:
         case CARD_RESULT_NOFILE:
+        case CARD_RESULT_FATAL_ERROR:
             break;
         }
     }
@@ -1682,7 +1701,7 @@ static S32 iSG_mc_fopen(st_ISG_MEMCARD_DATA* mcdata, const char* fname, S32 fsiz
     else
     {
         S32 res = iSG_mc_fdel(mcdata, fname);
-        if (mcdata->unk_12c == 0 && res > 0)
+        if (mcdata->cardIsIll == 0 && res > 0)
         {
             s32 result;
             do
@@ -1705,7 +1724,7 @@ static S32 iSG_mc_fopen(st_ISG_MEMCARD_DATA* mcdata, const char* fname, S32 fsiz
                     break;
                 case CARD_RESULT_IOERROR:
                 case CARD_RESULT_BROKEN:
-                    mcdata->unk_12c = 1;
+                    mcdata->cardIsIll = 1;
                     *operr = ISG_OPERR_DAMAGE;
                     break;
                 case CARD_RESULT_NOENT:
@@ -1741,7 +1760,13 @@ static S32 iSG_mc_fopen(st_ISG_MEMCARD_DATA* mcdata, const char* fname, S32 fsiz
 
     if (ret != 0)
     {
+#if defined(VERSION_GU4Y78)
+        if (memcmp(stat->gameName, "GU4Y", 4) != 0 || memcmp(stat->company, "78", 2) != 0)
+#elif defined(VERSION_GQPP78)
+        if (memcmp(stat->gameName, "GQPP", 4) != 0 || memcmp(stat->company, "78", 2) != 0)
+#else
         if (memcmp(stat->gameName, "GQPE", 4) != 0 || memcmp(stat->company, "78", 2) != 0)
+#endif
         {
             iSG_mc_fclose(mcdata);
             ret = 0;
@@ -1814,12 +1839,14 @@ static S32 iSG_mc_fdel(st_ISG_MEMCARD_DATA* mcdata, const char* fname)
         switch (result)
         {
         case CARD_RESULT_IOERROR:
-            mcdata->unk_12c = 1;
+            mcdata->cardIsIll = 1;
             break;
+        case CARD_RESULT_READY:
+        case CARD_RESULT_BUSY:
+        case CARD_RESULT_NOCARD:
+        case CARD_RESULT_NOFILE:
         case CARD_RESULT_NOPERM:
         case CARD_RESULT_FATAL_ERROR:
-        case CARD_RESULT_WRONGDEVICE:
-        case CARD_RESULT_NOFILE:
             break;
         }
     }

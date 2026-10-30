@@ -5,7 +5,8 @@
 // is raw PCM and RWLogo.xmv has no audio track at all. FFmpeg demuxes XMV and
 // decodes all of that already, which is the whole reason this backend exists:
 // the alternative is a WMV2 decoder, and WMV2 is a DCT codec in the H.263
-// family that nobody should write for eight videos.
+// family that nobody should write for eight videos. The GameCube release's .bik
+// movies are Bink, which FFmpeg reads too.
 //
 // Linked only when CMake finds FFmpeg. Without it iFMVDecoderNull.cpp is built
 // instead and movies are skipped, which is what the port did before any of this.
@@ -337,8 +338,8 @@ iFMVDecoder* iFMVDecoderOpen(const char* path, iFMVDecoderInfo* info)
                 }
 
                 // Everything is converted to interleaved 16-bit at the source
-                // rate. The rate is left alone because these files are 44100
-                // and 48000 and the device can take either; the FORMAT is not,
+                // rate. The rate is left alone because these files are 32000,
+                // 44100 and 48000 and the device takes any; the FORMAT is not,
                 // because ADPCM decodes to planar and no audio API wants that.
 #if LIBAVUTIL_VERSION_MAJOR >= 57
                 AVChannelLayout out_ch;

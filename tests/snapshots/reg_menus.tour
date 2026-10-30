@@ -1,0 +1,31 @@
+# The code menus at 640x480 on Direct3D 9: title, main menu, the four
+# settings tabs and Options. Intro movies are off, so the title is up by 660.
+# Settings is three down from New Game; R1 steps through its tabs. B returns
+# to the main menu with the cursor on Settings, one below Options.
+
+wait 900
+shot reg_title 0
+press start
+wait 180
+shot reg_main_menu 0
+press down
+press down
+press down
+press a
+wait 120
+shot reg_settings_display 0
+press r1
+wait 30
+shot reg_settings_effects 0
+press r1
+wait 30
+shot reg_settings_controls 0
+press r1
+wait 30
+shot reg_settings_game 0
+press b
+wait 60
+press up
+press a
+wait 120
+shot reg_options 0

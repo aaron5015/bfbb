@@ -1,6 +1,7 @@
 #include "isavegame.h"
 #include "iHost.h"
 #include "iFile.h"
+#include "iSaveFile.h"
 #include "iSaveThumb.h"
 
 #include <types.h>
@@ -97,43 +98,22 @@ void iSGSetSaveRoot(const char* dir)
 // BFBB_SAVE_DIR wins so a player can point saves anywhere; otherwise the
 // setting, and otherwise wherever this host keeps per-user data, which is where
 // its users expect to find it. Which directory that is belongs to iHost; the
-// "/bfbb/saves" under it is this game's policy and belongs here.
+// "/bfbb/saves" under it is this game's policy, written once in iSaveFile.cpp
+// so that bfbb_config finds the same folder.
 //
 // With a mod folder in use, the default becomes "/bfbb/mods/<name>/saves": a
 // mod's levels and tasks differ from the disc's, so its saves and the disc's
 // must not load into each other. A folder the player named is used as given.
 static void iSG_resolve_saveroot()
 {
-    const char* explicit_dir = getenv("BFBB_SAVE_DIR");
-    if (explicit_dir != NULL && explicit_dir[0] != '\0')
-    {
-        snprintf(g_saveroot, sizeof(g_saveroot), "%s", explicit_dir);
-        return;
-    }
-
-    if (g_configroot[0] != '\0')
-    {
-        snprintf(g_saveroot, sizeof(g_saveroot), "%s", g_configroot);
-        return;
-    }
-
-    char base[512];
-    if (!iHostUserDataDir(base, sizeof(base)))
-    {
-        base[0] = '\0';
-    }
-    const char* sep = base[0] != '\0' ? "/bfbb/" : "";
-
     const char* mod = iFileModName();
+    iSaveFileRoot(g_configroot, mod, g_saveroot, sizeof(g_saveroot));
+
     if (mod[0] != '\0')
     {
-        snprintf(g_saveroot, sizeof(g_saveroot), "%s%smods/%s/saves", base, sep, mod);
         printf("bfbb: mod saves: %s\n", g_saveroot);
         fflush(stdout);
-        return;
     }
-
-    snprintf(g_saveroot, sizeof(g_saveroot), "%s%ssaves", base, sep);
 }
 
 // The first target is the save root ITSELF rather than a subdirectory of it.

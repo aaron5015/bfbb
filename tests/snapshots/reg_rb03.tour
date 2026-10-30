@@ -1,0 +1,5 @@
+# The Rock Bottom trench (rb03) at 640x480 on Direct3D 9, booted straight into the scene.
+# SpongeBob slides down the trench from the start.
+
+wait 600
+shot reg_rb03 0

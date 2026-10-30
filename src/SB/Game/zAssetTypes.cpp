@@ -5,11 +5,13 @@
 #include "iScreen.h"
 #endif
 
+#include "iModPatch.h"
 #include "xAnim.h"
 #include "xCM.h"
 #include "xCurveAsset.h"
 #include "xCutscene.h"
 #include "xstransvc.h"
+#include "xpkrsvc.h"
 #include "xDebug.h"
 #include "xEnv.h"
 #include "xJSP.h"
@@ -21,6 +23,9 @@
 #include <stdio.h>
 #include <rwcore.h>
 #include <rpworld.h>
+#if defined(PS2)
+#include <rwplcore.h>
+#endif
 
 #ifdef PLATFORM_PC
 #include "iTextPatch.h"
@@ -37,7 +42,9 @@ static void* RWTX_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32
 static void* Model_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize);
 static void* BSP_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize);
 static void* JSP_Read(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize);
+#if !defined(PS2)
 static void* SndInfoRead(void*, unsigned int, void*, unsigned int, unsigned int*);
+#endif
 static void Model_Unload(void*, U32);
 static void BSP_Unload(void*, U32);
 static void JSP_Unload(void*, U32);
@@ -80,7 +87,7 @@ static u32 s_scFootSoundB;
 static u32 s_patFootSoundA;
 static u32 s_patFootSoundB;
 
-static st_PACKER_ASSETTYPE assetTypeHandlers[78] = {
+static st_PACKER_ASSETTYPE assetTypeHandlers[78 + IMODPATCH_ASSET_TYPE_COUNT] = {
     { 'BSP ', 0, 0, BSP_Read, NULL, NULL, NULL, NULL, BSP_Unload, NULL },
     { 'JSP ', 0, 0, JSP_Read, NULL, NULL, NULL, NULL, JSP_Unload, NULL },
     { 'TXD ' },
@@ -113,7 +120,11 @@ static st_PACKER_ASSETTYPE assetTypeHandlers[78] = {
     { 'GRUP' },
     { 'MPHT' },
     { 'SFX ' },
+#if defined(PS2)
+    { 'SNDI' },
+#else
     { 'SNDI', 0, 0, SndInfoRead, NULL, NULL, NULL, NULL, NULL, NULL },
+#endif
     { 'HANG' },
     { 'SIMP' },
     { 'BUTN' },
@@ -167,6 +178,7 @@ static st_PACKER_ASSETTYPE assetTypeHandlers[78] = {
     { 'DUPC' },
     { 'SLID' },
     { 'CRDT', 0, 0, CRDT_READ, NULL, NULL, NULL, NULL, NULL, NULL },
+    IMODPATCH_ASSET_TYPES
 };
 
 void zAssetStartup()
@@ -554,11 +566,11 @@ static void* Curve_Read(void* param_1, U32 param_2, void* indata, U32 insize, U3
 // src/SB/Core/pc/iTextPatch.h; off in config.ini this is a no-op and the asset
 // arrives exactly as the disc shipped it.
 //
-// The asset is transformed IN PLACE and handed straight back. Every other
-// readXForm here returns a new object, and the packer supports both -- but a
-// TEXT asset's payload is a string, the rewrite only ever shortens it, and
-// returning the same bytes means there is nothing to free and so no unload
-// handler to keep in step with this one.
+// The asset is transformed IN PLACE and handed straight back, so there is
+// nothing to free and no unload handler to keep in step with this one. The
+// exception is an override longer than the asset, which happens on the
+// GameCube's shorter strings: iTextPatchGrown hands back a copy it owns for
+// the life of the process, and the packer takes that instead.
 static void* TEXT_Read(void*, U32 assetID, void* indata, U32 insize, U32* outsize)
 {
     *outsize = insize;
@@ -571,6 +583,12 @@ static void* TEXT_Read(void*, U32 assetID, void* indata, U32 insize, U32* outsiz
     // zTalkBox.h declares a second xTextAsset of its own inside an anonymous
     // namespace, and it reaches this file through the include chain, so the
     // bare name is ambiguous here and the macro's cast is too.
+    void* grown = iTextPatchGrown(assetID, indata, sizeof(::xTextAsset), insize, outsize);
+    if (grown != NULL)
+    {
+        return grown;
+    }
+
     if (indata != NULL && insize > sizeof(::xTextAsset))
     {
         char* text = (char*)((::xTextAsset*)indata + 1);
@@ -720,16 +738,16 @@ static RpAtomic* jsp_shadow_hack_atomic_cb(RpAtomic* atomic, void* data)
     }
 
     xClumpCollBSPTree* colltree = context.jsp->colltree;
-    if (context.jsp->jspNodeList[index].originalMatIndex == context.last_material)
+    S32 material_index = context.jsp->jspNodeList[index].originalMatIndex;
+    if (material_index == context.last_material)
     {
         return atomic;
     }
 
-    S32 material_index = context.jsp->jspNodeList[index].originalMatIndex;
     context.last_material = material_index;
 
     xClumpCollBSPTriangle* tri = colltree->triangles;
-    xClumpCollBSPTriangle* end_tri = colltree->triangles + colltree->numTriangles;
+    xClumpCollBSPTriangle* end_tri = tri + colltree->numTriangles;
 
     for (; tri != end_tri; ++tri)
     {
@@ -1750,6 +1768,7 @@ static void MovePoint_Unload(void* userdata, U32 b)
     xMovePointSplineDestroy((xMovePoint*)userdata);
 }
 
+#if !defined(PS2)
 static void* SndInfoRead(void* param_1, U32 param_2, void* indata, U32 insize, U32* outsize)
 {
     void* __dest = RWSRCGLOBAL(memoryFuncs.rwmalloc(insize));
@@ -1773,3 +1792,4 @@ static void* SndInfoRead(void* param_1, U32 param_2, void* indata, U32 insize, U
 
     return __dest;
 }
+#endif

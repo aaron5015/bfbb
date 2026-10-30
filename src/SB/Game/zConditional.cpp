@@ -3,8 +3,13 @@
 #include <types.h>
 
 #include "zVar.h"
+#if defined(PS2)
+#include "zSceneLookup.h"
+#else
 #include "zScene.h"
+#endif
 #include "xEvent.h"
+#include "iModPatch.h"
 
 S32 zConditionalEventCB(xBase*, xBase*, U32, const F32*, xBase*);
 
@@ -14,7 +19,11 @@ void zConditionalInit(void* b, void* asset)
     zVarInit(zVarEntryTable);
 }
 
-void zConditionalInit(xBase* b, zCondAsset* asset)
+#if defined(PS2)
+inline
+#endif
+    void
+    zConditionalInit(xBase* b, zCondAsset* asset)
 {
     _zConditional* cond = (_zConditional*)b;
 
@@ -32,7 +41,11 @@ void zConditionalInit(xBase* b, zCondAsset* asset)
     }
 }
 
-void zConditionalReset(_zConditional* ent)
+#if defined(PS2)
+inline
+#endif
+    void
+    zConditionalReset(_zConditional* ent)
 {
     xBaseReset(ent, ent->asset);
 }
@@ -69,7 +82,7 @@ U32 zConditional_Evaluate(_zConditional* c)
     if (v == NULL)
         return 0;
 
-    U32 temp = v->varCB(context);
+    U32 temp = iModPatchVarRead(v, context);
 
     switch (c->asset->op)
     {
@@ -112,6 +125,9 @@ S32 zConditionalEventCB(xBase* arg1, xBase* arg2, U32 toEvent, const F32* fp, xB
         break;
 
     case eEventTrue:
+#if defined(PS2)
+    case eEventFalse:
+#endif
         break;
 
     case eEventReset:

@@ -1,0 +1,5 @@
+# The credits (pg12) at 640x480 on Direct3D 9, booted straight into the scene.
+# The credits roll over the race track.
+
+wait 1500
+shot reg_pg12 0

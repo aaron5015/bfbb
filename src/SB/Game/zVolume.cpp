@@ -11,15 +11,31 @@ struct PreCalcOcclude
     xVec4 FrustVec[4];
 };
 
-zVolume* vols;
-volatile U16 nvols;
+// Unreferenced in retail (stripped by the linker), but present in this TU per
+// the DWARF. Being the TU's first common, it anchors the common block: without
+// it mwld allocates gOccludeList over the whole block and gOccludeCalc again
+// after it, doubling the .bss footprint.
+DECL_COMMON char buffer[16];
+
+static zVolume* vols;
+#if defined(PS2)
+static U16 nvols;
+S32 gOccludeCount;
+zVolume* gOccludeList[10];
+#else
+static volatile U16 nvols;
 
 volatile S32 gOccludeCount;
 zVolume* volatile gOccludeList[10];
+#endif
 S32 gOccludeCalcCount;
 PreCalcOcclude gOccludeCalc[10];
 
-static void zVolumeInit(zVolume* vol, xVolumeAsset* asset)
+#if defined(PS2)
+inline
+#endif
+    static void
+    zVolumeInit(zVolume* vol, xVolumeAsset* asset)
 {
     vol->Init(asset);
     vol->eventFunc = zVolumeEventCB;
@@ -32,11 +48,17 @@ void zVolumeInit()
 
     nvols = xSTAssetCountByType('VOLU');
 
+#if defined(PS2)
+    if (nvols)
+    {
+        vols = (zVolume*)xMemAllocSize(nvols * sizeof(zVolume));
+#else
     U32 count = nvols;
 
     if (count)
     {
         vols = (zVolume*)xMemAllocSize(count * sizeof(zVolume));
+#endif
 
         for (i = 0; i < nvols; i++)
         {
@@ -97,8 +119,8 @@ void zVolume_OccludePrecalc(xVec3* camPos)
         corner[0].y = a->bound.box.box.lower.y;
         corner[0].z = s * (a->bound.box.box.lower.x - a->xpivot) + a->bound.box.box.lower.z;
 
-        corner[1].y = a->bound.box.box.lower.y;
         corner[1].x = c * (a->bound.box.box.upper.x - a->xpivot) + a->xpivot;
+        corner[1].y = a->bound.box.box.lower.y;
         corner[1].z = s * (a->bound.box.box.upper.x - a->xpivot) + a->bound.box.box.lower.z;
 
         corner[2].x = c * (a->bound.box.box.upper.x - a->xpivot) + a->xpivot;
@@ -193,6 +215,43 @@ S32 zVolumeEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*)
         vol->Reset();
         break;
     }
+#if defined(PS2)
+    case eEventOccludeOn:
+    {
+        if (gOccludeCount == 10)
+        {
+            return 1;
+        }
+
+        for (i = 0; i < gOccludeCount; i++)
+        {
+            if (gOccludeList[i] == vol)
+            {
+                return 1;
+            }
+        }
+
+        gOccludeList[gOccludeCount] = vol;
+        gOccludeCount++;
+
+        break;
+    }
+    case eEventOccludeOff:
+    {
+        for (i = 0; i < gOccludeCount; i++)
+        {
+            if (gOccludeList[i] == vol)
+            {
+                gOccludeList[gOccludeCount] = gOccludeList[gOccludeCount - 1];
+                gOccludeCount--;
+
+                return 1;
+            }
+        }
+
+        break;
+    }
+#else
     case eEventOccludeOn:
     {
         S32 count = gOccludeCount;
@@ -232,6 +291,7 @@ S32 zVolumeEventCB(xBase*, xBase* to, U32 toEvent, const F32*, xBase*)
 
         break;
     }
+#endif
     }
 
     return 1;

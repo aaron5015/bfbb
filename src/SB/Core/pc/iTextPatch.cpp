@@ -4,10 +4,12 @@
 #include "iTextPatch.h"
 
 #include "iHostWords.h"
+#include "iPadHost.h"
 #include "iPadLayout.h"
 #include "xPad.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace
@@ -487,6 +489,136 @@ namespace
 
         return changed;
     }
+
+    // The talk and exit prompts, which name the button by what it is on an Xbox
+    // pad: "Pull the {i:button_exitlevel_text} to enter Bikini Bottom", where
+    // that include is "{i:button_picture_05} Trigger". With R1 on a key, that
+    // reads "Pull the C Trigger".
+    //
+    // So each phrase is swapped at load for an include of its own, and what the
+    // include says is decided as it is drawn, because the device in the
+    // player's hands can change at any moment and the text is in memory for the
+    // whole level. Bound to a trigger it is the phrase exactly as shipped;
+    // bound to anything else it is "Press" and the picture.
+    //
+    // Every placeholder is shorter than its phrase, which the in-place rewrite
+    // needs, and iTextPatchRulesFit checks it with the word swaps.
+    //
+    // In threes, one three per include and spelling of it, with the longer
+    // phrases first so they win where one starts another.
+    const Rule kPhrases[] = {
+        { "Pull the {i:button_exitlevel_text} button", "{i:pc_say_1}" },
+        { "Press the {i:button_exitlevel_text} button", "{i:pc_say_1b}" },
+        { "Pull the {i:button_exitlevel_text}", "{i:pc_say_1c}" },
+
+        { "Pull the {insert:button_exitlevel_text} button", "{i:pc_say_2}" },
+        { "Press the {insert:button_exitlevel_text} button", "{i:pc_say_2b}" },
+        { "Pull the {insert:button_exitlevel_text}", "{i:pc_say_2c}" },
+
+        { "Pull the {i:button_talktonpc_text} button", "{i:pc_say_3}" },
+        { "Press the {i:button_talktonpc_text} button", "{i:pc_say_3b}" },
+        { "Pull the {i:button_talktonpc_text}", "{i:pc_say_3c}" },
+
+        { "Pull the {insert:button_talktonpc_text} button", "{i:pc_say_4}" },
+        { "Press the {insert:button_talktonpc_text} button", "{i:pc_say_4b}" },
+        { "Pull the {insert:button_talktonpc_text}", "{i:pc_say_4c}" },
+    };
+
+    const size_t kPhraseCount = sizeof(kPhrases) / sizeof(kPhrases[0]);
+
+    // What a placeholder says off a trigger, one per three phrases above: the
+    // include it named, which iTextPatchInsert also strips of its " Trigger".
+    const char* const kPhrasePress[] = {
+        "Press {i:button_exitlevel_text}",
+        "Press {i:button_exitlevel_text}",
+        "Press {i:button_talktonpc_text}",
+        "Press {i:button_talktonpc_text}",
+    };
+
+    // The two includes, as the archives ship them, without the word.
+    const char* const kTriggerIncludes[] = { "button_exitlevel_text", "button_talktonpc_text" };
+    const char kTriggerless[] = "{i:button_picture_05}";
+
+    U32 sPhraseID[kPhraseCount];
+    U32 sTriggerIncludeID[2];
+    S32 sPhrasesHashed;
+
+    void hashPhrases()
+    {
+        if (sPhrasesHashed)
+        {
+            return;
+        }
+
+        for (size_t i = 0; i < kPhraseCount; i++)
+        {
+            // "{i:" and "}" off the placeholder leave its name.
+            char name[32];
+            const char* to = kPhrases[i].to + 3;
+            size_t n = strlen(to) - 1;
+            memcpy(name, to, n);
+            name[n] = '\0';
+            sPhraseID[i] = iTextPatchAssetID(name);
+        }
+
+        for (size_t i = 0; i < 2; i++)
+        {
+            sTriggerIncludeID[i] = iTextPatchAssetID(kTriggerIncludes[i]);
+        }
+
+        sPhrasesHashed = TRUE;
+    }
+
+    // Exact and case-sensitive, and run over the markup as well as the words:
+    // the phrase is mostly markup.
+    S32 applyPhrases(char* text)
+    {
+        char* src = text;
+        char* dst = text;
+        S32 changed = FALSE;
+
+        while (*src != '\0')
+        {
+            size_t i;
+            for (i = 0; i < kPhraseCount; i++)
+            {
+                size_t n = strlen(kPhrases[i].from);
+                if (strncmp(src, kPhrases[i].from, n) == 0)
+                {
+                    const char* to = kPhrases[i].to;
+                    while (*to != '\0')
+                    {
+                        *dst++ = *to++;
+                    }
+                    src += n;
+                    changed = TRUE;
+                    break;
+                }
+            }
+
+            if (i == kPhraseCount)
+            {
+                *dst++ = *src++;
+            }
+        }
+
+        *dst = '\0';
+        return changed;
+    }
+
+    // Whether the talk and exit button is a trigger, which is what the
+    // shipped wording assumes. A chord on a pad is the GameCube preset's
+    // shoulders and is taken as one.
+    S32 talkIsTrigger()
+    {
+        if (iPadHostKeyboardIsLive())
+        {
+            return FALSE;
+        }
+
+        const char* input = iPadHostBoundInput(XPAD_BUTTON_R1);
+        return input == NULL || strcmp(input, "lt") == 0 || strcmp(input, "rt") == 0;
+    }
 } // namespace
 
 U32 iTextPatchAssetID(const char* name)
@@ -521,7 +653,48 @@ S32 iTextPatchRulesFit()
         }
     }
 
+    for (i = 0; i < kPhraseCount; i++)
+    {
+        if (strlen(kPhrases[i].to) > strlen(kPhrases[i].from))
+        {
+            printf("bfbb: text phrase '%s' -> '%s' is longer than what it replaces\n",
+                   kPhrases[i].from, kPhrases[i].to);
+            return FALSE;
+        }
+    }
+
     return TRUE;
+}
+
+const char* iTextPatchInsert(U32 assetID)
+{
+    hashPhrases();
+
+    // Answered with the switch off as well, with the phrase as shipped: the
+    // menus built in code (menu/mnu4_text.cpp) are written with these names in
+    // them and have no other text to fall back on.
+    for (size_t i = 0; i < kPhraseCount; i++)
+    {
+        if (sPhraseID[i] == assetID)
+        {
+            return (!sEnabled || talkIsTrigger()) ? kPhrases[i].from : kPhrasePress[i / 3];
+        }
+    }
+
+    if (!sEnabled)
+    {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < 2; i++)
+    {
+        if (sTriggerIncludeID[i] == assetID)
+        {
+            return talkIsTrigger() ? NULL : kTriggerless;
+        }
+    }
+
+    return NULL;
 }
 
 void iTextPatchSetEnabled(S32 on)
@@ -601,5 +774,52 @@ S32 iTextPatchAsset(U32 assetID, char* text, U32 capacity)
         return fixed;
     }
 
-    return applyRules(text) || fixed;
+    S32 phrased = applyPhrases(text);
+    return applyRules(text) || phrased || fixed;
+}
+
+void* iTextPatchGrown(U32 assetID, const void* asset, U32 headerSize, U32 size, U32* outsize)
+{
+    static void* sGrown[kOverrideCount];
+
+    if (!sEnabled || asset == NULL || size < headerSize)
+    {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < kOverrideCount; i++)
+    {
+        if (iTextPatchAssetID(kOverrides[i].name) != assetID)
+        {
+            continue;
+        }
+
+        U32 need = (U32)strlen(kOverrides[i].text) + 1;
+        if (need <= size - headerSize)
+        {
+            return NULL;
+        }
+
+        if (sGrown[i] == NULL)
+        {
+            U8* block = (U8*)malloc(headerSize + need);
+            if (block == NULL)
+            {
+                return NULL;
+            }
+            memcpy(block, asset, headerSize);
+            memcpy(block + headerSize, kOverrides[i].text, need);
+            if (headerSize >= sizeof(U32))
+            {
+                U32 len = need - 1;
+                memcpy(block, &len, sizeof(len));
+            }
+            sGrown[i] = block;
+        }
+
+        *outsize = headerSize + need;
+        return sGrown[i];
+    }
+
+    return NULL;
 }

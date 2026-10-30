@@ -13,6 +13,24 @@
 #define ISAVESCREEN_SAVE_ROW "PC SV ROW %d"
 #define ISAVESCREEN_ROW_TEXT "PC SAVE ROW %d TXT"
 
+// The pause menu's Load Game entry: retail's, unused until now. It opens the
+// save screen's widgets as a list of saves to load.
+#define ISAVESCREEN_PAUSE_LOAD "PAUSE OPTION LOAD UIF"
+
+// The save screen's overwrite question, which loading from the pause menu
+// rewrites to ask about the unsaved game instead.
+#define ISAVESCREEN_OVERWRITE_TEXT "SV OVERWRITE TXT"
+#define ISAVESCREEN_OVERWRITE_ASK "A game already exists. Would you like to overwrite it?"
+
+// The save screen's failure message, which a failed load from the pause menu
+// rewrites: the title's load-failed message is in mnu3, not loaded in a level.
+#define ISAVESCREEN_BADSAVE_TEXT "SV BADSAVE TXT"
+#define ISAVESCREEN_BADSAVE_SAY                                                                    \
+    "{c=ffff0000}Save failed!{~:c} There is not enough free space to create new save games. "      \
+    "Press {i:ui_accept} to continue."
+#define ISAVESCREEN_BADLOAD_SAY                                                                    \
+    "{c=ffff0000}Load failed!{~:c} Unable to load game. Press {i:ui_accept} to continue"
+
 // Room for a row's two lines.
 #define ISAVESCREEN_ROW_TEXT_SIZE 160
 

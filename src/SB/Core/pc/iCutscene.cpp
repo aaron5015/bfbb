@@ -4,12 +4,21 @@
 #include "xstransvc.h"
 #include "xMath.h"
 
+#include "iFile.h"
+#include "iGCSwap.h"
 #include "iModel.h"
 
 #include <rwcore.h>
 #include <string.h>
 
 U32 read_sizzze = 0;
+
+// A GameCube cutscene's stream is big-endian. Its time chunks are swapped as
+// each read completes, and its JDELTAMODELs as they are copied out. The time
+// chunk in flight is the one iCSFileAsyncRead last asked for.
+static bool sGameCubeStream;
+static void* sPendingChunk;
+static U32 sPendingSize;
 
 void iCSSoundSetup(xCutscene* csn)
 {
@@ -140,7 +149,13 @@ static void iCSAsyncReadCB(tag_xFile* file)
         if (iFileReadAsyncStatus(file->ps.asynckey, &bytes) == IFILE_RDSTAT_DONE)
         {
             iFileSeek(file, bytes, IFILE_SEEK_CUR);
+
+            if (sGameCubeStream && sPendingChunk != NULL)
+            {
+                iGCSwapCutsceneTime(sPendingChunk, sPendingSize);
+            }
         }
+        sPendingChunk = NULL;
 
         xCutscene* csn = xCutscene_CurrentCutscene();
         csn->Waiting = 0;
@@ -152,7 +167,13 @@ U32 iCSFileOpen(xCutscene* csn)
     U32 headerskip;
     st_PKR_ASSET_TOCINFO ainfo;
 
-    headerskip = ALIGN(csn->Info->HeaderSize, 2048);
+    // The header as the CSN asset has it. CutsceneTOC_Read widens each
+    // xCutsceneData in the table where a pointer is wider than the 4-byte
+    // file offset, and grows HeaderSize to match; the asset on disc is not.
+    headerskip =
+        ALIGN(csn->Info->HeaderSize -
+                  csn->Info->NumData * (U32)(sizeof(xCutsceneData) - XCUTSCENE_STREAM_RECORD_SIZE),
+              2048);
 
     if (!xSTGetAssetInfo(csn->Info->AssetID, &ainfo))
     {
@@ -179,6 +200,8 @@ U32 iCSFileOpen(xCutscene* csn)
                   IFILE_SEEK_SET);
 
         csn->File.ps.asynckey = -1;
+        sGameCubeStream = iFileIsGameCubePackage(csn->File.ps.path);
+        sPendingChunk = NULL;
     }
     else
     {
@@ -188,11 +211,23 @@ U32 iCSFileOpen(xCutscene* csn)
     return 1;
 }
 
+// A read of a model or JDELTAMODEL, which is not a time chunk.
+static void iCSFileAsyncReadData(xCutscene* csn, void* dest, U32 size);
+
 void iCSFileAsyncRead(xCutscene* csn, void* dest, U32 size)
+{
+    iCSFileAsyncReadData(csn, dest, size);
+
+    sPendingChunk = dest;
+    sPendingSize = size;
+}
+
+static void iCSFileAsyncReadData(xCutscene* csn, void* dest, U32 size)
 {
     U32* buf = (U32*)dest;
     U32 i;
 
+    sPendingChunk = NULL;
     read_sizzze = size;
     csn->Waiting = 1;
 
@@ -278,6 +313,12 @@ S32 iCSLoadStep(xCutscene* csn)
 
                         memcpy(csn->Data[csn->DataLoading].DataPtr, csn->AlignBuf,
                                csn->Data[csn->DataLoading].ChunkSize);
+
+                        if (sGameCubeStream)
+                        {
+                            iGCSwapCutsceneDeltaModel(csn->Data[csn->DataLoading].DataPtr,
+                                                      csn->Data[csn->DataLoading].ChunkSize);
+                        }
                     }
                     else
                     {
@@ -291,8 +332,8 @@ S32 iCSLoadStep(xCutscene* csn)
                 }
                 else
                 {
-                    iCSFileAsyncRead(csn, csn->AlignBuf,
-                                     ALIGN(csn->Data[csn->DataLoading].ChunkSize, 2048));
+                    iCSFileAsyncReadData(csn, csn->AlignBuf,
+                                         ALIGN(csn->Data[csn->DataLoading].ChunkSize, 2048));
 
                     csn->GotData = 1;
                     return 0;
